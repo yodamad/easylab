@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"labascode/coder"
 	"log"
 	"net/http"
 	"os"
@@ -316,4 +317,171 @@ func (h *Handler) DownloadKubeconfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", strconv.Itoa(len(kubeconfig)))
 
 	w.Write([]byte(kubeconfig))
+}
+
+// ServeStudentDashboard serves the student dashboard page
+func (h *Handler) ServeStudentDashboard(w http.ResponseWriter, r *http.Request) {
+	tmplPath := filepath.Join("web", "student-dashboard.html")
+	tmpl, err := template.ParseFiles(tmplPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load template: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Prevent caching
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	if err := tmpl.Execute(w, nil); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to execute template: %v", err), http.StatusInternalServerError)
+	}
+}
+
+// ListLabs returns a list of completed jobs (labs) available for workspace requests
+func (h *Handler) ListLabs(w http.ResponseWriter, r *http.Request) {
+	h.jobManager.mu.RLock()
+	defer h.jobManager.mu.RUnlock()
+
+	var completedLabs []*Job
+	for _, job := range h.jobManager.jobs {
+		job.mu.RLock()
+		status := job.Status
+		job.mu.RUnlock()
+		if status == JobStatusCompleted {
+			completedLabs = append(completedLabs, job)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(completedLabs)
+}
+
+// RequestWorkspace handles workspace request from students
+func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	email := r.FormValue("email")
+	labID := r.FormValue("lab_id")
+
+	// Validate email
+	if email == "" {
+		http.Error(w, "Email is required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate lab ID
+	if labID == "" {
+		http.Error(w, "Lab ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get the job
+	job, exists := h.jobManager.GetJob(labID)
+	if !exists {
+		http.Error(w, "Lab not found", http.StatusNotFound)
+		return
+	}
+
+	job.mu.RLock()
+	status := job.Status
+	coderURL := job.CoderURL
+	coderSessionToken := job.CoderSessionToken
+	coderOrganizationID := job.CoderOrganizationID
+	job.mu.RUnlock()
+
+	if status != JobStatusCompleted {
+		http.Error(w, "Lab is not ready yet", http.StatusBadRequest)
+		return
+	}
+
+	if coderURL == "" || coderSessionToken == "" || coderOrganizationID == "" {
+		http.Error(w, "Coder configuration not available for this lab", http.StatusInternalServerError)
+		return
+	}
+
+	// Generate secure password for student
+	password, err := GenerateSecurePassword()
+	if err != nil {
+		log.Printf("Failed to generate password: %v", err)
+		http.Error(w, "Failed to generate password", http.StatusInternalServerError)
+		return
+	}
+
+	// Get username from email (before @)
+	username := strings.Split(email, "@")[0]
+	// Sanitize username (remove special characters)
+	username = strings.ToLower(strings.ReplaceAll(username, ".", "-"))
+
+	// Create Coder client config
+	coderConfig := coder.CoderClientConfig{
+		ServerURL:      coderURL,
+		SessionToken:   coderSessionToken,
+		OrganizationID: coderOrganizationID,
+	}
+
+	// Get available templates
+	templates, err := coder.GetTemplates(coderConfig)
+	if err != nil {
+		log.Printf("Failed to get templates: %v", err)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `<div class="error-message">Failed to get templates: %s</div>`, template.HTMLEscapeString(err.Error()))
+		return
+	}
+
+	if len(templates) == 0 {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `<div class="error-message">No templates available in this lab</div>`)
+		return
+	}
+
+	// Use first available template
+	templateID := templates[0].ID
+
+	// Create user in Coder
+	user, err := coder.CreateUser(coderConfig, email, username, password)
+	if err != nil {
+		log.Printf("Failed to create user: %v", err)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `<div class="error-message">Failed to create user: %s</div>`, template.HTMLEscapeString(err.Error()))
+		return
+	}
+
+	// Create workspace for user
+	workspaceName := fmt.Sprintf("%s-workspace", username)
+	workspace, err := coder.CreateWorkspace(coderConfig, user.ID, templateID, workspaceName)
+	if err != nil {
+		log.Printf("Failed to create workspace: %v", err)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `<div class="error-message">Failed to create workspace: %s</div>`, template.HTMLEscapeString(err.Error()))
+		return
+	}
+
+	// Build workspace URL
+	workspaceURL := fmt.Sprintf("%s/@%s/%s", coderURL, user.Username, workspace.Name)
+
+	// Return success response with credentials
+	w.Header().Set("Content-Type", "text/html")
+	var response strings.Builder
+	response.WriteString(`<div class="success-message">`)
+	response.WriteString(`<h3>✅ Workspace Created Successfully!</h3>`)
+	response.WriteString(`<div class="credentials-box">`)
+	response.WriteString(`<h3>Your Workspace Credentials</h3>`)
+	response.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Workspace URL:</label><div class="value"><a href="%s" target="_blank">%s</a></div></div>`, workspaceURL, workspaceURL))
+	response.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Email:</label><div class="value">%s</div></div>`, template.HTMLEscapeString(email)))
+	response.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Password:</label><div class="value">%s</div></div>`, template.HTMLEscapeString(password)))
+	response.WriteString(`<p><strong>Important:</strong> Please save these credentials. You will need them to access your workspace.</p>`)
+	response.WriteString(`</div>`)
+	response.WriteString(`</div>`)
+
+	fmt.Fprint(w, response.String())
 }

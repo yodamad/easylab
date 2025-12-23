@@ -395,3 +395,93 @@ func waitForTemplateVersion(client *codersdk.Client, versionID uuid.UUID) error 
 		time.Sleep(2 * time.Second)
 	}
 }
+
+// CoderClientConfig holds configuration for connecting to a Coder instance
+type CoderClientConfig struct {
+	ServerURL      string
+	SessionToken   string
+	OrganizationID string
+}
+
+// GetTemplates retrieves all available templates from a Coder instance
+func GetTemplates(config CoderClientConfig) ([]codersdk.Template, error) {
+	serverURL, err := url.Parse(config.ServerURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse server URL: %w", err)
+	}
+
+	organizationID, err := uuid.Parse(config.OrganizationID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse organization ID: %w", err)
+	}
+
+	client := codersdk.New(serverURL)
+	client.SetSessionToken(config.SessionToken)
+
+	templates, err := client.TemplatesByOrganization(context.Background(), organizationID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get templates: %w", err)
+	}
+
+	return templates, nil
+}
+
+// CreateUser creates a new user in Coder with the given email and password
+func CreateUser(config CoderClientConfig, email, username, password string) (codersdk.User, error) {
+	serverURL, err := url.Parse(config.ServerURL)
+	if err != nil {
+		return codersdk.User{}, fmt.Errorf("failed to parse server URL: %w", err)
+	}
+
+	organizationID, err := uuid.Parse(config.OrganizationID)
+	if err != nil {
+		return codersdk.User{}, fmt.Errorf("failed to parse organization ID: %w", err)
+	}
+
+	client := codersdk.New(serverURL)
+	client.SetSessionToken(config.SessionToken)
+
+	// Create user request
+	createReq := codersdk.CreateUserRequest{
+		Email:          email,
+		Username:       username,
+		Password:       password,
+		OrganizationID: organizationID,
+	}
+
+	user, err := client.CreateUser(context.Background(), createReq)
+	if err != nil {
+		return codersdk.User{}, fmt.Errorf("failed to create user: %w", err)
+	}
+
+	return user, nil
+}
+
+// CreateWorkspace creates a workspace for a user based on a template
+func CreateWorkspace(config CoderClientConfig, userID uuid.UUID, templateID uuid.UUID, workspaceName string) (codersdk.Workspace, error) {
+	serverURL, err := url.Parse(config.ServerURL)
+	if err != nil {
+		return codersdk.Workspace{}, fmt.Errorf("failed to parse server URL: %w", err)
+	}
+
+	organizationID, err := uuid.Parse(config.OrganizationID)
+	if err != nil {
+		return codersdk.Workspace{}, fmt.Errorf("failed to parse organization ID: %w", err)
+	}
+
+	client := codersdk.New(serverURL)
+	client.SetSessionToken(config.SessionToken)
+
+	// Create workspace request
+	createReq := codersdk.CreateWorkspaceRequest{
+		TemplateID: templateID,
+		Name:       workspaceName,
+	}
+
+	workspace, err := client.CreateWorkspace(context.Background(), organizationID, userID.String(), createReq)
+	if err != nil {
+		return codersdk.Workspace{}, fmt.Errorf("failed to create workspace: %w", err)
+	}
+
+	return workspace, nil
+}

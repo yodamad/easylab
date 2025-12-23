@@ -26,7 +26,13 @@ type Job struct {
 	Error      string     `json:"error,omitempty"`
 	Config     *LabConfig `json:"config,omitempty"`
 	Kubeconfig string     `json:"kubeconfig,omitempty"`
-	mu         sync.RWMutex
+	// Coder configuration stored after deployment
+	CoderURL             string `json:"coder_url,omitempty"`
+	CoderAdminEmail      string `json:"coder_admin_email,omitempty"`
+	CoderAdminPassword   string `json:"coder_admin_password,omitempty"`
+	CoderSessionToken    string `json:"coder_session_token,omitempty"`
+	CoderOrganizationID  string `json:"coder_organization_id,omitempty"`
+	mu                   sync.RWMutex
 }
 
 // LabConfig holds all configuration values for a lab
@@ -183,6 +189,28 @@ func (jm *JobManager) SetKubeconfig(id string, kubeconfig string) error {
 	defer job.mu.Unlock()
 
 	job.Kubeconfig = kubeconfig
+	job.UpdatedAt = time.Now()
+	return nil
+}
+
+// SetCoderConfig sets the Coder configuration for a job
+func (jm *JobManager) SetCoderConfig(id string, coderURL, coderAdminEmail, coderAdminPassword, coderSessionToken, coderOrganizationID string) error {
+	jm.mu.RLock()
+	job, exists := jm.jobs[id]
+	jm.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("job %s not found", id)
+	}
+
+	job.mu.Lock()
+	defer job.mu.Unlock()
+
+	job.CoderURL = coderURL
+	job.CoderAdminEmail = coderAdminEmail
+	job.CoderAdminPassword = coderAdminPassword
+	job.CoderSessionToken = coderSessionToken
+	job.CoderOrganizationID = coderOrganizationID
 	job.UpdatedAt = time.Now()
 	return nil
 }

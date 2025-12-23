@@ -165,6 +165,23 @@ config:
 		pe.jobManager.AppendOutput(jobID, "Kubeconfig extracted successfully")
 	}
 
+	// Extract Coder configuration from stack outputs
+	pe.jobManager.AppendOutput(jobID, "Extracting Coder configuration...")
+	coderURL, err := pe.getStackOutput(jobDir, env, "coderServerURL")
+	if err != nil {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to extract coderServerURL: %v", err))
+	} else if coderURL != "" {
+		coderSessionToken, _ := pe.getStackOutput(jobDir, env, "coderSessionToken")
+		coderOrganizationID, _ := pe.getStackOutput(jobDir, env, "coderOrganizationID")
+		
+		// Store Coder config in job
+		if err := pe.jobManager.SetCoderConfig(jobID, coderURL, config.CoderAdminEmail, config.CoderAdminPassword, coderSessionToken, coderOrganizationID); err != nil {
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to store Coder config: %v", err))
+		} else {
+			pe.jobManager.AppendOutput(jobID, "Coder configuration extracted and stored successfully")
+		}
+	}
+
 	// Success
 	pe.jobManager.UpdateJobStatus(jobID, JobStatusCompleted)
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Deployment completed successfully at %s", time.Now().Format(time.RFC3339)))

@@ -50,6 +50,19 @@ func main() {
 	})
 	mux.HandleFunc("/static/", handler.ServeStatic) // Static files don't need auth
 
+	// Student routes (public login, protected dashboard)
+	mux.HandleFunc("/student/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			authHandler.HandleStudentLogin(w, r)
+		} else {
+			authHandler.ServeStudentLogin(w, r)
+		}
+	})
+	mux.HandleFunc("/student/logout", authHandler.HandleStudentLogout)
+	mux.HandleFunc("/student/dashboard", authHandler.RequireStudentAuth(handler.ServeStudentDashboard))
+	mux.HandleFunc("/api/student/labs", authHandler.RequireStudentAuth(handler.ListLabs))
+	mux.HandleFunc("/api/student/workspace/request", authHandler.RequireStudentAuth(handler.RequestWorkspace))
+
 	// Protected routes (auth required)
 	mux.HandleFunc("/", authHandler.RequireAuth(handler.ServeUI))
 	mux.HandleFunc("/api/labs", authHandler.RequireAuth(handler.CreateLab))
