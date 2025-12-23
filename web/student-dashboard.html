@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Portal - Request Workspace</title>
+    <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.0/dist/htmx.min.js" integrity="sha384-LAnQFtNXh8s0hn9mOc8bezfn16i4Zo4y3i4dMT8PtV9yip8jGehR3RxCJrmHV11d" crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        body {
+            background: linear-gradient(135deg, #4a5568 0%, #2d3748 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        header {
+            background: var(--background);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header-title h1 {
+            color: #48bb78;
+            margin: 0;
+            font-size: 1.75rem;
+        }
+        .header-title .subtitle {
+            color: var(--text-light);
+            margin: 0.25rem 0 0 0;
+            font-size: 0.875rem;
+        }
+        .logout-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: #48bb78;
+            color: white;
+            text-decoration: none;
+            border-radius: var(--radius);
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        .logout-btn:hover {
+            background: #38a169;
+        }
+        .card {
+            background: var(--background);
+            border-radius: var(--radius);
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        .card h2 {
+            margin-top: 0;
+            color: var(--text);
+            font-size: 1.5rem;
+        }
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        .form-group label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            color: var(--text);
+        }
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 1rem;
+            transition: border-color 0.2s;
+        }
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #48bb78;
+            box-shadow: 0 0 0 3px rgba(72, 187, 120, 0.1);
+        }
+        .btn {
+            padding: 0.75rem 1.5rem;
+            background: #48bb78;
+            color: white;
+            border: none;
+            border-radius: var(--radius);
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn:hover {
+            background: #38a169;
+        }
+        .btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+        .labs-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .lab-item {
+            padding: 1rem;
+            border: 2px solid var(--border);
+            border-radius: var(--radius);
+            margin-bottom: 1rem;
+            background: var(--background);
+        }
+        .lab-item:hover {
+            border-color: #48bb78;
+        }
+        .lab-item strong {
+            color: var(--text);
+            display: block;
+            margin-bottom: 0.5rem;
+        }
+        .lab-item .lab-meta {
+            color: var(--text-light);
+            font-size: 0.875rem;
+        }
+        .credentials-box {
+            background: #f0f9ff;
+            border: 2px solid #48bb78;
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            margin-top: 1.5rem;
+        }
+        .credentials-box h3 {
+            margin-top: 0;
+            color: #48bb78;
+        }
+        .credential-item {
+            margin-bottom: 1rem;
+        }
+        .credential-item label {
+            font-weight: 600;
+            color: var(--text);
+            display: block;
+            margin-bottom: 0.25rem;
+        }
+        .credential-item .value {
+            font-family: monospace;
+            background: white;
+            padding: 0.5rem;
+            border-radius: var(--radius);
+            word-break: break-all;
+        }
+        .error-message {
+            background: #fee2e2;
+            border: 1px solid #fecaca;
+            color: #991b1b;
+            padding: 1rem;
+            border-radius: var(--radius);
+            margin-top: 1rem;
+        }
+        .success-message {
+            background: #d1fae5;
+            border: 1px solid #48bb78;
+            color: #065f46;
+            padding: 1rem;
+            border-radius: var(--radius);
+            margin-top: 1rem;
+        }
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-light);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <div class="header-title">
+                    <h1>🎓 Student Portal</h1>
+                    <p class="subtitle">Request your workspace</p>
+                </div>
+                <a href="/student/logout" class="logout-btn" title="Logout">
+                    <span>🚪</span>
+                    <span>Logout</span>
+                </a>
+            </div>
+        </header>
+
+        <main>
+            <!-- Available Labs -->
+            <div class="card">
+                <h2>Available Labs</h2>
+                <div id="labs-container">
+                    <div class="loading">Loading available labs...</div>
+                </div>
+            </div>
+
+            <!-- Workspace Request Form -->
+            <div class="card">
+                <h2>Request Workspace</h2>
+                <form id="workspace-request-form" hx-post="/api/student/workspace/request" hx-target="#workspace-response" hx-swap="innerHTML">
+                    <div class="form-group">
+                        <label for="email">Email Address *</label>
+                        <input type="email" id="email" name="email" required placeholder="your.email@example.com">
+                        <small>This email will be used to create your Coder account</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="lab_id">Select Lab *</label>
+                        <select id="lab_id" name="lab_id" required>
+                            <option value="">Loading labs...</option>
+                        </select>
+                    </div>
+
+                    <button type="submit" class="btn" id="submit-btn">Request Workspace</button>
+                </form>
+
+                <div id="workspace-response"></div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Load labs on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadLabs();
+        });
+
+        function loadLabs() {
+            fetch('/api/student/labs')
+                .then(response => response.json())
+                .then(data => {
+                    const container = document.getElementById('labs-container');
+                    const select = document.getElementById('lab_id');
+                    
+                    if (data.length === 0) {
+                        container.innerHTML = '<p>No labs available. Please contact your instructor.</p>';
+                        select.innerHTML = '<option value="">No labs available</option>';
+                        return;
+                    }
+
+                    // Populate labs list
+                    const labsList = document.createElement('ul');
+                    labsList.className = 'labs-list';
+                    data.forEach(lab => {
+                        const item = document.createElement('li');
+                        item.className = 'lab-item';
+                        const date = new Date(lab.created_at).toLocaleString();
+                        item.innerHTML = `
+                            <strong>${lab.config.stack_name || lab.id}</strong>
+                            <div class="lab-meta">
+                                Created: ${date} | Status: ${lab.status}
+                            </div>
+                        `;
+                        labsList.appendChild(item);
+                    });
+                    container.innerHTML = '';
+                    container.appendChild(labsList);
+
+                    // Populate select dropdown
+                    select.innerHTML = '<option value="">Select a lab...</option>';
+                    data.forEach(lab => {
+                        const option = document.createElement('option');
+                        option.value = lab.id;
+                        option.textContent = `${lab.config.stack_name || lab.id} (${lab.status})`;
+                        select.appendChild(option);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error loading labs:', error);
+                    document.getElementById('labs-container').innerHTML = 
+                        '<p class="error-message">Error loading labs. Please refresh the page.</p>';
+                });
+        }
+
+        // Handle form submission
+        document.getElementById('workspace-request-form').addEventListener('htmx:beforeRequest', function() {
+            const btn = document.getElementById('submit-btn');
+            btn.disabled = true;
+            btn.textContent = 'Requesting...';
+        });
+
+        document.getElementById('workspace-request-form').addEventListener('htmx:afterRequest', function() {
+            const btn = document.getElementById('submit-btn');
+            btn.disabled = false;
+            btn.textContent = 'Request Workspace';
+        });
+    </script>
+</body>
+</html>
+
