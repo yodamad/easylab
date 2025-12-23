@@ -365,23 +365,50 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
-		return
+	// Parse form data - handle both application/x-www-form-urlencoded and multipart/form-data
+	contentType := r.Header.Get("Content-Type")
+	if strings.Contains(contentType, "multipart/form-data") {
+		if err := r.ParseMultipartForm(32 << 20); err != nil { // 32MB max
+			log.Printf("Failed to parse multipart form: %v", err)
+			http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
+			return
+		}
+	} else {
+		if err := r.ParseForm(); err != nil {
+			log.Printf("Failed to parse form: %v", err)
+			http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
+			return
+		}
 	}
 
-	email := r.FormValue("email")
-	labID := r.FormValue("lab_id")
+	// Try PostFormValue first (POST-only), then FormValue (includes query params)
+	email := r.PostFormValue("email")
+	if email == "" {
+		email = r.FormValue("email")
+	}
+	
+	labID := r.PostFormValue("lab_id")
+	if labID == "" {
+		labID = r.FormValue("lab_id")
+	}
+	
+	// Debug logging - show all form values
+	log.Printf("RequestWorkspace - Content-Type: %s", contentType)
+	log.Printf("RequestWorkspace - PostForm: %v", r.PostForm)
+	log.Printf("RequestWorkspace - Form: %v", r.Form)
+	log.Printf("RequestWorkspace - Email: %q, LabID: %q", email, labID)
 
 	// Validate email
 	if email == "" {
-		http.Error(w, "Email is required", http.StatusBadRequest)
+		log.Printf("RequestWorkspace - Email validation failed. Available form keys: %v", getFormKeys(r))
+		http.Error(w, fmt.Sprintf("Email is required. Received form data: %v", getFormKeys(r)), http.StatusBadRequest)
 		return
 	}
 
 	// Validate lab ID
 	if labID == "" {
-		http.Error(w, "Lab ID is required", http.StatusBadRequest)
+		log.Printf("RequestWorkspace - LabID validation failed. Available form keys: %v", getFormKeys(r))
+		http.Error(w, fmt.Sprintf("Lab ID is required. Received form data: %v", getFormKeys(r)), http.StatusBadRequest)
 		return
 	}
 
@@ -484,4 +511,20 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	response.WriteString(`</div>`)
 
 	fmt.Fprint(w, response.String())
+}
+
+// getFormKeys returns all keys from both PostForm and Form
+func getFormKeys(r *http.Request) []string {
+	keys := make(map[string]bool)
+	for k := range r.PostForm {
+		keys[k] = true
+	}
+	for k := range r.Form {
+		keys[k] = true
+	}
+	result := make([]string, 0, len(keys))
+	for k := range keys {
+		result = append(result, k)
+	}
+	return result
 }

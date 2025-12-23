@@ -208,7 +208,7 @@
             <!-- Workspace Request Form -->
             <div class="card">
                 <h2>Request Workspace</h2>
-                <form id="workspace-request-form" hx-post="/api/student/workspace/request" hx-target="#workspace-response" hx-swap="innerHTML">
+                <form id="workspace-request-form" method="POST" action="/api/student/workspace/request" enctype="application/x-www-form-urlencoded" hx-post="/api/student/workspace/request" hx-target="#workspace-response" hx-swap="innerHTML">
                     <div class="form-group">
                         <label for="email">Email Address *</label>
                         <input type="email" id="email" name="email" required placeholder="your.email@example.com">
@@ -284,17 +284,52 @@
         }
 
         // Handle form submission
-        document.getElementById('workspace-request-form').addEventListener('htmx:beforeRequest', function() {
-            const btn = document.getElementById('submit-btn');
-            btn.disabled = true;
-            btn.textContent = 'Requesting...';
-        });
+        const workspaceForm = document.getElementById('workspace-request-form');
+        
+        // HTMX event handlers
+        if (typeof htmx !== 'undefined') {
+            workspaceForm.addEventListener('htmx:beforeRequest', function() {
+                const btn = document.getElementById('submit-btn');
+                btn.disabled = true;
+                btn.textContent = 'Requesting...';
+            });
 
-        document.getElementById('workspace-request-form').addEventListener('htmx:afterRequest', function() {
-            const btn = document.getElementById('submit-btn');
-            btn.disabled = false;
-            btn.textContent = 'Request Workspace';
-        });
+            workspaceForm.addEventListener('htmx:afterRequest', function() {
+                const btn = document.getElementById('submit-btn');
+                btn.disabled = false;
+                btn.textContent = 'Request Workspace';
+            });
+        } else {
+            // Fallback for when HTMX is not available
+            workspaceForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                const btn = document.getElementById('submit-btn');
+                const responseDiv = document.getElementById('workspace-response');
+                
+                btn.disabled = true;
+                btn.textContent = 'Requesting...';
+                responseDiv.innerHTML = '<div class="loading">Requesting workspace...</div>';
+                
+                const formData = new FormData(workspaceForm);
+                
+                fetch('/api/student/workspace/request', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.text())
+                .then(html => {
+                    responseDiv.innerHTML = html;
+                    btn.disabled = false;
+                    btn.textContent = 'Request Workspace';
+                })
+                .catch(error => {
+                    responseDiv.innerHTML = `<div class="error-message">Error: ${error.message}</div>`;
+                    btn.disabled = false;
+                    btn.textContent = 'Request Workspace';
+                });
+            });
+        }
     </script>
 </body>
 </html>
