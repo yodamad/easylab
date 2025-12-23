@@ -29,23 +29,36 @@ func main() {
 	jobManager := server.NewJobManager()
 	pulumiExec := server.NewPulumiExecutor(jobManager, *workDir)
 	handler := server.NewHandler(jobManager, pulumiExec)
+	authHandler := server.NewAuthHandler()
 
 	// Setup routes
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", handler.ServeUI)
+
+	// Public routes (no auth required)
+	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			authHandler.HandleLogin(w, r)
+		} else {
+			authHandler.ServeLogin(w, r)
+		}
+	})
+	mux.HandleFunc("/logout", authHandler.HandleLogout)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
-	mux.HandleFunc("/api/labs", handler.CreateLab)
-	mux.HandleFunc("/api/jobs/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/static/", handler.ServeStatic) // Static files don't need auth
+
+	// Protected routes (auth required)
+	mux.HandleFunc("/", authHandler.RequireAuth(handler.ServeUI))
+	mux.HandleFunc("/api/labs", authHandler.RequireAuth(handler.CreateLab))
+	mux.HandleFunc("/api/jobs/", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("format") == "json" {
 			handler.GetJobStatusJSON(w, r)
 		} else {
 			handler.GetJobStatus(w, r)
 		}
-	})
-	mux.HandleFunc("/static/", handler.ServeStatic)
+	}))
 
 	// Configure server with timeouts
 	addr := fmt.Sprintf(":%s", *port)
@@ -61,6 +74,7 @@ func main() {
 	go func() {
 		log.Printf("Starting server on http://localhost%s", addr)
 		log.Printf("Work directory: %s", *workDir)
+		log.Printf("Set %s environment variable to configure admin password", server.EnvAdminPassword)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server failed: %v", err)
 		}
