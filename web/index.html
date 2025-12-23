@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lab as Code - Create New Lab</title>
+    <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.0/dist/htmx.min.js" integrity="sha384-LAnQFtNXh8s0hn9mOc8bezfn16i4Zo4y3i4dMT8PtV9yip8jGehR3RxCJrmHV11d" crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Lab as Code</h1>
+            <p class="subtitle">Create a new lab environment</p>
+        </header>
+
+        <main>
+            <!-- Progress Indicator -->
+            <div class="wizard-progress">
+                <div class="progress-step active" data-step="1">
+                    <span class="step-number">1</span>
+                    <span class="step-label">Pulumi</span>
+                </div>
+                <div class="progress-step" data-step="2">
+                    <span class="step-number">2</span>
+                    <span class="step-label">OVH</span>
+                </div>
+                <div class="progress-step" data-step="3">
+                    <span class="step-number">3</span>
+                    <span class="step-label">Network</span>
+                </div>
+                <div class="progress-step" data-step="4">
+                    <span class="step-number">4</span>
+                    <span class="step-label">Kubernetes</span>
+                </div>
+                <div class="progress-step" data-step="5">
+                    <span class="step-number">5</span>
+                    <span class="step-label">Node Pool</span>
+                </div>
+                <div class="progress-step" data-step="6">
+                    <span class="step-number">6</span>
+                    <span class="step-label">Coder</span>
+                </div>
+            </div>
+
+            <form id="lab-form" action="/api/labs" method="POST" hx-post="/api/labs" hx-target="#form-response" hx-swap="innerHTML" hx-indicator="#loading">
+                <div id="form-response"></div>
+                <div id="loading" class="htmx-indicator">
+                    <div class="spinner"></div>
+                    <p>Submitting...</p>
+                </div>
+
+                <!-- Step 1: Pulumi Configuration -->
+                <section class="wizard-step active" data-step="1">
+                    <div class="step-header">
+                        <h2>Pulumi Configuration</h2>
+                        <p class="section-description">Configure your Pulumi stack settings</p>
+                    </div>
+                    <div class="step-content">
+                        <div class="form-group">
+                            <label for="stack_name">Stack Name *</label>
+                            <input type="text" id="stack_name" name="stack_name" value="dev" required pattern="[a-zA-Z0-9_-]+" title="Only letters, numbers, hyphens and underscores allowed">
+                            <small>Unique name for this deployment (e.g., dev, prod, test-lab-1)</small>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Step 2: OVH Credentials -->
+                <section class="wizard-step" data-step="2">
+                    <div class="step-header">
+                        <h2>OVH Credentials</h2>
+                        <p class="section-description">Enter your OVHcloud API credentials</p>
+                    </div>
+                    <div class="step-content">
+                        <div class="form-group">
+                            <label for="ovh_application_key">Application Key *</label>
+                            <input type="text" id="ovh_application_key" name="ovh_application_key" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="ovh_application_secret">Application Secret *</label>
+                            <input type="password" id="ovh_application_secret" name="ovh_application_secret" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="ovh_consumer_key">Consumer Key *</label>
+                            <input type="text" id="ovh_consumer_key" name="ovh_consumer_key" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="ovh_service_name">Service Name (Project ID) *</label>
+                            <input type="text" id="ovh_service_name" name="ovh_service_name" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="ovh_endpoint">OVH Endpoint</label>
+                            <select id="ovh_endpoint" name="ovh_endpoint" required>
+                                <option value="ovh-eu" selected>ovh-eu</option>
+                                <option value="ovh-us">ovh-us</option>
+                                <option value="ovh-ca">ovh-ca</option>
+                            </select>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Step 3: Network Configuration -->
+                <section class="wizard-step" data-step="3">
+                    <div class="step-header">
+                        <h2>Network Configuration</h2>
+                        <p class="section-description">Configure private network and gateway settings</p>
+                    </div>
+                    <div class="step-content">
+                        <div class="form-group">
+                            <label for="network_gateway_name">Gateway Name *</label>
+                            <input type="text" id="network_gateway_name" name="network_gateway_name" value="test-gateway" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="network_gateway_model">Gateway Model *</label>
+                            <select id="network_gateway_model" name="network_gateway_model" required>
+                                <option value="s" selected>s (Small)</option>
+                                <option value="m">m (Medium)</option>
+                                <option value="l">l (Large)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="network_private_network_name">Private Network Name *</label>
+                            <input type="text" id="network_private_network_name" name="network_private_network_name" value="test-network" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="network_region">Region *</label>
+                            <select id="network_region" name="network_region" required>
+                                <option value="GRA9" selected>GRA9</option>
+                                <option value="GRA11">GRA11</option>
+                                <option value="SBG5">SBG5</option>
+                                <option value="BHS5">BHS5</option>
+                                <option value="WAW1">WAW1</option>
+                                <option value="DE1">DE1</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="network_mask">Network Mask (CIDR) *</label>
+                            <input type="text" id="network_mask" name="network_mask" value="10.0.0.0/24" required>
+                            <small>e.g., 10.0.0.0/24</small>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="network_start_ip">Start IP *</label>
+                                <input type="text" id="network_start_ip" name="network_start_ip" value="10.0.0.100" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="network_end_ip">End IP *</label>
+                                <input type="text" id="network_end_ip" name="network_end_ip" value="10.0.0.254" required>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="network_id">Network ID (Optional)</label>
+                            <input type="text" id="network_id" name="network_id" placeholder="Leave empty for new network">
+                            <small>VLAN ID if reusing existing network</small>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Step 4: Kubernetes Configuration -->
+                <section class="wizard-step" data-step="4">
+                    <div class="step-header">
+                        <h2>Kubernetes Configuration</h2>
+                        <p class="section-description">Configure your managed Kubernetes cluster</p>
+                    </div>
+                    <div class="step-content">
+                        <div class="form-group">
+                            <label for="k8s_cluster_name">Cluster Name *</label>
+                            <input type="text" id="k8s_cluster_name" name="k8s_cluster_name" value="test-cluster" required>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Step 5: Node Pool Configuration -->
+                <section class="wizard-step" data-step="5">
+                    <div class="step-header">
+                        <h2>Node Pool Configuration</h2>
+                        <p class="section-description">Configure Kubernetes node pool settings</p>
+                    </div>
+                    <div class="step-content">
+                        <div class="form-group">
+                            <label for="nodepool_name">Node Pool Name *</label>
+                            <input type="text" id="nodepool_name" name="nodepool_name" value="test-nodepool" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="nodepool_flavor">Flavor *</label>
+                            <select id="nodepool_flavor" name="nodepool_flavor" required>
+                                <option value="d2-8" selected>d2-8</option>
+                                <option value="b2-7">b2-7</option>
+                                <option value="b2-15">b2-15</option>
+                                <option value="c2-7">c2-7</option>
+                                <option value="c2-15">c2-15</option>
+                            </select>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="nodepool_desired_node_count">Desired Nodes *</label>
+                                <input type="number" id="nodepool_desired_node_count" name="nodepool_desired_node_count" value="1" min="1" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="nodepool_min_node_count">Min Nodes *</label>
+                                <input type="number" id="nodepool_min_node_count" name="nodepool_min_node_count" value="1" min="1" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="nodepool_max_node_count">Max Nodes *</label>
+                                <input type="number" id="nodepool_max_node_count" name="nodepool_max_node_count" value="2" min="1" required>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Step 6: Coder Configuration -->
+                <section class="wizard-step" data-step="6">
+                    <div class="step-header">
+                        <h2>Coder Configuration</h2>
+                        <p class="section-description">Configure the Coder IDE platform</p>
+                    </div>
+                    <div class="step-content">
+                        <div class="form-group">
+                            <label for="coder_admin_email">Admin Email *</label>
+                            <input type="email" id="coder_admin_email" name="coder_admin_email" value="admin@coder.com" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="coder_admin_password">Admin Password *</label>
+                            <input type="password" id="coder_admin_password" name="coder_admin_password" required>
+                            <small>Strong password required</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="coder_version">Coder Version *</label>
+                            <input type="text" id="coder_version" name="coder_version" value="2.28.6" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="coder_template_name">Template Name *</label>
+                            <input type="text" id="coder_template_name" name="coder_template_name" value="docker-template" required>
+                        </div>
+
+                        <h3 class="subsection-title">Database Configuration</h3>
+                        
+                        <div class="form-group">
+                            <label for="coder_db_user">Database User *</label>
+                            <input type="text" id="coder_db_user" name="coder_db_user" value="coder" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="coder_db_password">Database Password *</label>
+                            <input type="password" id="coder_db_password" name="coder_db_password" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="coder_db_name">Database Name *</label>
+                            <input type="text" id="coder_db_name" name="coder_db_name" value="coderdb" required>
+                        </div>
+                    </div>
+                </section>
+            </form>
+
+            <!-- Sticky Footer Navigation -->
+            <div class="wizard-footer">
+                <div class="footer-content">
+                    <button type="button" id="btn-prev" class="btn btn-secondary" disabled>
+                        <span class="btn-icon">←</span> Previous
+                    </button>
+                    <div class="step-indicator">
+                        Step <span id="current-step-num">1</span> of <span id="total-steps">6</span>
+                    </div>
+                    <button type="button" id="btn-next" class="btn btn-primary">
+                        Next <span class="btn-icon">→</span>
+                    </button>
+                    <button type="submit" id="btn-submit" form="lab-form" class="btn btn-success" style="display: none;">
+                        Create Lab
+                    </button>
+                </div>
+            </div>
+
+            <!-- Job Status Display Area -->
+            <div id="job-status-container" class="job-status-container"></div>
+        </main>
+    </div>
+
+    <script>
+        // Wizard functionality
+        const wizard = {
+            currentStep: 1,
+            totalSteps: 6,
+            
+            init() {
+                this.bindEvents();
+                this.updateUI();
+            },
+            
+            bindEvents() {
+                document.getElementById('btn-next').addEventListener('click', () => this.nextStep());
+                document.getElementById('btn-prev').addEventListener('click', () => this.prevStep());
+                
+                // Keyboard navigation
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
+                        e.preventDefault();
+                        if (this.currentStep < this.totalSteps) {
+                            this.nextStep();
+                        }
+                    }
+                });
+                
+                // Progress step click
+                document.querySelectorAll('.progress-step').forEach(step => {
+                    step.addEventListener('click', () => {
+                        const stepNum = parseInt(step.dataset.step);
+                        if (this.canGoToStep(stepNum)) {
+                            this.goToStep(stepNum);
+                        }
+                    });
+                });
+            },
+            
+            validateCurrentStep() {
+                const currentStepEl = document.querySelector(`.wizard-step[data-step="${this.currentStep}"]`);
+                const inputs = currentStepEl.querySelectorAll('input[required], select[required]');
+                let valid = true;
+                
+                inputs.forEach(input => {
+                    if (!input.checkValidity()) {
+                        input.reportValidity();
+                        valid = false;
+                    }
+                });
+                
+                return valid;
+            },
+            
+            canGoToStep(stepNum) {
+                // Can always go back
+                if (stepNum < this.currentStep) return true;
+                // Can only go forward one step at a time after validation
+                if (stepNum === this.currentStep + 1) return this.validateCurrentStep();
+                // Can go to current step
+                if (stepNum === this.currentStep) return true;
+                return false;
+            },
+            
+            nextStep() {
+                if (this.currentStep < this.totalSteps && this.validateCurrentStep()) {
+                    this.currentStep++;
+                    this.updateUI();
+                }
+            },
+            
+            prevStep() {
+                if (this.currentStep > 1) {
+                    this.currentStep--;
+                    this.updateUI();
+                }
+            },
+            
+            goToStep(stepNum) {
+                if (stepNum >= 1 && stepNum <= this.totalSteps) {
+                    this.currentStep = stepNum;
+                    this.updateUI();
+                }
+            },
+            
+            updateUI() {
+                // Update step visibility
+                document.querySelectorAll('.wizard-step').forEach(step => {
+                    const stepNum = parseInt(step.dataset.step);
+                    step.classList.toggle('active', stepNum === this.currentStep);
+                });
+                
+                // Update progress indicator
+                document.querySelectorAll('.progress-step').forEach(step => {
+                    const stepNum = parseInt(step.dataset.step);
+                    step.classList.remove('active', 'completed');
+                    if (stepNum === this.currentStep) {
+                        step.classList.add('active');
+                    } else if (stepNum < this.currentStep) {
+                        step.classList.add('completed');
+                    }
+                });
+                
+                // Update step counter
+                document.getElementById('current-step-num').textContent = this.currentStep;
+                
+                // Update buttons
+                const prevBtn = document.getElementById('btn-prev');
+                const nextBtn = document.getElementById('btn-next');
+                const submitBtn = document.getElementById('btn-submit');
+                
+                prevBtn.disabled = this.currentStep === 1;
+                
+                if (this.currentStep === this.totalSteps) {
+                    nextBtn.style.display = 'none';
+                    submitBtn.style.display = 'inline-flex';
+                } else {
+                    nextBtn.style.display = 'inline-flex';
+                    submitBtn.style.display = 'none';
+                }
+                
+                // Scroll to top of form
+                document.querySelector('.wizard-progress').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        };
+        
+        // Initialize wizard
+        document.addEventListener('DOMContentLoaded', function() {
+            wizard.init();
+            
+            const form = document.getElementById('lab-form');
+            
+            // Check if HTMX is loaded
+            if (typeof htmx === 'undefined') {
+                console.warn('HTMX not loaded, using fallback form submission');
+                form.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    const formData = new FormData(form);
+                    const responseDiv = document.getElementById('form-response');
+                    responseDiv.innerHTML = '<p>Submitting...</p>';
+                    
+                    fetch('/api/labs', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.text())
+                    .then(html => {
+                        responseDiv.innerHTML = html;
+                        startPolling();
+                    })
+                    .catch(error => {
+                        responseDiv.innerHTML = '<p class="error-message">Error: ' + error.message + '</p>';
+                    });
+                });
+            }
+            
+            // Handle job status display on page load if job ID is in URL
+            const urlParams = new URLSearchParams(window.location.search);
+            const jobId = urlParams.get('job');
+            if (jobId) {
+                const container = document.getElementById('job-status-container');
+                container.innerHTML = `<div id="job-status" hx-get="/api/jobs/${jobId}/status" hx-trigger="load, every 2s" hx-swap="innerHTML"></div>`;
+                if (typeof htmx !== 'undefined') {
+                    htmx.process(container);
+                } else {
+                    pollJobStatus(jobId, container);
+                }
+            }
+        });
+
+        // Fallback polling function
+        function pollJobStatus(jobId, container) {
+            fetch('/api/jobs/' + jobId + '/status')
+                .then(response => response.text())
+                .then(html => {
+                    container.innerHTML = html;
+                    if (html.includes('status-pending') || html.includes('status-running')) {
+                        setTimeout(() => pollJobStatus(jobId, container), 2000);
+                    }
+                })
+                .catch(error => {
+                    container.innerHTML = '<p class="error-message">Error polling status: ' + error.message + '</p>';
+                });
+        }
+
+        function startPolling() {
+            const responseDiv = document.getElementById('form-response');
+            const jobStatusDiv = responseDiv.querySelector('[id^="job-status"]');
+            if (jobStatusDiv) {
+                const container = document.getElementById('job-status-container');
+                container.innerHTML = '';
+                container.appendChild(jobStatusDiv);
+                
+                const hxGet = jobStatusDiv.getAttribute('hx-get');
+                if (hxGet) {
+                    const match = hxGet.match(/\/api\/jobs\/([^/]+)/);
+                    if (match) {
+                        pollJobStatus(match[1], container);
+                    }
+                }
+            }
+        }
+
+        // Handle form submission response (for HTMX)
+        document.body.addEventListener('htmx:afterSwap', function(event) {
+            if (event.detail.target.id === 'form-response') {
+                const response = event.detail.target;
+                const jobStatusDiv = response.querySelector('[id^="job-status"]');
+                if (jobStatusDiv) {
+                    const container = document.getElementById('job-status-container');
+                    container.innerHTML = '';
+                    container.appendChild(jobStatusDiv);
+                    if (typeof htmx !== 'undefined') {
+                        htmx.process(container);
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
