@@ -74,7 +74,7 @@
                     <div class="step-content">
                         <div class="form-group">
                             <label for="ovh_application_key">Application Key *</label>
-                            <input type="text" id="ovh_application_key" name="ovh_application_key" required>
+                            <input type="password" id="ovh_application_key" name="ovh_application_key" required>
                         </div>
 
                         <div class="form-group">
@@ -84,12 +84,12 @@
 
                         <div class="form-group">
                             <label for="ovh_consumer_key">Consumer Key *</label>
-                            <input type="text" id="ovh_consumer_key" name="ovh_consumer_key" required>
+                            <input type="password" id="ovh_consumer_key" name="ovh_consumer_key" required>
                         </div>
 
                         <div class="form-group">
                             <label for="ovh_service_name">Service Name (Project ID) *</label>
-                            <input type="text" id="ovh_service_name" name="ovh_service_name" required>
+                            <input type="password" id="ovh_service_name" name="ovh_service_name" required>
                         </div>
 
                         <div class="form-group">
@@ -417,6 +417,21 @@
             }
         };
         
+        // Function to hide wizard and show only job status
+        function hideWizardShowStatus() {
+            // Hide wizard elements
+            document.querySelector('.wizard-progress').style.display = 'none';
+            document.getElementById('lab-form').style.display = 'none';
+            document.querySelector('.wizard-footer').style.display = 'none';
+            
+            // Make sure job status container is visible
+            const container = document.getElementById('job-status-container');
+            container.style.display = 'block';
+            
+            // Remove bottom padding from body since footer is hidden
+            document.body.style.paddingBottom = '1rem';
+        }
+        
         // Initialize wizard
         document.addEventListener('DOMContentLoaded', function() {
             wizard.init();
@@ -451,6 +466,9 @@
             const urlParams = new URLSearchParams(window.location.search);
             const jobId = urlParams.get('job');
             if (jobId) {
+                // Hide wizard and show only status
+                hideWizardShowStatus();
+                
                 const container = document.getElementById('job-status-container');
                 container.innerHTML = `<div id="job-status" hx-get="/api/jobs/${jobId}/status" hx-trigger="load, every 2s" hx-swap="innerHTML"></div>`;
                 if (typeof htmx !== 'undefined') {
@@ -461,12 +479,21 @@
             }
         });
 
+        // Scroll output to bottom
+        function scrollOutputToBottom() {
+            const outputEl = document.querySelector('.output');
+            if (outputEl) {
+                outputEl.scrollTop = outputEl.scrollHeight;
+            }
+        }
+
         // Fallback polling function
         function pollJobStatus(jobId, container) {
             fetch('/api/jobs/' + jobId + '/status')
                 .then(response => response.text())
                 .then(html => {
                     container.innerHTML = html;
+                    scrollOutputToBottom();
                     if (html.includes('status-pending') || html.includes('status-running')) {
                         setTimeout(() => pollJobStatus(jobId, container), 2000);
                     }
@@ -480,6 +507,9 @@
             const responseDiv = document.getElementById('form-response');
             const jobStatusDiv = responseDiv.querySelector('[id^="job-status"]');
             if (jobStatusDiv) {
+                // Hide wizard and show only status
+                hideWizardShowStatus();
+                
                 const container = document.getElementById('job-status-container');
                 container.innerHTML = '';
                 container.appendChild(jobStatusDiv);
@@ -500,6 +530,9 @@
                 const response = event.detail.target;
                 const jobStatusDiv = response.querySelector('[id^="job-status"]');
                 if (jobStatusDiv) {
+                    // Hide wizard and show only status
+                    hideWizardShowStatus();
+                    
                     const container = document.getElementById('job-status-container');
                     container.innerHTML = '';
                     container.appendChild(jobStatusDiv);
@@ -508,6 +541,14 @@
                     }
                 }
             }
+            
+            // Scroll output to bottom after any HTMX swap
+            scrollOutputToBottom();
+        });
+
+        // Also handle HTMX afterSettle for job status updates
+        document.body.addEventListener('htmx:afterSettle', function(event) {
+            scrollOutputToBottom();
         });
     </script>
 </body>
