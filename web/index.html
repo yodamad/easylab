@@ -120,7 +120,7 @@
                     <div class="step-content">
                         <div class="form-group">
                             <label for="network_gateway_name">Gateway Name *</label>
-                            <input type="text" id="network_gateway_name" name="network_gateway_name" value="test-gateway" required>
+                            <input type="text" id="network_gateway_name" name="network_gateway_name" value="dev-gateway" required data-base-name="gateway">
                         </div>
 
                         <div class="form-group">
@@ -134,7 +134,7 @@
 
                         <div class="form-group">
                             <label for="network_private_network_name">Private Network Name *</label>
-                            <input type="text" id="network_private_network_name" name="network_private_network_name" value="test-network" required>
+                            <input type="text" id="network_private_network_name" name="network_private_network_name" value="dev-network" required data-base-name="network">
                         </div>
 
                         <div class="form-group">
@@ -184,7 +184,7 @@
                     <div class="step-content">
                         <div class="form-group">
                             <label for="k8s_cluster_name">Cluster Name *</label>
-                            <input type="text" id="k8s_cluster_name" name="k8s_cluster_name" value="test-cluster" required>
+                            <input type="text" id="k8s_cluster_name" name="k8s_cluster_name" value="dev-cluster" required data-base-name="cluster">
                         </div>
                     </div>
                 </section>
@@ -198,7 +198,7 @@
                     <div class="step-content">
                         <div class="form-group">
                             <label for="nodepool_name">Node Pool Name *</label>
-                            <input type="text" id="nodepool_name" name="nodepool_name" value="test-nodepool" required>
+                            <input type="text" id="nodepool_name" name="nodepool_name" value="dev-nodepool" required data-base-name="nodepool">
                         </div>
 
                         <div class="form-group">
@@ -440,11 +440,130 @@
             document.body.style.paddingBottom = '1rem';
         }
         
+        // Extract base name from prefixed value (removes stack prefix)
+        function extractBaseName(prefixedValue, stackName) {
+            if (!prefixedValue || !stackName) return prefixedValue || '';
+            const prefix = `${stackName}-`;
+            if (prefixedValue.startsWith(prefix)) {
+                return prefixedValue.substring(prefix.length);
+            }
+            return prefixedValue;
+        }
+        
+        // Update resource name inputs with stack prefix
+        function updateResourceNames(skipIfEditing = false) {
+            const stackName = document.getElementById('stack_name').value || 'dev';
+            const resourceInputs = [
+                { id: 'network_gateway_name', baseAttr: 'data-base-name' },
+                { id: 'network_private_network_name', baseAttr: 'data-base-name' },
+                { id: 'k8s_cluster_name', baseAttr: 'data-base-name' },
+                { id: 'nodepool_name', baseAttr: 'data-base-name' }
+            ];
+            
+            resourceInputs.forEach(({ id, baseAttr }) => {
+                const input = document.getElementById(id);
+                if (!input) return;
+                
+                // Skip if user is currently editing this field
+                if (skipIfEditing && document.activeElement === input) {
+                    return;
+                }
+                
+                // Get current value and determine base name
+                let currentValue = input.value || '';
+                let baseName = input.getAttribute(baseAttr);
+                
+                // Extract base name from current value if it has prefix, otherwise use current value as base
+                if (currentValue.startsWith(`${stackName}-`)) {
+                    baseName = extractBaseName(currentValue, stackName);
+                    input.setAttribute(baseAttr, baseName);
+                } else if (currentValue && !baseName) {
+                    // If no prefix and no stored base name, use current value as base
+                    baseName = currentValue;
+                    input.setAttribute(baseAttr, baseName);
+                }
+                
+                // Update input value to show prefixed name
+                if (baseName) {
+                    const prefixedValue = `${stackName}-${baseName}`;
+                    if (input.value !== prefixedValue) {
+                        input.value = prefixedValue;
+                    }
+                }
+            });
+        }
+        
+        // Extract base names from form before submission
+        function extractBaseNamesBeforeSubmit(form) {
+            const stackName = document.getElementById('stack_name').value || 'dev';
+            const resourceFields = [
+                'network_gateway_name',
+                'network_private_network_name',
+                'k8s_cluster_name',
+                'nodepool_name'
+            ];
+            
+            resourceFields.forEach(fieldName => {
+                const input = form.querySelector(`[name="${fieldName}"]`);
+                if (input) {
+                    const currentValue = input.value || '';
+                    const baseName = extractBaseName(currentValue, stackName);
+                    // Temporarily set the base name for submission
+                    input.value = baseName;
+                }
+            });
+        }
+        
         // Initialize wizard
         document.addEventListener('DOMContentLoaded', function() {
             wizard.init();
             
             const form = document.getElementById('lab-form');
+            
+            // Set up resource name updates
+            const stackNameInput = document.getElementById('stack_name');
+            const resourceInputs = [
+                document.getElementById('network_gateway_name'),
+                document.getElementById('network_private_network_name'),
+                document.getElementById('k8s_cluster_name'),
+                document.getElementById('nodepool_name')
+            ];
+            
+            // Update resource names when stack name changes
+            if (stackNameInput) {
+                stackNameInput.addEventListener('input', function() {
+                    updateResourceNames(true); // Skip fields being edited
+                });
+                stackNameInput.addEventListener('change', function() {
+                    updateResourceNames(false); // Update all when stack name is finalized
+                });
+            }
+            
+            // Update resource names when user finishes editing (on blur)
+            resourceInputs.forEach(input => {
+                if (input) {
+                    input.addEventListener('blur', function() {
+                        updateResourceNames(false);
+                    });
+                }
+            });
+            
+            // Initial update
+            updateResourceNames();
+            
+            // Extract base names before form submission
+            form.addEventListener('submit', function(e) {
+                extractBaseNamesBeforeSubmit(form);
+            });
+            
+            // Also handle HTMX form submission
+            if (typeof htmx !== 'undefined') {
+                document.body.addEventListener('htmx:configRequest', function(event) {
+                    if (event.detail.target === form || event.detail.elt === form) {
+                        extractBaseNamesBeforeSubmit(form);
+                    }
+                });
+            }
             
             // Check if HTMX is loaded
             if (typeof htmx === 'undefined') {
