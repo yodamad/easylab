@@ -186,6 +186,7 @@ func (h *Handler) GetJobStatus(w http.ResponseWriter, r *http.Request) {
 	status := job.Status
 	output := job.Output
 	errorMsg := job.Error
+	kubeconfig := job.Kubeconfig
 	job.mu.RUnlock()
 
 	w.Header().Set("Content-Type", "text/html")
@@ -193,6 +194,13 @@ func (h *Handler) GetJobStatus(w http.ResponseWriter, r *http.Request) {
 	var statusHTML strings.Builder
 	statusHTML.WriteString(`<div class="job-status">`)
 	statusHTML.WriteString(fmt.Sprintf(`<div class="status-badge status-%s">%s</div>`, status, status))
+
+	// Show download button if job completed successfully and kubeconfig is available
+	if status == JobStatusCompleted && kubeconfig != "" {
+		statusHTML.WriteString(fmt.Sprintf(`<a href="/api/jobs/%s/kubeconfig" class="btn btn-download" download="kubeconfig-%s.yaml">`, jobID, jobID))
+		statusHTML.WriteString(`<span class="btn-icon">⬇</span> Download Kubeconfig`)
+		statusHTML.WriteString(`</a>`)
+	}
 
 	if errorMsg != "" {
 		statusHTML.WriteString(fmt.Sprintf(`<div class="error-message">%s</div>`, template.HTMLEscapeString(errorMsg)))
@@ -266,4 +274,46 @@ func (h *Handler) ServeStatic(w http.ResponseWriter, r *http.Request) {
 	}
 
 	io.Copy(w, file)
+}
+
+// DownloadKubeconfig serves the kubeconfig file for download
+func (h *Handler) DownloadKubeconfig(w http.ResponseWriter, r *http.Request) {
+	// Extract job ID from path like /api/jobs/{id}/kubeconfig
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 4 || pathParts[0] != "api" || pathParts[1] != "jobs" || pathParts[3] != "kubeconfig" {
+		log.Printf("Invalid path for kubeconfig download: %s", r.URL.Path)
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	jobID := pathParts[2]
+	log.Printf("DownloadKubeconfig called for job: %s", jobID)
+
+	job, exists := h.jobManager.GetJob(jobID)
+	if !exists {
+		log.Printf("Job not found: %s", jobID)
+		http.Error(w, "Job not found", http.StatusNotFound)
+		return
+	}
+
+	job.mu.RLock()
+	kubeconfig := job.Kubeconfig
+	status := job.Status
+	job.mu.RUnlock()
+
+	if status != JobStatusCompleted {
+		http.Error(w, "Job not completed", http.StatusBadRequest)
+		return
+	}
+
+	if kubeconfig == "" {
+		http.Error(w, "Kubeconfig not available", http.StatusNotFound)
+		return
+	}
+
+	// Set headers for file download
+	w.Header().Set("Content-Type", "application/x-yaml")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=kubeconfig-%s.yaml", jobID))
+	w.Header().Set("Content-Length", strconv.Itoa(len(kubeconfig)))
+
+	w.Write([]byte(kubeconfig))
 }

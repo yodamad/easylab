@@ -155,6 +155,16 @@ config:
 		return err
 	}
 
+	// Extract kubeconfig from stack outputs
+	pe.jobManager.AppendOutput(jobID, "Extracting kubeconfig...")
+	kubeconfig, err := pe.getStackOutput(jobDir, env, "kubeconfig")
+	if err != nil {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to extract kubeconfig: %v", err))
+	} else if kubeconfig != "" {
+		pe.jobManager.SetKubeconfig(jobID, kubeconfig)
+		pe.jobManager.AppendOutput(jobID, "Kubeconfig extracted successfully")
+	}
+
 	// Success
 	pe.jobManager.UpdateJobStatus(jobID, JobStatusCompleted)
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Deployment completed successfully at %s", time.Now().Format(time.RFC3339)))
@@ -352,4 +362,18 @@ func (pe *PulumiExecutor) streamOutput(jobID string, r io.ReadCloser) {
 		line := scanner.Text()
 		pe.jobManager.AppendOutput(jobID, line)
 	}
+}
+
+// getStackOutput retrieves a specific output from the Pulumi stack
+func (pe *PulumiExecutor) getStackOutput(dir string, env []string, outputName string) (string, error) {
+	cmd := exec.Command("pulumi", "stack", "output", outputName, "--non-interactive")
+	cmd.Dir = dir
+	cmd.Env = env
+
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get stack output %s: %w", outputName, err)
+	}
+
+	return strings.TrimSpace(string(output)), nil
 }

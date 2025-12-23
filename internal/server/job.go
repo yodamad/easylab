@@ -18,14 +18,15 @@ const (
 
 // Job represents a Pulumi execution job
 type Job struct {
-	ID        string     `json:"id"`
-	Status    JobStatus  `json:"status"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
-	Output    []string   `json:"output"`
-	Error     string     `json:"error,omitempty"`
-	Config    *LabConfig `json:"config,omitempty"`
-	mu        sync.RWMutex
+	ID         string     `json:"id"`
+	Status     JobStatus  `json:"status"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+	Output     []string   `json:"output"`
+	Error      string     `json:"error,omitempty"`
+	Config     *LabConfig `json:"config,omitempty"`
+	Kubeconfig string     `json:"kubeconfig,omitempty"`
+	mu         sync.RWMutex
 }
 
 // LabConfig holds all configuration values for a lab
@@ -164,6 +165,24 @@ func (jm *JobManager) SetError(id string, err error) error {
 
 	job.Error = err.Error()
 	job.Status = JobStatusFailed
+	job.UpdatedAt = time.Now()
+	return nil
+}
+
+// SetKubeconfig sets the kubeconfig for a job
+func (jm *JobManager) SetKubeconfig(id string, kubeconfig string) error {
+	jm.mu.RLock()
+	job, exists := jm.jobs[id]
+	jm.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("job %s not found", id)
+	}
+
+	job.mu.Lock()
+	defer job.mu.Unlock()
+
+	job.Kubeconfig = kubeconfig
 	job.UpdatedAt = time.Now()
 	return nil
 }

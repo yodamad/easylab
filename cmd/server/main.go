@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -53,6 +54,11 @@ func main() {
 	mux.HandleFunc("/", authHandler.RequireAuth(handler.ServeUI))
 	mux.HandleFunc("/api/labs", authHandler.RequireAuth(handler.CreateLab))
 	mux.HandleFunc("/api/jobs/", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		// Check if this is a kubeconfig download request
+		if strings.HasSuffix(r.URL.Path, "/kubeconfig") {
+			handler.DownloadKubeconfig(w, r)
+			return
+		}
 		if r.URL.Query().Get("format") == "json" {
 			handler.GetJobStatusJSON(w, r)
 		} else {

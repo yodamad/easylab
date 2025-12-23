@@ -417,6 +417,31 @@ main {
     box-shadow: var(--shadow-lg);
 }
 
+.btn-download {
+    background: linear-gradient(135deg, #059669 0%, #047857 100%);
+    color: white;
+    text-decoration: none;
+    margin-left: 1rem;
+    padding: 0.75rem 1.5rem;
+    border-radius: var(--radius);
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: all 0.2s ease;
+    box-shadow: var(--shadow);
+}
+
+.btn-download:hover {
+    background: linear-gradient(135deg, #047857 0%, #065f46 100%);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+}
+
+.btn-download .btn-icon {
+    font-size: 1.1rem;
+}
+
 /* ============================================
    HTMX INDICATORS
    ============================================ */
