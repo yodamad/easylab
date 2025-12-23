@@ -1,0 +1,6 @@
+name: lab-as-code
+runtime: go
+description: OVHcloud Gateway and Managed Kubernetes infrastructure
+
+config:
+  ovh:endpoint: ovh-eu
