@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -161,8 +162,12 @@ config:
 	if err != nil {
 		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to extract kubeconfig: %v", err))
 	} else if kubeconfig != "" {
+		// Validate that kubeconfig looks like valid YAML (should start with "apiVersion" or contain "kind:")
+		if !strings.Contains(kubeconfig, "apiVersion") && !strings.Contains(kubeconfig, "kind:") {
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: kubeconfig may be invalid (length: %d chars)", len(kubeconfig)))
+		}
 		pe.jobManager.SetKubeconfig(jobID, kubeconfig)
-		pe.jobManager.AppendOutput(jobID, "Kubeconfig extracted successfully")
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Kubeconfig extracted successfully (length: %d chars)", len(kubeconfig)))
 	}
 
 	// Extract Coder configuration from stack outputs
@@ -250,20 +255,26 @@ type configCommand struct {
 }
 
 func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
+	// Prefix resource names with stack name
+	prefixedGatewayName := fmt.Sprintf("%s-%s", config.StackName, config.NetworkGatewayName)
+	prefixedPrivateNetworkName := fmt.Sprintf("%s-%s", config.StackName, config.NetworkPrivateNetworkName)
+	prefixedK8sClusterName := fmt.Sprintf("%s-%s", config.StackName, config.K8sClusterName)
+	prefixedNodePoolName := fmt.Sprintf("%s-%s", config.StackName, config.NodePoolName)
+
 	commands := []configCommand{
-		{"network:gatewayName", config.NetworkGatewayName, false},
+		{"network:gatewayName", prefixedGatewayName, false},
 		{"network:gatewayModel", config.NetworkGatewayModel, false},
-		{"network:privateNetworkName", config.NetworkPrivateNetworkName, false},
+		{"network:privateNetworkName", prefixedPrivateNetworkName, false},
 		{"network:region", config.NetworkRegion, false},
 		{"network:networkMask", config.NetworkMask, false},
 		{"network:networkStartIp", config.NetworkStartIP, false},
 		{"network:networkEndIp", config.NetworkEndIP, false},
-		{"nodepool:name", config.NodePoolName, false},
+		{"nodepool:name", prefixedNodePoolName, false},
 		{"nodepool:flavor", config.NodePoolFlavor, false},
 		{"nodepool:desiredNodeCount", fmt.Sprintf("%d", config.NodePoolDesiredNodeCount), false},
 		{"nodepool:minNodeCount", fmt.Sprintf("%d", config.NodePoolMinNodeCount), false},
 		{"nodepool:maxNodeCount", fmt.Sprintf("%d", config.NodePoolMaxNodeCount), false},
-		{"k8s:clusterName", config.K8sClusterName, false},
+		{"k8s:clusterName", prefixedK8sClusterName, false},
 		{"coder:adminEmail", config.CoderAdminEmail, false},
 		{"coder:adminPassword", config.CoderAdminPassword, true}, // secret
 		{"coder:version", config.CoderVersion, false},
@@ -281,11 +292,17 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 }
 
 func (pe *PulumiExecutor) generateStackConfig(config *LabConfig) string {
+	// Prefix resource names with stack name
+	prefixedGatewayName := fmt.Sprintf("%s-%s", config.StackName, config.NetworkGatewayName)
+	prefixedPrivateNetworkName := fmt.Sprintf("%s-%s", config.StackName, config.NetworkPrivateNetworkName)
+	prefixedK8sClusterName := fmt.Sprintf("%s-%s", config.StackName, config.K8sClusterName)
+	prefixedNodePoolName := fmt.Sprintf("%s-%s", config.StackName, config.NodePoolName)
+
 	var sb strings.Builder
 	sb.WriteString("config:\n")
-	sb.WriteString(fmt.Sprintf("  network:gatewayName: %q\n", config.NetworkGatewayName))
+	sb.WriteString(fmt.Sprintf("  network:gatewayName: %q\n", prefixedGatewayName))
 	sb.WriteString(fmt.Sprintf("  network:gatewayModel: %q\n", config.NetworkGatewayModel))
-	sb.WriteString(fmt.Sprintf("  network:privateNetworkName: %q\n", config.NetworkPrivateNetworkName))
+	sb.WriteString(fmt.Sprintf("  network:privateNetworkName: %q\n", prefixedPrivateNetworkName))
 	sb.WriteString(fmt.Sprintf("  network:region: %q\n", config.NetworkRegion))
 	sb.WriteString(fmt.Sprintf("  network:networkMask: %q\n", config.NetworkMask))
 	sb.WriteString(fmt.Sprintf("  network:networkStartIp: %q\n", config.NetworkStartIP))
@@ -293,12 +310,12 @@ func (pe *PulumiExecutor) generateStackConfig(config *LabConfig) string {
 	if config.NetworkID != "" {
 		sb.WriteString(fmt.Sprintf("  network:networkId: %q\n", config.NetworkID))
 	}
-	sb.WriteString(fmt.Sprintf("  nodepool:name: %q\n", config.NodePoolName))
+	sb.WriteString(fmt.Sprintf("  nodepool:name: %q\n", prefixedNodePoolName))
 	sb.WriteString(fmt.Sprintf("  nodepool:flavor: %q\n", config.NodePoolFlavor))
 	sb.WriteString(fmt.Sprintf("  nodepool:desiredNodeCount: %d\n", config.NodePoolDesiredNodeCount))
 	sb.WriteString(fmt.Sprintf("  nodepool:minNodeCount: %d\n", config.NodePoolMinNodeCount))
 	sb.WriteString(fmt.Sprintf("  nodepool:maxNodeCount: %d\n", config.NodePoolMaxNodeCount))
-	sb.WriteString(fmt.Sprintf("  k8s:clusterName: %q\n", config.K8sClusterName))
+	sb.WriteString(fmt.Sprintf("  k8s:clusterName: %q\n", prefixedK8sClusterName))
 	sb.WriteString(fmt.Sprintf("  coder:adminEmail: %q\n", config.CoderAdminEmail))
 	sb.WriteString(fmt.Sprintf("  coder:adminPassword: %q\n", config.CoderAdminPassword))
 	sb.WriteString(fmt.Sprintf("  coder:version: %q\n", config.CoderVersion))
@@ -383,14 +400,61 @@ func (pe *PulumiExecutor) streamOutput(jobID string, r io.ReadCloser) {
 
 // getStackOutput retrieves a specific output from the Pulumi stack
 func (pe *PulumiExecutor) getStackOutput(dir string, env []string, outputName string) (string, error) {
-	cmd := exec.Command("pulumi", "stack", "output", outputName, "--non-interactive")
+	// Use --json flag to get structured output, which handles multiline strings better
+	cmd := exec.Command("pulumi", "stack", "output", "--json", "--show-secrets", "--non-interactive")
 	cmd.Dir = dir
 	cmd.Env = env
 
 	output, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("failed to get stack output %s: %w", outputName, err)
+		// Fallback to single output if JSON fails
+		cmd = exec.Command("pulumi", "stack", "output", outputName, "--non-interactive", "--show-secrets")
+		cmd.Dir = dir
+		cmd.Env = env
+		output, err = cmd.Output()
+		if err != nil {
+			return "", fmt.Errorf("failed to get stack output %s: %w", outputName, err)
+		}
+		result := strings.TrimSpace(string(output))
+		// Try JSON decode if it looks like JSON string
+		if len(result) > 0 && result[0] == '"' && result[len(result)-1] == '"' {
+			var decoded string
+			if err := json.Unmarshal([]byte(result), &decoded); err == nil {
+				result = decoded
+			}
+		}
+		return result, nil
 	}
 
-	return strings.TrimSpace(string(output)), nil
+	// Parse JSON output
+	var outputs map[string]interface{}
+	if err := json.Unmarshal(output, &outputs); err != nil {
+		return "", fmt.Errorf("failed to parse stack outputs JSON: %w", err)
+	}
+
+	value, ok := outputs[outputName]
+	if !ok {
+		return "", fmt.Errorf("output %s not found", outputName)
+	}
+
+	// Convert value to string, handling different types
+	var result string
+	switch v := value.(type) {
+	case string:
+		result = v
+	case []byte:
+		result = string(v)
+	default:
+		// For other types, marshal to JSON and then unmarshal as string
+		jsonBytes, err := json.Marshal(v)
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal output %s: %w", outputName, err)
+		}
+		// Unmarshal as string to handle JSON-encoded strings
+		if err := json.Unmarshal(jsonBytes, &result); err != nil {
+			result = string(jsonBytes)
+		}
+	}
+
+	return result, nil
 }
