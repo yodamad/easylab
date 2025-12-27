@@ -178,7 +178,7 @@ config:
 	} else if coderURL != "" {
 		coderSessionToken, _ := pe.getStackOutput(jobDir, env, "coderSessionToken")
 		coderOrganizationID, _ := pe.getStackOutput(jobDir, env, "coderOrganizationID")
-		
+
 		// Store Coder config in job
 		if err := pe.jobManager.SetCoderConfig(jobID, coderURL, config.CoderAdminEmail, config.CoderAdminPassword, coderSessionToken, coderOrganizationID); err != nil {
 			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to store Coder config: %v", err))
@@ -190,6 +190,12 @@ config:
 	// Success
 	pe.jobManager.UpdateJobStatus(jobID, JobStatusCompleted)
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Deployment completed successfully at %s", time.Now().Format(time.RFC3339)))
+
+	// Persist completed job to disk
+	if err := pe.jobManager.SaveJob(jobID); err != nil {
+		log.Printf("Warning: failed to persist job %s: %v", jobID, err)
+		// Don't fail the job if persistence fails
+	}
 
 	return nil
 }

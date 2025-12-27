@@ -1,7 +1,11 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -32,7 +36,7 @@ type Job struct {
 	CoderAdminPassword   string `json:"coder_admin_password,omitempty"`
 	CoderSessionToken    string `json:"coder_session_token,omitempty"`
 	CoderOrganizationID  string `json:"coder_organization_id,omitempty"`
-	mu                   sync.RWMutex
+	mu                   sync.RWMutex `json:"-"`
 }
 
 // LabConfig holds all configuration values for a lab
@@ -81,15 +85,26 @@ type LabConfig struct {
 
 // JobManager manages Pulumi execution jobs
 type JobManager struct {
-	jobs map[string]*Job
-	mu   sync.RWMutex
+	jobs    map[string]*Job
+	dataDir string
+	mu      sync.RWMutex
 }
 
-// NewJobManager creates a new job manager
-func NewJobManager() *JobManager {
-	return &JobManager{
-		jobs: make(map[string]*Job),
+// NewJobManager creates a new job manager with optional data directory for persistence
+func NewJobManager(dataDir string) *JobManager {
+	jm := &JobManager{
+		jobs:    make(map[string]*Job),
+		dataDir: dataDir,
 	}
+	
+	// Load persisted jobs if data directory is provided
+	if dataDir != "" {
+		if err := jm.LoadJobs(); err != nil {
+			log.Printf("Warning: failed to load persisted jobs: %v", err)
+		}
+	}
+	
+	return jm
 }
 
 // CreateJob creates a new job and returns its ID
@@ -212,5 +227,118 @@ func (jm *JobManager) SetCoderConfig(id string, coderURL, coderAdminEmail, coder
 	job.CoderSessionToken = coderSessionToken
 	job.CoderOrganizationID = coderOrganizationID
 	job.UpdatedAt = time.Now()
+	return nil
+}
+
+// SaveJob persists a completed job to disk
+func (jm *JobManager) SaveJob(id string) error {
+	if jm.dataDir == "" {
+		return nil // Persistence disabled
+	}
+
+	jm.mu.RLock()
+	job, exists := jm.jobs[id]
+	jm.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("job %s not found", id)
+	}
+
+	job.mu.RLock()
+	status := job.Status
+	job.mu.RUnlock()
+
+	// Only persist completed jobs
+	if status != JobStatusCompleted {
+		return nil
+	}
+
+	// Create jobs directory if it doesn't exist
+	jobsDir := filepath.Join(jm.dataDir, "jobs")
+	if err := os.MkdirAll(jobsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create jobs directory: %w", err)
+	}
+
+	// Marshal job to JSON
+	job.mu.RLock()
+	jobData, err := json.MarshalIndent(job, "", "  ")
+	job.mu.RUnlock()
+	if err != nil {
+		return fmt.Errorf("failed to marshal job: %w", err)
+	}
+
+	// Write atomically: write to temp file, then rename
+	jobFile := filepath.Join(jobsDir, fmt.Sprintf("%s.json", id))
+	tmpFile := jobFile + ".tmp"
+	
+	if err := os.WriteFile(tmpFile, jobData, 0644); err != nil {
+		return fmt.Errorf("failed to write job file: %w", err)
+	}
+	
+	if err := os.Rename(tmpFile, jobFile); err != nil {
+		os.Remove(tmpFile) // Clean up temp file on error
+		return fmt.Errorf("failed to rename temp file: %w", err)
+	}
+
+	return nil
+}
+
+// LoadJobs loads all persisted completed jobs from disk
+func (jm *JobManager) LoadJobs() error {
+	if jm.dataDir == "" {
+		return nil // Persistence disabled
+	}
+
+	jobsDir := filepath.Join(jm.dataDir, "jobs")
+	
+	// Check if jobs directory exists
+	if _, err := os.Stat(jobsDir); os.IsNotExist(err) {
+		return nil // No jobs directory, nothing to load
+	}
+
+	// Read all JSON files in jobs directory
+	entries, err := os.ReadDir(jobsDir)
+	if err != nil {
+		return fmt.Errorf("failed to read jobs directory: %w", err)
+	}
+
+	loadedCount := 0
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+
+		jobFile := filepath.Join(jobsDir, entry.Name())
+		data, err := os.ReadFile(jobFile)
+		if err != nil {
+			log.Printf("Warning: failed to read job file %s: %v", jobFile, err)
+			continue
+		}
+
+		var job Job
+		if err := json.Unmarshal(data, &job); err != nil {
+			log.Printf("Warning: failed to unmarshal job file %s: %v", jobFile, err)
+			continue
+		}
+
+		// Only load completed jobs
+		if job.Status != JobStatusCompleted {
+			continue
+		}
+
+		// Initialize mutex for loaded job (mutex is not serialized)
+		// The mutex will be zero-initialized which is correct for sync.RWMutex
+
+		// Add to jobs map
+		jm.mu.Lock()
+		jm.jobs[job.ID] = &job
+		jm.mu.Unlock()
+		loadedCount++
+	}
+
+	if loadedCount > 0 {
+		log.Printf("Loaded %d persisted job(s) from %s", loadedCount, jobsDir)
+	}
+
 	return nil
 }

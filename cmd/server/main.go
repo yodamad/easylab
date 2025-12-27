@@ -18,6 +18,7 @@ func main() {
 	var (
 		port    = flag.String("port", "8080", "Port to listen on")
 		workDir = flag.String("work-dir", "/tmp/lab-as-code-jobs", "Directory for job workspaces")
+		dataDir = flag.String("data-dir", "/tmp/lab-as-code-data", "Directory for persisting job data")
 	)
 	flag.Parse()
 
@@ -26,10 +27,16 @@ func main() {
 		log.Fatalf("Failed to create work directory: %v", err)
 	}
 
+	// Create data directory if it doesn't exist
+	if err := os.MkdirAll(*dataDir, 0755); err != nil {
+		log.Fatalf("Failed to create data directory: %v", err)
+	}
+
 	// Initialize components
-	jobManager := server.NewJobManager()
+	jobManager := server.NewJobManager(*dataDir)
 	pulumiExec := server.NewPulumiExecutor(jobManager, *workDir)
-	handler := server.NewHandler(jobManager, pulumiExec)
+	credentialsManager := server.NewCredentialsManager()
+	handler := server.NewHandler(jobManager, pulumiExec, credentialsManager)
 	authHandler := server.NewAuthHandler()
 
 	// Setup routes
@@ -65,6 +72,16 @@ func main() {
 
 	// Protected routes (auth required)
 	mux.HandleFunc("/", authHandler.RequireAuth(handler.ServeUI))
+	mux.HandleFunc("/ovh-credentials", authHandler.RequireAuth(handler.ServeOVHCredentials))
+	mux.HandleFunc("/api/ovh-credentials", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			handler.SetOVHCredentials(w, r)
+		} else if r.Method == http.MethodGet {
+			handler.GetOVHCredentials(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	}))
 	mux.HandleFunc("/api/labs", authHandler.RequireAuth(handler.CreateLab))
 	mux.HandleFunc("/api/jobs/", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
 		// Check if this is a kubeconfig download request
@@ -93,6 +110,7 @@ func main() {
 	go func() {
 		log.Printf("Starting server on http://localhost%s", addr)
 		log.Printf("Work directory: %s", *workDir)
+		log.Printf("Data directory: %s", *dataDir)
 		log.Printf("Set %s environment variable to configure admin password", server.EnvAdminPassword)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server failed: %v", err)

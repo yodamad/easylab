@@ -16,16 +16,18 @@ import (
 
 // Handler handles HTTP requests
 type Handler struct {
-	jobManager    *JobManager
-	pulumiExec    *PulumiExecutor
-	templateCache *template.Template
+	jobManager         *JobManager
+	pulumiExec         *PulumiExecutor
+	templateCache      *template.Template
+	credentialsManager *CredentialsManager
 }
 
 // NewHandler creates a new HTTP handler
-func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor) *Handler {
+func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsManager *CredentialsManager) *Handler {
 	return &Handler{
-		jobManager: jobManager,
-		pulumiExec: pulumiExec,
+		jobManager:         jobManager,
+		pulumiExec:         pulumiExec,
+		credentialsManager: credentialsManager,
 	}
 }
 
@@ -44,12 +46,20 @@ func (h *Handler) ServeUI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if credentials are configured
+	hasCredentials := h.credentialsManager.HasCredentials()
+
 	// Prevent caching
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Expires", "0")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.Execute(w, nil); err != nil {
+
+	data := map[string]interface{}{
+		"HasCredentials": hasCredentials,
+	}
+
+	if err := tmpl.Execute(w, data); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to execute template: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -83,7 +93,20 @@ func (h *Handler) CreateLab(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	log.Printf("Form parsed successfully")
-	log.Printf("OVH Application Key present: %v", r.FormValue("ovh_application_key") != "")
+
+	// Get OVH credentials from in-memory storage
+	ovhCreds, err := h.credentialsManager.GetCredentials()
+	if err != nil {
+		log.Printf("OVH credentials not configured: %v", err)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `
+			<div class="error-message">
+				<h3>OVH Credentials Not Configured</h3>
+				<p>Please configure your OVH credentials first before creating a lab.</p>
+				<a href="/ovh-credentials" class="btn btn-primary">Configure OVH Credentials</a>
+			</div>`)
+		return
+	}
 
 	// Parse integer fields
 	desiredNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_desired_node_count"))
@@ -99,10 +122,12 @@ func (h *Handler) CreateLab(w http.ResponseWriter, r *http.Request) {
 	config := &LabConfig{
 		StackName: stackName,
 
-		OvhApplicationKey:    r.FormValue("ovh_application_key"),
-		OvhApplicationSecret: r.FormValue("ovh_application_secret"),
-		OvhConsumerKey:       r.FormValue("ovh_consumer_key"),
-		OvhServiceName:       r.FormValue("ovh_service_name"),
+		// Use credentials from in-memory storage
+		OvhApplicationKey:    ovhCreds.ApplicationKey,
+		OvhApplicationSecret: ovhCreds.ApplicationSecret,
+		OvhConsumerKey:       ovhCreds.ConsumerKey,
+		OvhServiceName:       ovhCreds.ServiceName,
+		OvhEndpoint:          ovhCreds.Endpoint,
 
 		NetworkGatewayName:        r.FormValue("network_gateway_name"),
 		NetworkGatewayModel:       r.FormValue("network_gateway_model"),
@@ -128,15 +153,6 @@ func (h *Handler) CreateLab(w http.ResponseWriter, r *http.Request) {
 		CoderDbPassword:    r.FormValue("coder_db_password"),
 		CoderDbName:        r.FormValue("coder_db_name"),
 		CoderTemplateName:  r.FormValue("coder_template_name"),
-
-		OvhEndpoint: r.FormValue("ovh_endpoint"),
-	}
-
-	// Validate required fields
-	if config.OvhApplicationKey == "" || config.OvhApplicationSecret == "" ||
-		config.OvhConsumerKey == "" || config.OvhServiceName == "" {
-		http.Error(w, "Missing required OVH credentials", http.StatusBadRequest)
-		return
 	}
 
 	// Create job
@@ -386,12 +402,12 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	if email == "" {
 		email = r.FormValue("email")
 	}
-	
+
 	labID := r.PostFormValue("lab_id")
 	if labID == "" {
 		labID = r.FormValue("lab_id")
 	}
-	
+
 	// Debug logging - show all form values
 	log.Printf("RequestWorkspace - Content-Type: %s", contentType)
 	log.Printf("RequestWorkspace - PostForm: %v", r.PostForm)
@@ -527,4 +543,189 @@ func getFormKeys(r *http.Request) []string {
 		result = append(result, k)
 	}
 	return result
+}
+
+// ServeOVHCredentials serves the OVH credentials configuration page
+func (h *Handler) ServeOVHCredentials(w http.ResponseWriter, r *http.Request) {
+	tmplPath := filepath.Join("web", "ovh-credentials.html")
+	tmpl, err := template.ParseFiles(tmplPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load template: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Get current credentials status (without exposing secrets)
+	var currentCreds map[string]interface{}
+	creds, err := h.credentialsManager.GetCredentials()
+	if err == nil {
+		currentCreds = map[string]interface{}{
+			"configured":   true,
+			"service_name": creds.ServiceName,
+			"endpoint":     creds.Endpoint,
+		}
+	} else {
+		currentCreds = map[string]interface{}{
+			"configured": false,
+		}
+	}
+
+	// Prevent caching
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	data := map[string]interface{}{
+		"CurrentCreds": currentCreds,
+	}
+
+	if err := tmpl.Execute(w, data); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to execute template: %v", err), http.StatusInternalServerError)
+	}
+}
+
+// SetOVHCredentials handles setting OVH credentials
+func (h *Handler) SetOVHCredentials(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		fmt.Fprintf(w, `
+			<div class="error-message">
+				<h3>Method Not Allowed</h3>
+				<p>Only POST requests are accepted.</p>
+			</div>`)
+		return
+	}
+
+	// Parse form data - handle both multipart and urlencoded
+	contentType := r.Header.Get("Content-Type")
+	log.Printf("SetOVHCredentials - Content-Type: %s", contentType)
+
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		if err := r.ParseMultipartForm(10 << 20); err != nil { // 10MB max
+			log.Printf("Failed to parse multipart form: %v", err)
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintf(w, `
+				<div class="error-message">
+					<h3>Failed to Parse Form</h3>
+					<p>%s</p>
+				</div>`, template.HTMLEscapeString(err.Error()))
+			return
+		}
+	} else {
+		// Handle application/x-www-form-urlencoded (default for HTMX)
+		if err := r.ParseForm(); err != nil {
+			log.Printf("Failed to parse form: %v", err)
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintf(w, `
+				<div class="error-message">
+					<h3>Failed to Parse Form</h3>
+					<p>%s</p>
+				</div>`, template.HTMLEscapeString(err.Error()))
+			return
+		}
+	}
+
+	// Debug: log received form values (without secrets)
+	log.Printf("SetOVHCredentials - Form keys: %v", getFormKeys(r))
+
+	// Try PostFormValue first (POST-only), then FormValue (includes query params)
+	applicationKey := r.PostFormValue("ovh_application_key")
+	if applicationKey == "" {
+		applicationKey = r.FormValue("ovh_application_key")
+	}
+
+	applicationSecret := r.PostFormValue("ovh_application_secret")
+	if applicationSecret == "" {
+		applicationSecret = r.FormValue("ovh_application_secret")
+	}
+
+	consumerKey := r.PostFormValue("ovh_consumer_key")
+	if consumerKey == "" {
+		consumerKey = r.FormValue("ovh_consumer_key")
+	}
+
+	serviceName := r.PostFormValue("ovh_service_name")
+	if serviceName == "" {
+		serviceName = r.FormValue("ovh_service_name")
+	}
+
+	endpoint := r.PostFormValue("ovh_endpoint")
+	if endpoint == "" {
+		endpoint = r.FormValue("ovh_endpoint")
+	}
+
+	log.Printf("SetOVHCredentials - Service Name present: %v, value: %s", serviceName != "", serviceName)
+	log.Printf("SetOVHCredentials - Endpoint present: %v, value: %s", endpoint != "", endpoint)
+	log.Printf("SetOVHCredentials - ApplicationKey present: %v", applicationKey != "")
+	log.Printf("SetOVHCredentials - ApplicationSecret present: %v", applicationSecret != "")
+	log.Printf("SetOVHCredentials - ConsumerKey present: %v", consumerKey != "")
+
+	creds := &OVHCredentials{
+		ApplicationKey:    applicationKey,
+		ApplicationSecret: applicationSecret,
+		ConsumerKey:       consumerKey,
+		ServiceName:       serviceName,
+		Endpoint:          endpoint,
+	}
+
+	// Debug: log what we're trying to save (without secrets)
+	log.Printf("SetOVHCredentials - Attempting to save credentials for service: %s, endpoint: %s", creds.ServiceName, creds.Endpoint)
+	log.Printf("SetOVHCredentials - ApplicationKey empty: %v, ApplicationSecret empty: %v, ConsumerKey empty: %v",
+		creds.ApplicationKey == "", creds.ApplicationSecret == "", creds.ConsumerKey == "")
+
+	if err := h.credentialsManager.SetCredentials(creds); err != nil {
+		log.Printf("Failed to set credentials: %v", err)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `
+			<div class="error-message">
+				<h3>Failed to Save Credentials</h3>
+				<p>%s</p>
+				<p><small>Please ensure all fields are filled correctly.</small></p>
+			</div>`, template.HTMLEscapeString(err.Error()))
+		return
+	}
+
+	// Verify credentials were saved
+	verifyCreds, verifyErr := h.credentialsManager.GetCredentials()
+	if verifyErr != nil {
+		log.Printf("Warning: Credentials saved but verification failed: %v", verifyErr)
+	} else {
+		log.Printf("Credentials verified - Service: %s, Endpoint: %s", verifyCreds.ServiceName, verifyCreds.Endpoint)
+	}
+
+	log.Printf("OVH credentials saved successfully for service: %s", creds.ServiceName)
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `
+		<div class="success-message">
+			<p>✅ Credentials saved successfully</p>
+		</div>`)
+}
+
+// GetOVHCredentials handles getting OVH credentials status
+func (h *Handler) GetOVHCredentials(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	creds, err := h.credentialsManager.GetCredentials()
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]bool{"configured": false})
+		return
+	}
+
+	// Return limited info (not the actual secrets)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"configured":          true,
+		"service_name":        creds.ServiceName,
+		"endpoint":            creds.Endpoint,
+		"has_application_key": creds.ApplicationKey != "",
+		"has_consumer_key":    creds.ConsumerKey != "",
+	})
 }

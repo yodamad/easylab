@@ -70,6 +70,13 @@ header h1 {
     font-size: 0.875rem;
 }
 
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.header-btn,
 .logout-btn {
     display: flex;
     align-items: center;
@@ -85,21 +92,29 @@ header h1 {
     transition: all 0.2s;
 }
 
+.header-btn:hover,
 .logout-btn:hover {
     background: rgba(255, 255, 255, 0.25);
     border-color: rgba(255, 255, 255, 0.5);
 }
 
-.logout-icon {
+.logout-icon,
+.header-btn .btn-icon {
     font-size: 1rem;
 }
 
+.header-btn .btn-text {
+    white-space: nowrap;
+}
+
 @media (max-width: 480px) {
-    .logout-text {
+    .logout-text,
+    .header-btn .btn-text {
         display: none;
     }
     
-    .logout-btn {
+    .logout-btn,
+    .header-btn {
         padding: 0.5rem;
     }
 }
@@ -654,6 +669,67 @@ main {
     .form-actions {
         flex-direction: column;
     }
+}
+
+/* ============================================
+   CREDENTIALS PAGE
+   ============================================ */
+
+.info-box {
+    padding: 1.5rem;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: var(--radius);
+    margin-bottom: 1.5rem;
+}
+
+.info-box h3 {
+    margin-top: 0;
+    margin-bottom: 0.75rem;
+    color: #1e40af;
+    font-size: 1.125rem;
+}
+
+.info-box p {
+    margin-bottom: 0.75rem;
+    color: #1e3a8a;
+}
+
+.info-box p:last-child {
+    margin-bottom: 0;
+}
+
+.credentials-container {
+    padding: 2rem;
+}
+
+.form-section {
+    margin-bottom: 2rem;
+}
+
+.form-section h2 {
+    margin-bottom: 1.5rem;
+    color: var(--text);
+    font-size: 1.5rem;
+}
+
+.status-container {
+    margin-top: 2rem;
+    padding: 1.5rem;
+    background: var(--surface);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+}
+
+.status-container h3 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+}
+
+.header-actions {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
 }
 
 /* ============================================

@@ -15,10 +15,16 @@
                     <h1>Lab as Code</h1>
                     <p class="subtitle">Create a new lab environment</p>
                 </div>
-                <a href="/logout" class="logout-btn" title="Logout">
-                    <span class="logout-icon">🚪</span>
-                    <span class="logout-text">Logout</span>
-                </a>
+                <div class="header-actions">
+                    <a href="/ovh-credentials" class="header-btn" title="OVH Credentials">
+                        <span class="btn-icon">🔐</span>
+                        <span class="btn-text">Credentials</span>
+                    </a>
+                    <a href="/logout" class="logout-btn" title="Logout">
+                        <span class="logout-icon">🚪</span>
+                        <span class="logout-text">Logout</span>
+                    </a>
+                </div>
             </div>
         </header>
 
@@ -31,24 +37,29 @@
                 </div>
                 <div class="progress-step" data-step="2">
                     <span class="step-number">2</span>
-                    <span class="step-label">OVH</span>
+                    <span class="step-label">Network</span>
                 </div>
                 <div class="progress-step" data-step="3">
                     <span class="step-number">3</span>
-                    <span class="step-label">Network</span>
+                    <span class="step-label">Kubernetes</span>
                 </div>
                 <div class="progress-step" data-step="4">
                     <span class="step-number">4</span>
-                    <span class="step-label">Kubernetes</span>
+                    <span class="step-label">Node Pool</span>
                 </div>
                 <div class="progress-step" data-step="5">
                     <span class="step-number">5</span>
-                    <span class="step-label">Node Pool</span>
-                </div>
-                <div class="progress-step" data-step="6">
-                    <span class="step-number">6</span>
                     <span class="step-label">Coder</span>
                 </div>
+            </div>
+
+            <!-- OVH Credentials Notice -->
+            <div id="ovh-credentials-notice" class="info-box" style="margin-bottom: 2rem; display: none;">
+                <h3>🔐 OVH Credentials Required</h3>
+                <p>Before creating a lab, please configure your OVHcloud API credentials. These credentials will be stored in memory and reused for all lab deployments.</p>
+                <a href="/ovh-credentials" class="btn btn-primary">
+                    <span class="btn-icon">⚙️</span> Configure OVH Credentials
+                </a>
             </div>
 
             <form id="lab-form" action="/api/labs" method="POST" hx-post="/api/labs" hx-target="#form-response" hx-swap="innerHTML" hx-indicator="#loading">
@@ -73,45 +84,7 @@
                     </div>
                 </section>
 
-                <!-- Step 2: OVH Credentials -->
-                <section class="wizard-step" data-step="2">
-                    <div class="step-header">
-                        <h2>OVH Credentials</h2>
-                        <p class="section-description">Enter your OVHcloud API credentials</p>
-                    </div>
-                    <div class="step-content">
-                        <div class="form-group">
-                            <label for="ovh_application_key">Application Key *</label>
-                            <input type="password" id="ovh_application_key" name="ovh_application_key" required>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="ovh_application_secret">Application Secret *</label>
-                            <input type="password" id="ovh_application_secret" name="ovh_application_secret" required>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="ovh_consumer_key">Consumer Key *</label>
-                            <input type="password" id="ovh_consumer_key" name="ovh_consumer_key" required>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="ovh_service_name">Service Name (Project ID) *</label>
-                            <input type="password" id="ovh_service_name" name="ovh_service_name" required>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="ovh_endpoint">OVH Endpoint</label>
-                            <select id="ovh_endpoint" name="ovh_endpoint" required>
-                                <option value="ovh-eu" selected>ovh-eu</option>
-                                <option value="ovh-us">ovh-us</option>
-                                <option value="ovh-ca">ovh-ca</option>
-                            </select>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Step 3: Network Configuration -->
+                <!-- Step 2: Network Configuration -->
                 <section class="wizard-step" data-step="3">
                     <div class="step-header">
                         <h2>Network Configuration</h2>
@@ -175,8 +148,8 @@
                     </div>
                 </section>
 
-                <!-- Step 4: Kubernetes Configuration -->
-                <section class="wizard-step" data-step="4">
+                <!-- Step 3: Kubernetes Configuration -->
+                <section class="wizard-step" data-step="3">
                     <div class="step-header">
                         <h2>Kubernetes Configuration</h2>
                         <p class="section-description">Configure your managed Kubernetes cluster</p>
@@ -189,8 +162,8 @@
                     </div>
                 </section>
 
-                <!-- Step 5: Node Pool Configuration -->
-                <section class="wizard-step" data-step="5">
+                <!-- Step 4: Node Pool Configuration -->
+                <section class="wizard-step" data-step="4">
                     <div class="step-header">
                         <h2>Node Pool Configuration</h2>
                         <p class="section-description">Configure Kubernetes node pool settings</p>
@@ -231,8 +204,8 @@
                     </div>
                 </section>
 
-                <!-- Step 6: Coder Configuration -->
-                <section class="wizard-step" data-step="6">
+                <!-- Step 5: Coder Configuration -->
+                <section class="wizard-step" data-step="5">
                     <div class="step-header">
                         <h2>Coder Configuration</h2>
                         <p class="section-description">Configure the Coder IDE platform</p>
@@ -286,7 +259,7 @@
                         <span class="btn-icon">←</span> Previous
                     </button>
                     <div class="step-indicator">
-                        Step <span id="current-step-num">1</span> of <span id="total-steps">6</span>
+                        Step <span id="current-step-num">1</span> of <span id="total-steps">5</span>
                     </div>
                     <button type="button" id="btn-next" class="btn btn-primary">
                         Next <span class="btn-icon">→</span>
@@ -306,7 +279,7 @@
         // Wizard functionality
         const wizard = {
             currentStep: 1,
-            totalSteps: 6,
+            totalSteps: 5,
             
             init() {
                 this.bindEvents();
@@ -514,9 +487,37 @@
             });
         }
         
+        // Check credentials status and show/hide disclaimer
+        function checkCredentialsStatus() {
+            fetch('/api/ovh-credentials')
+                .then(response => {
+                    if (response.ok) {
+                        return response.json();
+                    } else if (response.status === 404) {
+                        return { configured: false };
+                    }
+                    return { configured: false };
+                })
+                .then(data => {
+                    const notice = document.getElementById('ovh-credentials-notice');
+                    if (notice) {
+                        notice.style.display = data.configured ? 'none' : 'block';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error checking credentials:', error);
+                    // Show notice on error to be safe
+                    const notice = document.getElementById('ovh-credentials-notice');
+                    if (notice) {
+                        notice.style.display = 'block';
+                    }
+                });
+        }
+
         // Initialize wizard
         document.addEventListener('DOMContentLoaded', function() {
             wizard.init();
+            checkCredentialsStatus();
             
             const form = document.getElementById('lab-form');
             
@@ -680,3 +681,4 @@
     </script>
 </body>
 </html>
+
