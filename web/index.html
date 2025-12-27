@@ -85,7 +85,7 @@
                 </section>
 
                 <!-- Step 2: Network Configuration -->
-                <section class="wizard-step" data-step="3">
+                <section class="wizard-step" data-step="2">
                     <div class="step-header">
                         <h2>Network Configuration</h2>
                         <p class="section-description">Configure private network and gateway settings</p>
@@ -111,6 +111,11 @@
                         </div>
 
                         <div class="form-group">
+                            <label for="network_id">Network ID</label>
+                            <input type="text" id="network_id" name="network_id" placeholder="New network ID" required>
+                        </div>
+
+                        <div class="form-group">
                             <label for="network_region">Region *</label>
                             <select id="network_region" name="network_region" required>
                                 <option value="GRA9" selected>GRA9</option>
@@ -126,25 +131,17 @@
                             <label for="network_mask">Network Mask (CIDR) *</label>
                             <input type="text" id="network_mask" name="network_mask" value="10.0.0.0/24" required>
                             <small>e.g., 10.0.0.0/24</small>
-                        </div>
-
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="network_start_ip">Start IP *</label>
-                                <input type="text" id="network_start_ip" name="network_start_ip" value="10.0.0.100" required>
+                            <div id="network-calculated-info" class="calculated-info" style="margin-top: 0.75rem; padding: 0.75rem; background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border);">
+                                <div style="font-size: 0.875rem; color: var(--text-light);">
+                                    <div><strong>Start IP:</strong> <span id="calculated-start-ip">10.0.0.100</span></div>
+                                    <div style="margin-top: 0.5rem;"><strong>End IP:</strong> <span id="calculated-end-ip">10.0.0.254</span></div>
+                                </div>
                             </div>
-
-                            <div class="form-group">
-                                <label for="network_end_ip">End IP *</label>
-                                <input type="text" id="network_end_ip" name="network_end_ip" value="10.0.0.254" required>
-                            </div>
+                            <!-- Hidden fields to submit calculated values -->
+                            <input type="hidden" id="network_start_ip" name="network_start_ip" value="10.0.0.100">
+                            <input type="hidden" id="network_end_ip" name="network_end_ip" value="10.0.0.254">
                         </div>
 
-                        <div class="form-group">
-                            <label for="network_id">Network ID (Optional)</label>
-                            <input type="text" id="network_id" name="network_id" placeholder="Leave empty for new network">
-                            <small>VLAN ID if reusing existing network</small>
-                        </div>
                     </div>
                 </section>
 
@@ -487,6 +484,50 @@
             });
         }
         
+        // Calculate start and end IPs from network mask
+        function calculateNetworkIPs() {
+            const maskInput = document.getElementById('network_mask');
+            const startIpDisplay = document.getElementById('calculated-start-ip');
+            const endIpDisplay = document.getElementById('calculated-end-ip');
+            const startIpHidden = document.getElementById('network_start_ip');
+            const endIpHidden = document.getElementById('network_end_ip');
+            
+            if (!maskInput || !startIpDisplay || !endIpDisplay || !startIpHidden || !endIpHidden) {
+                return;
+            }
+            
+            const maskValue = maskInput.value.trim();
+            
+            // Parse CIDR notation (e.g., "10.0.0.0/24")
+            const cidrMatch = maskValue.match(/^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/);
+            
+            if (!cidrMatch) {
+                // Invalid format, keep default values
+                return;
+            }
+            
+            const networkAddress = cidrMatch[1];
+            const parts = networkAddress.split('.');
+            
+            if (parts.length !== 4) {
+                return;
+            }
+            
+            // Calculate start IP (last octet = 100)
+            const startIP = `${parts[0]}.${parts[1]}.${parts[2]}.100`;
+            
+            // Calculate end IP (last octet = 254)
+            const endIP = `${parts[0]}.${parts[1]}.${parts[2]}.254`;
+            
+            // Update display
+            startIpDisplay.textContent = startIP;
+            endIpDisplay.textContent = endIP;
+            
+            // Update hidden fields for form submission
+            startIpHidden.value = startIP;
+            endIpHidden.value = endIP;
+        }
+
         // Check credentials status and show/hide disclaimer
         function checkCredentialsStatus() {
             fetch('/api/ovh-credentials')
@@ -518,6 +559,17 @@
         document.addEventListener('DOMContentLoaded', function() {
             wizard.init();
             checkCredentialsStatus();
+            
+            // Set up network mask calculation
+            const maskInput = document.getElementById('network_mask');
+            if (maskInput) {
+                // Calculate on page load
+                calculateNetworkIPs();
+                
+                // Calculate on input change
+                maskInput.addEventListener('input', calculateNetworkIPs);
+                maskInput.addEventListener('change', calculateNetworkIPs);
+            }
             
             const form = document.getElementById('lab-form');
             

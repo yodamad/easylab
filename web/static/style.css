@@ -368,6 +368,21 @@ main {
     font-size: 0.8125rem;
 }
 
+.calculated-info {
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    background: var(--surface);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    font-size: 0.875rem;
+    color: var(--text);
+}
+
+.calculated-info strong {
+    color: var(--text);
+    font-weight: 600;
+}
+
 .form-group small.name-preview .preview-value {
     font-family: monospace;
     font-weight: 600;
