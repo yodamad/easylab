@@ -31,7 +31,7 @@ func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsM
 	}
 }
 
-// ServeUI serves the main HTML UI
+// ServeUI serves the main HTML UI (homepage)
 func (h *Handler) ServeUI(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -40,6 +40,28 @@ func (h *Handler) ServeUI(w http.ResponseWriter, r *http.Request) {
 
 	// Read and parse template
 	tmplPath := filepath.Join("web", "index.html")
+	tmpl, err := template.ParseFiles(tmplPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load template: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Prevent caching
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	if err := tmpl.Execute(w, nil); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to execute template: %v", err), http.StatusInternalServerError)
+		return
+	}
+}
+
+// ServeAdminUI serves the admin HTML UI
+func (h *Handler) ServeAdminUI(w http.ResponseWriter, r *http.Request) {
+	// Read and parse template
+	tmplPath := filepath.Join("web", "admin.html")
 	tmpl, err := template.ParseFiles(tmplPath)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load template: %v", err), http.StatusInternalServerError)

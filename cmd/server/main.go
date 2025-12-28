@@ -70,8 +70,11 @@ func main() {
 	mux.HandleFunc("/api/student/labs", authHandler.RequireStudentAuth(handler.ListLabs))
 	mux.HandleFunc("/api/student/workspace/request", authHandler.RequireStudentAuth(handler.RequestWorkspace))
 
+	// Public homepage (no auth required)
+	mux.HandleFunc("/", handler.ServeUI)
+
 	// Protected routes (auth required)
-	mux.HandleFunc("/", authHandler.RequireAuth(handler.ServeUI))
+	mux.HandleFunc("/admin", authHandler.RequireAuth(handler.ServeAdminUI))
 	mux.HandleFunc("/ovh-credentials", authHandler.RequireAuth(handler.ServeOVHCredentials))
 	mux.HandleFunc("/api/ovh-credentials", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {

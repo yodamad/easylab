@@ -132,7 +132,7 @@ func (ah *AuthHandler) ServeLogin(w http.ResponseWriter, r *http.Request) {
 	// Check if already logged in
 	if cookie, err := r.Cookie(SessionCookieName); err == nil {
 		if ah.validateSession(cookie.Value) {
-			http.Redirect(w, r, "/", http.StatusSeeOther)
+			http.Redirect(w, r, "/admin", http.StatusSeeOther)
 			return
 		}
 	}
@@ -196,7 +196,7 @@ func (ah *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 
 	log.Printf("Successful login")
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }
 
 // HandleLogout logs out the user
