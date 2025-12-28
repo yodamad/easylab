@@ -10,7 +10,6 @@ import (
 	"math/big"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 )
@@ -40,6 +39,8 @@ type AuthHandler struct {
 	studentPasswordHash string
 	sessions            map[string]*Session
 	studentSessions     map[string]*Session
+	templates           map[string]*template.Template
+	templatesMu         sync.RWMutex
 	mu                  sync.RWMutex
 }
 
@@ -77,6 +78,7 @@ func NewAuthHandler() *AuthHandler {
 		studentPasswordHash: studentPasswordHash,
 		sessions:            make(map[string]*Session),
 		studentSessions:     make(map[string]*Session),
+		templates:           make(map[string]*template.Template),
 	}
 }
 
@@ -127,6 +129,46 @@ func (ah *AuthHandler) deleteSession(token string) {
 	delete(ah.sessions, token)
 }
 
+// getTemplate retrieves a cached template by filename, loading it lazily if needed
+func (ah *AuthHandler) getTemplate(filename string) (*template.Template, error) {
+	// Fast path: check cache first
+	ah.templatesMu.RLock()
+	tmpl, ok := ah.templates[filename]
+	ah.templatesMu.RUnlock()
+	if ok {
+		return tmpl, nil
+	}
+
+	// Slow path: load template
+	ah.templatesMu.Lock()
+	defer ah.templatesMu.Unlock()
+
+	// Double-check after acquiring write lock
+	if tmpl, ok := ah.templates[filename]; ok {
+		return tmpl, nil
+	}
+
+	// Map filename to full path
+	templatePaths := map[string]string{
+		"login.html":        "web/login.html",
+		"student-login.html": "web/student-login.html",
+	}
+
+	tmplPath, ok := templatePaths[filename]
+	if !ok {
+		return nil, fmt.Errorf("template %s not found", filename)
+	}
+
+	var err error
+	tmpl, err = template.ParseFiles(tmplPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load template %s: %w", tmplPath, err)
+	}
+
+	ah.templates[filename] = tmpl
+	return tmpl, nil
+}
+
 // ServeLogin serves the login page
 func (ah *AuthHandler) ServeLogin(w http.ResponseWriter, r *http.Request) {
 	// Check if already logged in
@@ -137,10 +179,10 @@ func (ah *AuthHandler) ServeLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	tmplPath := filepath.Join("web", "login.html")
-	tmpl, err := template.ParseFiles(tmplPath)
+	// Use cached template (lazy loaded)
+	tmpl, err := ah.getTemplate("login.html")
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to load template: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Failed to load login template: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -279,10 +321,10 @@ func (ah *AuthHandler) ServeStudentLogin(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	tmplPath := filepath.Join("web", "student-login.html")
-	tmpl, err := template.ParseFiles(tmplPath)
+	// Use cached template (lazy loaded)
+	tmpl, err := ah.getTemplate("student-login.html")
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to load template: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Failed to load student login template: %v", err), http.StatusInternalServerError)
 		return
 	}
 

@@ -10,11 +10,14 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
 
 func main() {
+	startTime := time.Now()
+	
 	var (
 		port    = flag.String("port", "8080", "Port to listen on")
 		workDir = flag.String("work-dir", "/tmp/lab-as-code-jobs", "Directory for job workspaces")
@@ -22,22 +25,62 @@ func main() {
 	)
 	flag.Parse()
 
+	log.Printf("[STARTUP] Starting application initialization...")
+
 	// Create work directory if it doesn't exist
+	dirStart := time.Now()
 	if err := os.MkdirAll(*workDir, 0755); err != nil {
 		log.Fatalf("Failed to create work directory: %v", err)
 	}
-
-	// Create data directory if it doesn't exist
 	if err := os.MkdirAll(*dataDir, 0755); err != nil {
 		log.Fatalf("Failed to create data directory: %v", err)
 	}
+	log.Printf("[STARTUP] Directory creation took %v", time.Since(dirStart))
 
-	// Initialize components
-	jobManager := server.NewJobManager(*dataDir)
-	pulumiExec := server.NewPulumiExecutor(jobManager, *workDir)
-	credentialsManager := server.NewCredentialsManager()
-	handler := server.NewHandler(jobManager, pulumiExec, credentialsManager)
-	authHandler := server.NewAuthHandler()
+	// Initialize independent components in parallel
+	var (
+		jobManager         *server.JobManager
+		credentialsManager *server.CredentialsManager
+		authHandler        *server.AuthHandler
+		pulumiExec         *server.PulumiExecutor
+		handler            *server.Handler
+	)
+
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	// Initialize jobManager
+	go func() {
+		defer wg.Done()
+		jobManager = server.NewJobManager(*dataDir)
+	}()
+
+	// Initialize credentialsManager
+	go func() {
+		defer wg.Done()
+		credentialsManager = server.NewCredentialsManager()
+	}()
+
+	// Initialize authHandler
+	go func() {
+		defer wg.Done()
+		authHandler = server.NewAuthHandler()
+	}()
+
+	// Wait for independent components
+	parallelStart := time.Now()
+	wg.Wait()
+	log.Printf("[STARTUP] Parallel component initialization took %v", time.Since(parallelStart))
+
+	// Initialize pulumiExec (depends on jobManager)
+	pulumiStart := time.Now()
+	pulumiExec = server.NewPulumiExecutor(jobManager, *workDir)
+	log.Printf("[STARTUP] PulumiExecutor initialization took %v", time.Since(pulumiStart))
+
+	// Initialize handler (depends on all components)
+	handlerStart := time.Now()
+	handler = server.NewHandler(jobManager, pulumiExec, credentialsManager)
+	log.Printf("[STARTUP] Handler initialization took %v", time.Since(handlerStart))
 
 	// Setup routes
 	mux := http.NewServeMux()
@@ -114,6 +157,7 @@ func main() {
 
 	// Start server in goroutine
 	go func() {
+		log.Printf("[STARTUP] Total initialization time: %v", time.Since(startTime))
 		log.Printf("Starting server on http://localhost%s", addr)
 		log.Printf("Work directory: %s", *workDir)
 		log.Printf("Data directory: %s", *dataDir)
@@ -122,6 +166,16 @@ func main() {
 			log.Fatalf("Server failed: %v", err)
 		}
 	}()
+
+	// Load persisted jobs asynchronously after server starts (non-blocking)
+	if *dataDir != "" {
+		go func() {
+			log.Printf("Loading persisted jobs from %s...", *dataDir)
+			if err := jobManager.LoadJobs(); err != nil {
+				log.Printf("Warning: failed to load persisted jobs: %v", err)
+			}
+		}()
+	}
 
 	// Wait for interrupt signal
 	quit := make(chan os.Signal, 1)

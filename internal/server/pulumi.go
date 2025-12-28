@@ -36,7 +36,17 @@ func NewPulumiExecutor(jobManager *JobManager, workDir string) *PulumiExecutor {
 }
 
 // findProjectRoot finds the project root by looking for go.mod
+// Checks PROJECT_ROOT environment variable first for faster startup
 func findProjectRoot() string {
+	// Check environment variable first (fastest path)
+	if projectRoot := os.Getenv("PROJECT_ROOT"); projectRoot != "" {
+		if _, err := os.Stat(filepath.Join(projectRoot, "go.mod")); err == nil {
+			return projectRoot
+		}
+		log.Printf("Warning: PROJECT_ROOT environment variable set but go.mod not found at %s, searching...", projectRoot)
+	}
+
+	// Walk up directory tree to find go.mod
 	dir, err := os.Getwd()
 	if err != nil {
 		return "."

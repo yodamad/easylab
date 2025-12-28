@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -19,7 +20,8 @@ import (
 type Handler struct {
 	jobManager         *JobManager
 	pulumiExec         *PulumiExecutor
-	templateCache      *template.Template
+	templates          map[string]*template.Template
+	templatesMu        sync.RWMutex
 	credentialsManager *CredentialsManager
 }
 
@@ -28,8 +30,52 @@ func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsM
 	return &Handler{
 		jobManager:         jobManager,
 		pulumiExec:         pulumiExec,
+		templates:          make(map[string]*template.Template),
 		credentialsManager: credentialsManager,
 	}
+}
+
+// getTemplate retrieves a cached template by filename, loading it lazily if needed
+func (h *Handler) getTemplate(filename string) (*template.Template, error) {
+	// Fast path: check cache first
+	h.templatesMu.RLock()
+	tmpl, ok := h.templates[filename]
+	h.templatesMu.RUnlock()
+	if ok {
+		return tmpl, nil
+	}
+
+	// Slow path: load template
+	h.templatesMu.Lock()
+	defer h.templatesMu.Unlock()
+
+	// Double-check after acquiring write lock
+	if tmpl, ok := h.templates[filename]; ok {
+		return tmpl, nil
+	}
+
+	// Map filename to full path
+	templatePaths := map[string]string{
+		"index.html":            "web/index.html",
+		"admin.html":             "web/admin.html",
+		"student-dashboard.html": "web/student-dashboard.html",
+		"ovh-credentials.html":   "web/ovh-credentials.html",
+		"jobs-list.html":         "web/jobs-list.html",
+	}
+
+	tmplPath, ok := templatePaths[filename]
+	if !ok {
+		return nil, fmt.Errorf("template %s not found", filename)
+	}
+
+	var err error
+	tmpl, err = template.ParseFiles(tmplPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load template %s: %w", tmplPath, err)
+	}
+
+	h.templates[filename] = tmpl
+	return tmpl, nil
 }
 
 // ServeUI serves the main HTML UI (homepage)
@@ -39,9 +85,8 @@ func (h *Handler) ServeUI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read and parse template
-	tmplPath := filepath.Join("web", "index.html")
-	tmpl, err := template.ParseFiles(tmplPath)
+	// Use cached template
+	tmpl, err := h.getTemplate("index.html")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load template: %v", err), http.StatusInternalServerError)
 		return
@@ -61,9 +106,8 @@ func (h *Handler) ServeUI(w http.ResponseWriter, r *http.Request) {
 
 // ServeAdminUI serves the admin HTML UI
 func (h *Handler) ServeAdminUI(w http.ResponseWriter, r *http.Request) {
-	// Read and parse template
-	tmplPath := filepath.Join("web", "admin.html")
-	tmpl, err := template.ParseFiles(tmplPath)
+	// Use cached template
+	tmpl, err := h.getTemplate("admin.html")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load template: %v", err), http.StatusInternalServerError)
 		return
@@ -556,8 +600,8 @@ func (h *Handler) DownloadKubeconfig(w http.ResponseWriter, r *http.Request) {
 
 // ServeStudentDashboard serves the student dashboard page
 func (h *Handler) ServeStudentDashboard(w http.ResponseWriter, r *http.Request) {
-	tmplPath := filepath.Join("web", "student-dashboard.html")
-	tmpl, err := template.ParseFiles(tmplPath)
+	// Use cached template
+	tmpl, err := h.getTemplate("student-dashboard.html")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load template: %v", err), http.StatusInternalServerError)
 		return
@@ -766,8 +810,8 @@ func getFormKeys(r *http.Request) []string {
 
 // ServeOVHCredentials serves the OVH credentials configuration page
 func (h *Handler) ServeOVHCredentials(w http.ResponseWriter, r *http.Request) {
-	tmplPath := filepath.Join("web", "ovh-credentials.html")
-	tmpl, err := template.ParseFiles(tmplPath)
+	// Use cached template
+	tmpl, err := h.getTemplate("ovh-credentials.html")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load template: %v", err), http.StatusInternalServerError)
 		return
@@ -951,8 +995,8 @@ func (h *Handler) GetOVHCredentials(w http.ResponseWriter, r *http.Request) {
 
 // ServeJobsList serves the jobs list page
 func (h *Handler) ServeJobsList(w http.ResponseWriter, r *http.Request) {
-	tmplPath := filepath.Join("web", "jobs-list.html")
-	tmpl, err := template.ParseFiles(tmplPath)
+	// Use cached template
+	tmpl, err := h.getTemplate("jobs-list.html")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to load template: %v", err), http.StatusInternalServerError)
 		return

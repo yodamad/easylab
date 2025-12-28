@@ -98,12 +98,8 @@ func NewJobManager(dataDir string) *JobManager {
 		dataDir: dataDir,
 	}
 	
-	// Load persisted jobs if data directory is provided
-	if dataDir != "" {
-		if err := jm.LoadJobs(); err != nil {
-			log.Printf("Warning: failed to load persisted jobs: %v", err)
-		}
-	}
+	// Job loading is now done asynchronously after server starts
+	// See cmd/server/main.go for the async LoadJobs() call
 	
 	return jm
 }
