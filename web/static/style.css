@@ -570,6 +570,11 @@ main {
     color: #991b1b;
 }
 
+.status-dry-run-completed {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
 .error-message {
     padding: 1rem;
     background: #fee2e2;

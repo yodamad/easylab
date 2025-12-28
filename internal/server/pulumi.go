@@ -200,6 +200,111 @@ config:
 	return nil
 }
 
+// Preview runs pulumi preview for a given job (dry run)
+func (pe *PulumiExecutor) Preview(jobID string) error {
+	job, exists := pe.jobManager.GetJob(jobID)
+	if !exists {
+		err := fmt.Errorf("job %s not found", jobID)
+		log.Printf("Preview error: %v", err)
+		return err
+	}
+
+	config := job.Config
+
+	// Update status to running immediately
+	pe.jobManager.UpdateJobStatus(jobID, JobStatusRunning)
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Dry run started at %s", time.Now().Format(time.RFC3339)))
+
+	// Create temporary directory for this job
+	jobDir := filepath.Join(pe.workDir, jobID)
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Creating job directory: %s", jobDir))
+
+	if err := os.MkdirAll(jobDir, 0755); err != nil {
+		pe.jobManager.SetError(jobID, fmt.Errorf("failed to create job directory: %w", err))
+		return err
+	}
+
+	// Write Pulumi.yaml
+	pe.jobManager.AppendOutput(jobID, "Writing Pulumi.yaml...")
+	pulumiYaml := `name: lab-as-code
+runtime: go
+description: OVHcloud Gateway and Managed Kubernetes infrastructure
+
+config:
+  ovh:endpoint: ` + config.OvhEndpoint + `
+`
+	if err := os.WriteFile(filepath.Join(jobDir, "Pulumi.yaml"), []byte(pulumiYaml), 0644); err != nil {
+		pe.jobManager.SetError(jobID, fmt.Errorf("failed to write Pulumi.yaml: %w", err))
+		return err
+	}
+
+	// Write Pulumi stack config
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Writing Pulumi stack config for stack '%s'...", config.StackName))
+	stackConfig := pe.generateStackConfig(config)
+	stackConfigFile := filepath.Join(jobDir, fmt.Sprintf("Pulumi.%s.yaml", config.StackName))
+	if err := os.WriteFile(stackConfigFile, []byte(stackConfig), 0644); err != nil {
+		pe.jobManager.SetError(jobID, fmt.Errorf("failed to write stack config: %w", err))
+		return err
+	}
+
+	// Copy main.go and other source files to job directory
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Copying source files from %s...", pe.projectRoot))
+	if err := pe.copySourceFiles(jobDir); err != nil {
+		pe.jobManager.SetError(jobID, fmt.Errorf("failed to copy source files: %w", err))
+		return err
+	}
+	pe.jobManager.AppendOutput(jobID, "Source files copied successfully")
+
+	// Set up environment variables
+	env := os.Environ()
+	env = append(env, fmt.Sprintf("OVH_APPLICATION_KEY=%s", config.OvhApplicationKey))
+	env = append(env, fmt.Sprintf("OVH_APPLICATION_SECRET=%s", config.OvhApplicationSecret))
+	env = append(env, fmt.Sprintf("OVH_CONSUMER_KEY=%s", config.OvhConsumerKey))
+	env = append(env, fmt.Sprintf("OVH_SERVICE_NAME=%s", config.OvhServiceName))
+
+	// Initialize Pulumi stack
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Initializing Pulumi stack '%s'...", config.StackName))
+	if err := pe.runCommand(jobID, jobDir, env, "pulumi", "stack", "init", config.StackName, "--non-interactive"); err != nil {
+		// Stack might already exist, try to select it
+		pe.jobManager.AppendOutput(jobID, "Stack may already exist, trying to select...")
+	}
+
+	// Select the stack
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Selecting Pulumi stack '%s'...", config.StackName))
+	if err := pe.runCommand(jobID, jobDir, env, "pulumi", "stack", "select", config.StackName, "--non-interactive"); err != nil {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack select warning: %v", err))
+	}
+
+	// Set all config values
+	pe.jobManager.AppendOutput(jobID, "Setting Pulumi configuration...")
+	configCommands := pe.getConfigCommands(config)
+	for _, cmd := range configCommands {
+		var err error
+		if cmd.secret {
+			err = pe.runCommand(jobID, jobDir, env, "pulumi", "config", "set", cmd.key, cmd.value, "--secret", "--non-interactive")
+		} else {
+			err = pe.runCommand(jobID, jobDir, env, "pulumi", "config", "set", cmd.key, cmd.value, "--non-interactive")
+		}
+		if err != nil {
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Config set %s warning: %v", cmd.key, err))
+		}
+	}
+
+	// Run pulumi preview with streaming output
+	pe.jobManager.AppendOutput(jobID, "Running pulumi preview (dry run)...")
+	if err := pe.runCommandWithStreaming(jobID, jobDir, env, "pulumi", "preview", "--non-interactive"); err != nil {
+		pe.jobManager.SetError(jobID, fmt.Errorf("pulumi preview failed: %w", err))
+		return err
+	}
+
+	// Success - mark as dry-run-completed
+	pe.jobManager.UpdateJobStatus(jobID, JobStatusDryRunCompleted)
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Dry run completed successfully at %s", time.Now().Format(time.RFC3339)))
+	pe.jobManager.AppendOutput(jobID, "✅ Dry run passed! You can now launch the real deployment.")
+
+	return nil
+}
+
 // runCommand runs a command and captures output
 func (pe *PulumiExecutor) runCommand(jobID, dir string, env []string, name string, args ...string) error {
 	cmd := exec.Command(name, args...)

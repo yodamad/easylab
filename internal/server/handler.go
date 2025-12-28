@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Handler handles HTTP requests
@@ -202,6 +203,192 @@ func (h *Handler) CreateLab(w http.ResponseWriter, r *http.Request) {
 		</div>`, jobID, jobID)
 }
 
+// DryRunLab handles dry run requests
+func (h *Handler) DryRunLab(w http.ResponseWriter, r *http.Request) {
+	log.Printf("DryRunLab called: method=%s, path=%s", r.Method, r.URL.Path)
+
+	if r.Method != http.MethodPost {
+		log.Printf("Method not allowed: %s", r.Method)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse form data - handle both multipart and urlencoded
+	contentType := r.Header.Get("Content-Type")
+	log.Printf("Content-Type: %s", contentType)
+
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		if err := r.ParseMultipartForm(10 << 20); err != nil { // 10MB max
+			log.Printf("Failed to parse multipart form: %v", err)
+			http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
+			return
+		}
+	} else {
+		if err := r.ParseForm(); err != nil {
+			log.Printf("Failed to parse form: %v", err)
+			http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+	log.Printf("Form parsed successfully")
+
+	// Get OVH credentials from in-memory storage
+	ovhCreds, err := h.credentialsManager.GetCredentials()
+	if err != nil {
+		log.Printf("OVH credentials not configured: %v", err)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `
+			<div class="error-message">
+				<h3>OVH Credentials Not Configured</h3>
+				<p>Please configure your OVH credentials first before running a dry run.</p>
+				<a href="/ovh-credentials" class="btn btn-primary">Configure OVH Credentials</a>
+			</div>`)
+		return
+	}
+
+	// Parse integer fields
+	desiredNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_desired_node_count"))
+	minNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_min_node_count"))
+	maxNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_max_node_count"))
+
+	// Get stack name with default
+	stackName := r.FormValue("stack_name")
+	if stackName == "" {
+		stackName = "dev"
+	}
+
+	config := &LabConfig{
+		StackName: stackName,
+
+		// Use credentials from in-memory storage
+		OvhApplicationKey:    ovhCreds.ApplicationKey,
+		OvhApplicationSecret: ovhCreds.ApplicationSecret,
+		OvhConsumerKey:       ovhCreds.ConsumerKey,
+		OvhServiceName:       ovhCreds.ServiceName,
+		OvhEndpoint:          ovhCreds.Endpoint,
+
+		NetworkGatewayName:        r.FormValue("network_gateway_name"),
+		NetworkGatewayModel:       r.FormValue("network_gateway_model"),
+		NetworkPrivateNetworkName: r.FormValue("network_private_network_name"),
+		NetworkRegion:             r.FormValue("network_region"),
+		NetworkMask:               r.FormValue("network_mask"),
+		NetworkStartIP:            r.FormValue("network_start_ip"),
+		NetworkEndIP:              r.FormValue("network_end_ip"),
+		NetworkID:                 r.FormValue("network_id"),
+
+		K8sClusterName: r.FormValue("k8s_cluster_name"),
+
+		NodePoolName:             r.FormValue("nodepool_name"),
+		NodePoolFlavor:           r.FormValue("nodepool_flavor"),
+		NodePoolDesiredNodeCount: desiredNodeCount,
+		NodePoolMinNodeCount:     minNodeCount,
+		NodePoolMaxNodeCount:     maxNodeCount,
+
+		CoderAdminEmail:    r.FormValue("coder_admin_email"),
+		CoderAdminPassword: r.FormValue("coder_admin_password"),
+		CoderVersion:       r.FormValue("coder_version"),
+		CoderDbUser:        r.FormValue("coder_db_user"),
+		CoderDbPassword:    r.FormValue("coder_db_password"),
+		CoderDbName:        r.FormValue("coder_db_name"),
+		CoderTemplateName:  r.FormValue("coder_template_name"),
+	}
+
+	// Create job
+	jobID := h.jobManager.CreateJob(config)
+	log.Printf("Dry run job created: %s", jobID)
+
+	// Start Pulumi preview in a goroutine
+	go func() {
+		log.Printf("Starting Pulumi preview for job: %s", jobID)
+		if err := h.pulumiExec.Preview(jobID); err != nil {
+			log.Printf("Pulumi preview failed for job %s: %v", jobID, err)
+			return
+		}
+		log.Printf("Pulumi preview completed for job: %s", jobID)
+	}()
+
+	// Return job status div for HTMX to display with proper polling
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `
+		<div class="job-created">
+			<h3>Dry Run Started: %s</h3>
+			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load, every 2s" hx-swap="innerHTML">
+				<p>Loading status...</p>
+			</div>
+		</div>`, jobID, jobID)
+}
+
+// LaunchLab handles launching a real deployment after a successful dry run
+func (h *Handler) LaunchLab(w http.ResponseWriter, r *http.Request) {
+	log.Printf("LaunchLab called: method=%s, path=%s", r.Method, r.URL.Path)
+
+	if r.Method != http.MethodPost {
+		log.Printf("Method not allowed: %s", r.Method)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse form data
+	if err := r.ParseForm(); err != nil {
+		log.Printf("Failed to parse form: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	jobID := r.FormValue("job_id")
+	if jobID == "" {
+		http.Error(w, "job_id is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get the job
+	job, exists := h.jobManager.GetJob(jobID)
+	if !exists {
+		http.Error(w, "Job not found", http.StatusNotFound)
+		return
+	}
+
+	// Check if job is in dry-run-completed status
+	job.mu.RLock()
+	status := job.Status
+	job.mu.RUnlock()
+
+	if status != JobStatusDryRunCompleted {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `
+			<div class="error-message">
+				<h3>Invalid Job Status</h3>
+				<p>This job is not in dry-run-completed status. Current status: %s</p>
+				<p>Only jobs that have completed a successful dry run can be launched.</p>
+			</div>`, status)
+		return
+	}
+
+	// Reset job status to pending and start execution
+	h.jobManager.UpdateJobStatus(jobID, JobStatusPending)
+	h.jobManager.AppendOutput(jobID, fmt.Sprintf("Launching real deployment at %s", time.Now().Format(time.RFC3339)))
+
+	// Start Pulumi execution in a goroutine
+	go func() {
+		log.Printf("Starting Pulumi execution for job: %s", jobID)
+		if err := h.pulumiExec.Execute(jobID); err != nil {
+			log.Printf("Pulumi execution failed for job %s: %v", jobID, err)
+			return
+		}
+		log.Printf("Pulumi execution completed for job: %s", jobID)
+	}()
+
+	// Return job status div for HTMX to display with proper polling
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `
+		<div class="job-created">
+			<h3>Deployment Launched: %s</h3>
+			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load, every 2s" hx-swap="innerHTML">
+				<p>Loading status...</p>
+			</div>
+		</div>`, jobID, jobID)
+}
+
 // GetJobStatus returns the current status of a job
 func (h *Handler) GetJobStatus(w http.ResponseWriter, r *http.Request) {
 	// Extract job ID from path like /api/jobs/{id}/status or /api/jobs/{id}
@@ -233,6 +420,16 @@ func (h *Handler) GetJobStatus(w http.ResponseWriter, r *http.Request) {
 	var statusHTML strings.Builder
 	statusHTML.WriteString(`<div class="job-status">`)
 	statusHTML.WriteString(fmt.Sprintf(`<div class="status-badge status-%s">%s</div>`, status, status))
+
+	// Show launch button if dry run completed successfully
+	if status == JobStatusDryRunCompleted {
+		statusHTML.WriteString(`<form hx-post="/api/labs/launch" hx-target="#job-status" hx-swap="outerHTML" style="display: inline-block; margin-left: 1rem;">`)
+		statusHTML.WriteString(fmt.Sprintf(`<input type="hidden" name="job_id" value="%s">`, jobID))
+		statusHTML.WriteString(`<button type="submit" class="btn btn-success">`)
+		statusHTML.WriteString(`<span class="btn-icon">🚀</span> Launch Real Deployment`)
+		statusHTML.WriteString(`</button>`)
+		statusHTML.WriteString(`</form>`)
+	}
 
 	// Show download button if job completed successfully and kubeconfig is available
 	if status == JobStatusCompleted && kubeconfig != "" {

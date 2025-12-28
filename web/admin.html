@@ -63,6 +63,7 @@
             </div>
 
             <form id="lab-form" action="/api/labs" method="POST" hx-post="/api/labs" hx-target="#form-response" hx-swap="innerHTML" hx-indicator="#loading">
+                <input type="hidden" id="dry-run-mode" name="dry_run" value="false">
                 <div id="form-response"></div>
                 <div id="loading" class="htmx-indicator">
                     <div class="spinner"></div>
@@ -261,6 +262,9 @@
                     <button type="button" id="btn-next" class="btn btn-primary">
                         Next <span class="btn-icon">→</span>
                     </button>
+                    <button type="button" id="btn-dry-run" form="lab-form" class="btn btn-secondary" style="display: none;">
+                        <span class="btn-icon">🔍</span> Dry Run
+                    </button>
                     <button type="submit" id="btn-submit" form="lab-form" class="btn btn-success" style="display: none;">
                         Create Lab
                     </button>
@@ -286,6 +290,16 @@
             bindEvents() {
                 document.getElementById('btn-next').addEventListener('click', () => this.nextStep());
                 document.getElementById('btn-prev').addEventListener('click', () => this.prevStep());
+                
+                // Dry run button handler
+                const dryRunBtn = document.getElementById('btn-dry-run');
+                if (dryRunBtn) {
+                    dryRunBtn.addEventListener('click', () => {
+                        if (this.validateCurrentStep()) {
+                            submitDryRun();
+                        }
+                    });
+                }
                 
                 // Keyboard navigation
                 document.addEventListener('keydown', (e) => {
@@ -379,15 +393,18 @@
                 const prevBtn = document.getElementById('btn-prev');
                 const nextBtn = document.getElementById('btn-next');
                 const submitBtn = document.getElementById('btn-submit');
+                const dryRunBtn = document.getElementById('btn-dry-run');
                 
                 prevBtn.disabled = this.currentStep === 1;
                 
                 if (this.currentStep === this.totalSteps) {
                     nextBtn.style.display = 'none';
                     submitBtn.style.display = 'inline-flex';
+                    dryRunBtn.style.display = 'inline-flex';
                 } else {
                     nextBtn.style.display = 'inline-flex';
                     submitBtn.style.display = 'none';
+                    dryRunBtn.style.display = 'none';
                 }
                 
                 // Scroll to top of form
@@ -553,6 +570,73 @@
                         notice.style.display = 'block';
                     }
                 });
+        }
+
+        // Submit dry run
+        function submitDryRun() {
+            const form = document.getElementById('lab-form');
+            if (!form) return;
+            
+            // Extract base names before submission
+            extractBaseNamesBeforeSubmit(form);
+            
+            const formData = new FormData(form);
+            const responseDiv = document.getElementById('form-response');
+            const loadingDiv = document.getElementById('loading');
+            
+            // Show loading indicator
+            if (loadingDiv) {
+                loadingDiv.style.display = 'block';
+            }
+            
+            // Submit to dry-run endpoint
+            fetch('/api/labs/dry-run', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.text())
+            .then(html => {
+                if (responseDiv) {
+                    responseDiv.innerHTML = html;
+                }
+                if (loadingDiv) {
+                    loadingDiv.style.display = 'none';
+                }
+                
+                // Hide wizard and show status
+                hideWizardShowStatus();
+                
+                // Start polling for status updates
+                const container = document.getElementById('job-status-container');
+                if (container) {
+                    const jobStatusDiv = responseDiv.querySelector('[id^="job-status"]');
+                    if (jobStatusDiv) {
+                        container.innerHTML = '';
+                        container.appendChild(jobStatusDiv);
+                        if (typeof htmx !== 'undefined') {
+                            htmx.process(container);
+                        } else {
+                            // Fallback polling
+                            const hxGet = jobStatusDiv.getAttribute('hx-get');
+                            if (hxGet) {
+                                const match = hxGet.match(/\/api\/jobs\/([^/]+)/);
+                                if (match) {
+                                    pollJobStatus(match[1], container);
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error submitting dry run:', error);
+                if (responseDiv) {
+                    responseDiv.innerHTML = `<div class="error-message">Error: ${error.message}</div>`;
+                }
+                if (loadingDiv) {
+                    loadingDiv.style.display = 'none';
+                }
+            });
         }
 
         // Initialize wizard
