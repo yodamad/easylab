@@ -1016,6 +1016,7 @@ func (h *Handler) ServeJobsList(w http.ResponseWriter, r *http.Request) {
 		HasError    bool
 		ErrorMsg    string
 		HasKubeconfig bool
+		IsDestroyed bool
 	}
 
 	jobsDisplay := make([]JobDisplay, 0, len(allJobs))
@@ -1030,6 +1031,7 @@ func (h *Handler) ServeJobsList(w http.ResponseWriter, r *http.Request) {
 		hasError := job.Error != ""
 		errorMsg := job.Error
 		hasKubeconfig := job.Kubeconfig != ""
+		isDestroyed := job.Status == JobStatusDestroyed
 		createdAt := job.CreatedAt.Format("2006-01-02 15:04:05")
 		updatedAt := job.UpdatedAt.Format("2006-01-02 15:04:05")
 		job.mu.RUnlock()
@@ -1044,6 +1046,7 @@ func (h *Handler) ServeJobsList(w http.ResponseWriter, r *http.Request) {
 			HasError:      hasError,
 			ErrorMsg:      errorMsg,
 			HasKubeconfig: hasKubeconfig,
+			IsDestroyed:   isDestroyed,
 		})
 	}
 
@@ -1118,20 +1121,110 @@ func (h *Handler) DestroyStack(w http.ResponseWriter, r *http.Request) {
 		}
 		log.Printf("Stack destruction completed for job: %s", jobID)
 
-		// Remove the job after successful destruction
-		if err := h.jobManager.RemoveJob(jobID); err != nil {
-			log.Printf("Warning: failed to remove job %s after destruction: %v", jobID, err)
+		// Mark job as destroyed instead of removing it
+		if err := h.jobManager.UpdateJobStatus(jobID, JobStatusDestroyed); err != nil {
+			log.Printf("Warning: failed to mark job %s as destroyed: %v", jobID, err)
+		} else {
+			// Persist the destroyed job
+			if err := h.jobManager.SaveJob(jobID); err != nil {
+				log.Printf("Warning: failed to persist destroyed job %s: %v", jobID, err)
+			}
 		}
 	}()
 
-	// Return job status div for HTMX to display with proper polling (similar to CreateLab)
-	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprintf(w, `
-		<div class="job-created">
-			<h3>Stack Destruction Started: %s</h3>
-			<p>Destroying stack '%s' for job %s...</p>
-			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load, every 2s" hx-swap="innerHTML">
-				<p>Loading status...</p>
-			</div>
-		</div>`, jobID, stackName, jobID, jobID)
+	// Redirect to admin page to view destroy progress (like CreateLab)
+	http.Redirect(w, r, fmt.Sprintf("/admin?job=%s", jobID), http.StatusSeeOther)
+}
+
+// RecreateLab handles recreating a lab from a destroyed job
+func (h *Handler) RecreateLab(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse form data
+	if err := r.ParseForm(); err != nil {
+		log.Printf("Failed to parse form: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	jobID := r.FormValue("job_id")
+	if jobID == "" {
+		http.Error(w, "job_id is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get the destroyed job
+	job, exists := h.jobManager.GetJob(jobID)
+	if !exists {
+		http.Error(w, "Job not found", http.StatusNotFound)
+		return
+	}
+
+	// Check if job is destroyed
+	job.mu.RLock()
+	status := job.Status
+	config := job.Config
+	job.mu.RUnlock()
+
+	if status != JobStatusDestroyed {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `
+			<div class="error-message">
+				<h3>Invalid Job Status</h3>
+				<p>This job is not destroyed. Current status: %s</p>
+				<p>Only destroyed jobs can be recreated.</p>
+			</div>`, status)
+		return
+	}
+
+	if config == nil {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `
+			<div class="error-message">
+				<h3>No Configuration Available</h3>
+				<p>This job does not have configuration data available for recreation.</p>
+			</div>`)
+		return
+	}
+
+	// Get OVH credentials from in-memory storage (they might have changed)
+	ovhCreds, err := h.credentialsManager.GetCredentials()
+	if err != nil {
+		log.Printf("OVH credentials not configured: %v", err)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `
+			<div class="error-message">
+				<h3>OVH Credentials Not Configured</h3>
+				<p>Please configure your OVH credentials first before recreating a lab.</p>
+				<a href="/ovh-credentials" class="btn btn-primary">Configure OVH Credentials</a>
+			</div>`)
+		return
+	}
+
+	// Update config with current credentials (in case they changed)
+	config.OvhApplicationKey = ovhCreds.ApplicationKey
+	config.OvhApplicationSecret = ovhCreds.ApplicationSecret
+	config.OvhConsumerKey = ovhCreds.ConsumerKey
+	config.OvhServiceName = ovhCreds.ServiceName
+	config.OvhEndpoint = ovhCreds.Endpoint
+
+	// Create new job with the same configuration
+	newJobID := h.jobManager.CreateJob(config)
+	log.Printf("Recreating lab from destroyed job %s as new job: %s", jobID, newJobID)
+
+	// Start Pulumi execution in a goroutine
+	go func() {
+		log.Printf("Starting Pulumi execution for recreated job: %s", newJobID)
+		if err := h.pulumiExec.Execute(newJobID); err != nil {
+			log.Printf("Pulumi execution failed for recreated job %s: %v", newJobID, err)
+			return
+		}
+		log.Printf("Pulumi execution completed for recreated job: %s", newJobID)
+	}()
+
+	// Redirect to admin page to view recreation progress (like CreateLab)
+	http.Redirect(w, r, fmt.Sprintf("/admin?job=%s", newJobID), http.StatusSeeOther)
 }

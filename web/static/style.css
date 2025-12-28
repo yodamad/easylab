@@ -580,6 +580,11 @@ a.btn {
     color: #1e40af;
 }
 
+.status-destroyed {
+    background: #f3f4f6;
+    color: #6b7280;
+}
+
 .error-message {
     padding: 1rem;
     background: #fee2e2;

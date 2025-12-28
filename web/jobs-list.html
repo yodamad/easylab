@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jobs List - Lab as Code</title>
     <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.0/dist/htmx.min.js" integrity="sha384-LAnQFtNXh8s0hn9mOc8bezfn16i4Zo4y3i4dMT8PtV9yip8jGehR3RxCJrmHV11d" crossorigin="anonymous"></script>
     <style>
         .jobs-page-container {
             max-width: 1400px;
@@ -322,14 +323,18 @@
                                 </a>
                                 {{end}}
                                 {{if and .StackName (or (eq .Status "completed") (eq .Status "failed"))}}
-                                <form style="display: inline;" method="POST" action="/api/stacks/destroy" hx-post="/api/stacks/destroy" hx-target="#destroy-status-container" hx-swap="innerHTML" hx-confirm="Are you sure you want to destroy stack '{{.StackName}}'? This will run pulumi down and remove the stack." hx-boost="false">
-                                    <input type="hidden" name="job_id" value="{{.ID}}">
-                                    <button type="submit" class="btn btn-danger btn-icon-only" title="Destroy stack (pulumi down)">
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                                            <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                                        </svg>
-                                    </button>
-                                </form>
+                                <button type="button" class="btn btn-danger btn-icon-only" title="Destroy stack (pulumi down)" onclick="destroyStack('{{.ID}}')">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                                    </svg>
+                                </button>
+                                {{end}}
+                                {{if .IsDestroyed}}
+                                <button type="button" class="btn btn-success btn-icon-only" title="Recreate lab" onclick="recreateLab('{{.ID}}')">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                                    </svg>
+                                </button>
                                 {{end}}
                             </td>
                         </tr>
@@ -348,54 +353,53 @@
             </div>
             {{end}}
 
-            <!-- Destroy Status Display Area -->
-            <div id="destroy-status-container" class="job-status-container"></div>
         </main>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.0/dist/htmx.min.js" integrity="sha384-LAnQFtNXh8s0hn9mOc8bezfn16i4Zo4y3i4dMT8PtV9yip8jGehR3RxCJrmHV11d" crossorigin="anonymous"></script>
+
     <script>
-        // Handle destroy status display similar to admin page
-        if (typeof htmx !== 'undefined') {
-            // When destroy form is submitted, scroll to status container
-            document.body.addEventListener('htmx:beforeRequest', function(event) {
-                if (event.detail.elt.closest('form') && event.detail.elt.closest('form').action.includes('/api/stacks/destroy')) {
-                    const container = document.getElementById('destroy-status-container');
-                    if (container) {
-                        setTimeout(() => {
-                            container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                        }, 100);
-                    }
+        function destroyStack(jobId) {
+            // Send POST request to destroy endpoint
+            fetch('/api/stacks/destroy', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'job_id=' + encodeURIComponent(jobId)
+            })
+            .then(response => {
+                if (response.redirected) {
+                    // Follow the redirect
+                    window.location.href = response.url;
+                } else {
+                    // Handle error
+                    console.error('Destroy failed:', response.status);
                 }
+            })
+            .catch(error => {
+                console.error('Destroy error:', error);
             });
+        }
 
-            // When destroy status is displayed, process HTMX attributes
-            document.body.addEventListener('htmx:afterSwap', function(event) {
-                if (event.detail.target.id === 'destroy-status-container') {
-                    const response = event.detail.target;
-                    const jobStatusDiv = response.querySelector('[id^="job-status"]');
-                    if (jobStatusDiv) {
-                        // Process HTMX attributes in the new content
-                        htmx.process(response);
-                    }
+        function recreateLab(jobId) {
+            // Send POST request to recreate endpoint
+            fetch('/api/labs/recreate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'job_id=' + encodeURIComponent(jobId)
+            })
+            .then(response => {
+                if (response.redirected) {
+                    // Follow the redirect
+                    window.location.href = response.url;
+                } else {
+                    // Handle error
+                    console.error('Recreate failed:', response.status);
                 }
-            });
-
-            // Handle HTMX afterSettle for job status updates
-            document.body.addEventListener('htmx:afterSettle', function(event) {
-                const container = document.getElementById('destroy-status-container');
-                if (container && event.detail.target === container) {
-                    const jobStatusDiv = container.querySelector('[id^="job-status"]');
-                    if (jobStatusDiv) {
-                        // Ensure HTMX processes the polling div
-                        htmx.process(jobStatusDiv);
-                        
-                        // Scroll output to bottom after any HTMX swap
-                        const outputContainer = container.querySelector('.output-container');
-                        if (outputContainer) {
-                            outputContainer.scrollTop = outputContainer.scrollHeight;
-                        }
-                    }
-                }
+            })
+            .catch(error => {
+                console.error('Recreate error:', error);
             });
         }
     </script>

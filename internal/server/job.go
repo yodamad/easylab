@@ -19,6 +19,7 @@ const (
 	JobStatusCompleted      JobStatus = "completed"
 	JobStatusFailed         JobStatus = "failed"
 	JobStatusDryRunCompleted JobStatus = "dry-run-completed"
+	JobStatusDestroyed      JobStatus = "destroyed"
 )
 
 // Job represents a Pulumi execution job
@@ -245,8 +246,8 @@ func (jm *JobManager) SaveJob(id string) error {
 	status := job.Status
 	job.mu.RUnlock()
 
-	// Only persist completed jobs
-	if status != JobStatusCompleted {
+	// Persist completed and destroyed jobs
+	if status != JobStatusCompleted && status != JobStatusDestroyed {
 		return nil
 	}
 
@@ -318,8 +319,8 @@ func (jm *JobManager) LoadJobs() error {
 			continue
 		}
 
-		// Only load completed jobs
-		if job.Status != JobStatusCompleted {
+		// Load completed and destroyed jobs
+		if job.Status != JobStatusCompleted && job.Status != JobStatusDestroyed {
 			continue
 		}
 

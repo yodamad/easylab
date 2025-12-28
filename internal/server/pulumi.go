@@ -411,9 +411,10 @@ config:
 		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' removed successfully", stackName))
 	}
 
-	// Success
-	pe.jobManager.UpdateJobStatus(jobID, JobStatusCompleted)
+	// Success - mark as destroyed
+	pe.jobManager.UpdateJobStatus(jobID, JobStatusDestroyed)
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy completed at %s", time.Now().Format(time.RFC3339)))
+	pe.jobManager.AppendOutput(jobID, "✅ Stack destroyed successfully. You can recreate it using the same configuration.")
 
 	return nil
 }
