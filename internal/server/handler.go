@@ -948,3 +948,73 @@ func (h *Handler) GetOVHCredentials(w http.ResponseWriter, r *http.Request) {
 		"has_consumer_key":    creds.ConsumerKey != "",
 	})
 }
+
+// ServeJobsList serves the jobs list page
+func (h *Handler) ServeJobsList(w http.ResponseWriter, r *http.Request) {
+	tmplPath := filepath.Join("web", "jobs-list.html")
+	tmpl, err := template.ParseFiles(tmplPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load template: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Get all jobs
+	allJobs := h.jobManager.GetAllJobs()
+
+	// Prepare job data for template (without sensitive info)
+	type JobDisplay struct {
+		ID          string
+		Status      string
+		CreatedAt   string
+		UpdatedAt   string
+		StackName   string
+		IsDryRun    bool
+		HasError    bool
+		ErrorMsg    string
+		HasKubeconfig bool
+	}
+
+	jobsDisplay := make([]JobDisplay, 0, len(allJobs))
+	for _, job := range allJobs {
+		job.mu.RLock()
+		status := string(job.Status)
+		stackName := ""
+		if job.Config != nil {
+			stackName = job.Config.StackName
+		}
+		isDryRun := job.Status == JobStatusDryRunCompleted
+		hasError := job.Error != ""
+		errorMsg := job.Error
+		hasKubeconfig := job.Kubeconfig != ""
+		createdAt := job.CreatedAt.Format("2006-01-02 15:04:05")
+		updatedAt := job.UpdatedAt.Format("2006-01-02 15:04:05")
+		job.mu.RUnlock()
+
+		jobsDisplay = append(jobsDisplay, JobDisplay{
+			ID:            job.ID,
+			Status:        status,
+			CreatedAt:     createdAt,
+			UpdatedAt:     updatedAt,
+			StackName:     stackName,
+			IsDryRun:      isDryRun,
+			HasError:      hasError,
+			ErrorMsg:      errorMsg,
+			HasKubeconfig: hasKubeconfig,
+		})
+	}
+
+	// Prevent caching
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	data := map[string]interface{}{
+		"Jobs": jobsDisplay,
+		"Count": len(jobsDisplay),
+	}
+
+	if err := tmpl.Execute(w, data); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to execute template: %v", err), http.StatusInternalServerError)
+	}
+}

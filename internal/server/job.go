@@ -343,3 +343,25 @@ func (jm *JobManager) LoadJobs() error {
 
 	return nil
 }
+
+// GetAllJobs returns all jobs sorted by creation time (newest first)
+func (jm *JobManager) GetAllJobs() []*Job {
+	jm.mu.RLock()
+	defer jm.mu.RUnlock()
+
+	jobs := make([]*Job, 0, len(jm.jobs))
+	for _, job := range jm.jobs {
+		jobs = append(jobs, job)
+	}
+
+	// Sort by CreatedAt descending (newest first)
+	for i := 0; i < len(jobs)-1; i++ {
+		for j := i + 1; j < len(jobs); j++ {
+			if jobs[i].CreatedAt.Before(jobs[j].CreatedAt) {
+				jobs[i], jobs[j] = jobs[j], jobs[i]
+			}
+		}
+	}
+
+	return jobs
+}

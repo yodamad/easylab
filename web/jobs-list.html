@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jobs List - Lab as Code</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .jobs-page-container {
+            max-width: 1400px;
+        }
+
+        .jobs-table-wrapper {
+            overflow-x: auto;
+            margin-top: 1.5rem;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+        }
+
+        .jobs-table {
+            width: 100%;
+            min-width: 1200px;
+            border-collapse: collapse;
+            background: var(--background);
+        }
+
+        .jobs-table thead {
+            background: var(--surface);
+        }
+
+        .jobs-table th {
+            padding: 1rem 1.25rem;
+            text-align: left;
+            font-weight: 600;
+            color: var(--text);
+            border-bottom: 2px solid var(--border);
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            white-space: nowrap;
+        }
+
+        .jobs-table th:nth-child(1) { /* Job ID */
+            width: 200px;
+            min-width: 200px;
+        }
+
+        .jobs-table th:nth-child(2) { /* Stack Name */
+            width: 150px;
+            min-width: 150px;
+        }
+
+        .jobs-table th:nth-child(3) { /* Type */
+            width: 120px;
+            min-width: 120px;
+        }
+
+        .jobs-table th:nth-child(4) { /* Status */
+            width: 140px;
+            min-width: 140px;
+        }
+
+        .jobs-table th:nth-child(5) { /* Created */
+            width: 180px;
+            min-width: 180px;
+        }
+
+        .jobs-table th:nth-child(6) { /* Updated */
+            width: 180px;
+            min-width: 180px;
+        }
+
+        .jobs-table th:nth-child(7) { /* Actions */
+            width: 120px;
+            min-width: 120px;
+        }
+
+        .jobs-table td {
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid var(--border);
+            color: var(--text);
+            vertical-align: middle;
+        }
+
+        .jobs-table tbody tr:hover {
+            background: var(--surface);
+        }
+
+        .jobs-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .job-id {
+            font-family: monospace;
+            font-size: 0.875rem;
+            color: var(--primary-color);
+            word-break: break-all;
+        }
+
+        .job-id a {
+            color: var(--primary-color);
+            text-decoration: none;
+        }
+
+        .job-id a:hover {
+            text-decoration: underline;
+        }
+
+        .stack-name {
+            font-weight: 500;
+            color: var(--text);
+        }
+
+        .job-type-badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .job-type-dry-run {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+
+        .job-type-real {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem 2rem;
+            color: var(--text-light);
+        }
+
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+
+        .stats-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 1.5rem;
+            background: var(--surface);
+            border-radius: var(--radius);
+            margin-bottom: 1.5rem;
+        }
+
+        .stats-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .stats-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary-color);
+        }
+
+        .stats-label {
+            font-size: 0.875rem;
+            color: var(--text-light);
+        }
+
+        .timestamp {
+            font-size: 0.875rem;
+            color: var(--text-light);
+            white-space: nowrap;
+        }
+
+        .actions-cell {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .actions-cell .btn {
+            white-space: nowrap;
+            padding: 0.5rem;
+            min-width: 2.5rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .actions-cell .btn-icon-only {
+            padding: 0.5rem;
+            min-width: 2.5rem;
+            height: 2.5rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .actions-cell .btn-icon-only svg {
+            width: 1.25rem;
+            height: 1.25rem;
+            stroke-width: 2;
+        }
+
+        .actions-cell .btn-icon-only:hover svg {
+            stroke-width: 2.5;
+        }
+
+        @media (max-width: 1400px) {
+            .jobs-page-container {
+                max-width: 100%;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .jobs-table {
+                font-size: 0.875rem;
+                min-width: 1000px;
+            }
+
+            .jobs-table th,
+            .jobs-table td {
+                padding: 0.75rem 1rem;
+            }
+
+            .stats-bar {
+                flex-direction: column;
+                gap: 1rem;
+                align-items: flex-start;
+            }
+
+            .actions-cell {
+                flex-direction: column;
+            }
+
+            .actions-cell .btn {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container jobs-page-container">
+        <header>
+            <div class="header-content">
+                <div class="header-title">
+                    <h1>Lab as Code</h1>
+                    <p class="subtitle">Jobs History</p>
+                </div>
+                <div class="header-actions">
+                    <a href="/admin" class="header-btn" title="Create Lab">
+                        <span class="btn-icon">➕</span>
+                        <span class="btn-text">New Lab</span>
+                    </a>
+                    <a href="/ovh-credentials" class="header-btn" title="OVH Credentials">
+                        <span class="btn-icon">🔐</span>
+                        <span class="btn-text">Credentials</span>
+                    </a>
+                    <a href="/logout" class="logout-btn" title="Logout">
+                        <span class="logout-icon">🚪</span>
+                        <span class="logout-text">Logout</span>
+                    </a>
+                </div>
+            </div>
+        </header>
+
+        <main>
+            {{if .Jobs}}
+            <div class="stats-bar">
+                <div class="stats-item">
+                    <span class="stats-value">{{.Count}}</span>
+                    <span class="stats-label">Total Jobs</span>
+                </div>
+            </div>
+
+            <div class="jobs-table-wrapper">
+                <table class="jobs-table">
+                    <thead>
+                        <tr>
+                            <th>Job ID</th>
+                            <th>Stack Name</th>
+                            <th>Type</th>
+                            <th>Status</th>
+                            <th>Created</th>
+                            <th>Updated</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .Jobs}}
+                        <tr>
+                            <td class="job-id">
+                                <a href="/admin?job={{.ID}}" title="{{.ID}}">{{.ID}}</a>
+                            </td>
+                            <td class="stack-name">{{if .StackName}}{{.StackName}}{{else}}-{{end}}</td>
+                            <td>
+                                {{if .IsDryRun}}
+                                <span class="job-type-badge job-type-dry-run">🔍 Dry Run</span>
+                                {{else}}
+                                <span class="job-type-badge job-type-real">🚀 Real</span>
+                                {{end}}
+                            </td>
+                            <td>
+                                <span class="status-badge status-{{.Status}}">{{.Status}}</span>
+                            </td>
+                            <td class="timestamp">{{.CreatedAt}}</td>
+                            <td class="timestamp">{{.UpdatedAt}}</td>
+                            <td class="actions-cell">
+                                <a href="/admin?job={{.ID}}" class="btn btn-secondary btn-icon-only" title="View job details">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                    </svg>
+                                </a>
+                                {{if .HasKubeconfig}}
+                                <a href="/api/jobs/{{.ID}}/kubeconfig" class="btn btn-download btn-icon-only" title="Download kubeconfig" download="kubeconfig-{{.ID}}.yaml">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                    </svg>
+                                </a>
+                                {{end}}
+                            </td>
+                        </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </div>
+            {{else}}
+            <div class="empty-state">
+                <div class="empty-state-icon">📋</div>
+                <h2>No Jobs Yet</h2>
+                <p>You haven't created any labs yet. Start by creating your first lab!</p>
+                <a href="/admin" class="btn btn-primary" style="margin-top: 1.5rem;">
+                    <span class="btn-icon">➕</span> Create New Lab
+                </a>
+            </div>
+            {{end}}
+        </main>
+    </div>
+</body>
+</html>
+

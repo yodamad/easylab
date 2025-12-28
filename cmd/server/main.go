@@ -75,6 +75,7 @@ func main() {
 
 	// Protected routes (auth required)
 	mux.HandleFunc("/admin", authHandler.RequireAuth(handler.ServeAdminUI))
+	mux.HandleFunc("/jobs", authHandler.RequireAuth(handler.ServeJobsList))
 	mux.HandleFunc("/ovh-credentials", authHandler.RequireAuth(handler.ServeOVHCredentials))
 	mux.HandleFunc("/api/ovh-credentials", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
