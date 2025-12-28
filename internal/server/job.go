@@ -361,3 +361,29 @@ func (jm *JobManager) GetAllJobs() []*Job {
 
 	return jobs
 }
+
+// RemoveJob removes a job from the manager and optionally deletes its persisted file
+func (jm *JobManager) RemoveJob(id string) error {
+	jm.mu.Lock()
+	defer jm.mu.Unlock()
+
+	_, exists := jm.jobs[id]
+	if !exists {
+		return fmt.Errorf("job %s not found", id)
+	}
+
+	// Remove from memory
+	delete(jm.jobs, id)
+
+	// Remove persisted file if it exists
+	if jm.dataDir != "" {
+		jobsDir := filepath.Join(jm.dataDir, "jobs")
+		jobFile := filepath.Join(jobsDir, fmt.Sprintf("%s.json", id))
+		if err := os.Remove(jobFile); err != nil && !os.IsNotExist(err) {
+			log.Printf("Warning: failed to remove job file %s: %v", jobFile, err)
+			// Don't fail the operation if file removal fails
+		}
+	}
+
+	return nil
+}

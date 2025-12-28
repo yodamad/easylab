@@ -1062,3 +1062,76 @@ func (h *Handler) ServeJobsList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Failed to execute template: %v", err), http.StatusInternalServerError)
 	}
 }
+
+// DestroyStack handles stack destruction requests
+func (h *Handler) DestroyStack(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse form data
+	if err := r.ParseForm(); err != nil {
+		log.Printf("Failed to parse form: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	jobID := r.FormValue("job_id")
+	if jobID == "" {
+		http.Error(w, "job_id is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get the job
+	job, exists := h.jobManager.GetJob(jobID)
+	if !exists {
+		http.Error(w, "Job not found", http.StatusNotFound)
+		return
+	}
+
+	// Check if job has a stack name
+	job.mu.RLock()
+	stackName := ""
+	if job.Config != nil {
+		stackName = job.Config.StackName
+	}
+	job.mu.RUnlock()
+
+	if stackName == "" {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `
+			<div class="error-message">
+				<h3>No Stack Associated</h3>
+				<p>This job does not have an associated stack to destroy.</p>
+			</div>`)
+		return
+	}
+
+	// Start destruction in a goroutine
+	go func() {
+		log.Printf("Starting stack destruction for job: %s, stack: %s", jobID, stackName)
+		if err := h.pulumiExec.Destroy(jobID); err != nil {
+			log.Printf("Stack destruction failed for job %s: %v", jobID, err)
+			h.jobManager.SetError(jobID, fmt.Errorf("destroy failed: %w", err))
+			return
+		}
+		log.Printf("Stack destruction completed for job: %s", jobID)
+
+		// Remove the job after successful destruction
+		if err := h.jobManager.RemoveJob(jobID); err != nil {
+			log.Printf("Warning: failed to remove job %s after destruction: %v", jobID, err)
+		}
+	}()
+
+	// Return job status div for HTMX to display with proper polling (similar to CreateLab)
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `
+		<div class="job-created">
+			<h3>Stack Destruction Started: %s</h3>
+			<p>Destroying stack '%s' for job %s...</p>
+			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load, every 2s" hx-swap="innerHTML">
+				<p>Loading status...</p>
+			</div>
+		</div>`, jobID, stackName, jobID, jobID)
+}

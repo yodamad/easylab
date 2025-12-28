@@ -315,6 +315,109 @@ config:
 	return nil
 }
 
+// Destroy runs pulumi destroy and removes the stack for a given job
+func (pe *PulumiExecutor) Destroy(jobID string) error {
+	job, exists := pe.jobManager.GetJob(jobID)
+	if !exists {
+		err := fmt.Errorf("job %s not found", jobID)
+		log.Printf("Destroy error: %v", err)
+		return err
+	}
+
+	job.mu.RLock()
+	config := job.Config
+	stackName := ""
+	if config != nil {
+		stackName = config.StackName
+	}
+	job.mu.RUnlock()
+
+	if stackName == "" {
+		err := fmt.Errorf("job %s has no stack name", jobID)
+		log.Printf("Destroy error: %v", err)
+		return err
+	}
+
+	// Update status to running immediately
+	pe.jobManager.UpdateJobStatus(jobID, JobStatusRunning)
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy started at %s", time.Now().Format(time.RFC3339)))
+
+	// Find job directory
+	jobDir := filepath.Join(pe.workDir, jobID)
+	if _, err := os.Stat(jobDir); os.IsNotExist(err) {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Job directory not found: %s. Creating it...", jobDir))
+		if err := os.MkdirAll(jobDir, 0755); err != nil {
+			pe.jobManager.SetError(jobID, fmt.Errorf("failed to create job directory: %w", err))
+			return err
+		}
+
+		// Write Pulumi.yaml
+		pulumiYaml := `name: lab-as-code
+runtime: go
+description: OVHcloud Gateway and Managed Kubernetes infrastructure
+
+config:
+  ovh:endpoint: ` + config.OvhEndpoint + `
+`
+		if err := os.WriteFile(filepath.Join(jobDir, "Pulumi.yaml"), []byte(pulumiYaml), 0644); err != nil {
+			pe.jobManager.SetError(jobID, fmt.Errorf("failed to write Pulumi.yaml: %w", err))
+			return err
+		}
+
+		// Write Pulumi stack config
+		stackConfig := pe.generateStackConfig(config)
+		stackConfigFile := filepath.Join(jobDir, fmt.Sprintf("Pulumi.%s.yaml", stackName))
+		if err := os.WriteFile(stackConfigFile, []byte(stackConfig), 0644); err != nil {
+			pe.jobManager.SetError(jobID, fmt.Errorf("failed to write stack config: %w", err))
+			return err
+		}
+
+		// Copy source files (needed for pulumi destroy to know what to destroy)
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Copying source files from %s...", pe.projectRoot))
+		if err := pe.copySourceFiles(jobDir); err != nil {
+			pe.jobManager.SetError(jobID, fmt.Errorf("failed to copy source files: %w", err))
+			return err
+		}
+		pe.jobManager.AppendOutput(jobID, "Source files copied successfully")
+	}
+
+	// Set up environment variables
+	env := os.Environ()
+	env = append(env, fmt.Sprintf("OVH_APPLICATION_KEY=%s", config.OvhApplicationKey))
+	env = append(env, fmt.Sprintf("OVH_APPLICATION_SECRET=%s", config.OvhApplicationSecret))
+	env = append(env, fmt.Sprintf("OVH_CONSUMER_KEY=%s", config.OvhConsumerKey))
+	env = append(env, fmt.Sprintf("OVH_SERVICE_NAME=%s", config.OvhServiceName))
+
+	// Select the stack first
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Selecting Pulumi stack '%s'...", stackName))
+	if err := pe.runCommand(jobID, jobDir, env, "pulumi", "stack", "select", stackName, "--non-interactive"); err != nil {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to select stack: %v. Stack may not exist.", err))
+		// Continue anyway - stack might not exist
+	}
+
+	// Run pulumi destroy with streaming output
+	pe.jobManager.AppendOutput(jobID, "Running pulumi destroy --yes --non-interactive...")
+	if err := pe.runCommandWithStreaming(jobID, jobDir, env, "pulumi", "destroy", "--yes", "--non-interactive"); err != nil {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: pulumi destroy failed: %v. Continuing with stack removal...", err))
+		// Continue with stack removal even if destroy failed
+	}
+
+	// Remove the stack
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Removing Pulumi stack '%s'...", stackName))
+	if err := pe.runCommand(jobID, jobDir, env, "pulumi", "stack", "rm", stackName, "--yes", "--non-interactive"); err != nil {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to remove stack: %v", err))
+		// Don't fail the entire operation if stack removal fails
+	} else {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' removed successfully", stackName))
+	}
+
+	// Success
+	pe.jobManager.UpdateJobStatus(jobID, JobStatusCompleted)
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy completed at %s", time.Now().Format(time.RFC3339)))
+
+	return nil
+}
+
 // runCommand runs a command and captures output
 func (pe *PulumiExecutor) runCommand(jobID, dir string, env []string, name string, args ...string) error {
 	cmd := exec.Command(name, args...)

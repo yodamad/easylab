@@ -132,6 +132,7 @@ func main() {
 	mux.HandleFunc("/api/labs", authHandler.RequireAuth(handler.CreateLab))
 	mux.HandleFunc("/api/labs/dry-run", authHandler.RequireAuth(handler.DryRunLab))
 	mux.HandleFunc("/api/labs/launch", authHandler.RequireAuth(handler.LaunchLab))
+	mux.HandleFunc("/api/stacks/destroy", authHandler.RequireAuth(handler.DestroyStack))
 	mux.HandleFunc("/api/jobs/", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
 		// Check if this is a kubeconfig download request
 		if strings.HasSuffix(r.URL.Path, "/kubeconfig") {
