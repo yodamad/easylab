@@ -2,6 +2,8 @@ package server
 
 import (
 	"fmt"
+	"log"
+	"os"
 	"sync"
 )
 
@@ -14,17 +16,50 @@ type OVHCredentials struct {
 	Endpoint          string `json:"endpoint"`
 }
 
+// loadCredentialsFromEnv attempts to load OVH credentials from environment variables
+func loadCredentialsFromEnv() *OVHCredentials {
+	appKey := os.Getenv("OVH_APPLICATION_KEY")
+	appSecret := os.Getenv("OVH_APPLICATION_SECRET")
+	consumerKey := os.Getenv("OVH_CONSUMER_KEY")
+	serviceName := os.Getenv("OVH_SERVICE_NAME")
+	endpoint := os.Getenv("OVH_ENDPOINT")
+
+	// Check if all required environment variables are present
+	if appKey == "" || appSecret == "" || consumerKey == "" || serviceName == "" || endpoint == "" {
+		return nil
+	}
+
+	return &OVHCredentials{
+		ApplicationKey:    appKey,
+		ApplicationSecret: appSecret,
+		ConsumerKey:       consumerKey,
+		ServiceName:       serviceName,
+		Endpoint:          endpoint,
+	}
+}
+
 // CredentialsManager manages OVH credentials in memory
 type CredentialsManager struct {
 	credentials *OVHCredentials
 	mu          sync.RWMutex
 }
 
-// NewCredentialsManager creates a new credentials manager
+// NewCredentialsManager creates a new credentials manager and loads credentials from environment variables
 func NewCredentialsManager() *CredentialsManager {
-	return &CredentialsManager{
+	cm := &CredentialsManager{
 		credentials: nil,
 	}
+
+	// Try to load credentials from environment variables
+	if creds := loadCredentialsFromEnv(); creds != nil {
+		if err := cm.SetCredentials(creds); err != nil {
+			log.Printf("Warning: Failed to load OVH credentials from environment variables: %v", err)
+		} else {
+			log.Printf("[STARTUP] OVH credentials loaded from environment variables")
+		}
+	}
+
+	return cm
 }
 
 // SetCredentials stores OVH credentials in memory
