@@ -156,6 +156,240 @@ func (pe *PulumiExecutor) setStackConfig(ctx context.Context, stack auto.Stack, 
 	return nil
 }
 
+// JobPreparation holds the prepared resources for a Pulumi operation
+type JobPreparation struct {
+	Stack   auto.Stack
+	Writer  *jobOutputWriter
+	Context context.Context
+}
+
+// prepareJob handles all common setup logic for Pulumi operations
+func (pe *PulumiExecutor) prepareJob(jobID string, allowMissingDir bool) (*JobPreparation, error) {
+	// Validate job exists
+	job, exists := pe.jobManager.GetJob(jobID)
+	if !exists {
+		return nil, fmt.Errorf("job %s not found", jobID)
+	}
+	config := job.Config
+
+	// Create context
+	ctx := context.Background()
+
+	// Update status to running
+	pe.jobManager.UpdateJobStatus(jobID, JobStatusRunning)
+
+	// Create job directory
+	jobDir := filepath.Join(pe.workDir, jobID)
+
+	// Handle directory creation based on allowMissingDir flag
+	if allowMissingDir {
+		// For destroy operations - check if directory exists first
+		if _, err := os.Stat(jobDir); os.IsNotExist(err) {
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Job directory not found: %s. Creating it...", jobDir))
+			if err := os.MkdirAll(jobDir, 0755); err != nil {
+				pe.jobManager.SetError(jobID, fmt.Errorf("failed to create job directory: %w", err))
+				return nil, err
+			}
+		}
+	} else {
+		// For create/preview operations - always create directory
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Creating job directory: %s", jobDir))
+		if err := os.MkdirAll(jobDir, 0755); err != nil {
+			pe.jobManager.SetError(jobID, fmt.Errorf("failed to create job directory: %w", err))
+			return nil, err
+		}
+	}
+
+	// Write Pulumi.yaml
+	pe.jobManager.AppendOutput(jobID, "Writing Pulumi.yaml...")
+	pulumiYaml := `name: lab-as-code
+runtime: go
+description: OVHcloud Gateway and Managed Kubernetes infrastructure
+
+config:
+  ovh:endpoint: ` + config.OvhEndpoint + `
+`
+	if err := os.WriteFile(filepath.Join(jobDir, "Pulumi.yaml"), []byte(pulumiYaml), 0644); err != nil {
+		pe.jobManager.SetError(jobID, fmt.Errorf("failed to write Pulumi.yaml: %w", err))
+		return nil, err
+	}
+
+	// Copy source files
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Copying source files from %s...", pe.projectRoot))
+	if err := pe.copySourceFiles(jobDir); err != nil {
+		pe.jobManager.SetError(jobID, fmt.Errorf("failed to copy source files: %w", err))
+		return nil, err
+	}
+	pe.jobManager.AppendOutput(jobID, "Source files copied successfully")
+
+	// Set up environment variables
+	originalEnv := make(map[string]string)
+	envVars := map[string]string{
+		"OVH_APPLICATION_KEY":    config.OvhApplicationKey,
+		"OVH_APPLICATION_SECRET": config.OvhApplicationSecret,
+		"OVH_CONSUMER_KEY":       config.OvhConsumerKey,
+		"OVH_SERVICE_NAME":       config.OvhServiceName,
+	}
+
+	// Save original values and set new ones
+	for key, value := range envVars {
+		if original, exists := os.LookupEnv(key); exists {
+			originalEnv[key] = original
+		}
+		os.Setenv(key, value)
+	}
+
+	// Restore original env vars when done
+	defer func() {
+		for key, value := range originalEnv {
+			os.Setenv(key, value)
+		}
+		for key := range envVars {
+			if _, wasSet := originalEnv[key]; !wasSet {
+				os.Unsetenv(key)
+			}
+		}
+	}()
+
+	// Get or create stack
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Initializing Pulumi stack '%s'...", config.StackName))
+	stack, err := pe.getOrCreateStack(ctx, config.StackName, jobDir, jobID)
+	if err != nil {
+		pe.jobManager.SetError(jobID, fmt.Errorf("failed to get or create stack: %w", err))
+		return nil, err
+	}
+
+	// Set all config values
+	pe.jobManager.AppendOutput(jobID, "Setting Pulumi configuration...")
+	if err := pe.setStackConfig(ctx, stack, config); err != nil {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to set some config: %v", err))
+		// Continue anyway - some configs might already be set
+	}
+
+	// Create output writer for streaming
+	outputWriter := &jobOutputWriter{
+		jobID:      jobID,
+		jobManager: pe.jobManager,
+	}
+	defer outputWriter.Flush()
+
+	return &JobPreparation{
+		Stack:   stack,
+		Writer:  outputWriter,
+		Context: ctx,
+	}, nil
+}
+
+// prepareDestroyJob handles setup for destroy operations with special handling for missing stacks
+func (pe *PulumiExecutor) prepareDestroyJob(jobID string) (*JobPreparation, error) {
+	// Validate job exists
+	job, exists := pe.jobManager.GetJob(jobID)
+	if !exists {
+		return nil, fmt.Errorf("job %s not found", jobID)
+	}
+
+	job.mu.RLock()
+	config := job.Config
+	stackName := ""
+	if config != nil {
+		stackName = config.StackName
+	}
+	job.mu.RUnlock()
+
+	if stackName == "" {
+		return nil, fmt.Errorf("job %s has no stack name", jobID)
+	}
+
+	// Create context
+	ctx := context.Background()
+
+	// Update status to running
+	pe.jobManager.UpdateJobStatus(jobID, JobStatusRunning)
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy started at %s", time.Now().Format(time.RFC3339)))
+
+	// Find job directory
+	jobDir := filepath.Join(pe.workDir, jobID)
+	if _, err := os.Stat(jobDir); os.IsNotExist(err) {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Job directory not found: %s. Creating it...", jobDir))
+		if err := os.MkdirAll(jobDir, 0755); err != nil {
+			pe.jobManager.SetError(jobID, fmt.Errorf("failed to create job directory: %w", err))
+			return nil, err
+		}
+
+		// Write Pulumi.yaml
+		pulumiYaml := `name: lab-as-code
+runtime: go
+description: OVHcloud Gateway and Managed Kubernetes infrastructure
+
+config:
+  ovh:endpoint: ` + config.OvhEndpoint + `
+`
+		if err := os.WriteFile(filepath.Join(jobDir, "Pulumi.yaml"), []byte(pulumiYaml), 0644); err != nil {
+			pe.jobManager.SetError(jobID, fmt.Errorf("failed to write Pulumi.yaml: %w", err))
+			return nil, err
+		}
+
+		// Copy source files (needed for pulumi destroy to know what to destroy)
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Copying source files from %s...", pe.projectRoot))
+		if err := pe.copySourceFiles(jobDir); err != nil {
+			pe.jobManager.SetError(jobID, fmt.Errorf("failed to copy source files: %w", err))
+			return nil, err
+		}
+		pe.jobManager.AppendOutput(jobID, "Source files copied successfully")
+	}
+
+	// Set up environment variables
+	originalEnv := make(map[string]string)
+	envVars := map[string]string{
+		"OVH_APPLICATION_KEY":    config.OvhApplicationKey,
+		"OVH_APPLICATION_SECRET": config.OvhApplicationSecret,
+		"OVH_CONSUMER_KEY":       config.OvhConsumerKey,
+		"OVH_SERVICE_NAME":       config.OvhServiceName,
+	}
+
+	for key, value := range envVars {
+		if original, exists := os.LookupEnv(key); exists {
+			originalEnv[key] = original
+		}
+		os.Setenv(key, value)
+	}
+
+	defer func() {
+		for key, value := range originalEnv {
+			os.Setenv(key, value)
+		}
+		for key := range envVars {
+			if _, wasSet := originalEnv[key]; !wasSet {
+				os.Unsetenv(key)
+			}
+		}
+	}()
+
+	// Try to select the stack (don't create if it doesn't exist)
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Selecting Pulumi stack '%s'...", stackName))
+	stack, err := auto.SelectStackLocalSource(ctx, stackName, jobDir, auto.WorkDir(jobDir))
+	if err != nil {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to select stack: %v. Stack may not exist.", err))
+		// For destroy operations, if stack doesn't exist, we consider it already destroyed
+		pe.jobManager.UpdateJobStatus(jobID, JobStatusDestroyed)
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy completed at %s (stack did not exist)", time.Now().Format(time.RFC3339)))
+		return nil, nil // Special case: return nil to indicate stack didn't exist
+	}
+
+	// Create output writer for streaming
+	outputWriter := &jobOutputWriter{
+		jobID:      jobID,
+		jobManager: pe.jobManager,
+	}
+	defer outputWriter.Flush()
+
+	return &JobPreparation{
+		Stack:   stack,
+		Writer:  outputWriter,
+		Context: ctx,
+	}, nil
+}
+
 // findProjectRoot finds the project root by looking for go.mod
 // Checks PROJECT_ROOT environment variable first for faster startup
 func findProjectRoot() string {
@@ -192,106 +426,18 @@ func findProjectRoot() string {
 
 // Execute runs pulumi up for a given job
 func (pe *PulumiExecutor) Execute(jobID string) error {
-	job, exists := pe.jobManager.GetJob(jobID)
-	if !exists {
-		err := fmt.Errorf("job %s not found", jobID)
-		log.Printf("Execute error: %v", err)
-		return err
-	}
-
-	config := job.Config
-	ctx := context.Background()
-
-	// Update status to running immediately
-	pe.jobManager.UpdateJobStatus(jobID, JobStatusRunning)
-	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Job started at %s", time.Now().Format(time.RFC3339)))
-
-	// Create temporary directory for this job
-	jobDir := filepath.Join(pe.workDir, jobID)
-	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Creating job directory: %s", jobDir))
-
-	if err := os.MkdirAll(jobDir, 0755); err != nil {
-		pe.jobManager.SetError(jobID, fmt.Errorf("failed to create job directory: %w", err))
-		return err
-	}
-
-	// Write Pulumi.yaml
-	pe.jobManager.AppendOutput(jobID, "Writing Pulumi.yaml...")
-	pulumiYaml := `name: lab-as-code
-runtime: go
-description: OVHcloud Gateway and Managed Kubernetes infrastructure
-
-config:
-  ovh:endpoint: ` + config.OvhEndpoint + `
-`
-	if err := os.WriteFile(filepath.Join(jobDir, "Pulumi.yaml"), []byte(pulumiYaml), 0644); err != nil {
-		pe.jobManager.SetError(jobID, fmt.Errorf("failed to write Pulumi.yaml: %w", err))
-		return err
-	}
-
-	// Copy main.go and other source files to job directory
-	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Copying source files from %s...", pe.projectRoot))
-	if err := pe.copySourceFiles(jobDir); err != nil {
-		pe.jobManager.SetError(jobID, fmt.Errorf("failed to copy source files: %w", err))
-		return err
-	}
-	pe.jobManager.AppendOutput(jobID, "Source files copied successfully")
-
-	// Set up environment variables (needed for Pulumi program execution)
-	// Store original env vars and restore them after
-	originalEnv := make(map[string]string)
-	envVars := map[string]string{
-		"OVH_APPLICATION_KEY":    config.OvhApplicationKey,
-		"OVH_APPLICATION_SECRET": config.OvhApplicationSecret,
-		"OVH_CONSUMER_KEY":       config.OvhConsumerKey,
-		"OVH_SERVICE_NAME":       config.OvhServiceName,
-	}
-
-	// Save original values and set new ones
-	for key, value := range envVars {
-		if original, exists := os.LookupEnv(key); exists {
-			originalEnv[key] = original
-		}
-		os.Setenv(key, value)
-	}
-
-	// Restore original env vars when done
-	defer func() {
-		for key, value := range originalEnv {
-			os.Setenv(key, value)
-		}
-		for key := range envVars {
-			if _, wasSet := originalEnv[key]; !wasSet {
-				os.Unsetenv(key)
-			}
-		}
-	}()
-
-	// Get or create stack
-	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Initializing Pulumi stack '%s'...", config.StackName))
-	stack, err := pe.getOrCreateStack(ctx, config.StackName, jobDir, jobID)
+	// Prepare job with common setup
+	prep, err := pe.prepareJob(jobID, false) // false = always create directory
 	if err != nil {
-		pe.jobManager.SetError(jobID, fmt.Errorf("failed to get or create stack: %w", err))
 		return err
 	}
 
-	// Set all config values
-	pe.jobManager.AppendOutput(jobID, "Setting Pulumi configuration...")
-	if err := pe.setStackConfig(ctx, stack, config); err != nil {
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to set some config: %v", err))
-		// Continue anyway - some configs might already be set
-	}
-
-	// Create output writer for streaming
-	outputWriter := &jobOutputWriter{
-		jobID:      jobID,
-		jobManager: pe.jobManager,
-	}
-	defer outputWriter.Flush()
+	// Add execution-specific output
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Job started at %s", time.Now().Format(time.RFC3339)))
 
 	// Run pulumi up with streaming output
 	pe.jobManager.AppendOutput(jobID, "Running pulumi up...")
-	upResult, err := stack.Up(ctx, optup.ProgressStreams(outputWriter))
+	upResult, err := prep.Stack.Up(prep.Context, optup.ProgressStreams(prep.Writer))
 	if err != nil {
 		pe.jobManager.SetError(jobID, fmt.Errorf("pulumi up failed: %w", err))
 		return err
@@ -316,6 +462,9 @@ config:
 	// Extract Coder configuration from stack outputs
 	pe.jobManager.AppendOutput(jobID, "Extracting Coder configuration...")
 	if coderURLVal, ok := upResult.Outputs["coderServerURL"]; ok {
+		job, _ := pe.jobManager.GetJob(jobID) // We know job exists from prepareJob
+		config := job.Config
+
 		coderURL := pe.outputValueToString(coderURLVal)
 		if coderURL != "" {
 			coderSessionToken := ""
@@ -352,102 +501,18 @@ config:
 
 // Preview runs pulumi preview for a given job (dry run)
 func (pe *PulumiExecutor) Preview(jobID string) error {
-	job, exists := pe.jobManager.GetJob(jobID)
-	if !exists {
-		err := fmt.Errorf("job %s not found", jobID)
-		log.Printf("Preview error: %v", err)
-		return err
-	}
-
-	config := job.Config
-	ctx := context.Background()
-
-	// Update status to running immediately
-	pe.jobManager.UpdateJobStatus(jobID, JobStatusRunning)
-	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Dry run started at %s", time.Now().Format(time.RFC3339)))
-
-	// Create temporary directory for this job
-	jobDir := filepath.Join(pe.workDir, jobID)
-	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Creating job directory: %s", jobDir))
-
-	if err := os.MkdirAll(jobDir, 0755); err != nil {
-		pe.jobManager.SetError(jobID, fmt.Errorf("failed to create job directory: %w", err))
-		return err
-	}
-
-	// Write Pulumi.yaml
-	pe.jobManager.AppendOutput(jobID, "Writing Pulumi.yaml...")
-	pulumiYaml := `name: lab-as-code
-runtime: go
-description: OVHcloud Gateway and Managed Kubernetes infrastructure
-
-config:
-  ovh:endpoint: ` + config.OvhEndpoint + `
-`
-	if err := os.WriteFile(filepath.Join(jobDir, "Pulumi.yaml"), []byte(pulumiYaml), 0644); err != nil {
-		pe.jobManager.SetError(jobID, fmt.Errorf("failed to write Pulumi.yaml: %w", err))
-		return err
-	}
-
-	// Copy main.go and other source files to job directory
-	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Copying source files from %s...", pe.projectRoot))
-	if err := pe.copySourceFiles(jobDir); err != nil {
-		pe.jobManager.SetError(jobID, fmt.Errorf("failed to copy source files: %w", err))
-		return err
-	}
-	pe.jobManager.AppendOutput(jobID, "Source files copied successfully")
-
-	// Set up environment variables
-	originalEnv := make(map[string]string)
-	envVars := map[string]string{
-		"OVH_APPLICATION_KEY":    config.OvhApplicationKey,
-		"OVH_APPLICATION_SECRET": config.OvhApplicationSecret,
-		"OVH_CONSUMER_KEY":       config.OvhConsumerKey,
-		"OVH_SERVICE_NAME":       config.OvhServiceName,
-	}
-
-	for key, value := range envVars {
-		if original, exists := os.LookupEnv(key); exists {
-			originalEnv[key] = original
-		}
-		os.Setenv(key, value)
-	}
-
-	defer func() {
-		for key, value := range originalEnv {
-			os.Setenv(key, value)
-		}
-		for key := range envVars {
-			if _, wasSet := originalEnv[key]; !wasSet {
-				os.Unsetenv(key)
-			}
-		}
-	}()
-
-	// Get or create stack
-	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Initializing Pulumi stack '%s'...", config.StackName))
-	stack, err := pe.getOrCreateStack(ctx, config.StackName, jobDir, jobID)
+	// Prepare job with common setup
+	prep, err := pe.prepareJob(jobID, false) // false = always create directory
 	if err != nil {
-		pe.jobManager.SetError(jobID, fmt.Errorf("failed to get or create stack: %w", err))
 		return err
 	}
 
-	// Set all config values
-	pe.jobManager.AppendOutput(jobID, "Setting Pulumi configuration...")
-	if err := pe.setStackConfig(ctx, stack, config); err != nil {
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to set some config: %v", err))
-	}
-
-	// Create output writer for streaming
-	outputWriter := &jobOutputWriter{
-		jobID:      jobID,
-		jobManager: pe.jobManager,
-	}
-	defer outputWriter.Flush()
+	// Add preview-specific output
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Dry run started at %s", time.Now().Format(time.RFC3339)))
 
 	// Run pulumi preview with streaming output
 	pe.jobManager.AppendOutput(jobID, "Running pulumi preview (dry run)...")
-	_, err = stack.Preview(ctx, optpreview.ProgressStreams(outputWriter))
+	_, err = prep.Stack.Preview(prep.Context, optpreview.ProgressStreams(prep.Writer))
 	if err != nil {
 		pe.jobManager.SetError(jobID, fmt.Errorf("pulumi preview failed: %w", err))
 		return err
@@ -463,112 +528,26 @@ config:
 
 // Destroy runs pulumi destroy and removes the stack for a given job
 func (pe *PulumiExecutor) Destroy(jobID string) error {
-	job, exists := pe.jobManager.GetJob(jobID)
-	if !exists {
-		err := fmt.Errorf("job %s not found", jobID)
-		log.Printf("Destroy error: %v", err)
-		return err
-	}
-
-	job.mu.RLock()
-	config := job.Config
-	stackName := ""
-	if config != nil {
-		stackName = config.StackName
-	}
-	job.mu.RUnlock()
-
-	if stackName == "" {
-		err := fmt.Errorf("job %s has no stack name", jobID)
-		log.Printf("Destroy error: %v", err)
-		return err
-	}
-
-	ctx := context.Background()
-
-	// Update status to running immediately
-	pe.jobManager.UpdateJobStatus(jobID, JobStatusRunning)
-	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy started at %s", time.Now().Format(time.RFC3339)))
-
-	// Find job directory
-	jobDir := filepath.Join(pe.workDir, jobID)
-	if _, err := os.Stat(jobDir); os.IsNotExist(err) {
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Job directory not found: %s. Creating it...", jobDir))
-		if err := os.MkdirAll(jobDir, 0755); err != nil {
-			pe.jobManager.SetError(jobID, fmt.Errorf("failed to create job directory: %w", err))
-			return err
-		}
-
-		// Write Pulumi.yaml
-		pulumiYaml := `name: lab-as-code
-runtime: go
-description: OVHcloud Gateway and Managed Kubernetes infrastructure
-
-config:
-  ovh:endpoint: ` + config.OvhEndpoint + `
-`
-		if err := os.WriteFile(filepath.Join(jobDir, "Pulumi.yaml"), []byte(pulumiYaml), 0644); err != nil {
-			pe.jobManager.SetError(jobID, fmt.Errorf("failed to write Pulumi.yaml: %w", err))
-			return err
-		}
-
-		// Copy source files (needed for pulumi destroy to know what to destroy)
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Copying source files from %s...", pe.projectRoot))
-		if err := pe.copySourceFiles(jobDir); err != nil {
-			pe.jobManager.SetError(jobID, fmt.Errorf("failed to copy source files: %w", err))
-			return err
-		}
-		pe.jobManager.AppendOutput(jobID, "Source files copied successfully")
-	}
-
-	// Set up environment variables
-	originalEnv := make(map[string]string)
-	envVars := map[string]string{
-		"OVH_APPLICATION_KEY":    config.OvhApplicationKey,
-		"OVH_APPLICATION_SECRET": config.OvhApplicationSecret,
-		"OVH_CONSUMER_KEY":       config.OvhConsumerKey,
-		"OVH_SERVICE_NAME":       config.OvhServiceName,
-	}
-
-	for key, value := range envVars {
-		if original, exists := os.LookupEnv(key); exists {
-			originalEnv[key] = original
-		}
-		os.Setenv(key, value)
-	}
-
-	defer func() {
-		for key, value := range originalEnv {
-			os.Setenv(key, value)
-		}
-		for key := range envVars {
-			if _, wasSet := originalEnv[key]; !wasSet {
-				os.Unsetenv(key)
-			}
-		}
-	}()
-
-	// Try to select the stack
-	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Selecting Pulumi stack '%s'...", stackName))
-	stack, err := auto.SelectStackLocalSource(ctx, stackName, jobDir, auto.WorkDir(jobDir))
+	// Prepare job with destroy-specific setup
+	prep, err := pe.prepareDestroyJob(jobID)
 	if err != nil {
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to select stack: %v. Stack may not exist.", err))
-		// Continue anyway - stack might not exist, mark as destroyed
-		pe.jobManager.UpdateJobStatus(jobID, JobStatusDestroyed)
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy completed at %s (stack did not exist)", time.Now().Format(time.RFC3339)))
+		return err
+	}
+
+	// Special case: stack didn't exist, already handled in prepareDestroyJob
+	if prep == nil {
 		return nil
 	}
 
-	// Create output writer for streaming
-	outputWriter := &jobOutputWriter{
-		jobID:      jobID,
-		jobManager: pe.jobManager,
-	}
-	defer outputWriter.Flush()
+	// Get stack name for output
+	job, _ := pe.jobManager.GetJob(jobID)
+	job.mu.RLock()
+	stackName := job.Config.StackName
+	job.mu.RUnlock()
 
 	// Run pulumi destroy with streaming output
 	pe.jobManager.AppendOutput(jobID, "Running pulumi destroy...")
-	_, err = stack.Destroy(ctx, optdestroy.ProgressStreams(outputWriter))
+	_, err = prep.Stack.Destroy(prep.Context, optdestroy.ProgressStreams(prep.Writer))
 	if err != nil {
 		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: pulumi destroy failed: %v. Continuing with stack removal...", err))
 		// Continue with stack removal even if destroy failed

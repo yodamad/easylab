@@ -35,6 +35,173 @@ func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsM
 	}
 }
 
+// parseForm handles both multipart and urlencoded form data parsing
+func (h *Handler) parseForm(w http.ResponseWriter, r *http.Request, maxSize int64) error {
+	if maxSize == 0 {
+		maxSize = 10 << 20 // 10MB default
+	}
+
+	contentType := r.Header.Get("Content-Type")
+	log.Printf("Content-Type: %s", contentType)
+
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		if err := r.ParseMultipartForm(maxSize); err != nil {
+			log.Printf("Failed to parse multipart form: %v", err)
+			return err
+		}
+	} else {
+		if err := r.ParseForm(); err != nil {
+			log.Printf("Failed to parse form: %v", err)
+			return err
+		}
+	}
+	log.Printf("Form parsed successfully")
+	return nil
+}
+
+// getOVHCredentials retrieves OVH credentials and returns an HTML error if not configured
+func (h *Handler) getOVHCredentials(w http.ResponseWriter) (*OVHCredentials, error) {
+	ovhCreds, err := h.credentialsManager.GetCredentials()
+	if err != nil {
+		log.Printf("OVH credentials not configured: %v", err)
+		h.renderHTMLError(w, "OVH Credentials Not Configured", "Please configure your OVH credentials first.", `<a href="/ovh-credentials" class="btn btn-primary">Configure OVH Credentials</a>`)
+		return nil, err
+	}
+	return ovhCreds, nil
+}
+
+// createLabConfigFromForm creates a LabConfig from form data and OVH credentials
+func (h *Handler) createLabConfigFromForm(r *http.Request, ovhCreds *OVHCredentials) *LabConfig {
+	// Parse integer fields
+	desiredNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_desired_node_count"))
+	minNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_min_node_count"))
+	maxNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_max_node_count"))
+
+	// Get stack name with default
+	stackName := r.FormValue("stack_name")
+	if stackName == "" {
+		stackName = "dev"
+	}
+
+	return &LabConfig{
+		StackName: stackName,
+
+		// Use credentials from in-memory storage
+		OvhApplicationKey:    ovhCreds.ApplicationKey,
+		OvhApplicationSecret: ovhCreds.ApplicationSecret,
+		OvhConsumerKey:       ovhCreds.ConsumerKey,
+		OvhServiceName:       ovhCreds.ServiceName,
+		OvhEndpoint:          ovhCreds.Endpoint,
+
+		NetworkGatewayName:        r.FormValue("network_gateway_name"),
+		NetworkGatewayModel:       r.FormValue("network_gateway_model"),
+		NetworkPrivateNetworkName: r.FormValue("network_private_network_name"),
+		NetworkRegion:             r.FormValue("network_region"),
+		NetworkMask:               r.FormValue("network_mask"),
+		NetworkStartIP:            r.FormValue("network_start_ip"),
+		NetworkEndIP:              r.FormValue("network_end_ip"),
+		NetworkID:                 r.FormValue("network_id"),
+
+		K8sClusterName: r.FormValue("k8s_cluster_name"),
+
+		NodePoolName:             r.FormValue("nodepool_name"),
+		NodePoolFlavor:           r.FormValue("nodepool_flavor"),
+		NodePoolDesiredNodeCount: desiredNodeCount,
+		NodePoolMinNodeCount:     minNodeCount,
+		NodePoolMaxNodeCount:     maxNodeCount,
+
+		CoderAdminEmail:    r.FormValue("coder_admin_email"),
+		CoderAdminPassword: r.FormValue("coder_admin_password"),
+		CoderVersion:       r.FormValue("coder_version"),
+		CoderDbUser:        r.FormValue("coder_db_user"),
+		CoderDbPassword:    r.FormValue("coder_db_password"),
+		CoderDbName:        r.FormValue("coder_db_name"),
+		CoderTemplateName:  r.FormValue("coder_template_name"),
+	}
+}
+
+// executeLabJob creates a job and starts execution, returning the job ID and HTML response
+func (h *Handler) executeLabJob(config *LabConfig, isDryRun bool) (string, string) {
+	// Create job
+	jobID := h.jobManager.CreateJob(config)
+
+	if isDryRun {
+		log.Printf("Dry run job created: %s", jobID)
+	} else {
+		log.Printf("Job created: %s", jobID)
+	}
+
+	// Start execution in a goroutine
+	go func() {
+		if isDryRun {
+			log.Printf("Starting Pulumi preview for job: %s", jobID)
+			if err := h.pulumiExec.Preview(jobID); err != nil {
+				log.Printf("Pulumi preview failed for job %s: %v", jobID, err)
+				return
+			}
+			log.Printf("Pulumi preview completed for job: %s", jobID)
+		} else {
+			log.Printf("Starting Pulumi execution for job: %s", jobID)
+			if err := h.pulumiExec.Execute(jobID); err != nil {
+				log.Printf("Pulumi execution failed for job %s: %v", jobID, err)
+				return
+			}
+			log.Printf("Pulumi execution completed for job: %s", jobID)
+		}
+	}()
+
+	// Prepare response
+	title := fmt.Sprintf("Job Created: %s", jobID)
+	if isDryRun {
+		title = fmt.Sprintf("Dry Run Started: %s", jobID)
+	}
+
+	html := fmt.Sprintf(`
+		<div class="job-created">
+			<h3>%s</h3>
+			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load, every 2s" hx-swap="innerHTML">
+				<p>Loading status...</p>
+			</div>
+		</div>`, title, jobID)
+
+	return jobID, html
+}
+
+// serveTemplate serves a template with optional data and no-cache headers
+func (h *Handler) serveTemplate(w http.ResponseWriter, templateName string, data interface{}) error {
+	// Use cached template
+	tmpl, err := h.getTemplate(templateName)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load template: %v", err), http.StatusInternalServerError)
+		return err
+	}
+
+	// Prevent caching
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	if err := tmpl.Execute(w, data); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to execute template: %v", err), http.StatusInternalServerError)
+		return err
+	}
+
+	return nil
+}
+
+// renderHTMLError renders a standardized HTML error message
+func (h *Handler) renderHTMLError(w http.ResponseWriter, title, message string, optionalLink ...string) {
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `<div class="error-message">`)
+	fmt.Fprintf(w, `<h3>%s</h3>`, template.HTMLEscapeString(title))
+	fmt.Fprintf(w, `<p>%s</p>`, template.HTMLEscapeString(message))
+	if len(optionalLink) > 0 {
+		fmt.Fprint(w, optionalLink[0])
+	}
+	fmt.Fprintf(w, `</div>`)
+}
+
 // getTemplate retrieves a cached template by filename, loading it lazily if needed
 func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 	// Fast path: check cache first
@@ -56,7 +223,7 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 
 	// Map filename to full path
 	templatePaths := map[string]string{
-		"index.html":            "web/index.html",
+		"index.html":             "web/index.html",
 		"admin.html":             "web/admin.html",
 		"student-dashboard.html": "web/student-dashboard.html",
 		"ovh-credentials.html":   "web/ovh-credentials.html",
@@ -85,51 +252,19 @@ func (h *Handler) ServeUI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Use cached template
-	tmpl, err := h.getTemplate("index.html")
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to load template: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	// Prevent caching
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Expires", "0")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
-	if err := tmpl.Execute(w, nil); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to execute template: %v", err), http.StatusInternalServerError)
-		return
-	}
+	h.serveTemplate(w, "index.html", nil)
 }
 
 // ServeAdminUI serves the admin HTML UI
 func (h *Handler) ServeAdminUI(w http.ResponseWriter, r *http.Request) {
-	// Use cached template
-	tmpl, err := h.getTemplate("admin.html")
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to load template: %v", err), http.StatusInternalServerError)
-		return
-	}
-
 	// Check if credentials are configured
 	hasCredentials := h.credentialsManager.HasCredentials()
-
-	// Prevent caching
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Expires", "0")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	data := map[string]interface{}{
 		"HasCredentials": hasCredentials,
 	}
 
-	if err := tmpl.Execute(w, data); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to execute template: %v", err), http.StatusInternalServerError)
-		return
-	}
+	h.serveTemplate(w, "admin.html", data)
 }
 
 // CreateLab handles lab creation requests
@@ -143,108 +278,23 @@ func (h *Handler) CreateLab(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse form data - handle both multipart and urlencoded
-	contentType := r.Header.Get("Content-Type")
-	log.Printf("Content-Type: %s", contentType)
-
-	if strings.HasPrefix(contentType, "multipart/form-data") {
-		if err := r.ParseMultipartForm(10 << 20); err != nil { // 10MB max
-			log.Printf("Failed to parse multipart form: %v", err)
-			http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
-			return
-		}
-	} else {
-		if err := r.ParseForm(); err != nil {
-			log.Printf("Failed to parse form: %v", err)
-			http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
-			return
-		}
-	}
-	log.Printf("Form parsed successfully")
-
-	// Get OVH credentials from in-memory storage
-	ovhCreds, err := h.credentialsManager.GetCredentials()
-	if err != nil {
-		log.Printf("OVH credentials not configured: %v", err)
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, `
-			<div class="error-message">
-				<h3>OVH Credentials Not Configured</h3>
-				<p>Please configure your OVH credentials first before creating a lab.</p>
-				<a href="/ovh-credentials" class="btn btn-primary">Configure OVH Credentials</a>
-			</div>`)
+	if err := h.parseForm(w, r, 10<<20); err != nil {
 		return
 	}
 
-	// Parse integer fields
-	desiredNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_desired_node_count"))
-	minNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_min_node_count"))
-	maxNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_max_node_count"))
-
-	// Get stack name with default
-	stackName := r.FormValue("stack_name")
-	if stackName == "" {
-		stackName = "dev"
+	// Get OVH credentials from in-memory storage
+	ovhCreds, err := h.getOVHCredentials(w)
+	if err != nil {
+		return
 	}
 
-	config := &LabConfig{
-		StackName: stackName,
+	config := h.createLabConfigFromForm(r, ovhCreds)
 
-		// Use credentials from in-memory storage
-		OvhApplicationKey:    ovhCreds.ApplicationKey,
-		OvhApplicationSecret: ovhCreds.ApplicationSecret,
-		OvhConsumerKey:       ovhCreds.ConsumerKey,
-		OvhServiceName:       ovhCreds.ServiceName,
-		OvhEndpoint:          ovhCreds.Endpoint,
-
-		NetworkGatewayName:        r.FormValue("network_gateway_name"),
-		NetworkGatewayModel:       r.FormValue("network_gateway_model"),
-		NetworkPrivateNetworkName: r.FormValue("network_private_network_name"),
-		NetworkRegion:             r.FormValue("network_region"),
-		NetworkMask:               r.FormValue("network_mask"),
-		NetworkStartIP:            r.FormValue("network_start_ip"),
-		NetworkEndIP:              r.FormValue("network_end_ip"),
-		NetworkID:                 r.FormValue("network_id"),
-
-		K8sClusterName: r.FormValue("k8s_cluster_name"),
-
-		NodePoolName:             r.FormValue("nodepool_name"),
-		NodePoolFlavor:           r.FormValue("nodepool_flavor"),
-		NodePoolDesiredNodeCount: desiredNodeCount,
-		NodePoolMinNodeCount:     minNodeCount,
-		NodePoolMaxNodeCount:     maxNodeCount,
-
-		CoderAdminEmail:    r.FormValue("coder_admin_email"),
-		CoderAdminPassword: r.FormValue("coder_admin_password"),
-		CoderVersion:       r.FormValue("coder_version"),
-		CoderDbUser:        r.FormValue("coder_db_user"),
-		CoderDbPassword:    r.FormValue("coder_db_password"),
-		CoderDbName:        r.FormValue("coder_db_name"),
-		CoderTemplateName:  r.FormValue("coder_template_name"),
-	}
-
-	// Create job
-	jobID := h.jobManager.CreateJob(config)
-	log.Printf("Job created: %s", jobID)
-
-	// Start Pulumi execution in a goroutine
-	go func() {
-		log.Printf("Starting Pulumi execution for job: %s", jobID)
-		if err := h.pulumiExec.Execute(jobID); err != nil {
-			log.Printf("Pulumi execution failed for job %s: %v", jobID, err)
-			return
-		}
-		log.Printf("Pulumi execution completed for job: %s", jobID)
-	}()
+	_, html := h.executeLabJob(config, false)
 
 	// Return job status div for HTMX to display with proper polling
 	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprintf(w, `
-		<div class="job-created">
-			<h3>Job Created: %s</h3>
-			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load, every 2s" hx-swap="innerHTML">
-				<p>Loading status...</p>
-			</div>
-		</div>`, jobID, jobID)
+	fmt.Fprint(w, html)
 }
 
 // DryRunLab handles dry run requests
@@ -258,108 +308,23 @@ func (h *Handler) DryRunLab(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse form data - handle both multipart and urlencoded
-	contentType := r.Header.Get("Content-Type")
-	log.Printf("Content-Type: %s", contentType)
-
-	if strings.HasPrefix(contentType, "multipart/form-data") {
-		if err := r.ParseMultipartForm(10 << 20); err != nil { // 10MB max
-			log.Printf("Failed to parse multipart form: %v", err)
-			http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
-			return
-		}
-	} else {
-		if err := r.ParseForm(); err != nil {
-			log.Printf("Failed to parse form: %v", err)
-			http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
-			return
-		}
-	}
-	log.Printf("Form parsed successfully")
-
-	// Get OVH credentials from in-memory storage
-	ovhCreds, err := h.credentialsManager.GetCredentials()
-	if err != nil {
-		log.Printf("OVH credentials not configured: %v", err)
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, `
-			<div class="error-message">
-				<h3>OVH Credentials Not Configured</h3>
-				<p>Please configure your OVH credentials first before running a dry run.</p>
-				<a href="/ovh-credentials" class="btn btn-primary">Configure OVH Credentials</a>
-			</div>`)
+	if err := h.parseForm(w, r, 10<<20); err != nil {
 		return
 	}
 
-	// Parse integer fields
-	desiredNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_desired_node_count"))
-	minNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_min_node_count"))
-	maxNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_max_node_count"))
-
-	// Get stack name with default
-	stackName := r.FormValue("stack_name")
-	if stackName == "" {
-		stackName = "dev"
+	// Get OVH credentials from in-memory storage
+	ovhCreds, err := h.getOVHCredentials(w)
+	if err != nil {
+		return
 	}
 
-	config := &LabConfig{
-		StackName: stackName,
+	config := h.createLabConfigFromForm(r, ovhCreds)
 
-		// Use credentials from in-memory storage
-		OvhApplicationKey:    ovhCreds.ApplicationKey,
-		OvhApplicationSecret: ovhCreds.ApplicationSecret,
-		OvhConsumerKey:       ovhCreds.ConsumerKey,
-		OvhServiceName:       ovhCreds.ServiceName,
-		OvhEndpoint:          ovhCreds.Endpoint,
-
-		NetworkGatewayName:        r.FormValue("network_gateway_name"),
-		NetworkGatewayModel:       r.FormValue("network_gateway_model"),
-		NetworkPrivateNetworkName: r.FormValue("network_private_network_name"),
-		NetworkRegion:             r.FormValue("network_region"),
-		NetworkMask:               r.FormValue("network_mask"),
-		NetworkStartIP:            r.FormValue("network_start_ip"),
-		NetworkEndIP:              r.FormValue("network_end_ip"),
-		NetworkID:                 r.FormValue("network_id"),
-
-		K8sClusterName: r.FormValue("k8s_cluster_name"),
-
-		NodePoolName:             r.FormValue("nodepool_name"),
-		NodePoolFlavor:           r.FormValue("nodepool_flavor"),
-		NodePoolDesiredNodeCount: desiredNodeCount,
-		NodePoolMinNodeCount:     minNodeCount,
-		NodePoolMaxNodeCount:     maxNodeCount,
-
-		CoderAdminEmail:    r.FormValue("coder_admin_email"),
-		CoderAdminPassword: r.FormValue("coder_admin_password"),
-		CoderVersion:       r.FormValue("coder_version"),
-		CoderDbUser:        r.FormValue("coder_db_user"),
-		CoderDbPassword:    r.FormValue("coder_db_password"),
-		CoderDbName:        r.FormValue("coder_db_name"),
-		CoderTemplateName:  r.FormValue("coder_template_name"),
-	}
-
-	// Create job
-	jobID := h.jobManager.CreateJob(config)
-	log.Printf("Dry run job created: %s", jobID)
-
-	// Start Pulumi preview in a goroutine
-	go func() {
-		log.Printf("Starting Pulumi preview for job: %s", jobID)
-		if err := h.pulumiExec.Preview(jobID); err != nil {
-			log.Printf("Pulumi preview failed for job %s: %v", jobID, err)
-			return
-		}
-		log.Printf("Pulumi preview completed for job: %s", jobID)
-	}()
+	_, html := h.executeLabJob(config, true)
 
 	// Return job status div for HTMX to display with proper polling
 	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprintf(w, `
-		<div class="job-created">
-			<h3>Dry Run Started: %s</h3>
-			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load, every 2s" hx-swap="innerHTML">
-				<p>Loading status...</p>
-			</div>
-		</div>`, jobID, jobID)
+	fmt.Fprint(w, html)
 }
 
 // LaunchLab handles launching a real deployment after a successful dry run
@@ -600,22 +565,7 @@ func (h *Handler) DownloadKubeconfig(w http.ResponseWriter, r *http.Request) {
 
 // ServeStudentDashboard serves the student dashboard page
 func (h *Handler) ServeStudentDashboard(w http.ResponseWriter, r *http.Request) {
-	// Use cached template
-	tmpl, err := h.getTemplate("student-dashboard.html")
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to load template: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	// Prevent caching
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Expires", "0")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
-	if err := tmpl.Execute(w, nil); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to execute template: %v", err), http.StatusInternalServerError)
-	}
+	h.serveTemplate(w, "student-dashboard.html", nil)
 }
 
 // ListLabs returns a list of completed jobs (labs) available for workspace requests
@@ -645,19 +595,8 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse form data - handle both application/x-www-form-urlencoded and multipart/form-data
-	contentType := r.Header.Get("Content-Type")
-	if strings.Contains(contentType, "multipart/form-data") {
-		if err := r.ParseMultipartForm(32 << 20); err != nil { // 32MB max
-			log.Printf("Failed to parse multipart form: %v", err)
-			http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
-			return
-		}
-	} else {
-		if err := r.ParseForm(); err != nil {
-			log.Printf("Failed to parse form: %v", err)
-			http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
-			return
-		}
+	if err := h.parseForm(w, r, 32<<20); err != nil {
+		return
 	}
 
 	// Try PostFormValue first (POST-only), then FormValue (includes query params)
@@ -672,7 +611,6 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Debug logging - show all form values
-	log.Printf("RequestWorkspace - Content-Type: %s", contentType)
 	log.Printf("RequestWorkspace - PostForm: %v", r.PostForm)
 	log.Printf("RequestWorkspace - Form: %v", r.Form)
 	log.Printf("RequestWorkspace - Email: %q, LabID: %q", email, labID)
@@ -810,13 +748,6 @@ func getFormKeys(r *http.Request) []string {
 
 // ServeOVHCredentials serves the OVH credentials configuration page
 func (h *Handler) ServeOVHCredentials(w http.ResponseWriter, r *http.Request) {
-	// Use cached template
-	tmpl, err := h.getTemplate("ovh-credentials.html")
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to load template: %v", err), http.StatusInternalServerError)
-		return
-	}
-
 	// Get current credentials status (without exposing secrets)
 	var currentCreds map[string]interface{}
 	creds, err := h.credentialsManager.GetCredentials()
@@ -832,19 +763,11 @@ func (h *Handler) ServeOVHCredentials(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Prevent caching
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Expires", "0")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
 	data := map[string]interface{}{
 		"CurrentCreds": currentCreds,
 	}
 
-	if err := tmpl.Execute(w, data); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to execute template: %v", err), http.StatusInternalServerError)
-	}
+	h.serveTemplate(w, "ovh-credentials.html", data)
 }
 
 // SetOVHCredentials handles setting OVH credentials
@@ -861,34 +784,11 @@ func (h *Handler) SetOVHCredentials(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse form data - handle both multipart and urlencoded
-	contentType := r.Header.Get("Content-Type")
-	log.Printf("SetOVHCredentials - Content-Type: %s", contentType)
-
-	if strings.HasPrefix(contentType, "multipart/form-data") {
-		if err := r.ParseMultipartForm(10 << 20); err != nil { // 10MB max
-			log.Printf("Failed to parse multipart form: %v", err)
-			w.Header().Set("Content-Type", "text/html")
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `
-				<div class="error-message">
-					<h3>Failed to Parse Form</h3>
-					<p>%s</p>
-				</div>`, template.HTMLEscapeString(err.Error()))
-			return
-		}
-	} else {
-		// Handle application/x-www-form-urlencoded (default for HTMX)
-		if err := r.ParseForm(); err != nil {
-			log.Printf("Failed to parse form: %v", err)
-			w.Header().Set("Content-Type", "text/html")
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `
-				<div class="error-message">
-					<h3>Failed to Parse Form</h3>
-					<p>%s</p>
-				</div>`, template.HTMLEscapeString(err.Error()))
-			return
-		}
+	if err := h.parseForm(w, r, 10<<20); err != nil {
+		// Return HTML error for HTMX compatibility
+		w.WriteHeader(http.StatusBadRequest)
+		h.renderHTMLError(w, "Failed to Parse Form", err.Error())
+		return
 	}
 
 	// Debug: log received form values (without secrets)
@@ -995,28 +895,21 @@ func (h *Handler) GetOVHCredentials(w http.ResponseWriter, r *http.Request) {
 
 // ServeJobsList serves the jobs list page
 func (h *Handler) ServeJobsList(w http.ResponseWriter, r *http.Request) {
-	// Use cached template
-	tmpl, err := h.getTemplate("jobs-list.html")
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to load template: %v", err), http.StatusInternalServerError)
-		return
-	}
-
 	// Get all jobs
 	allJobs := h.jobManager.GetAllJobs()
 
 	// Prepare job data for template (without sensitive info)
 	type JobDisplay struct {
-		ID          string
-		Status      string
-		CreatedAt   string
-		UpdatedAt   string
-		StackName   string
-		IsDryRun    bool
-		HasError    bool
-		ErrorMsg    string
+		ID            string
+		Status        string
+		CreatedAt     string
+		UpdatedAt     string
+		StackName     string
+		IsDryRun      bool
+		HasError      bool
+		ErrorMsg      string
 		HasKubeconfig bool
-		IsDestroyed bool
+		IsDestroyed   bool
 	}
 
 	jobsDisplay := make([]JobDisplay, 0, len(allJobs))
@@ -1050,20 +943,12 @@ func (h *Handler) ServeJobsList(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Prevent caching
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Expires", "0")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
 	data := map[string]interface{}{
-		"Jobs": jobsDisplay,
+		"Jobs":  jobsDisplay,
 		"Count": len(jobsDisplay),
 	}
 
-	if err := tmpl.Execute(w, data); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to execute template: %v", err), http.StatusInternalServerError)
-	}
+	h.serveTemplate(w, "jobs-list.html", data)
 }
 
 // DestroyStack handles stack destruction requests
@@ -1191,16 +1076,8 @@ func (h *Handler) RecreateLab(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get OVH credentials from in-memory storage (they might have changed)
-	ovhCreds, err := h.credentialsManager.GetCredentials()
+	ovhCreds, err := h.getOVHCredentials(w)
 	if err != nil {
-		log.Printf("OVH credentials not configured: %v", err)
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, `
-			<div class="error-message">
-				<h3>OVH Credentials Not Configured</h3>
-				<p>Please configure your OVH credentials first before recreating a lab.</p>
-				<a href="/ovh-credentials" class="btn btn-primary">Configure OVH Credentials</a>
-			</div>`)
 		return
 	}
 
