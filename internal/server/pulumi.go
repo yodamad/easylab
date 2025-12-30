@@ -490,6 +490,12 @@ func (pe *PulumiExecutor) Execute(jobID string) error {
 	pe.jobManager.UpdateJobStatus(jobID, JobStatusCompleted)
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Deployment completed successfully at %s", time.Now().Format(time.RFC3339)))
 
+	// Clean up the job directory since all necessary data has been extracted
+	if err := pe.cleanupJobDirectory(jobID); err != nil {
+		log.Printf("Warning: failed to cleanup job directory for %s: %v", jobID, err)
+		// Don't fail the job if cleanup fails
+	}
+
 	// Persist completed job to disk
 	if err := pe.jobManager.SaveJob(jobID); err != nil {
 		log.Printf("Warning: failed to persist job %s: %v", jobID, err)
@@ -564,6 +570,31 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy completed at %s", time.Now().Format(time.RFC3339)))
 	pe.jobManager.AppendOutput(jobID, "✅ Stack destroyed successfully. You can recreate it using the same configuration.")
 
+	// Clean up the job directory since all resources have been destroyed
+	if err := pe.cleanupJobDirectory(jobID); err != nil {
+		log.Printf("Warning: failed to cleanup job directory for %s: %v", jobID, err)
+		// Don't fail the job if cleanup fails
+	}
+
+	return nil
+}
+
+// cleanupJobDirectory removes the job's working directory after successful completion
+func (pe *PulumiExecutor) cleanupJobDirectory(jobID string) error {
+	jobDir := filepath.Join(pe.workDir, jobID)
+
+	// Check if directory exists
+	if _, err := os.Stat(jobDir); os.IsNotExist(err) {
+		// Directory already doesn't exist, nothing to clean up
+		return nil
+	}
+
+	// Remove the entire job directory
+	if err := os.RemoveAll(jobDir); err != nil {
+		return fmt.Errorf("failed to remove job directory %s: %w", jobDir, err)
+	}
+
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Cleaned up job directory: %s", jobDir))
 	return nil
 }
 
