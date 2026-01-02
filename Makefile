@@ -71,6 +71,14 @@ test-pkg:
 test-short:
 	$(GOTEST) -short -v ./...
 
+# Run only chaos tests
+test-chaos:
+	$(GOTEST) -race -v ./internal/server/... -run "Chaos"
+
+# Run unit tests (excluding chaos tests)
+test-unit:
+	$(GOTEST) -v ./internal/server/... -run "^Test[^C]"
+
 ## Coverage targets
 
 # Run tests with coverage
@@ -161,6 +169,8 @@ help:
 	@echo "  test-race      - Run tests with race detector"
 	@echo "  test-pkg       - Run tests for a specific package (PKG=./path)"
 	@echo "  test-short     - Run only short tests"
+	@echo "  test-chaos     - Run only chaos tests (with race detector)"
+	@echo "  test-unit      - Run only unit tests (exclude chaos)"
 	@echo ""
 	@echo "Coverage targets:"
 	@echo "  coverage       - Run tests with coverage and show summary"
@@ -177,4 +187,7 @@ help:
 	@echo "  ci             - Run all CI checks"
 	@echo "  ci-coverage    - Run tests and generate coverage for CI"
 	@echo "  help           - Show this help message"
+	@echo ""
+	@echo "Documentation:"
+	@echo "  See TESTING.md for comprehensive test documentation"
 
