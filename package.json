@@ -6,7 +6,13 @@
     "test": "playwright test",
     "test:ui": "playwright test --ui",
     "test:headed": "playwright test --headed",
-    "test:debug": "playwright test --debug"
+    "test:debug": "playwright test --debug",
+    "test:chaos": "playwright test tests/chaos/",
+    "test:chaos:headed": "playwright test tests/chaos/ --headed",
+    "test:chaos:network": "playwright test tests/chaos/network-chaos.spec.ts",
+    "test:chaos:server": "playwright test tests/chaos/server-chaos.spec.ts",
+    "test:chaos:ui": "playwright test tests/chaos/ui-chaos.spec.ts",
+    "test:chaos:api": "playwright test tests/chaos/api-chaos.spec.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.57.0",
