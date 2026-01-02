@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lab-as-code-jobs-pvc
+  namespace: lab-as-code
+  labels:
+    app: lab-as-code
+    component: jobs-storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: ""  # Use default storage class
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lab-as-code-data-pvc
+  namespace: lab-as-code
+  labels:
+    app: lab-as-code
+    component: data-storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: ""  # Use default storage class

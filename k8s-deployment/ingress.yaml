@@ -1,0 +1,32 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: lab-as-code-ingress
+  namespace: lab-as-code
+  labels:
+    app: lab-as-code
+    component: ingress
+  annotations:
+    # Add annotations based on your ingress controller
+    # For nginx ingress controller:
+    # nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # For cert-manager:
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx  # Adjust based on your ingress controller
+  tls:
+  - hosts:
+    - lab-as-code.example.com  # Replace with your actual domain
+    secretName: lab-as-code-tls
+  rules:
+  - host: lab-as-code.example.com  # Replace with your actual domain
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: lab-as-code-service
+            port:
+              number: 80

@@ -1,0 +1,119 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lab-as-code
+  namespace: lab-as-code
+  labels:
+    app: lab-as-code
+    component: application
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lab-as-code
+      component: application
+  template:
+    metadata:
+      labels:
+        app: lab-as-code
+        component: application
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+      - name: lab-as-code
+        image: lab-as-code:latest  # Replace with your actual image
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        - name: PORT
+          valueFrom:
+            configMapKeyRef:
+              name: lab-as-code-config
+              key: PORT
+        - name: WORK_DIR
+          valueFrom:
+            configMapKeyRef:
+              name: lab-as-code-config
+              key: WORK_DIR
+        - name: DATA_DIR
+          valueFrom:
+            configMapKeyRef:
+              name: lab-as-code-config
+              key: DATA_DIR
+        - name: LAB_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: lab-as-code-secrets
+              key: LAB_ADMIN_PASSWORD
+        - name: LAB_STUDENT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: lab-as-code-secrets
+              key: LAB_STUDENT_PASSWORD
+        - name: OVH_APPLICATION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: lab-as-code-secrets
+              key: OVH_APPLICATION_KEY
+        - name: OVH_APPLICATION_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: lab-as-code-secrets
+              key: OVH_APPLICATION_SECRET
+        - name: OVH_CONSUMER_KEY
+          valueFrom:
+            secretKeyRef:
+              name: lab-as-code-secrets
+              key: OVH_CONSUMER_KEY
+        - name: OVH_SERVICE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: lab-as-code-secrets
+              key: OVH_SERVICE_NAME
+        - name: OVH_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              name: lab-as-code-secrets
+              key: OVH_ENDPOINT
+        volumeMounts:
+        - name: jobs-storage
+          mountPath: /app/jobs
+        - name: data-storage
+          mountPath: /app/data
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: jobs-storage
+        persistentVolumeClaim:
+          claimName: lab-as-code-jobs-pvc
+      - name: data-storage
+        persistentVolumeClaim:
+          claimName: lab-as-code-data-pvc
