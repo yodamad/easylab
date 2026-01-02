@@ -1,0 +1,47 @@
+# Node.js dependencies
+node_modules/
+package-lock.json
+
+# Test files and results
+test-results/
+playwright-report/
+*.test
+*_test.go
+
+# Git
+.git/
+.gitignore
+
+# Docker files (avoid recursion)
+Dockerfile
+docker-compose.yml
+.dockerignore
+docker.zip
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.local
+env.sh
+
+# Pulumi state files (if any)
+.pulumi/
+
+# Build artifacts
+dist/
+build/
+
+# Documentation (optional - remove if you want docs in image)
+README.md

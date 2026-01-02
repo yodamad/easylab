@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  lab-as-code:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      # Persist job workspaces - critical for ongoing lab deployments
+      - lab_jobs:/app/jobs
+      # Persist application data - contains job metadata and configurations
+      - lab_data:/app/data
+    environment:
+      - PORT=8080
+      - WORK_DIR=/app/jobs
+      - DATA_DIR=/app/data
+      # Set passwords via environment variables (change these!)
+      - LAB_ADMIN_PASSWORD=${LAB_ADMIN_PASSWORD:-admin123}
+      - LAB_STUDENT_PASSWORD=${LAB_STUDENT_PASSWORD:-student123}
+      # Set OVH credentials via environment variables (change these!)
+      - OVH_APPLICATION_KEY=${OVH_APPLICATION_KEY}
+      - OVH_APPLICATION_SECRET=${OVH_APPLICATION_SECRET}
+      - OVH_CONSUMER_KEY=${OVH_CONSUMER_KEY}
+      - OVH_SERVICE_NAME=${OVH_SERVICE_NAME}
+      - OVH_ENDPOINT=${OVH_ENDPOINT}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - lab-network
+
+volumes:
+  lab_jobs:
+    driver: local
+  lab_data:
+    driver: local
+
+networks:
+  lab-network:
+    driver: bridge
