@@ -254,6 +254,21 @@ test.describe('Network Chaos - OVH Credentials', () => {
   });
 
   test('handles slow network on credentials save', async ({ page }) => {
+    // Set up slow response interception BEFORE navigating
+    // Note: The endpoint is /api/ovh-credentials (with ovh- prefix)
+    await page.route('**/api/ovh-credentials', async route => {
+      if (route.request().method() === 'POST') {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        route.fulfill({
+          status: 200,
+          contentType: 'text/html',
+          body: '<div class="success-message"><p>✅ Credentials saved successfully</p></div>',
+        });
+      } else {
+        route.continue();
+      }
+    });
+
     await page.goto('/ovh-credentials');
     
     // Fill all fields
@@ -263,30 +278,22 @@ test.describe('Network Chaos - OVH Credentials', () => {
     await page.locator('input#ovh_service_name').fill('test-service-slow');
     await page.locator('select#ovh_endpoint').selectOption('ovh-eu');
     
-    // Set up slow response interception
-    await page.route('**/api/credentials', async route => {
-      if (route.request().method() === 'POST') {
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        route.fulfill({
-          status: 200,
-          contentType: 'text/html',
-          body: '<div class="success-message">Credentials saved</div>',
-        });
-      } else {
-        route.continue();
-      }
-    });
-    
     const startTime = Date.now();
     await page.locator('button[type="submit"]').click();
     
-    // Wait for response to complete
-    await page.waitForSelector('#form-response', { timeout: 10000 });
+    // Wait for form response to contain actual content
+    await page.waitForFunction(
+      () => {
+        const el = document.querySelector('#form-response');
+        return el && el.textContent && el.textContent.includes('saved');
+      },
+      { timeout: 10000 }
+    );
     
     const elapsed = Date.now() - startTime;
     expect(elapsed).toBeGreaterThanOrEqual(1800);
     
-    await page.unroute('**/api/credentials');
+    await page.unroute('**/api/ovh-credentials');
   });
 });
 
