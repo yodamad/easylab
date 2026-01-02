@@ -1,0 +1,18 @@
+{
+  "name": "lab-as-code",
+  "version": "1.0.0",
+  "description": "Lab as Code - Web application for managing cloud infrastructure labs",
+  "scripts": {
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.57.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "private": true
+}
+
