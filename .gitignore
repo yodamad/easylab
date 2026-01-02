@@ -28,6 +28,7 @@ Pulumi.dev.yaml
 Pulumi.v2.yaml
 env.sh
 docker.zip
+coverage/
 
 # Node
 node_modules/
