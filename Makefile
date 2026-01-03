@@ -10,20 +10,27 @@ BINARY_NAME=lab-as-code
 BINARY_UNIX=$(BINARY_NAME)_unix
 SERVER_BINARY=lab-as-code-server
 
+# NPM parameters
+NPMCMD=npm
+NPMTEST=$(NPMCMD) test
+NPMINSTALL=$(NPMCMD) install
+
 # Directories
 BUILD_DIR=./build
 COVERAGE_DIR=./coverage
 SERVER_CMD=./cmd/server
+TEST_RESULTS_DIR=./test-results
+PLAYWRIGHT_REPORT_DIR=./playwright-report
 
 # Coverage settings
 COVERAGE_FILE=$(COVERAGE_DIR)/coverage.out
 COVERAGE_HTML=$(COVERAGE_DIR)/coverage.html
 COVERAGE_THRESHOLD=50
 
-.PHONY: all build clean test test-verbose test-race coverage coverage-html coverage-check deps lint help server run-server
+.PHONY: all build clean test test-all test-backend test-frontend test-verbose test-race coverage coverage-html coverage-check deps deps-all deps-update npm-install npm-update lint help server run-server npm-test-ui npm-test-headed npm-test-debug npm-test-chaos npm-test-chaos-headed npm-test-chaos-network npm-test-chaos-server npm-test-chaos-ui npm-test-chaos-api ci ci-coverage
 
 # Default target
-all: deps test build
+all: deps-all test-all build
 
 ## Build targets
 
@@ -39,17 +46,33 @@ server:
 run-server: server
 	./$(BUILD_DIR)/$(SERVER_BINARY)
 
-# Clean build artifacts and coverage files
+# Clean build artifacts, coverage files, and test results
 clean:
 	$(GOCLEAN)
 	rm -rf $(BUILD_DIR)
 	rm -rf $(COVERAGE_DIR)
+	rm -rf $(TEST_RESULTS_DIR)
+	rm -rf $(PLAYWRIGHT_REPORT_DIR)
+	rm -rf node_modules
 
 ## Test targets
 
-# Run all tests
-test:
+# Run all tests (backend + frontend)
+test-all: test-backend test-frontend
+	@echo "All tests completed successfully!"
+
+# Run backend (Go) tests
+test-backend:
+	@echo "Running backend tests..."
 	$(GOTEST) -v ./...
+
+# Run frontend (Playwright) tests
+test-frontend: npm-install
+	@echo "Running frontend tests..."
+	$(NPMTEST)
+
+# Run all backend tests (alias for test-backend)
+test: test-backend
 
 # Run tests with verbose output
 test-verbose:
@@ -118,15 +141,26 @@ coverage-pkg:
 
 ## Dependency management
 
-# Download and tidy dependencies
+# Download and tidy Go dependencies
 deps:
 	$(GOMOD) download
 	$(GOMOD) tidy
 
-# Update all dependencies
+# Install npm dependencies
+npm-install:
+	$(NPMINSTALL)
+
+# Install all dependencies (Go + npm)
+deps-all: deps npm-install
+
+# Update all Go dependencies
 deps-update:
 	$(GOMOD) get -u ./...
 	$(GOMOD) tidy
+
+# Update npm dependencies
+npm-update:
+	$(NPMCMD) update
 
 ## Linting and formatting
 
@@ -141,10 +175,48 @@ vet:
 # Run basic linting (fmt + vet)
 lint: fmt vet
 
+## NPM/Playwright test targets
+
+# Run Playwright tests with UI
+npm-test-ui: npm-install
+	$(NPMCMD) run test:ui
+
+# Run Playwright tests in headed mode
+npm-test-headed: npm-install
+	$(NPMCMD) run test:headed
+
+# Run Playwright tests in debug mode
+npm-test-debug: npm-install
+	$(NPMCMD) run test:debug
+
+# Run chaos tests
+npm-test-chaos: npm-install
+	$(NPMCMD) run test:chaos
+
+# Run chaos tests in headed mode
+npm-test-chaos-headed: npm-install
+	$(NPMCMD) run test:chaos:headed
+
+# Run network chaos tests
+npm-test-chaos-network: npm-install
+	$(NPMCMD) run test:chaos:network
+
+# Run server chaos tests
+npm-test-chaos-server: npm-install
+	$(NPMCMD) run test:chaos:server
+
+# Run UI chaos tests
+npm-test-chaos-ui: npm-install
+	$(NPMCMD) run test:chaos:ui
+
+# Run API chaos tests
+npm-test-chaos-api: npm-install
+	$(NPMCMD) run test:chaos:api
+
 ## CI targets
 
 # Run all CI checks (lint, test, coverage check)
-ci: lint test-race coverage-check
+ci: lint test-race coverage-check test-frontend
 
 # Run tests and generate coverage report for CI
 ci-coverage:
@@ -161,31 +233,50 @@ help:
 	@echo "  build          - Build the main Pulumi application"
 	@echo "  server         - Build the web server"
 	@echo "  run-server     - Build and run the web server"
-	@echo "  clean          - Remove build artifacts and coverage files"
+	@echo "  clean          - Remove build artifacts, coverage files, and test results"
 	@echo ""
 	@echo "Test targets:"
-	@echo "  test           - Run all tests"
-	@echo "  test-verbose   - Run tests with verbose output"
-	@echo "  test-race      - Run tests with race detector"
+	@echo "  test-all       - Run all tests (backend + frontend)"
+	@echo "  test           - Run backend (Go) tests"
+	@echo "  test-backend   - Run backend (Go) tests"
+	@echo "  test-frontend  - Run frontend (Playwright) tests"
+	@echo "  test-verbose   - Run backend tests with verbose output"
+	@echo "  test-race      - Run backend tests with race detector"
 	@echo "  test-pkg       - Run tests for a specific package (PKG=./path)"
-	@echo "  test-short     - Run only short tests"
-	@echo "  test-chaos     - Run only chaos tests (with race detector)"
-	@echo "  test-unit      - Run only unit tests (exclude chaos)"
+	@echo "  test-short     - Run only short backend tests"
+	@echo "  test-chaos     - Run only backend chaos tests (with race detector)"
+	@echo "  test-unit      - Run only backend unit tests (exclude chaos)"
+	@echo ""
+	@echo "Frontend test targets:"
+	@echo "  npm-test-ui            - Run Playwright tests with UI"
+	@echo "  npm-test-headed        - Run Playwright tests in headed mode"
+	@echo "  npm-test-debug         - Run Playwright tests in debug mode"
+	@echo "  npm-test-chaos         - Run chaos tests"
+	@echo "  npm-test-chaos-headed  - Run chaos tests in headed mode"
+	@echo "  npm-test-chaos-network - Run network chaos tests"
+	@echo "  npm-test-chaos-server  - Run server chaos tests"
+	@echo "  npm-test-chaos-ui      - Run UI chaos tests"
+	@echo "  npm-test-chaos-api     - Run API chaos tests"
 	@echo ""
 	@echo "Coverage targets:"
-	@echo "  coverage       - Run tests with coverage and show summary"
+	@echo "  coverage       - Run backend tests with coverage and show summary"
 	@echo "  coverage-html  - Generate HTML coverage report"
 	@echo "  coverage-check - Check if coverage meets threshold ($(COVERAGE_THRESHOLD)%)"
 	@echo "  coverage-pkg   - Generate coverage report for specific package (PKG=./path)"
 	@echo ""
+	@echo "Dependency targets:"
+	@echo "  deps           - Download and tidy Go dependencies"
+	@echo "  npm-install    - Install npm dependencies"
+	@echo "  deps-all       - Install all dependencies (Go + npm)"
+	@echo "  deps-update    - Update all Go dependencies"
+	@echo "  npm-update     - Update npm dependencies"
+	@echo ""
 	@echo "Other targets:"
-	@echo "  deps           - Download and tidy dependencies"
-	@echo "  deps-update    - Update all dependencies"
 	@echo "  fmt            - Format code with go fmt"
 	@echo "  vet            - Run go vet"
 	@echo "  lint           - Run basic linting (fmt + vet)"
-	@echo "  ci             - Run all CI checks"
-	@echo "  ci-coverage    - Run tests and generate coverage for CI"
+	@echo "  ci             - Run all CI checks (lint, test, coverage, frontend tests)"
+	@echo "  ci-coverage    - Run backend tests and generate coverage for CI"
 	@echo "  help           - Show this help message"
 	@echo ""
 	@echo "Documentation:"
