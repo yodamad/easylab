@@ -125,7 +125,12 @@ func (pe *PulumiExecutor) outputValueToString(val interface{}) string {
 		if value, ok := v["Value"].(string); ok {
 			return value
 		}
-		// Fall through to default case
+		// Map without Value key - marshal to JSON
+		jsonBytes, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Sprintf("%v", v)
+		}
+		return string(jsonBytes)
 	default:
 		// For other types, try to marshal to JSON and extract string
 		jsonBytes, err := json.Marshal(v)
@@ -149,7 +154,6 @@ func (pe *PulumiExecutor) outputValueToString(val interface{}) string {
 		}
 		return string(jsonBytes)
 	}
-	return ""
 }
 
 // setStackConfig sets all configuration values for a stack
