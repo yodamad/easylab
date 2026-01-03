@@ -352,6 +352,99 @@ main {
     font-family: monospace;
 }
 
+/* File Upload Styling */
+.file-upload-wrapper {
+    position: relative;
+    margin-bottom: 0.5rem;
+}
+
+.file-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+}
+
+.file-upload-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.25rem;
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    gap: 0.75rem;
+}
+
+.file-upload-label:hover {
+    border-color: var(--primary-color);
+    background: rgba(37, 99, 235, 0.05);
+}
+
+.file-upload-label:active {
+    transform: scale(0.98);
+}
+
+.file-input:focus + .file-upload-label {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+    border-color: var(--primary-color);
+}
+
+.file-upload-icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+
+.file-upload-text {
+    flex: 1;
+    color: var(--text);
+    font-size: 0.9375rem;
+}
+
+.file-upload-button {
+    padding: 0.5rem 1rem;
+    background: var(--primary-color);
+    color: white;
+    border-radius: calc(var(--radius) - 0.125rem);
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+.file-upload-label:hover .file-upload-button {
+    background: var(--primary-hover);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow);
+}
+
+.file-name-display {
+    display: none;
+    margin-top: 0.75rem;
+    padding: 0.75rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    border-left: 3px solid var(--primary-color);
+    font-size: 0.875rem;
+    color: var(--text);
+    font-weight: 500;
+}
+
+.file-name-display::before {
+    content: '✓ ';
+    color: var(--success);
+    margin-right: 0.5rem;
+}
+
 .form-group small {
     display: block;
     margin-top: 0.25rem;
@@ -698,6 +791,21 @@ a.btn {
 
     .form-actions {
         flex-direction: column;
+    }
+
+    /* File upload responsive */
+    .file-upload-label {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.5rem;
+    }
+
+    .file-upload-text {
+        text-align: center;
+    }
+
+    .file-upload-button {
+        width: 100%;
     }
 }
 

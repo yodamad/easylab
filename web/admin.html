@@ -236,7 +236,15 @@
 
                         <div class="form-group">
                             <label for="template_file">Template File (Optional)</label>
-                            <input type="file" id="template_file" name="template_file" accept=".zip,.tf">
+                            <div class="file-upload-wrapper">
+                                <input type="file" id="template_file" name="template_file" accept=".zip,.tf" class="file-input">
+                                <label for="template_file" class="file-upload-label">
+                                    <span class="file-upload-icon">📁</span>
+                                    <span class="file-upload-text">Choose file or drag it here</span>
+                                    <span class="file-upload-button">Browse</span>
+                                </label>
+                                <div class="file-name-display" id="file-name-display"></div>
+                            </div>
                             <small>Upload a template file (.zip or .tf). If not provided, the default Git-based template will be used.</small>
                         </div>
 
@@ -824,6 +832,58 @@
         document.body.addEventListener('htmx:afterSettle', function(event) {
             scrollOutputToBottom();
         });
+
+        // File upload display handler with drag and drop support
+        const fileInput = document.getElementById('template_file');
+        const fileNameDisplay = document.getElementById('file-name-display');
+        const fileUploadLabel = document.querySelector('.file-upload-label');
+        
+        if (fileInput && fileNameDisplay && fileUploadLabel) {
+            // Handle file selection
+            fileInput.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    fileNameDisplay.textContent = `Selected: ${file.name}`;
+                    fileNameDisplay.style.display = 'block';
+                } else {
+                    fileNameDisplay.style.display = 'none';
+                }
+            });
+
+            // Drag and drop support
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                fileUploadLabel.addEventListener(eventName, preventDefaults, false);
+            });
+
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                fileUploadLabel.addEventListener(eventName, function() {
+                    fileUploadLabel.style.borderColor = 'var(--primary-color)';
+                    fileUploadLabel.style.background = 'rgba(37, 99, 235, 0.1)';
+                }, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                fileUploadLabel.addEventListener(eventName, function() {
+                    fileUploadLabel.style.borderColor = 'var(--border)';
+                    fileUploadLabel.style.background = 'var(--surface)';
+                }, false);
+            });
+
+            fileUploadLabel.addEventListener('drop', function(e) {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                if (files.length > 0) {
+                    fileInput.files = files;
+                    const event = new Event('change', { bubbles: true });
+                    fileInput.dispatchEvent(event);
+                }
+            }, false);
+        }
     </script>
 </body>
 </html>
