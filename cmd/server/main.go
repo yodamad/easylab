@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
 	"labascode/internal/server"
+	"labascode/utils"
 	"log"
 	"net/http"
 	"os"
@@ -15,15 +17,108 @@ import (
 	"time"
 )
 
+// loadEnvFile loads environment variables from a file.
+// The file path is passed as a parameter.
+// The file format is standard .env format: KEY=VALUE (one per line).
+// Lines starting with # are treated as comments and ignored.
+// Empty lines are ignored.
+func loadEnvFile(envFile string) error {
+	if envFile == "" {
+		return nil // No env file specified, skip loading
+	}
+
+	file, err := os.Open(envFile)
+	if err != nil {
+		return fmt.Errorf("failed to open env file %s: %w", envFile, err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	lineNum := 0
+	loadedCount := 0
+
+	for scanner.Scan() {
+		lineNum++
+		line := strings.TrimSpace(scanner.Text())
+
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Handle export KEY=VALUE format (for compatibility with shell scripts)
+		if strings.HasPrefix(line, "export ") {
+			line = strings.TrimPrefix(line, "export ")
+			line = strings.TrimSpace(line)
+		}
+
+		// Parse KEY=VALUE format
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			log.Printf("Warning: Skipping invalid line %d in env file %s: %s", lineNum, envFile, line)
+			continue
+		}
+
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+
+		// Remove quotes if present
+		if len(value) >= 2 {
+			if (strings.HasPrefix(value, `"`) && strings.HasSuffix(value, `"`)) ||
+				(strings.HasPrefix(value, `'`) && strings.HasSuffix(value, `'`)) {
+				value = value[1 : len(value)-1]
+			}
+		}
+
+		if key == "" {
+			log.Printf("Warning: Skipping line %d in env file %s: empty key", lineNum, envFile)
+			continue
+		}
+
+		// Set the environment variable
+		if err := os.Setenv(key, value); err != nil {
+			log.Printf("Warning: Failed to set environment variable %s from line %d: %v", key, lineNum, err)
+			continue
+		}
+		loadedCount++
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading env file %s: %w", envFile, err)
+	}
+
+	log.Printf("[STARTUP] Loaded %d environment variables from %s", loadedCount, envFile)
+	return nil
+}
+
 func main() {
 	startTime := time.Now()
 
 	var (
 		port    = flag.String("port", "8080", "Port to listen on")
-		workDir = flag.String("work-dir", "/tmp/lab-as-code-jobs", "Directory for job workspaces")
-		dataDir = flag.String("data-dir", "/tmp/lab-as-code-data", "Directory for persisting job data")
+		workDir = flag.String("work-dir", utils.DEFAULT_WORK_DIR, "Directory for job workspaces")
+		dataDir = flag.String("data-dir", utils.DEFAULT_DATA_DIR, "Directory for persisting job data")
+		envFile = flag.String("env-file", "", "Path to environment file to load at startup")
 	)
 	flag.Parse()
+
+	// Load environment variables from file if specified
+	if *envFile != "" {
+		if err := loadEnvFile(*envFile); err != nil {
+			log.Fatalf("Failed to load env file: %v", err)
+		}
+	}
+
+	// Get default values from environment variables if set, otherwise use hardcoded defaults
+	defaultWorkDir := os.Getenv("WORK_DIR")
+	if (*workDir == "" || *workDir == utils.DEFAULT_WORK_DIR) && defaultWorkDir != "" {
+		*workDir = defaultWorkDir
+	}
+
+	defaultDataDir := os.Getenv("DATA_DIR")
+	if (*dataDir == "" || *dataDir == utils.DEFAULT_DATA_DIR) && defaultDataDir != "" {
+		*dataDir = defaultDataDir
+	}
 
 	log.Printf("[STARTUP] Starting application initialization...")
 

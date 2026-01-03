@@ -12,88 +12,6 @@ Lab-as-Code is a comprehensive platform that simplifies cloud infrastructure lab
 - **Persistent Storage**: Job data and workspace persistence across deployments
 - **Multi-deployment Options**: Run locally, with Docker, or on Kubernetes
 
-## Architecture
-
-The application consists of two main components:
-
-### 1. Web Application (`cmd/server/`)
-- **Go-based HTTP server** serving web interfaces and API endpoints
-- **Admin interface** for infrastructure lab management
-- **Student interface** for workspace access
-- **Pulumi integration** for infrastructure provisioning
-- **Persistent job storage** for tracking deployments
-
-### 2. Infrastructure Provisioning (`main.go`)
-- **Pulumi project** for OVHcloud infrastructure provisioning
-- **Kubernetes cluster creation** with managed node pools
-- **Network configuration** with private networks and gateways
-- **Coder integration** for development workspaces
-
-## Quick Start
-
-### Local Development
-```bash
-# Install dependencies
-go mod tidy
-
-# Run the web application
-go run cmd/server/main.go
-
-# Access at http://localhost:8080
-```
-
-### Docker Deployment
-```bash
-# Set admin password
-export LAB_ADMIN_PASSWORD="your-secure-password"
-
-# Start with Docker Compose
-docker-compose up -d
-
-# Access at http://localhost:8080
-```
-
-### Kubernetes Deployment
-```bash
-# Build and push image
-docker build -t lab-as-code:latest .
-docker push your-registry/lab-as-code:latest
-
-# Deploy to Kubernetes
-cd k8s-deployment
-./deploy.sh
-
-# Configure OVH credentials
-kubectl edit secret lab-as-code-secrets -n lab-as-code
-```
-
-## Configuration
-
-### Environment Variables
-
-#### Core Application Settings
-- `PORT`: HTTP server port (default: `8080`)
-- `WORK_DIR`: Directory for job workspaces (default: `/tmp/lab-as-code-jobs`)
-- `DATA_DIR`: Directory for application data (default: `/tmp/lab-as-code-data`)
-
-#### Authentication
-- `LAB_ADMIN_PASSWORD`: Password for admin interface (default: `admin123`)
-- `LAB_STUDENT_PASSWORD`: Password for student interface (default: `student123`)
-
-#### OVHcloud Integration
-- `OVH_ENDPOINT`: OVHcloud API endpoint (default: `ovh-eu`)
-- `OVH_APPLICATION_KEY`: OVHcloud application key
-- `OVH_APPLICATION_SECRET`: OVHcloud application secret
-- `OVH_CONSUMER_KEY`: OVHcloud consumer key
-- `OVH_SERVICE_NAME`: OVHcloud project/service name
-
-### Configuration Files
-
-- `Pulumi.yaml`: Pulumi project configuration
-- `Pulumi.dev.yaml`: Development stack configuration
-- `docker-compose.yml`: Docker Compose configuration
-- `k8s-deployment/`: Kubernetes manifests and configuration
-
 ## Application Features
 
 ### Admin Interface
@@ -112,6 +30,75 @@ kubectl edit secret lab-as-code-secrets -n lab-as-code
 - **Network Setup**: Private networks and gateways
 - **Node Pools**: Configurable worker node pools
 - **Coder Integration**: Development workspace provisioning
+
+## Architecture
+
+The application consists of two main components:
+
+### 1. Web Application (`cmd/server/`)
+- **Go-based HTTP server** serving web interfaces and API endpoints
+- **Admin interface** for infrastructure lab management
+- **Student interface** for workspace access
+- **Pulumi integration** for infrastructure provisioning
+- **Persistent job storage** for tracking deployments
+
+### 2. Infrastructure Provisioning (`main.go`)
+- **Pulumi project** for OVHcloud infrastructure provisioning
+- **Kubernetes cluster creation** with managed node pools
+- **Network configuration** with private networks and gateways
+- **Coder integration** for development workspaces
+
+## Configuration
+
+### Command-Line Arguments
+
+- `-port`: HTTP server port (default: `8080`)
+- `-work-dir`: Directory for job workspaces (default: `/tmp/lab-as-code-jobs` or `$WORK_DIR`)
+- `-data-dir`: Directory for application data (default: `/tmp/lab-as-code-data` or `$DATA_DIR`)
+- `-env-file`: Path to an environment file to load at startup. The file should contain `KEY=VALUE` pairs (one per line). Lines starting with `#` are treated as comments. Both `KEY=VALUE` and `export KEY=VALUE` formats are supported.
+
+Example `.env` file:
+```bash
+# OVHcloud credentials
+OVH_APPLICATION_KEY=your-key
+OVH_APPLICATION_SECRET=your-secret
+OVH_CONSUMER_KEY=your-consumer-key
+OVH_SERVICE_NAME=your-service-name
+OVH_ENDPOINT=ovh-eu
+
+# Application settings
+LAB_ADMIN_PASSWORD=your-secure-password
+LAB_STUDENT_PASSWORD=student-password
+WORK_DIR=/app/jobs
+DATA_DIR=/app/data
+```
+
+Example usage:
+```bash
+go run cmd/server/main.go -env-file=.env -port=8080
+```
+
+### Environment Variables
+
+#### Core Application Settings
+- `WORK_DIR`: Directory for job workspaces (can be overridden with `-work-dir` flag)
+- `DATA_DIR`: Directory for application data (can be overridden with `-data-dir` flag)
+
+#### Authentication
+- `LAB_ADMIN_PASSWORD`: Password for admin interface (default: `admin123`)
+- `LAB_STUDENT_PASSWORD`: Password for student interface (default: `student123`)
+
+#### OVHcloud Integration
+- `OVH_ENDPOINT`: OVHcloud API endpoint (default: `ovh-eu`)
+- `OVH_APPLICATION_KEY`: OVHcloud application key
+- `OVH_APPLICATION_SECRET`: OVHcloud application secret
+- `OVH_CONSUMER_KEY`: OVHcloud consumer key
+- `OVH_SERVICE_NAME`: OVHcloud project/service name
+
+### Configuration Files
+
+- `docker-compose.yml`: Docker Compose configuration
+- `k8s-deployment/`: Kubernetes manifests and configuration
 
 ## Deployment Options
 
@@ -226,74 +213,6 @@ kubectl apply -f ingress.yaml
 - **Internal Service**: `http://lab-as-code-service.lab-as-code.svc.cluster.local`
 - **External Access**: Configure ingress with your domain
 
-## Infrastructure Provisioning
-
-This repository includes a Pulumi project for provisioning OVHcloud infrastructure.
-
-### Prerequisites
-- [Pulumi CLI](https://www.pulumi.com/docs/get-started/install/)
-- Go 1.24+
-- OVHcloud account with API credentials
-
-### Setup
-```bash
-# Install dependencies
-go mod tidy
-
-# Initialize Pulumi stack
-pulumi stack init dev
-
-# Configure OVHcloud credentials
-pulumi config set ovhServiceName "your-project-id"
-pulumi config set ovh:endpoint "ovh-eu"
-pulumi config set ovh:applicationKey "your-app-key" --secret
-pulumi config set ovh:applicationSecret "your-app-secret" --secret
-pulumi config set ovh:consumerKey "your-consumer-key" --secret
-```
-
-### Infrastructure Configuration
-- `location`: OVHcloud region (default: `GRA11`)
-- `nodePoolCount`: Number of node pools (default: `1`)
-- `vmSize`: VM flavor (default: `b2-7`)
-- `gatewayModel`: Gateway size (default: `s`)
-- `minNodes`/`maxNodes`/`desiredNodes`: Node pool scaling
-
-### Deployment
-```bash
-# Preview infrastructure
-pulumi preview
-
-# Deploy infrastructure
-pulumi up
-
-# Destroy when done
-pulumi destroy
-```
-
-### Outputs
-- Kubernetes cluster details and kubeconfig
-- Network and gateway information
-- Node pool configurations
-
-## Project Structure
-
-```
-├── cmd/server/           # Web application
-│   ├── main.go          # Application entry point
-│   └── ...
-├── internal/server/      # Application logic
-├── k8s-deployment/       # Kubernetes manifests
-├── web/                  # Static web assets
-├── utils/               # Shared utilities
-├── coder/               # Coder integration
-├── ovh/                 # OVHcloud integration
-├── k8s/                 # Kubernetes utilities
-├── Pulumi.yaml          # Infrastructure config
-├── docker-compose.yml   # Docker config
-├── Dockerfile          # Container build
-└── README.md           # This file
-```
-
 ## Development
 
 ### Building
@@ -311,12 +230,12 @@ go build -o infrastructure main.go
 ### Testing
 ```bash
 # Run tests
-go test ./...
+make test
 
 # Run with race detection
 go test -race ./...
 
-# E2E tests (requires Docker)
+# E2E tests
 npm test  # From playwright-report directory
 ```
 
@@ -368,8 +287,3 @@ npm test  # From playwright-report directory
 - **Issues**: GitHub Issues for bug reports and feature requests
 - **OVHcloud Docs**: https://docs.ovh.com/
 - **Pulumi Docs**: https://www.pulumi.com/docs/
-
-## License
-
-[Add license information here]
-

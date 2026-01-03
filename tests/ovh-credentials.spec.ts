@@ -21,7 +21,8 @@ test.describe('OVH Credentials Page', () => {
 
     // Check info box
     await expect(page.locator('text=About OVH Credentials')).toBeVisible();
-    await expect(page.locator('text=stored in memory')).toBeVisible();
+    await expect(page.locator('text=Update Existing Credentials')).toBeVisible();
+    await expect(page.locator('text=Credentials are currently configured')).toBeVisible();
 
     // Check form section header
     await expect(page.locator('h2:has-text("OVH API Credentials")')).toBeVisible();

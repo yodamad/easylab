@@ -11,6 +11,10 @@ func getConfig(ctx *pulumi.Context, group string, key string) string {
 	return config.Require(ctx, fmt.Sprintf("%s:%s", group, key))
 }
 
+// Internal config group
+const DEFAULT_WORK_DIR = "/tmp/lab-as-code-jobs"
+const DEFAULT_DATA_DIR = "/tmp/lab-as-code-data"
+
 // OVH config keys from environment variables
 const OvhApplicationKey = "OVH_APPLICATION_KEY"
 const OvhApplicationSecret = "OVH_APPLICATION_SECRET"

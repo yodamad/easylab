@@ -38,7 +38,7 @@ export default defineConfig({
 
   /* Run your local dev server before starting the tests */
   webServer: {
-    command: 'go build -o test-results/build/lab-as-code-server cmd/server/main.go && LAB_ADMIN_PASSWORD=testpassword LAB_STUDENT_PASSWORD=studentpass WORK_DIR=test-results/work DATA_DIR=test-results/data ./test-results/build/lab-as-code-server',
+    command: 'rm -rf test-results/ && go build -o test-results/build/lab-as-code-server cmd/server/main.go && ./test-results/build/lab-as-code-server -env-file=env.test.sh',
     url: 'http://localhost:8080/health',
     reuseExistingServer: !process.env.CI,
     timeout: 120000, // 2 minutes for Go build + server start
