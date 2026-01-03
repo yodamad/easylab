@@ -17,7 +17,7 @@ import (
 
 func main() {
 	startTime := time.Now()
-	
+
 	var (
 		port    = flag.String("port", "8080", "Port to listen on")
 		workDir = flag.String("work-dir", "/tmp/lab-as-code-jobs", "Directory for job workspaces")
