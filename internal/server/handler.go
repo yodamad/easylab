@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"io"
 	"labascode/coder"
+	"labascode/utils"
 	"log"
 	"net/http"
 	"os"
@@ -38,7 +39,7 @@ func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsM
 // parseForm handles both multipart and urlencoded form data parsing
 func (h *Handler) parseForm(w http.ResponseWriter, r *http.Request, maxSize int64) error {
 	if maxSize == 0 {
-		maxSize = 10 << 20 // 10MB default
+		maxSize = 50 << 20 // 50MB default (increased for template file uploads)
 	}
 
 	contentType := r.Header.Get("Content-Type")
@@ -70,8 +71,82 @@ func (h *Handler) getOVHCredentials(w http.ResponseWriter) (*OVHCredentials, err
 	return ovhCreds, nil
 }
 
+// saveUploadedTemplateFile handles template file upload and saves it to the job directory
+// Returns the file path relative to job directory, or empty string if no file was uploaded
+func (h *Handler) saveUploadedTemplateFile(r *http.Request, jobDir string) (string, error) {
+	// Check if template file was uploaded
+	file, header, err := r.FormFile("template_file")
+	if err != nil {
+		if err == http.ErrMissingFile {
+			// No file uploaded, this is optional
+			return "", nil
+		}
+		return "", fmt.Errorf("failed to get uploaded file: %w", err)
+	}
+	defer file.Close()
+
+	// Validate file extension
+	filename := header.Filename
+	if !strings.HasSuffix(strings.ToLower(filename), ".zip") && !strings.HasSuffix(strings.ToLower(filename), ".tf") {
+		return "", fmt.Errorf("invalid file type: only .zip and .tf files are allowed")
+	}
+
+	// Create job directory if it doesn't exist
+	if err := os.MkdirAll(jobDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create job directory: %w", err)
+	}
+
+	// Determine destination file path
+	var destPath string
+	var finalPath string
+	if strings.HasSuffix(strings.ToLower(filename), ".tf") {
+		// Save .tf file first, will be zipped later
+		destPath = filepath.Join(jobDir, "template.tf")
+		finalPath = "template.zip" // Will be created from .tf file
+	} else {
+		// Save .zip file directly
+		destPath = filepath.Join(jobDir, "template.zip")
+		finalPath = "template.zip"
+	}
+
+	// Create destination file
+	destFile, err := os.Create(destPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to create destination file: %w", err)
+	}
+	defer destFile.Close()
+
+	// Copy uploaded file to destination
+	_, err = io.Copy(destFile, file)
+	if err != nil {
+		return "", fmt.Errorf("failed to save uploaded file: %w", err)
+	}
+	destFile.Close()
+
+	// If it's a .tf file, zip it
+	if strings.HasSuffix(strings.ToLower(filename), ".tf") {
+		zipPath, err := utils.ZipTerraformFile(destPath)
+		if err != nil {
+			return "", fmt.Errorf("failed to zip terraform file: %w", err)
+		}
+		// Remove the original .tf file
+		os.Remove(destPath)
+		// Verify zip file was created in job directory
+		if !strings.HasPrefix(zipPath, jobDir) {
+			// Zip was created elsewhere, move it to job directory
+			finalZipPath := filepath.Join(jobDir, "template.zip")
+			if err := os.Rename(zipPath, finalZipPath); err != nil {
+				return "", fmt.Errorf("failed to move zip file to job directory: %w", err)
+			}
+		}
+		return finalPath, nil
+	}
+
+	return finalPath, nil
+}
+
 // createLabConfigFromForm creates a LabConfig from form data and OVH credentials
-func (h *Handler) createLabConfigFromForm(r *http.Request, ovhCreds *OVHCredentials) *LabConfig {
+func (h *Handler) createLabConfigFromForm(r *http.Request, ovhCreds *OVHCredentials, templateFilePath string) *LabConfig {
 	// Parse integer fields
 	desiredNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_desired_node_count"))
 	minNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_min_node_count"))
@@ -117,6 +192,7 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, ovhCreds *OVHCredenti
 		CoderDbPassword:    r.FormValue("coder_db_password"),
 		CoderDbName:        r.FormValue("coder_db_name"),
 		CoderTemplateName:  r.FormValue("coder_template_name"),
+		TemplateFilePath:   templateFilePath,
 	}
 }
 
@@ -124,11 +200,15 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, ovhCreds *OVHCredenti
 func (h *Handler) executeLabJob(config *LabConfig, isDryRun bool) (string, string) {
 	// Create job
 	jobID := h.jobManager.CreateJob(config)
+	return h.executeLabJobWithID(config, isDryRun, jobID)
+}
 
+// executeLabJobWithID starts execution for an existing job, returning the job ID and HTML response
+func (h *Handler) executeLabJobWithID(config *LabConfig, isDryRun bool, jobID string) (string, string) {
 	if isDryRun {
-		log.Printf("Dry run job created: %s", jobID)
+		log.Printf("Dry run job started: %s", jobID)
 	} else {
-		log.Printf("Job created: %s", jobID)
+		log.Printf("Job started: %s", jobID)
 	}
 
 	// Start execution in a goroutine
@@ -277,8 +357,10 @@ func (h *Handler) CreateLab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse form data - handle both multipart and urlencoded
-	if err := h.parseForm(w, r, 10<<20); err != nil {
+	// Parse form data - handle both multipart and urlencoded (50MB for template files)
+	if err := h.parseForm(w, r, 50<<20); err != nil {
+		log.Printf("Failed to parse form: %v", err)
+		h.renderHTMLError(w, "Form Parse Error", fmt.Sprintf("Failed to parse form: %v", err))
 		return
 	}
 
@@ -288,9 +370,42 @@ func (h *Handler) CreateLab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	config := h.createLabConfigFromForm(r, ovhCreds)
+	// Create initial config without template file path
+	initialConfig := h.createLabConfigFromForm(r, ovhCreds, "")
 
-	_, html := h.executeLabJob(config, false)
+	// Create job first to get jobID
+	jobID := h.jobManager.CreateJob(initialConfig)
+
+	// Create job directory
+	jobDir := filepath.Join(h.pulumiExec.GetWorkDir(), jobID)
+	if err := os.MkdirAll(jobDir, 0755); err != nil {
+		log.Printf("Failed to create job directory: %v", err)
+		h.renderHTMLError(w, "Job Creation Error", fmt.Sprintf("Failed to create job directory: %v", err))
+		return
+	}
+
+	// Handle template file upload
+	templateFilePath, err := h.saveUploadedTemplateFile(r, jobDir)
+	if err != nil {
+		log.Printf("Failed to save template file: %v", err)
+		h.renderHTMLError(w, "Template Upload Error", fmt.Sprintf("Failed to save template file: %v", err))
+		return
+	}
+
+	// Update config with template file path (relative to job directory)
+	if templateFilePath != "" {
+		// Store as relative path, will be resolved in main.go
+		initialConfig.TemplateFilePath = templateFilePath
+		// Update job config
+		job, exists := h.jobManager.GetJob(jobID)
+		if exists {
+			job.mu.Lock()
+			job.Config.TemplateFilePath = templateFilePath
+			job.mu.Unlock()
+		}
+	}
+
+	_, html := h.executeLabJobWithID(initialConfig, false, jobID)
 
 	// Return job status div for HTMX to display with proper polling
 	w.Header().Set("Content-Type", "text/html")
@@ -307,8 +422,10 @@ func (h *Handler) DryRunLab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse form data - handle both multipart and urlencoded
-	if err := h.parseForm(w, r, 10<<20); err != nil {
+	// Parse form data - handle both multipart and urlencoded (50MB for template files)
+	if err := h.parseForm(w, r, 50<<20); err != nil {
+		log.Printf("Failed to parse form: %v", err)
+		h.renderHTMLError(w, "Form Parse Error", fmt.Sprintf("Failed to parse form: %v", err))
 		return
 	}
 
@@ -318,9 +435,42 @@ func (h *Handler) DryRunLab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	config := h.createLabConfigFromForm(r, ovhCreds)
+	// Create initial config without template file path
+	initialConfig := h.createLabConfigFromForm(r, ovhCreds, "")
 
-	_, html := h.executeLabJob(config, true)
+	// Create job first to get jobID
+	jobID := h.jobManager.CreateJob(initialConfig)
+
+	// Create job directory
+	jobDir := filepath.Join(h.pulumiExec.GetWorkDir(), jobID)
+	if err := os.MkdirAll(jobDir, 0755); err != nil {
+		log.Printf("Failed to create job directory: %v", err)
+		h.renderHTMLError(w, "Job Creation Error", fmt.Sprintf("Failed to create job directory: %v", err))
+		return
+	}
+
+	// Handle template file upload
+	templateFilePath, err := h.saveUploadedTemplateFile(r, jobDir)
+	if err != nil {
+		log.Printf("Failed to save template file: %v", err)
+		h.renderHTMLError(w, "Template Upload Error", fmt.Sprintf("Failed to save template file: %v", err))
+		return
+	}
+
+	// Update config with template file path (relative to job directory)
+	if templateFilePath != "" {
+		// Store as relative path, will be resolved in main.go
+		initialConfig.TemplateFilePath = templateFilePath
+		// Update job config
+		job, exists := h.jobManager.GetJob(jobID)
+		if exists {
+			job.mu.Lock()
+			job.Config.TemplateFilePath = templateFilePath
+			job.mu.Unlock()
+		}
+	}
+
+	_, html := h.executeLabJobWithID(initialConfig, true, jobID)
 
 	// Return job status div for HTMX to display with proper polling
 	w.Header().Set("Content-Type", "text/html")
@@ -648,6 +798,11 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Clean up any malformed ConfigValue JSON strings that might have been saved
+	coderURL = extractStringFromConfigValue(coderURL)
+	coderSessionToken = extractStringFromConfigValue(coderSessionToken)
+	coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
+
 	if coderURL == "" || coderSessionToken == "" || coderOrganizationID == "" {
 		http.Error(w, "Coder configuration not available for this lab", http.StatusInternalServerError)
 		return
@@ -744,6 +899,31 @@ func getFormKeys(r *http.Request) []string {
 		result = append(result, k)
 	}
 	return result
+}
+
+// extractStringFromConfigValue extracts a string value from a Pulumi ConfigValue JSON string
+// If the input is already a plain string, it returns it as-is
+// If it's a JSON object like {"Value":"...","Secret":false}, it extracts the Value field
+func extractStringFromConfigValue(val string) string {
+	if val == "" {
+		return ""
+	}
+	// Check if it looks like a JSON object (starts with {)
+	if !strings.HasPrefix(strings.TrimSpace(val), "{") {
+		return val // Already a plain string
+	}
+	// Try to unmarshal as ConfigValue structure
+	var configVal struct {
+		Value  interface{} `json:"Value"`
+		Secret bool        `json:"Secret"`
+	}
+	if err := json.Unmarshal([]byte(val), &configVal); err == nil {
+		if strVal, ok := configVal.Value.(string); ok {
+			return strVal
+		}
+	}
+	// If unmarshaling failed or Value is not a string, return original value
+	return val
 }
 
 // ServeOVHCredentials serves the OVH credentials configuration page

@@ -7,6 +7,7 @@ import (
 	"labascode/ovh"
 	"labascode/utils"
 	"os"
+	"path/filepath"
 	"slices"
 
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
@@ -76,7 +77,35 @@ func main() {
 		ctx.Export("coderOrganizationID", coderConfig.OrganizationID)
 		utils.LogInfo(ctx, "Setup completed successfully!")
 
-		zipFile, _ := utils.CloneFolderFromGitAndZipIt("https://gitlab.com/yodamad-workshops/coder-templates#", "docker")
+		// Check if a template file was uploaded
+		templateFilePath := utils.CoderConfigOptional(ctx, utils.CoderTemplateFilePath)
+		var zipFile string
+
+		if templateFilePath != "" {
+			// Use uploaded template file
+			utils.LogInfo(ctx, "Using uploaded template file: "+templateFilePath)
+			// templateFilePath is relative to job directory (e.g., "template.zip")
+			// Pulumi runs from the job directory, so we need to make it absolute
+			// Get current working directory (should be job directory)
+			cwd, cwdErr := os.Getwd()
+			if cwdErr != nil {
+				return fmt.Errorf("failed to get current working directory: %w", cwdErr)
+			}
+			absTemplatePath := filepath.Join(cwd, templateFilePath)
+			// Verify file exists
+			if _, statErr := os.Stat(absTemplatePath); statErr != nil {
+				return fmt.Errorf("template file not found at %s: %w", absTemplatePath, statErr)
+			}
+			zipFile = absTemplatePath
+		} else {
+			// Use default Git-based template
+			utils.LogInfo(ctx, "No template file uploaded, using Git-based template")
+			var gitErr error
+			zipFile, gitErr = utils.CloneFolderFromGitAndZipIt("https://gitlab.com/yodamad-workshops/coder-templates#", "docker")
+			if gitErr != nil {
+				return fmt.Errorf("failed to clone and zip template from Git: %w", gitErr)
+			}
+		}
 
 		templateOutput := coder.CreateTemplateFromZip(ctx, coderConfig, utils.CoderConfig(ctx, utils.CoderTemplateName), "file://"+zipFile)
 		templateOutput.ApplyT(func(_ interface{}) error {

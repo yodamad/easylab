@@ -80,6 +80,7 @@ type LabConfig struct {
 	CoderDbPassword    string `json:"coder_db_password"`
 	CoderDbName        string `json:"coder_db_name"`
 	CoderTemplateName  string `json:"coder_template_name"`
+	TemplateFilePath   string `json:"template_file_path,omitempty"` // Path to uploaded template file (zip or tf)
 
 	// OVH Endpoint
 	OvhEndpoint string `json:"ovh_endpoint"`

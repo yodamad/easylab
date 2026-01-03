@@ -65,7 +65,19 @@ const CoderDbUser = "dbUser"
 const CoderDbPassword = "dbPassword"
 const CoderDbName = "dbName"
 const CoderTemplateName = "templateName"
+const CoderTemplateFilePath = "templateFilePath"
 
 func CoderConfig(ctx *pulumi.Context, key string) string {
 	return getConfig(ctx, CoderGroup, key)
+}
+
+// CoderConfigOptional returns an optional config value (empty string if not set)
+func CoderConfigOptional(ctx *pulumi.Context, key string) string {
+	cfg := config.New(ctx, CoderGroup)
+	// Try to get the config value, return empty string if not set
+	val := cfg.Get(key)
+	if val == "" {
+		return ""
+	}
+	return val
 }

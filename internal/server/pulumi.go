@@ -83,6 +83,11 @@ func NewPulumiExecutor(jobManager *JobManager, workDir string) *PulumiExecutor {
 	}
 }
 
+// GetWorkDir returns the work directory path
+func (pe *PulumiExecutor) GetWorkDir() string {
+	return pe.workDir
+}
+
 // getOrCreateStack gets or creates a Pulumi stack using Automation API
 func (pe *PulumiExecutor) getOrCreateStack(ctx context.Context, stackName, workDir, jobID string) (auto.Stack, error) {
 	// Try to select existing stack first
@@ -115,6 +120,12 @@ func (pe *PulumiExecutor) outputValueToString(val interface{}) string {
 	case pulumi.StringOutput:
 		// This shouldn't happen in Automation API outputs, but handle it
 		return ""
+	case map[string]interface{}:
+		// Handle Pulumi ConfigValue format: {"Value": "...", "Secret": false}
+		if value, ok := v["Value"].(string); ok {
+			return value
+		}
+		// Fall through to default case
 	default:
 		// For other types, try to marshal to JSON and extract string
 		jsonBytes, err := json.Marshal(v)
@@ -126,8 +137,19 @@ func (pe *PulumiExecutor) outputValueToString(val interface{}) string {
 		if err := json.Unmarshal(jsonBytes, &str); err == nil {
 			return str
 		}
+		// Try to unmarshal as ConfigValue structure
+		var configVal struct {
+			Value  interface{} `json:"Value"`
+			Secret bool        `json:"Secret"`
+		}
+		if err := json.Unmarshal(jsonBytes, &configVal); err == nil {
+			if strVal, ok := configVal.Value.(string); ok {
+				return strVal
+			}
+		}
 		return string(jsonBytes)
 	}
+	return ""
 }
 
 // setStackConfig sets all configuration values for a stack
@@ -636,6 +658,11 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 
 	if config.NetworkID != "" {
 		commands = append(commands, configCommand{"network:networkId", config.NetworkID, false})
+	}
+
+	// Add template file path if provided
+	if config.TemplateFilePath != "" {
+		commands = append(commands, configCommand{"coder:templateFilePath", config.TemplateFilePath, false})
 	}
 
 	return commands
