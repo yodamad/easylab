@@ -590,6 +590,15 @@ func (h *Handler) GetJobStatus(w http.ResponseWriter, r *http.Request) {
 		statusHTML.WriteString(`</form>`)
 	}
 
+	// Show retry button if job failed
+	if status == JobStatusFailed {
+		statusHTML.WriteString(`<form hx-post="/api/jobs/` + jobID + `/retry" hx-target="#job-status" hx-swap="outerHTML" style="display: inline-block; margin-left: 1rem;">`)
+		statusHTML.WriteString(`<button type="submit" class="btn btn-primary">`)
+		statusHTML.WriteString(`<span class="btn-icon">🔄</span> Retry Job`)
+		statusHTML.WriteString(`</button>`)
+		statusHTML.WriteString(`</form>`)
+	}
+
 	// Show download button if job completed successfully and kubeconfig is available
 	if status == JobStatusCompleted && kubeconfig != "" {
 		statusHTML.WriteString(fmt.Sprintf(`<a href="/api/jobs/%s/kubeconfig" class="btn btn-download" download="kubeconfig-%s.yaml">`, jobID, jobID))
@@ -791,6 +800,8 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	coderURL := job.CoderURL
 	coderSessionToken := job.CoderSessionToken
 	coderOrganizationID := job.CoderOrganizationID
+	coderAdminEmail := job.CoderAdminEmail
+	coderAdminPassword := job.CoderAdminPassword
 	job.mu.RUnlock()
 
 	if status != JobStatusCompleted {
@@ -802,9 +813,16 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	coderURL = extractStringFromConfigValue(coderURL)
 	coderSessionToken = extractStringFromConfigValue(coderSessionToken)
 	coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
+	coderAdminEmail = extractStringFromConfigValue(coderAdminEmail)
+	coderAdminPassword = extractStringFromConfigValue(coderAdminPassword)
 
 	if coderURL == "" || coderSessionToken == "" || coderOrganizationID == "" {
 		http.Error(w, "Coder configuration not available for this lab", http.StatusInternalServerError)
+		return
+	}
+
+	if coderAdminEmail == "" || coderAdminPassword == "" {
+		http.Error(w, "Coder admin credentials not available for this lab", http.StatusInternalServerError)
 		return
 	}
 
@@ -828,8 +846,8 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		OrganizationID: coderOrganizationID,
 	}
 
-	// Get available templates
-	templates, err := coder.GetTemplates(coderConfig)
+	// Get available templates with automatic token refresh
+	templates, err := coder.GetTemplatesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword)
 	if err != nil {
 		log.Printf("Failed to get templates: %v", err)
 		w.Header().Set("Content-Type", "text/html")
@@ -846,18 +864,20 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Use first available template
 	templateID := templates[0].ID
 
-	// Create user in Coder
-	user, err := coder.CreateUser(coderConfig, email, username, password)
+	// Create user in Coder with automatic token refresh
+	user, updatedConfig, err := coder.CreateUserWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, email, username, password)
 	if err != nil {
 		log.Printf("Failed to create user: %v", err)
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprintf(w, `<div class="error-message">Failed to create user: %s</div>`, template.HTMLEscapeString(err.Error()))
 		return
 	}
+	// Update config in case token was refreshed
+	coderConfig = updatedConfig
 
-	// Create workspace for user
+	// Create workspace for user with automatic token refresh
 	workspaceName := fmt.Sprintf("%s-workspace", username)
-	workspace, err := coder.CreateWorkspace(coderConfig, user.ID, templateID, workspaceName)
+	workspace, updatedConfig, err := coder.CreateWorkspaceWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, user.ID, templateID, workspaceName)
 	if err != nil {
 		log.Printf("Failed to create workspace: %v", err)
 		w.Header().Set("Content-Type", "text/html")
@@ -1284,4 +1304,110 @@ func (h *Handler) RecreateLab(w http.ResponseWriter, r *http.Request) {
 
 	// Redirect to admin page to view recreation progress (like CreateLab)
 	http.Redirect(w, r, fmt.Sprintf("/admin?job=%s", newJobID), http.StatusSeeOther)
+}
+
+// RetryJob handles retrying a failed job
+func (h *Handler) RetryJob(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract job ID from path like /api/jobs/{id}/retry
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 4 || pathParts[0] != "api" || pathParts[1] != "jobs" || pathParts[3] != "retry" {
+		log.Printf("Invalid path for job retry: %s", r.URL.Path)
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	jobID := pathParts[2]
+	log.Printf("RetryJob called for job: %s", jobID)
+
+	// Get the job
+	job, exists := h.jobManager.GetJob(jobID)
+	if !exists {
+		log.Printf("Job not found: %s", jobID)
+		http.Error(w, "Job not found", http.StatusNotFound)
+		return
+	}
+
+	// Check if job is failed
+	job.mu.RLock()
+	status := job.Status
+	config := job.Config
+	job.mu.RUnlock()
+
+	if status != JobStatusFailed {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `
+			<div class="error-message">
+				<h3>Invalid Job Status</h3>
+				<p>This job is not in failed status. Current status: %s</p>
+				<p>Only failed jobs can be retried.</p>
+			</div>`, status)
+		return
+	}
+
+	if config == nil {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `
+			<div class="error-message">
+				<h3>No Configuration Available</h3>
+				<p>This job does not have configuration data available for retry.</p>
+			</div>`)
+		return
+	}
+
+	// Get OVH credentials from in-memory storage (they might have changed)
+	ovhCreds, err := h.getOVHCredentials(w)
+	if err != nil {
+		return
+	}
+
+	// Update config with current credentials (in case they changed)
+	config.OvhApplicationKey = ovhCreds.ApplicationKey
+	config.OvhApplicationSecret = ovhCreds.ApplicationSecret
+	config.OvhConsumerKey = ovhCreds.ConsumerKey
+	config.OvhServiceName = ovhCreds.ServiceName
+	config.OvhEndpoint = ovhCreds.Endpoint
+
+	// Reset job for retry
+	if err := h.jobManager.ResetJobForRetry(jobID); err != nil {
+		log.Printf("Failed to reset job for retry: %v", err)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `
+			<div class="error-message">
+				<h3>Failed to Reset Job</h3>
+				<p>%s</p>
+			</div>`, template.HTMLEscapeString(err.Error()))
+		return
+	}
+
+	// Update job config with current credentials
+	job.mu.Lock()
+	job.Config = config
+	job.mu.Unlock()
+
+	// Add retry message to output
+	h.jobManager.AppendOutput(jobID, fmt.Sprintf("Retrying job at %s", time.Now().Format(time.RFC3339)))
+
+	// Start Pulumi execution in a goroutine
+	go func() {
+		log.Printf("Starting Pulumi execution for retried job: %s", jobID)
+		if err := h.pulumiExec.Execute(jobID); err != nil {
+			log.Printf("Pulumi execution failed for retried job %s: %v", jobID, err)
+			return
+		}
+		log.Printf("Pulumi execution completed for retried job: %s", jobID)
+	}()
+
+	// Return job status div for HTMX to display with proper polling
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `
+		<div class="job-created">
+			<h3>Job Retried: %s</h3>
+			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load, every 2s" hx-swap="innerHTML">
+				<p>Loading status...</p>
+			</div>
+		</div>`, jobID, jobID)
 }

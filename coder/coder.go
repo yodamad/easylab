@@ -7,6 +7,7 @@ import (
 	"io"
 	internalK8s "labascode/k8s"
 	"labascode/utils"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -101,8 +102,8 @@ func SetupDBSecret(ctx *pulumi.Context, provider pulumi.ProviderResource, ns *k8
 
 func SetupCoder(ctx *pulumi.Context, k8sProvider *k8s.Provider, ns *k8score.Namespace) (*helmv3.Release, error) {
 	helmValues := internalK8s.HelmChartInfo{
-		Name:      "coder",
-		ChartName: "coder",
+		Name:      "coder-v2",
+		ChartName: "coder-v2/coder",
 		Version:   utils.CoderConfig(ctx, utils.CoderVersion),
 		Url:       "https://helm.coder.com/v2",
 	}
@@ -484,4 +485,100 @@ func CreateWorkspace(config CoderClientConfig, userID uuid.UUID, templateID uuid
 	}
 
 	return workspace, nil
+}
+
+// RefreshToken attempts to refresh the session token using admin credentials
+// Returns a new CoderClientConfig with refreshed token, or error if refresh fails
+func RefreshToken(config CoderClientConfig, adminEmail, adminPassword string) (CoderClientConfig, error) {
+	serverURL, err := url.Parse(config.ServerURL)
+	if err != nil {
+		return CoderClientConfig{}, fmt.Errorf("failed to parse server URL: %w", err)
+	}
+
+	client := codersdk.New(serverURL)
+
+	// Try to login with admin credentials
+	loginRes, err := client.LoginWithPassword(context.Background(), codersdk.LoginWithPasswordRequest{
+		Email:    adminEmail,
+		Password: adminPassword,
+	})
+	if err != nil {
+		return CoderClientConfig{}, fmt.Errorf("failed to refresh token: %w", err)
+	}
+
+	// Return updated config with new token
+	return CoderClientConfig{
+		ServerURL:      config.ServerURL,
+		SessionToken:   loginRes.SessionToken,
+		OrganizationID: config.OrganizationID,
+	}, nil
+}
+
+// GetTemplatesWithRetry gets templates with automatic token refresh on failure
+func GetTemplatesWithRetry(config CoderClientConfig, adminEmail, adminPassword string) ([]codersdk.Template, error) {
+	templates, err := GetTemplates(config)
+	if err != nil {
+		// If it fails, try to refresh token and retry
+		log.Printf("Template retrieval failed, attempting token refresh...")
+		refreshedConfig, refreshErr := RefreshToken(config, adminEmail, adminPassword)
+		if refreshErr != nil {
+			return nil, fmt.Errorf("failed to refresh token: %w", refreshErr)
+		}
+
+		// Retry with refreshed token
+		templates, err = GetTemplates(refreshedConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get templates even after token refresh: %w", err)
+		}
+
+		// Return refreshed config as well (though not used in this context)
+		log.Printf("Token refreshed successfully")
+	}
+	return templates, nil
+}
+
+// CreateUserWithRetry creates a user with automatic token refresh on failure
+func CreateUserWithRetry(config CoderClientConfig, adminEmail, adminPassword string, email, username, password string) (codersdk.User, CoderClientConfig, error) {
+	user, err := CreateUser(config, email, username, password)
+	if err != nil {
+		// If it fails, try to refresh token and retry
+		log.Printf("User creation failed, attempting token refresh...")
+		refreshedConfig, refreshErr := RefreshToken(config, adminEmail, adminPassword)
+		if refreshErr != nil {
+			return codersdk.User{}, config, fmt.Errorf("failed to refresh token: %w", refreshErr)
+		}
+
+		// Retry with refreshed token
+		user, err = CreateUser(refreshedConfig, email, username, password)
+		if err != nil {
+			return codersdk.User{}, refreshedConfig, fmt.Errorf("failed to create user even after token refresh: %w", err)
+		}
+
+		log.Printf("Token refreshed successfully")
+		return user, refreshedConfig, nil
+	}
+	return user, config, nil
+}
+
+// CreateWorkspaceWithRetry creates a workspace with automatic token refresh on failure
+func CreateWorkspaceWithRetry(config CoderClientConfig, adminEmail, adminPassword string, userID uuid.UUID, templateID uuid.UUID, workspaceName string) (codersdk.Workspace, CoderClientConfig, error) {
+	workspace, err := CreateWorkspace(config, userID, templateID, workspaceName)
+	if err != nil {
+		// If it fails, try to refresh token and retry
+		log.Printf("Workspace creation failed, attempting token refresh...")
+		refreshedConfig, refreshErr := RefreshToken(config, adminEmail, adminPassword)
+		if refreshErr != nil {
+			return codersdk.Workspace{}, config, fmt.Errorf("failed to refresh token: %w", refreshErr)
+		}
+
+		// Retry with refreshed token
+		workspace, err = CreateWorkspace(refreshedConfig, userID, templateID, workspaceName)
+		if err != nil {
+			return codersdk.Workspace{}, refreshedConfig, fmt.Errorf("failed to create workspace even after token refresh: %w", err)
+		}
+
+		log.Printf("Token refreshed successfully")
+		return workspace, refreshedConfig, nil
+	}
+	return workspace, config, nil
 }
