@@ -1202,6 +1202,11 @@ func (h *Handler) DestroyStack(w http.ResponseWriter, r *http.Request) {
 		if err := h.pulumiExec.Destroy(jobID); err != nil {
 			log.Printf("Stack destruction failed for job %s: %v", jobID, err)
 			h.jobManager.SetError(jobID, fmt.Errorf("destroy failed: %w", err))
+			// Persist failed job to disk
+			if saveErr := h.jobManager.SaveJob(jobID); saveErr != nil {
+				log.Printf("Warning: failed to persist failed job %s: %v", jobID, saveErr)
+				// Don't fail the job if persistence fails
+			}
 			return
 		}
 		log.Printf("Stack destruction completed for job: %s", jobID)

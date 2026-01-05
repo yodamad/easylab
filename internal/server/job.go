@@ -14,12 +14,12 @@ import (
 type JobStatus string
 
 const (
-	JobStatusPending        JobStatus = "pending"
-	JobStatusRunning        JobStatus = "running"
-	JobStatusCompleted      JobStatus = "completed"
-	JobStatusFailed         JobStatus = "failed"
+	JobStatusPending         JobStatus = "pending"
+	JobStatusRunning         JobStatus = "running"
+	JobStatusCompleted       JobStatus = "completed"
+	JobStatusFailed          JobStatus = "failed"
 	JobStatusDryRunCompleted JobStatus = "dry-run-completed"
-	JobStatusDestroyed      JobStatus = "destroyed"
+	JobStatusDestroyed       JobStatus = "destroyed"
 )
 
 // Job represents a Pulumi execution job
@@ -33,12 +33,12 @@ type Job struct {
 	Config     *LabConfig `json:"config,omitempty"`
 	Kubeconfig string     `json:"kubeconfig,omitempty"`
 	// Coder configuration stored after deployment
-	CoderURL             string `json:"coder_url,omitempty"`
-	CoderAdminEmail      string `json:"coder_admin_email,omitempty"`
-	CoderAdminPassword   string `json:"coder_admin_password,omitempty"`
-	CoderSessionToken    string `json:"coder_session_token,omitempty"`
-	CoderOrganizationID  string `json:"coder_organization_id,omitempty"`
-	mu                   sync.RWMutex `json:"-"`
+	CoderURL            string       `json:"coder_url,omitempty"`
+	CoderAdminEmail     string       `json:"coder_admin_email,omitempty"`
+	CoderAdminPassword  string       `json:"coder_admin_password,omitempty"`
+	CoderSessionToken   string       `json:"coder_session_token,omitempty"`
+	CoderOrganizationID string       `json:"coder_organization_id,omitempty"`
+	mu                  sync.RWMutex `json:"-"`
 }
 
 // LabConfig holds all configuration values for a lab
@@ -99,10 +99,10 @@ func NewJobManager(dataDir string) *JobManager {
 		jobs:    make(map[string]*Job),
 		dataDir: dataDir,
 	}
-	
+
 	// Job loading is now done asynchronously after server starts
 	// See cmd/server/main.go for the async LoadJobs() call
-	
+
 	return jm
 }
 
@@ -229,6 +229,33 @@ func (jm *JobManager) SetCoderConfig(id string, coderURL, coderAdminEmail, coder
 	return nil
 }
 
+// ResetJobForRetry resets a failed job to pending status for retry
+func (jm *JobManager) ResetJobForRetry(id string) error {
+	jm.mu.RLock()
+	job, exists := jm.jobs[id]
+	jm.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("job %s not found", id)
+	}
+
+	job.mu.Lock()
+	defer job.mu.Unlock()
+
+	// Only allow retry for failed jobs
+	if job.Status != JobStatusFailed {
+		return fmt.Errorf("job %s is not in failed status (current status: %s)", id, job.Status)
+	}
+
+	// Reset job state
+	job.Status = JobStatusPending
+	job.Error = ""
+	job.Output = []string{} // Clear previous output
+	job.UpdatedAt = time.Now()
+
+	return nil
+}
+
 // SaveJob persists a completed job to disk
 func (jm *JobManager) SaveJob(id string) error {
 	if jm.dataDir == "" {
@@ -247,8 +274,8 @@ func (jm *JobManager) SaveJob(id string) error {
 	status := job.Status
 	job.mu.RUnlock()
 
-	// Persist completed and destroyed jobs
-	if status != JobStatusCompleted && status != JobStatusDestroyed {
+	// Persist completed, destroyed, and failed jobs
+	if status != JobStatusCompleted && status != JobStatusDestroyed && status != JobStatusFailed {
 		return nil
 	}
 
@@ -269,11 +296,11 @@ func (jm *JobManager) SaveJob(id string) error {
 	// Write atomically: write to temp file, then rename
 	jobFile := filepath.Join(jobsDir, fmt.Sprintf("%s.json", id))
 	tmpFile := jobFile + ".tmp"
-	
+
 	if err := os.WriteFile(tmpFile, jobData, 0644); err != nil {
 		return fmt.Errorf("failed to write job file: %w", err)
 	}
-	
+
 	if err := os.Rename(tmpFile, jobFile); err != nil {
 		os.Remove(tmpFile) // Clean up temp file on error
 		return fmt.Errorf("failed to rename temp file: %w", err)
@@ -289,7 +316,7 @@ func (jm *JobManager) LoadJobs() error {
 	}
 
 	jobsDir := filepath.Join(jm.dataDir, "jobs")
-	
+
 	// Check if jobs directory exists
 	if _, err := os.Stat(jobsDir); os.IsNotExist(err) {
 		return nil // No jobs directory, nothing to load
@@ -320,8 +347,8 @@ func (jm *JobManager) LoadJobs() error {
 			continue
 		}
 
-		// Load completed and destroyed jobs
-		if job.Status != JobStatusCompleted && job.Status != JobStatusDestroyed {
+		// Load completed, destroyed, and failed jobs
+		if job.Status != JobStatusCompleted && job.Status != JobStatusDestroyed && job.Status != JobStatusFailed {
 			continue
 		}
 

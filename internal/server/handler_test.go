@@ -585,6 +585,32 @@ func TestHandler_ServeStatic_DirectoryTraversal(t *testing.T) {
 	}
 }
 
+func TestHandler_DestroyStack_FailedJob(t *testing.T) {
+	// Test that destroy works for failed jobs
+	jm := NewJobManager("")
+	h := NewHandler(jm, &PulumiExecutor{}, &CredentialsManager{})
+
+	// Create a job with failed status
+	jobID := jm.CreateJob(&LabConfig{
+		StackName: "test-stack",
+	})
+	jm.UpdateJobStatus(jobID, JobStatusFailed)
+
+	form := url.Values{}
+	form.Set("job_id", jobID)
+	req := httptest.NewRequest("POST", "/api/stack/destroy", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	h.DestroyStack(w, req)
+
+	// Should not return an error for wrong method or missing job
+	if w.Code == http.StatusMethodNotAllowed || w.Code == http.StatusBadRequest || w.Code == http.StatusNotFound {
+		t.Errorf("DestroyStack() should work for failed jobs, got status %d", w.Code)
+	}
+	// Note: We can't easily test the full destroy flow without mocking PulumiExecutor
+}
+
 func TestHandler_ServeStatic_NotFound(t *testing.T) {
 	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
 

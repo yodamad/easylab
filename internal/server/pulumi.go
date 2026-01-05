@@ -450,6 +450,32 @@ func findProjectRoot() string {
 	return cwd
 }
 
+// extractKubeconfigFromOutputs extracts kubeconfig from outputs if cluster exists
+func (pe *PulumiExecutor) extractKubeconfigFromOutputs(jobID string, outputs auto.OutputMap) {
+	// Verify that Kubernetes cluster was created before extracting kubeconfig
+	if _, ok := outputs["kubeClusterId"]; ok {
+		pe.jobManager.AppendOutput(jobID, "Kubernetes cluster found, extracting kubeconfig...")
+		// Get kubeconfig from outputs
+		if kubeconfigVal, ok := outputs["kubeconfig"]; ok {
+			kubeconfig := pe.outputValueToString(kubeconfigVal)
+			if kubeconfig != "" {
+				// Validate that kubeconfig looks like valid YAML
+				if !strings.Contains(kubeconfig, "apiVersion") && !strings.Contains(kubeconfig, "kind:") {
+					pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: kubeconfig may be invalid (length: %d chars)", len(kubeconfig)))
+				}
+				pe.jobManager.SetKubeconfig(jobID, kubeconfig)
+				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Kubeconfig extracted successfully (length: %d chars)", len(kubeconfig)))
+			} else {
+				pe.jobManager.AppendOutput(jobID, "Warning: kubeconfig output exists but is empty")
+			}
+		} else {
+			pe.jobManager.AppendOutput(jobID, "Warning: Kubernetes cluster created but kubeconfig output not found")
+		}
+	} else {
+		pe.jobManager.AppendOutput(jobID, "Kubernetes cluster not found in outputs, skipping kubeconfig extraction")
+	}
+}
+
 // Execute runs pulumi up for a given job
 func (pe *PulumiExecutor) Execute(jobID string) error {
 	// Prepare job with common setup
@@ -466,24 +492,38 @@ func (pe *PulumiExecutor) Execute(jobID string) error {
 	upResult, err := prep.Stack.Up(prep.Context, optup.ProgressStreams(prep.Writer))
 	if err != nil {
 		pe.jobManager.SetError(jobID, fmt.Errorf("pulumi up failed: %w", err))
+
+		// Even if pulumi up failed, try to extract kubeconfig if cluster was created
+		pe.jobManager.AppendOutput(jobID, "Checking for kubeconfig despite deployment failure...")
+		if len(upResult.Outputs) > 0 {
+			pe.extractKubeconfigFromOutputs(jobID, upResult.Outputs)
+		} else {
+			// Try to refresh stack and get outputs directly
+			pe.jobManager.AppendOutput(jobID, "Attempting to refresh stack to get outputs...")
+			if _, refreshErr := prep.Stack.Refresh(prep.Context); refreshErr == nil {
+				if outputs, outErr := prep.Stack.Outputs(prep.Context); outErr == nil {
+					pe.extractKubeconfigFromOutputs(jobID, outputs)
+				} else {
+					pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Could not retrieve stack outputs: %v", outErr))
+				}
+			} else {
+				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Could not refresh stack: %v", refreshErr))
+			}
+		}
+
+		// Persist failed job to disk
+		if saveErr := pe.jobManager.SaveJob(jobID); saveErr != nil {
+			log.Printf("Warning: failed to persist failed job %s: %v", jobID, saveErr)
+			// Don't fail the job if persistence fails
+		}
 		return err
 	}
 
 	// Extract outputs from the result
 	pe.jobManager.AppendOutput(jobID, "Extracting stack outputs...")
 
-	// Get kubeconfig from outputs
-	if kubeconfigVal, ok := upResult.Outputs["kubeconfig"]; ok {
-		kubeconfig := pe.outputValueToString(kubeconfigVal)
-		if kubeconfig != "" {
-			// Validate that kubeconfig looks like valid YAML
-			if !strings.Contains(kubeconfig, "apiVersion") && !strings.Contains(kubeconfig, "kind:") {
-				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: kubeconfig may be invalid (length: %d chars)", len(kubeconfig)))
-			}
-			pe.jobManager.SetKubeconfig(jobID, kubeconfig)
-			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Kubeconfig extracted successfully (length: %d chars)", len(kubeconfig)))
-		}
-	}
+	// Extract kubeconfig if cluster was created
+	pe.extractKubeconfigFromOutputs(jobID, upResult.Outputs)
 
 	// Extract Coder configuration from stack outputs
 	pe.jobManager.AppendOutput(jobID, "Extracting Coder configuration...")
@@ -547,6 +587,11 @@ func (pe *PulumiExecutor) Preview(jobID string) error {
 	_, err = prep.Stack.Preview(prep.Context, optpreview.ProgressStreams(prep.Writer))
 	if err != nil {
 		pe.jobManager.SetError(jobID, fmt.Errorf("pulumi preview failed: %w", err))
+		// Persist failed job to disk
+		if saveErr := pe.jobManager.SaveJob(jobID); saveErr != nil {
+			log.Printf("Warning: failed to persist failed job %s: %v", jobID, saveErr)
+			// Don't fail the job if persistence fails
+		}
 		return err
 	}
 
@@ -571,11 +616,12 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 		return nil
 	}
 
-	// Get stack name for output
+	// Get stack name and job directory for output
 	job, _ := pe.jobManager.GetJob(jobID)
 	job.mu.RLock()
 	stackName := job.Config.StackName
 	job.mu.RUnlock()
+	jobDir := filepath.Join(pe.workDir, jobID)
 
 	// Run pulumi destroy with streaming output
 	pe.jobManager.AppendOutput(jobID, "Running pulumi destroy...")
@@ -585,11 +631,22 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 		// Continue with stack removal even if destroy failed
 	}
 
-	// Note: Stack removal is not necessary for local workspaces.
-	// The stack metadata is stored in the workspace directory (jobDir),
-	// which will be cleaned up when the job directory is removed.
-	// The Destroy() operation above has already removed all resources.
-	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' resources destroyed. Stack metadata will be cleaned up with job directory.", stackName))
+	// Remove the stack from the workspace
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Removing stack '%s' from workspace...", stackName))
+	workspace, wsErr := auto.NewLocalWorkspace(prep.Context, auto.WorkDir(jobDir))
+	if wsErr != nil {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to create workspace for stack removal: %v", wsErr))
+		// Continue with cleanup even if workspace creation failed
+	} else {
+		if removeErr := workspace.RemoveStack(prep.Context, stackName); removeErr != nil {
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to remove stack from workspace: %v", removeErr))
+			// Continue with cleanup even if stack removal failed
+		} else {
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' removed from workspace successfully", stackName))
+		}
+	}
+
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' resources destroyed and stack removed.", stackName))
 
 	// Success - mark as destroyed
 	pe.jobManager.UpdateJobStatus(jobID, JobStatusDestroyed)

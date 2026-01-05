@@ -230,6 +230,11 @@ func main() {
 	mux.HandleFunc("/api/labs/recreate", authHandler.RequireAuth(handler.RecreateLab))
 	mux.HandleFunc("/api/stacks/destroy", authHandler.RequireAuth(handler.DestroyStack))
 	mux.HandleFunc("/api/jobs/", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		// Check if this is a retry request
+		if strings.HasSuffix(r.URL.Path, "/retry") {
+			handler.RetryJob(w, r)
+			return
+		}
 		// Check if this is a kubeconfig download request
 		if strings.HasSuffix(r.URL.Path, "/kubeconfig") {
 			handler.DownloadKubeconfig(w, r)

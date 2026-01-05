@@ -322,6 +322,13 @@
                                     </svg>
                                 </a>
                                 {{end}}
+                                {{if eq .Status "failed"}}
+                                <button type="button" class="btn btn-primary btn-icon-only" title="Retry failed job" onclick="retryJob('{{.ID}}')">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                                    </svg>
+                                </button>
+                                {{end}}
                                 {{if and .StackName (or (eq .Status "completed") (eq .Status "failed"))}}
                                 <button type="button" class="btn btn-danger btn-icon-only" title="Destroy stack (pulumi down)" onclick="destroyStack('{{.ID}}')">
                                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
@@ -400,6 +407,32 @@
             })
             .catch(error => {
                 console.error('Recreate error:', error);
+            });
+        }
+
+        function retryJob(jobId) {
+            // Send POST request to retry endpoint
+            fetch('/api/jobs/' + encodeURIComponent(jobId) + '/retry', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                }
+            })
+            .then(response => {
+                if (response.ok) {
+                    // Redirect to admin page to view retry progress
+                    window.location.href = '/admin?job=' + encodeURIComponent(jobId);
+                } else {
+                    // Handle error
+                    response.text().then(text => {
+                        console.error('Retry failed:', response.status, text);
+                        alert('Failed to retry job: ' + response.status);
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Retry error:', error);
+                alert('Error retrying job: ' + error.message);
             });
         }
     </script>
