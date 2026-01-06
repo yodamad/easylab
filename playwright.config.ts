@@ -16,6 +16,9 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   /* Reporter to use */
   reporter: [['html', { outputFolder: 'playwright-report' }]],
+  /* Global setup and teardown for coverage collection */
+  globalSetup: require.resolve('./tests/global-setup.ts'),
+  globalTeardown: require.resolve('./tests/global-teardown.ts'),
   /* Shared settings for all the projects below */
   use: {
     /* Base URL to use in actions like `await page.goto('/')` */

@@ -442,7 +442,7 @@ go run ./cmd/server
 
 ## Coverage Reports
 
-### Go Coverage
+### Backend (Go) Coverage
 
 ```bash
 # Generate coverage and show summary
@@ -461,17 +461,62 @@ make coverage-check
 make coverage-pkg PKG=./internal/server
 ```
 
+### Frontend (JavaScript) Coverage
+
+Frontend coverage is collected using Playwright's Chrome DevTools Protocol (CDP) to track JavaScript execution during E2E tests. This measures which JavaScript code paths are executed during test runs.
+
+```bash
+# Generate frontend coverage
+make coverage-frontend
+
+# Or using npm directly
+COLLECT_COVERAGE=true npm run test
+
+# Run tests with coverage in headed mode (for debugging)
+COLLECT_COVERAGE=true npm run test:headed
+```
+
+Coverage data is saved to `coverage/frontend/`:
+- `coverage-summary.json` - Detailed coverage statistics
+- `coverage-summary.txt` - Human-readable summary
+- `coverage-*.json` - Individual test coverage files
+
+### Unified Coverage Report
+
+Generate a combined report showing both backend and frontend coverage:
+
+```bash
+# Generate unified coverage report
+make coverage-report
+
+# Or generate both separately
+make coverage-all
+```
+
+The unified report shows:
+- Backend coverage percentage
+- Frontend coverage percentage
+- Overall average coverage
+- Threshold compliance status
+
 ### Current Coverage Statistics
 
-| Package | Coverage |
-|---------|----------|
-| `internal/server` | ~39% |
-| Total (all packages) | ~28% |
+| Component | Coverage | Threshold |
+|-----------|----------|-----------|
+| Backend (`internal/server`) | ~39% | 50% |
+| Frontend (JavaScript) | Varies by test run | 50% |
+| Total (all packages) | ~28% | 50% |
 
-Key functions with 100% coverage:
+**Backend Key functions with 100% coverage:**
 - `hashPassword`, `generateToken`, `createSession`, `validateSession`, `deleteSession`
 - `SetCredentials`, `GetCredentials`, `HasCredentials`, `ClearCredentials`, `loadCredentialsFromEnv`
 - `NewHandler`, `NewJobManager`, `CreateJob`, `GetJob`, `UpdateJobStatus`, `AppendOutput`, `SetError`, `SetKubeconfig`, `SetCoderConfig`, `GetAllJobs`
+
+**Frontend Coverage Notes:**
+- Coverage is collected during Playwright E2E test execution
+- Only JavaScript code executed during tests is measured
+- Inline JavaScript in HTML files is included in coverage
+- Coverage percentage depends on which pages and features are tested
 
 ---
 

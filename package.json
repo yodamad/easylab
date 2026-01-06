@@ -12,7 +12,9 @@
     "test:chaos:network": "playwright test tests/chaos/network-chaos.spec.ts",
     "test:chaos:server": "playwright test tests/chaos/server-chaos.spec.ts",
     "test:chaos:ui": "playwright test tests/chaos/ui-chaos.spec.ts",
-    "test:chaos:api": "playwright test tests/chaos/api-chaos.spec.ts"
+    "test:chaos:api": "playwright test tests/chaos/api-chaos.spec.ts",
+    "test:coverage": "COLLECT_COVERAGE=true playwright test",
+    "test:coverage:headed": "COLLECT_COVERAGE=true playwright test --headed"
   },
   "devDependencies": {
     "@playwright/test": "1.57.0",

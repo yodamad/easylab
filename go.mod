@@ -7,6 +7,7 @@ require (
 	github.com/go-git/go-git/v5 v5.16.4
 	github.com/google/uuid v1.6.0
 	github.com/ovh/pulumi-ovh/sdk/v2 v2.10.0
+	github.com/pulumi/pulumi-command/sdk v1.1.3
 	github.com/pulumi/pulumi-kubernetes/sdk/v4 v4.24.1
 	github.com/pulumi/pulumi/sdk/v3 v3.210.0
 )

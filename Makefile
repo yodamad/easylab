@@ -27,7 +27,7 @@ COVERAGE_FILE=$(COVERAGE_DIR)/coverage.out
 COVERAGE_HTML=$(COVERAGE_DIR)/coverage.html
 COVERAGE_THRESHOLD=50
 
-.PHONY: all build clean test test-all test-backend test-frontend test-verbose test-race coverage coverage-html coverage-check deps deps-all deps-update npm-install npm-update lint help server run-server npm-test-ui npm-test-headed npm-test-debug npm-test-chaos npm-test-chaos-headed npm-test-chaos-network npm-test-chaos-server npm-test-chaos-ui npm-test-chaos-api ci ci-coverage
+.PHONY: all build clean test test-all test-backend test-frontend test-verbose test-race coverage coverage-html coverage-check coverage-frontend coverage-all coverage-report coverage-pkg deps deps-all deps-update npm-install npm-update lint help server run-server npm-test-ui npm-test-headed npm-test-debug npm-test-chaos npm-test-chaos-headed npm-test-chaos-network npm-test-chaos-server npm-test-chaos-ui npm-test-chaos-api ci ci-coverage
 
 # Default target
 all: deps-all test-all build
@@ -138,6 +138,25 @@ coverage-pkg:
 	$(GOCMD) tool cover -func=$(COVERAGE_FILE)
 	$(GOCMD) tool cover -html=$(COVERAGE_FILE) -o $(COVERAGE_HTML)
 	@echo "Coverage report for $(PKG) generated: $(COVERAGE_HTML)"
+
+# Generate frontend coverage
+coverage-frontend: npm-install
+	@echo "Generating frontend coverage..."
+	@mkdir -p $(COVERAGE_DIR)/frontend
+	COLLECT_COVERAGE=true $(NPMCMD) run test || true
+	@if [ -f $(COVERAGE_DIR)/frontend/coverage-summary.txt ]; then \
+		cat $(COVERAGE_DIR)/frontend/coverage-summary.txt; \
+	else \
+		echo "Frontend coverage data not found. Run tests with COLLECT_COVERAGE=true"; \
+	fi
+
+# Generate both backend and frontend coverage
+coverage-all: coverage coverage-frontend
+	@echo "Both backend and frontend coverage generated"
+
+# Generate unified coverage report (backend + frontend)
+coverage-report:
+	@./scripts/coverage-report.sh
 
 ## Dependency management
 
@@ -259,10 +278,13 @@ help:
 	@echo "  npm-test-chaos-api     - Run API chaos tests"
 	@echo ""
 	@echo "Coverage targets:"
-	@echo "  coverage       - Run backend tests with coverage and show summary"
-	@echo "  coverage-html  - Generate HTML coverage report"
-	@echo "  coverage-check - Check if coverage meets threshold ($(COVERAGE_THRESHOLD)%)"
-	@echo "  coverage-pkg   - Generate coverage report for specific package (PKG=./path)"
+	@echo "  coverage          - Run backend tests with coverage and show summary"
+	@echo "  coverage-html     - Generate HTML coverage report"
+	@echo "  coverage-check    - Check if coverage meets threshold ($(COVERAGE_THRESHOLD)%)"
+	@echo "  coverage-pkg      - Generate coverage report for specific package (PKG=./path)"
+	@echo "  coverage-frontend - Generate frontend coverage report"
+	@echo "  coverage-all      - Generate both backend and frontend coverage"
+	@echo "  coverage-report   - Generate unified coverage report (backend + frontend)"
 	@echo ""
 	@echo "Dependency targets:"
 	@echo "  deps           - Download and tidy Go dependencies"

@@ -1,0 +1,34 @@
+/**
+ * Example: How to use coverage collection in Playwright tests
+ * 
+ * Option 1: Use the coverage helper directly
+ */
+import { test, expect } from '@playwright/test';
+import { coverageCollector } from './coverage-helper';
+
+test.describe('Example with Coverage', () => {
+  test('example test with coverage', async ({ page }) => {
+    // Start coverage collection
+    if (process.env.COLLECT_COVERAGE === 'true') {
+      await coverageCollector.startCoverage(page);
+    }
+
+    // Your test code
+    await page.goto('/');
+    await expect(page.locator('h1')).toBeVisible();
+
+    // Stop coverage collection
+    if (process.env.COLLECT_COVERAGE === 'true') {
+      await coverageCollector.stopCoverage(page, 'example test with coverage');
+    }
+  });
+});
+
+/**
+ * Option 2: Use the test fixture (import from setup.ts instead)
+ * 
+ * import { test, expect } from './setup';
+ * 
+ * Then coverage is automatically collected for all tests using this import.
+ */
+
