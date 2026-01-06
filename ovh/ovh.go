@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/ovh/pulumi-ovh/sdk/v2/go/ovh/cloudproject"
+	local "github.com/pulumi/pulumi-command/sdk/go/command/local"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
 
@@ -76,7 +77,18 @@ func InitManagedKubernetesCluster(ctx *pulumi.Context, serviceName string, priva
 
 	ctx.Export("kubeClusterId", kubeCluster.ID())
 	ctx.Export("kubeClusterName", kubeCluster.Name)
-	ctx.Export("kubeconfig", kubeCluster.Kubeconfig)
+	ctx.Export("kubeconfig", pulumi.ToSecret(kubeCluster.Kubeconfig))
+	// Export kubeconfig to file
+	_, err = local.NewCommand(ctx, "writeKubeconfig", &local.CommandArgs{
+		Create: pulumi.Sprintf(
+			"echo '%s' > kubeconfig.yaml",
+			kubeCluster.Kubeconfig,
+		),
+	})
+	if err != nil {
+		fmt.Errorf("failed to write kubeconfig to file: %w", err)
+	}
+
 	return kubeCluster, nil
 }
 
