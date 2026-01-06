@@ -103,7 +103,7 @@ func SetupDBSecret(ctx *pulumi.Context, provider pulumi.ProviderResource, ns *k8
 func SetupCoder(ctx *pulumi.Context, k8sProvider *k8s.Provider, ns *k8score.Namespace) (*helmv3.Release, error) {
 	helmValues := internalK8s.HelmChartInfo{
 		Name:      "coder",
-		ChartName: "coder-v2/coder",
+		ChartName: "coder",
 		Version:   utils.CoderConfig(ctx, utils.CoderVersion),
 		Url:       "https://helm.coder.com/v2",
 	}
