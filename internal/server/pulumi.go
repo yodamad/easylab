@@ -90,21 +90,61 @@ func (pe *PulumiExecutor) GetWorkDir() string {
 
 // getOrCreateStack gets or creates a Pulumi stack using Automation API
 func (pe *PulumiExecutor) getOrCreateStack(ctx context.Context, stackName, workDir, jobID string) (auto.Stack, error) {
-	// Try to select existing stack first
+	// First, try to select the stack to check if it exists
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Checking if stack '%s' exists...", stackName))
 	stack, err := auto.SelectStackLocalSource(ctx, stackName, workDir, auto.WorkDir(workDir))
-	if err != nil {
-		// Stack doesn't exist, create it
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' does not exist, creating it...", stackName))
-		stack, err = auto.UpsertStackLocalSource(ctx, stackName, workDir, auto.WorkDir(workDir))
-		if err != nil {
-			// Return empty stack on error - caller should check error first
-			return stack, fmt.Errorf("failed to create stack: %w", err)
-		}
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' created successfully", stackName))
-	} else {
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' selected successfully", stackName))
+	if err == nil {
+		// Stack exists, return it
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' exists, selected successfully", stackName))
+		return stack, nil
 	}
 
+	// If selection failed, check if it's because the stack doesn't exist
+	// Try to list stacks to verify
+	workspace, wsErr := auto.NewLocalWorkspace(ctx, auto.WorkDir(workDir))
+	if wsErr != nil {
+		return auto.Stack{}, fmt.Errorf("failed to create workspace: %w", wsErr)
+	}
+
+	stacks, listErr := workspace.ListStacks(ctx)
+	if listErr != nil {
+		// If we can't list stacks, assume stack doesn't exist and try to create it
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' does not exist (could not verify), creating it...", stackName))
+		stack, createErr := auto.UpsertStackLocalSource(ctx, stackName, workDir, auto.WorkDir(workDir))
+		if createErr != nil {
+			return auto.Stack{}, fmt.Errorf("failed to create stack: %w", createErr)
+		}
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' created successfully", stackName))
+		return stack, nil
+	}
+
+	// Verify stack doesn't exist in the list
+	stackExists := false
+	for _, s := range stacks {
+		if s.Name == stackName {
+			stackExists = true
+			break
+		}
+	}
+
+	if stackExists {
+		// Stack exists in list but selection failed - try again with more context
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' exists in workspace, retrying selection...", stackName))
+		stack, err := auto.SelectStackLocalSource(ctx, stackName, workDir, auto.WorkDir(workDir))
+		if err != nil {
+			return auto.Stack{}, fmt.Errorf("failed to select existing stack: %w", err)
+		}
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' selected successfully", stackName))
+		return stack, nil
+	}
+
+	// Stack doesn't exist, create it
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' does not exist, creating it...", stackName))
+	stack, err = auto.UpsertStackLocalSource(ctx, stackName, workDir, auto.WorkDir(workDir))
+	if err != nil {
+		return auto.Stack{}, fmt.Errorf("failed to create stack: %w", err)
+	}
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' created successfully", stackName))
 	return stack, nil
 }
 
@@ -469,11 +509,48 @@ func (pe *PulumiExecutor) extractKubeconfigFromOutputs(jobID string, outputs aut
 				pe.jobManager.AppendOutput(jobID, "Warning: kubeconfig output exists but is empty")
 			}
 		} else {
-			pe.jobManager.AppendOutput(jobID, "Warning: Kubernetes cluster created but kubeconfig output not found")
+			pe.jobManager.AppendOutput(jobID, "Warning: Kubernetes cluster created but kubeconfig output not found, checking local file...")
+			// Fallback to local file if output is missing
+			pe.checkLocalKubeconfigFile(jobID)
 		}
 	} else {
-		pe.jobManager.AppendOutput(jobID, "Kubernetes cluster not found in outputs, skipping kubeconfig extraction")
+		pe.jobManager.AppendOutput(jobID, "Kubernetes cluster not found in outputs, checking for local kubeconfig.yaml file...")
+		// Check if kubeconfig.yaml exists locally as fallback
+		pe.checkLocalKubeconfigFile(jobID)
 	}
+}
+
+// checkLocalKubeconfigFile checks if kubeconfig.yaml exists in the job directory and reads it
+func (pe *PulumiExecutor) checkLocalKubeconfigFile(jobID string) {
+	jobDir := filepath.Join(pe.workDir, jobID)
+	kubeconfigPath := filepath.Join(jobDir, "kubeconfig.yaml")
+
+	// Check if file exists
+	if _, err := os.Stat(kubeconfigPath); os.IsNotExist(err) {
+		pe.jobManager.AppendOutput(jobID, "Local kubeconfig.yaml file not found")
+		return
+	}
+
+	// Read the file
+	kubeconfigBytes, err := os.ReadFile(kubeconfigPath)
+	if err != nil {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Failed to read local kubeconfig.yaml: %v", err))
+		return
+	}
+
+	kubeconfig := strings.TrimSpace(string(kubeconfigBytes))
+	if kubeconfig == "" {
+		pe.jobManager.AppendOutput(jobID, "Local kubeconfig.yaml file is empty")
+		return
+	}
+
+	// Validate that kubeconfig looks like valid YAML
+	if !strings.Contains(kubeconfig, "apiVersion") && !strings.Contains(kubeconfig, "kind:") {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: local kubeconfig may be invalid (length: %d chars)", len(kubeconfig)))
+	}
+
+	pe.jobManager.SetKubeconfig(jobID, kubeconfig)
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Kubeconfig loaded from local file (length: %d chars)", len(kubeconfig)))
 }
 
 // Execute runs pulumi up for a given job

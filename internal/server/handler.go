@@ -599,8 +599,8 @@ func (h *Handler) GetJobStatus(w http.ResponseWriter, r *http.Request) {
 		statusHTML.WriteString(`</form>`)
 	}
 
-	// Show download button if job completed successfully and kubeconfig is available
-	if status == JobStatusCompleted && kubeconfig != "" {
+	// Show download button if kubeconfig is available (for both completed and failed jobs)
+	if kubeconfig != "" && (status == JobStatusCompleted || status == JobStatusFailed) {
 		statusHTML.WriteString(fmt.Sprintf(`<a href="/api/jobs/%s/kubeconfig" class="btn btn-download" download="kubeconfig-%s.yaml">`, jobID, jobID))
 		statusHTML.WriteString(`<span class="btn-icon">⬇</span> Download Kubeconfig`)
 		statusHTML.WriteString(`</a>`)
@@ -704,8 +704,9 @@ func (h *Handler) DownloadKubeconfig(w http.ResponseWriter, r *http.Request) {
 	status := job.Status
 	job.mu.RUnlock()
 
-	if status != JobStatusCompleted {
-		http.Error(w, "Job not completed", http.StatusBadRequest)
+	// Allow download for completed or failed jobs if kubeconfig is available
+	if status != JobStatusCompleted && status != JobStatusFailed {
+		http.Error(w, "Job not completed or failed", http.StatusBadRequest)
 		return
 	}
 

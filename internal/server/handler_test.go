@@ -376,16 +376,45 @@ func TestHandler_DownloadKubeconfig_Success(t *testing.T) {
 	}
 }
 
+func TestHandler_DownloadKubeconfig_FailedJobWithKubeconfig(t *testing.T) {
+	jm := NewJobManager("")
+	config := &LabConfig{StackName: "test"}
+	jobID := jm.CreateJob(config)
+	jm.UpdateJobStatus(jobID, JobStatusFailed)
+	jm.SetKubeconfig(jobID, "apiVersion: v1\nkind: Config")
+
+	h := NewHandler(jm, &PulumiExecutor{}, &CredentialsManager{})
+
+	req := httptest.NewRequest("GET", "/api/jobs/"+jobID+"/kubeconfig", nil)
+	w := httptest.NewRecorder()
+
+	h.DownloadKubeconfig(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("DownloadKubeconfig() status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "application/x-yaml" {
+		t.Errorf("DownloadKubeconfig() Content-Type = %s, want application/x-yaml", contentType)
+	}
+
+	contentDisp := w.Header().Get("Content-Disposition")
+	if !strings.Contains(contentDisp, "attachment") {
+		t.Error("DownloadKubeconfig() missing attachment Content-Disposition")
+	}
+}
+
 func TestHandler_ListLabs(t *testing.T) {
 	jm := NewJobManager("")
-	
+
 	// Create some jobs with different statuses
 	config := &LabConfig{StackName: "test"}
 	jobID1 := jm.CreateJob(config)
 	jm.UpdateJobStatus(jobID1, JobStatusCompleted)
-	
+
 	jm.CreateJob(config) // Pending job - should not be in list
-	
+
 	jobID3 := jm.CreateJob(config)
 	jm.UpdateJobStatus(jobID3, JobStatusCompleted)
 
@@ -653,4 +682,3 @@ func TestHandler_RenderHTMLError_WithLink(t *testing.T) {
 		t.Error("renderHTMLError() missing optional link")
 	}
 }
-
