@@ -1,31 +1,31 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: lab-as-code-jobs-pvc
-  namespace: lab-as-code
+  name: easylab-jobs-pvc
+  namespace: easylab
   labels:
-    app: lab-as-code
+    app: easylab
     component: jobs-storage
 spec:
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 10Gi
-  storageClassName: ""  # Use default storage class
+      storage: 1Gi
+  storageClassName: longhorn
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: lab-as-code-data-pvc
-  namespace: lab-as-code
+  name: easylab-data-pvc
+  namespace: easylab
   labels:
-    app: lab-as-code
+    app: easylab
     component: data-storage
 spec:
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 5Gi
-  storageClassName: ""  # Use default storage class
+      storage: 200Mi
+  storageClassName: longhorn

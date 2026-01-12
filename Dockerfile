@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 # Set working directory
 WORKDIR /app
@@ -25,10 +25,10 @@ FROM alpine:latest
 # Install ca-certificates for HTTPS requests
 RUN apk --no-cache add ca-certificates
 
-# Create app user
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+# Create app user with UID 1000 to match Kubernetes securityContext
+RUN addgroup -g 1000 appgroup && adduser -u 1000 -G appgroup -S appuser
 
-WORKDIR /root/
+WORKDIR /app
 
 # Copy the binary from builder stage
 COPY --from=builder /app/main .
@@ -39,8 +39,11 @@ COPY --from=builder /app/web ./web
 # Create directories for data persistence
 RUN mkdir -p /app/data /app/jobs
 
-# Change ownership of the directories to appuser
-RUN chown -R appuser:appgroup /app /root
+# Change ownership of all files to appuser (including web directory)
+RUN chown -R appuser:appgroup /app
+
+# Ensure web directory has proper read permissions
+RUN chmod -R 755 /app/web
 
 # Switch to non-root user
 USER appuser

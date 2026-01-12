@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: lab-as-code
+  name: easylab
   labels:
-    app: lab-as-code
+    app: easylab
     component: namespace

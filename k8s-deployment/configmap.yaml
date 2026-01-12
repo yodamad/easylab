@@ -1,15 +1,12 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: lab-as-code-config
-  namespace: lab-as-code
+  name: easylab-config
+  namespace: easylab
   labels:
-    app: lab-as-code
+    app: easylab
     component: config
 data:
   PORT: "8080"
   WORK_DIR: "/app/jobs"
   DATA_DIR: "/app/data"
-  # Default passwords - should be overridden with secrets in production
-  LAB_ADMIN_PASSWORD: "admin123"
-  LAB_STUDENT_PASSWORD: "student123"
