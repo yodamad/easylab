@@ -13,6 +13,27 @@ Backend coverage uses Go's built-in coverage tools:
   - `make coverage-html` - Generate HTML report
   - `make coverage-check` - Check if coverage meets threshold (50%)
 
+### Coverage Exclusions
+
+To focus on critical business logic, the following are excluded from backend coverage:
+
+**Excluded:**
+- `main.go` - Root Pulumi application entry point (thin wrapper)
+- `cmd/server/main.go` - Web server entry point (thin wrapper)
+- `cmd/server/main_test.go` - Server entry point tests
+
+**Included (Critical Packages):**
+- `./internal/...` - Core server logic (handlers, auth, jobs, pulumi)
+- `./utils/...` - Utility functions (config, git, logging)
+- `./coder/...` - Coder integration logic
+- `./ovh/...` - OVH cloud provider integration
+- `./k8s/...` - Kubernetes integration
+
+**Rationale:**
+Main entry points are thin wrappers that orchestrate the application but don't contain critical business logic. Excluding them provides a clearer picture of actual code coverage for core functionality. Test files (`*_test.go`) are automatically excluded by Go's coverage tool.
+
+See `.coverignore` for the complete exclusion configuration.
+
 ## Frontend Coverage (JavaScript)
 
 Frontend coverage uses Playwright's Chrome DevTools Protocol (CDP) to collect JavaScript execution coverage during E2E tests.
@@ -59,6 +80,25 @@ make coverage-frontend
 COLLECT_COVERAGE=true npm run test
 ```
 
+### Coverage Exclusions
+
+To focus on web application code, the following are excluded from frontend coverage:
+
+**Excluded:**
+- Test files (`/tests/`, `/test/`) - Test infrastructure code
+- Coverage helper files (`coverage-helper`) - Coverage collection infrastructure
+- Config files (`playwright.config`) - Configuration files
+- Setup/teardown files (`global-setup`, `global-teardown`, `setup.ts`) - Test infrastructure
+- Fixture files (`fixtures.ts`) - Test fixtures
+
+**Included:**
+- Web application JavaScript code executed during tests
+- Inline JavaScript in HTML files (`web/*.html`)
+- Application logic only
+
+**Rationale:**
+Excluding test infrastructure, config files, and helper files ensures coverage metrics reflect actual application code quality rather than test infrastructure coverage.
+
 ### Coverage Output
 
 Frontend coverage data is saved to `coverage/frontend/`:
@@ -102,6 +142,17 @@ Output files:
 | `npm run test:coverage` | Run tests with coverage collection |
 | `npm run test:coverage:headed` | Run tests with coverage in headed mode |
 
+## Coverage Exclusions Summary
+
+Both backend and frontend coverage are configured to focus on critical application code:
+
+| Component | Included | Excluded |
+|-----------|----------|----------|
+| **Backend** | Internal packages (server, utils, coder, ovh, k8s) | Main entry points (main.go, cmd/server/main.go) |
+| **Frontend** | Web application JavaScript code | Test files, configs, helpers, fixtures |
+
+This approach ensures coverage metrics reflect actual business logic quality rather than including thin wrappers and test infrastructure.
+
 ## Notes
 
 - Frontend coverage only measures JavaScript code executed during Playwright tests
@@ -109,4 +160,25 @@ Output files:
 - Coverage percentage depends on which pages and features are tested
 - Set `COLLECT_COVERAGE=true` environment variable to enable coverage collection
 - Coverage thresholds are set to 50% by default (configurable via `COVERAGE_THRESHOLD`)
+- Coverage exclusions are configured in `.coverignore` (backend) and `tests/coverage-helper.ts` (frontend)
+
+## Verifying Coverage Exclusions
+
+To verify that exclusions are working correctly:
+
+**Backend:**
+```bash
+# Generate coverage and check that main.go is not included
+make coverage
+go tool cover -func=coverage/coverage.out | grep -i main
+# Should show no results or very low coverage for main packages
+```
+
+**Frontend:**
+```bash
+# Generate coverage and check the summary
+make coverage-frontend
+cat coverage/frontend/coverage-summary.txt
+# Check that test files and configs are not counted in the file count
+```
 

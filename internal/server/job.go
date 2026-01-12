@@ -108,6 +108,9 @@ func NewJobManager(dataDir string) *JobManager {
 
 // CreateJob creates a new job and returns its ID
 func (jm *JobManager) CreateJob(config *LabConfig) string {
+	if jm == nil {
+		return ""
+	}
 	jm.mu.Lock()
 	defer jm.mu.Unlock()
 
@@ -127,6 +130,9 @@ func (jm *JobManager) CreateJob(config *LabConfig) string {
 
 // GetJob retrieves a job by ID
 func (jm *JobManager) GetJob(id string) (*Job, bool) {
+	if jm == nil {
+		return nil, false
+	}
 	jm.mu.RLock()
 	defer jm.mu.RUnlock()
 
@@ -136,6 +142,9 @@ func (jm *JobManager) GetJob(id string) (*Job, bool) {
 
 // UpdateJobStatus updates the status of a job
 func (jm *JobManager) UpdateJobStatus(id string, status JobStatus) error {
+	if jm == nil {
+		return fmt.Errorf("job manager is nil")
+	}
 	jm.mu.RLock()
 	job, exists := jm.jobs[id]
 	jm.mu.RUnlock()
@@ -371,6 +380,9 @@ func (jm *JobManager) LoadJobs() error {
 
 // GetAllJobs returns all jobs sorted by creation time (newest first)
 func (jm *JobManager) GetAllJobs() []*Job {
+	if jm == nil {
+		return nil
+	}
 	jm.mu.RLock()
 	defer jm.mu.RUnlock()
 

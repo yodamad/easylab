@@ -1,7 +1,13 @@
 #!/bin/bash
 
+#!/bin/bash
+
 # Unified Coverage Report Script
 # Generates and combines backend (Go) and frontend (Playwright) coverage reports
+#
+# Coverage Exclusions:
+# - Main entry points (main.go, cmd/server/main.go) are excluded to focus on critical business logic
+# - See .coverignore for details on what's excluded and why
 
 set -e
 
@@ -60,12 +66,17 @@ parse_frontend_coverage() {
 
 # Generate Backend Coverage
 echo -e "${YELLOW}Generating backend coverage...${NC}"
+echo -e "${BLUE}Focusing on critical packages (excluding main entry points)${NC}"
 cd "$PROJECT_ROOT"
+
+# Coverage packages - focus on critical business logic, exclude main entry points
+# See .coverignore for details on what's excluded and why
+COVERAGE_PKGS="./internal/... ./utils/... ./coder/... ./ovh/... ./k8s/..."
 
 BACKEND_COVERAGE="0.0"
 if command_exists go; then
-    # Try to generate coverage for internal/server package (most important)
-    if go test -coverprofile="$COVERAGE_DIR/coverage.out" -covermode=atomic ./internal/server/... 2>/dev/null; then
+    # Generate coverage for critical packages (excluding main entry points)
+    if go test -coverprofile="$COVERAGE_DIR/coverage.out" -covermode=atomic $COVERAGE_PKGS 2>/dev/null; then
         BACKEND_COVERAGE=$(parse_go_coverage "$COVERAGE_DIR/coverage.out")
         echo -e "${GREEN}✓ Backend coverage generated${NC}"
         
@@ -163,6 +174,12 @@ REPORT_FILE="$COVERAGE_DIR/coverage-report.txt"
 cat > "$REPORT_FILE" <<EOF
 Lab as Code Coverage Report
 Generated: $(date)
+
+Coverage Scope:
+- Backend: Critical packages only (internal, utils, coder, ovh, k8s)
+- Backend Exclusions: Main entry points (main.go, cmd/server/main.go)
+- Frontend: Web application code only (excludes tests, configs, helpers)
+- See .coverignore for detailed exclusion list
 
 Backend Coverage: ${BACKEND_COVERAGE}%
 Frontend Coverage: ${FRONTEND_COVERAGE}%

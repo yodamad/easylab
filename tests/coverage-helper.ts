@@ -5,6 +5,12 @@ import * as path from 'path';
 /**
  * Coverage collection helper for Playwright tests
  * Collects JavaScript coverage using Chrome DevTools Protocol
+ * 
+ * Coverage Exclusions:
+ * - Test files (/tests/) - excluded to focus on application code
+ * - Coverage helper files (coverage-helper) - infrastructure code
+ * - Config files (playwright.config) - configuration, not application logic
+ * - Other non-web application code
  */
 export class CoverageCollector {
   private coverageEntries: CoverageEntry[] = [];
@@ -50,7 +56,41 @@ export class CoverageCollector {
   }
 
   /**
+   * Check if a URL should be excluded from coverage
+   * Excludes test files, config files, and helper files to focus on application code
+   */
+  private shouldExcludeFromCoverage(url: string): boolean {
+    // Exclude test files
+    if (url.includes('/tests/') || url.includes('/test/')) {
+      return true;
+    }
+    
+    // Exclude coverage helper files
+    if (url.includes('coverage-helper')) {
+      return true;
+    }
+    
+    // Exclude config files
+    if (url.includes('playwright.config') || url.includes('playwright.config.ts')) {
+      return true;
+    }
+    
+    // Exclude setup/teardown files
+    if (url.includes('global-setup') || url.includes('global-teardown') || url.includes('setup.ts')) {
+      return true;
+    }
+    
+    // Exclude fixture files
+    if (url.includes('fixtures.ts')) {
+      return true;
+    }
+    
+    return false;
+  }
+
+  /**
    * Calculate coverage statistics
+   * Focuses on web application code, excluding tests, configs, and helper files
    */
   calculateCoverageStats(): {
     totalBytes: number;
@@ -74,6 +114,11 @@ export class CoverageCollector {
     for (const entry of this.coverageEntries) {
       // Filter out non-application URLs (CDN, browser extensions, etc.)
       if (!entry.url.includes('localhost') && !entry.url.includes('127.0.0.1')) {
+        continue;
+      }
+      
+      // Filter out test files, config files, and helper files
+      if (this.shouldExcludeFromCoverage(entry.url)) {
         continue;
       }
       
@@ -126,6 +171,9 @@ Coverage Entries: ${summary.entries}
 Total Bytes: ${stats.totalBytes}
 Used Bytes: ${stats.usedBytes}
 Coverage: ${stats.coveragePercentage.toFixed(2)}%
+
+Note: Coverage focuses on web application code only.
+Excluded: test files, config files, and helper files.
 `;
     fs.writeFileSync(path.join(this.outputDir, 'coverage-summary.txt'), textSummary);
   }

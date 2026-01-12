@@ -11,6 +11,7 @@
 *.test
 *.out
 go.work
+build/
 
 # IDE
 .idea/

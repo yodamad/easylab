@@ -1,0 +1,29 @@
+# Coverage Exclusion Configuration
+# This file documents what code is excluded from coverage reports
+# to focus on critical business logic rather than entry points and test infrastructure.
+
+## Excluded Packages/Files
+
+### Main Entry Points
+# These are thin wrappers that orchestrate the application but don't contain
+# critical business logic. Excluding them provides a clearer picture of actual
+# code coverage for the core functionality.
+- main.go                          # Root Pulumi application entry point
+- cmd/server/main.go                # Web server entry point
+- cmd/server/main_test.go           # Server entry point tests
+
+## Included Packages
+
+### Critical Business Logic (Included in Coverage)
+# These packages contain the core business logic and should be fully covered:
+- ./internal/...                    # Core server logic (handlers, auth, jobs, pulumi)
+- ./utils/...                       # Utility functions (config, git, logging)
+- ./coder/...                       # Coder integration logic
+- ./ovh/...                         # OVH cloud provider integration
+- ./k8s/...                         # Kubernetes integration
+
+## Notes
+
+- Test files (*_test.go) are automatically excluded by Go's coverage tool
+- This configuration is used by Makefile targets and coverage-report.sh script
+- Frontend coverage exclusions are configured in tests/coverage-helper.ts

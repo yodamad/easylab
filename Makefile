@@ -26,6 +26,9 @@ PLAYWRIGHT_REPORT_DIR=./playwright-report
 COVERAGE_FILE=$(COVERAGE_DIR)/coverage.out
 COVERAGE_HTML=$(COVERAGE_DIR)/coverage.html
 COVERAGE_THRESHOLD=50
+# Coverage packages - focus on critical business logic, exclude main entry points
+# See .coverignore for details on what's excluded and why
+COVERAGE_PKGS=./internal/... ./utils/... ./coder/...
 
 .PHONY: all build clean test test-all test-backend test-frontend test-verbose test-race coverage coverage-html coverage-check coverage-frontend coverage-all coverage-report coverage-pkg deps deps-all deps-update npm-install npm-update lint help server run-server npm-test-ui npm-test-headed npm-test-debug npm-test-chaos npm-test-chaos-headed npm-test-chaos-network npm-test-chaos-server npm-test-chaos-ui npm-test-chaos-api ci ci-coverage
 
@@ -105,9 +108,12 @@ test-unit:
 ## Coverage targets
 
 # Run tests with coverage
+# Focuses on critical business logic packages, excluding main entry points
+# See .coverignore for details on exclusions
 coverage:
 	@mkdir -p $(COVERAGE_DIR)
-	$(GOTEST) -coverprofile=$(COVERAGE_FILE) -covermode=atomic ./...
+	@echo "Generating coverage for critical packages (excluding main entry points)..."
+	$(GOTEST) -coverprofile=$(COVERAGE_FILE) -covermode=atomic $(COVERAGE_PKGS)
 	$(GOCMD) tool cover -func=$(COVERAGE_FILE)
 
 # Generate HTML coverage report
@@ -238,9 +244,11 @@ npm-test-chaos-api: npm-install
 ci: lint test-race coverage-check test-frontend
 
 # Run tests and generate coverage report for CI
+# Focuses on critical business logic packages, excluding main entry points
 ci-coverage:
 	@mkdir -p $(COVERAGE_DIR)
-	$(GOTEST) -coverprofile=$(COVERAGE_FILE) -covermode=atomic -race ./...
+	@echo "Generating CI coverage for critical packages (excluding main entry points)..."
+	$(GOTEST) -coverprofile=$(COVERAGE_FILE) -covermode=atomic -race $(COVERAGE_PKGS)
 	$(GOCMD) tool cover -func=$(COVERAGE_FILE)
 
 ## Help

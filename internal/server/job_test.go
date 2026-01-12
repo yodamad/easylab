@@ -24,9 +24,14 @@ func TestJobStatus_Constants(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		// Capture loop variable to avoid potential race conditions
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			if string(tt.status) != tt.want {
-				t.Errorf("JobStatus = %s, want %s", tt.status, tt.want)
+			// Use local variables to ensure safe access
+			statusStr := string(tt.status)
+			wantStr := tt.want
+			if statusStr != wantStr {
+				t.Errorf("JobStatus = %s, want %s", statusStr, wantStr)
 			}
 		})
 	}
@@ -39,7 +44,12 @@ func TestNewJobManager(t *testing.T) {
 		t.Fatal("NewJobManager() returned nil")
 	}
 
-	if jm.jobs == nil {
+	// Access jobs map with proper locking to avoid race conditions
+	jm.mu.RLock()
+	jobsNil := jm.jobs == nil
+	jm.mu.RUnlock()
+	
+	if jobsNil {
 		t.Error("NewJobManager() jobs map is nil")
 	}
 
