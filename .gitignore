@@ -35,3 +35,6 @@ coverage/
 node_modules/
 playwright-report/
 test-results/
+
+# Sensitive data
+k8s-deployment/secret.yaml

@@ -752,7 +752,7 @@
                 hideWizardShowStatus();
                 
                 const container = document.getElementById('job-status-container');
-                container.innerHTML = `<div id="job-status" hx-get="/api/jobs/${jobId}/status" hx-trigger="load, every 2s" hx-swap="innerHTML"></div>`;
+                container.innerHTML = `<div id="job-status" hx-get="/api/jobs/${jobId}/status" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>`;
                 if (typeof htmx !== 'undefined') {
                     htmx.process(container);
                 } else {
@@ -777,7 +777,7 @@
                     container.innerHTML = html;
                     scrollOutputToBottom();
                     if (html.includes('status-pending') || html.includes('status-running')) {
-                        setTimeout(() => pollJobStatus(jobId, container), 2000);
+                        setTimeout(() => pollJobStatus(jobId, container), 10000);
                     }
                 })
                 .catch(error => {

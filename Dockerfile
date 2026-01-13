@@ -1,11 +1,11 @@
 # Build stage
-FROM golang:1.25-alpine AS builder
+FROM pulumi/pulumi-go:latest AS builder
 
 # Set working directory
 WORKDIR /app
 
 # Install git (needed for go mod download)
-RUN apk add --no-cache git
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 
 # Copy go mod and sum files
 COPY go.mod go.sum ./
@@ -20,13 +20,13 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main ./cmd/server
 
 # Runtime stage
-FROM alpine:latest
+FROM pulumi/pulumi-go:latest
 
-# Install ca-certificates for HTTPS requests
-RUN apk --no-cache add ca-certificates
+# Install ca-certificates and wget for HTTPS requests and health checks
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget && rm -rf /var/lib/apt/lists/*
 
 # Create app user with UID 1000 to match Kubernetes securityContext
-RUN addgroup -g 1000 appgroup && adduser -u 1000 -G appgroup -S appuser
+RUN groupadd -g 1000 appgroup && useradd -u 1000 -g appgroup -m -s /bin/bash appuser
 
 WORKDIR /app
 
@@ -36,14 +36,20 @@ COPY --from=builder /app/main .
 # Copy web static files
 COPY --from=builder /app/web ./web
 
-# Create directories for data persistence
-RUN mkdir -p /app/data /app/jobs
+# Copy templates directory
+COPY --from=builder /app/templates ./templates
 
-# Change ownership of all files to appuser (including web directory)
+# Create directories for data persistence and Go cache (including sumdb)
+RUN mkdir -p /app/data /app/jobs /app/.go/pkg/mod /app/.go/pkg/sumdb /app/.go/cache
+
+# Change ownership of all files to appuser (including web directory and Go cache)
 RUN chown -R appuser:appgroup /app
 
 # Ensure web directory has proper read permissions
 RUN chmod -R 755 /app/web
+
+# Ensure templates directory has proper read permissions
+RUN chmod -R 755 /app/templates
 
 # Switch to non-root user
 USER appuser
@@ -55,6 +61,17 @@ EXPOSE 8080
 ENV PORT=8080
 ENV WORK_DIR=/app/jobs
 ENV DATA_DIR=/app/data
+ENV TEMPLATES_DIR=/app/templates
+ENV PULUMI_BACKEND_URL=file://
+ENV PULUMI_SKIP_UPDATE_CHECK=true
+ENV PULUMI_CONFIG_PASSPHRASE=passphrase
+# Set Go cache directories to writable locations
+ENV GOMODCACHE=/app/.go/pkg/mod
+ENV GOCACHE=/app/.go/cache
+# Set GOPATH to ensure all Go directories are under /app/.go
+ENV GOPATH=/app/.go
+# Ensure sumdb uses writable location (relative to GOPATH/pkg)
+ENV GOSUMDB=sum.golang.org
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

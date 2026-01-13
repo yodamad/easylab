@@ -27,7 +27,7 @@ spec:
       - name: gitlabcredz                
       containers:
       - name: easylab
-        image: registry.gitlab.com/yodamad-workshops/easylab/easylab:0.3  # Replace with your actual image
+        image: registry.gitlab.com/yodamad-workshops/easylab/easylab:0.9.2  # Replace with your actual image
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
@@ -107,11 +107,11 @@ spec:
           failureThreshold: 3
         resources:
           requests:
-            memory: "128Mi"
-            cpu: "100m"
-          limits:
-            memory: "512Mi"
+            memory: "1024Mi"
             cpu: "500m"
+          limits:
+            memory: "4096Mi"
+            cpu: "3000m"
       volumes:
       - name: jobs-storage
         persistentVolumeClaim:

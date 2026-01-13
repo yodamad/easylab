@@ -45,18 +45,24 @@ func (h *Handler) parseForm(w http.ResponseWriter, r *http.Request, maxSize int6
 	contentType := r.Header.Get("Content-Type")
 	log.Printf("Content-Type: %s", contentType)
 
+	// Handle multipart/form-data
 	if strings.HasPrefix(contentType, "multipart/form-data") {
 		if err := r.ParseMultipartForm(maxSize); err != nil {
 			log.Printf("Failed to parse multipart form: %v", err)
 			return err
 		}
-	} else {
-		if err := r.ParseForm(); err != nil {
-			log.Printf("Failed to parse form: %v", err)
-			return err
-		}
+		log.Printf("Form parsed successfully (multipart)")
+		return nil
 	}
-	log.Printf("Form parsed successfully")
+
+	// Handle application/x-www-form-urlencoded or missing Content-Type
+	// ParseForm works for both urlencoded forms and can handle missing Content-Type
+	// by detecting the form data in the request body
+	if err := r.ParseForm(); err != nil {
+		log.Printf("Failed to parse form: %v", err)
+		return err
+	}
+	log.Printf("Form parsed successfully (urlencoded or auto-detected)")
 	return nil
 }
 
@@ -239,7 +245,7 @@ func (h *Handler) executeLabJobWithID(config *LabConfig, isDryRun bool, jobID st
 	html := fmt.Sprintf(`
 		<div class="job-created">
 			<h3>%s</h3>
-			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load, every 2s" hx-swap="innerHTML">
+			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load, every 10s" hx-swap="innerHTML">
 				<p>Loading status...</p>
 			</div>
 		</div>`, title, jobID)
@@ -542,7 +548,7 @@ func (h *Handler) LaunchLab(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `
 		<div class="job-created">
 			<h3>Deployment Launched: %s</h3>
-			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load, every 2s" hx-swap="innerHTML">
+			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load, every 10s" hx-swap="innerHTML">
 				<p>Loading status...</p>
 			</div>
 		</div>`, jobID, jobID)
@@ -621,7 +627,7 @@ func (h *Handler) GetJobStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Continue polling if job is still running
 	if status == JobStatusPending || status == JobStatusRunning {
-		statusHTML.WriteString(fmt.Sprintf(`<div hx-get="/api/jobs/%s/status" hx-trigger="every 2s" hx-swap="outerHTML"></div>`, jobID))
+		statusHTML.WriteString(fmt.Sprintf(`<div hx-get="/api/jobs/%s/status" hx-trigger="every 10s" hx-swap="outerHTML"></div>`, jobID))
 	}
 
 	statusHTML.WriteString(`</div>`)
@@ -922,6 +928,15 @@ func getFormKeys(r *http.Request) []string {
 	return result
 }
 
+// getPostFormKeys returns all keys from PostForm only
+func getPostFormKeys(r *http.Request) []string {
+	keys := make([]string, 0, len(r.PostForm))
+	for k := range r.PostForm {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // extractStringFromConfigValue extracts a string value from a Pulumi ConfigValue JSON string
 // If the input is already a plain string, it returns it as-is
 // If it's a JSON object like {"Value":"...","Secret":false}, it extracts the Value field
@@ -987,13 +1002,16 @@ func (h *Handler) SetOVHCredentials(w http.ResponseWriter, r *http.Request) {
 	// Parse form data - handle both multipart and urlencoded
 	if err := h.parseForm(w, r, 10<<20); err != nil {
 		// Return HTML error for HTMX compatibility
+		log.Printf("SetOVHCredentials - Failed to parse form: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
 		h.renderHTMLError(w, "Failed to Parse Form", err.Error())
 		return
 	}
 
 	// Debug: log received form values (without secrets)
+	log.Printf("SetOVHCredentials - Content-Type: %s", r.Header.Get("Content-Type"))
 	log.Printf("SetOVHCredentials - Form keys: %v", getFormKeys(r))
+	log.Printf("SetOVHCredentials - PostForm keys: %v", getPostFormKeys(r))
 
 	// Try PostFormValue first (POST-only), then FormValue (includes query params)
 	applicationKey := r.PostFormValue("ovh_application_key")
@@ -1412,7 +1430,7 @@ func (h *Handler) RetryJob(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `
 		<div class="job-created">
 			<h3>Job Retried: %s</h3>
-			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load, every 2s" hx-swap="innerHTML">
+			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load, every 10s" hx-swap="innerHTML">
 				<p>Loading status...</p>
 			</div>
 		</div>`, jobID, jobID)
