@@ -256,7 +256,7 @@ func (ah *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 	})
 
-	http.Redirect(w, r, "/login", http.StatusSeeOther)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 // RequireAuth is middleware that requires authentication
@@ -403,7 +403,7 @@ func (ah *AuthHandler) HandleStudentLogout(w http.ResponseWriter, r *http.Reques
 		MaxAge:   -1,
 	})
 
-	http.Redirect(w, r, "/student/login", http.StatusSeeOther)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 // RequireStudentAuth is middleware that requires student authentication

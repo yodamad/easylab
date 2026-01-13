@@ -178,16 +178,19 @@ test.describe('Student Dashboard', () => {
     await expect(form).toHaveAttribute('action', '/api/student/workspace/request');
   });
 
-  test('should navigate back to login when clicking logout', async ({ page }) => {
+  test('should navigate back to home page when clicking logout', async ({ page }) => {
     await page.goto('/student/dashboard');
 
     // Click logout button
     await page.locator('a[href="/student/logout"]').click();
     await page.waitForLoadState('networkidle');
 
-    // Should be back at login
-    await expect(page.locator('input[type="password"]')).toBeVisible();
-    await expect(page.locator('h1')).toContainText('Student Portal');
+    // Should be redirected to home page
+    await expect(page).toHaveURL('/');
+    await expect(page.locator('h1')).toContainText('Lab as Code');
+    // Check for the home page options (student and admin cards)
+    await expect(page.locator('text=Student Space')).toBeVisible();
+    await expect(page.locator('text=Admin Space')).toBeVisible();
   });
 });
 

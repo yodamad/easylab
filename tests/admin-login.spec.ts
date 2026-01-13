@@ -78,9 +78,12 @@ test.describe('Login Page', () => {
     await page.locator('a[href="/logout"]').click();
     await page.waitForLoadState('networkidle');
 
-    // Should be redirected to login page
+    // Should be redirected to home page
+    await expect(page).toHaveURL('/');
     await expect(page.locator('h1')).toContainText('Lab as Code');
-    await expect(page.locator('input[type="password"]')).toBeVisible();
+    // Check for the home page options (student and admin cards)
+    await expect(page.locator('text=Student Space')).toBeVisible();
+    await expect(page.locator('text=Admin Space')).toBeVisible();
   });
 });
 
