@@ -27,7 +27,7 @@ spec:
       - name: gitlabcredz                
       containers:
       - name: easylab
-        image: registry.gitlab.com/yodamad-workshops/easylab/easylab:0.9.2  # Replace with your actual image
+        image: registry.gitlab.com/yodamad-workshops/easylab/easylab:0.9.3  # Replace with your actual image
         imagePullPolicy: Always
         ports:
         - containerPort: 8080

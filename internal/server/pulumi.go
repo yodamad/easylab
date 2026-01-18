@@ -508,16 +508,42 @@ config:
 	// Get environment variables including OVH credentials for Pulumi Automation API
 	pulumiEnvVars := getPulumiEnvVars(config)
 	
+	// Check if .pulumi directory exists (required for file backend stack state)
+	pulumiDir := filepath.Join(jobDir, ".pulumi")
+	if _, err := os.Stat(pulumiDir); os.IsNotExist(err) {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: .pulumi directory not found at %s", pulumiDir))
+		pe.jobManager.AppendOutput(jobID, "In file backend mode, stack state is stored in .pulumi directory.")
+		pe.jobManager.AppendOutput(jobID, "If the job directory was cleaned up after deployment, stack state may be lost.")
+		pe.jobManager.AppendOutput(jobID, "Attempting to select stack anyway (stack may have been manually deleted)...")
+	} else {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Found .pulumi directory at %s", pulumiDir))
+	}
+	
 	// Try to select the stack (don't create if it doesn't exist)
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Selecting Pulumi stack '%s'...", stackName))
 	stack, err := auto.SelectStackLocalSource(ctx, stackName, jobDir,
 		auto.WorkDir(jobDir),
 		auto.EnvVars(pulumiEnvVars))
 	if err != nil {
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to select stack: %v. Stack may not exist.", err))
+		// Provide detailed error message for file backend
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Error: failed to select stack '%s': %v", stackName, err))
+		pe.jobManager.AppendOutput(jobID, "This may occur if:")
+		pe.jobManager.AppendOutput(jobID, "  1. The stack was never created")
+		pe.jobManager.AppendOutput(jobID, "  2. The .pulumi directory was deleted (stack state lost)")
+		pe.jobManager.AppendOutput(jobID, "  3. The stack name doesn't match")
+		
+		// Check if .pulumi directory exists to provide more specific guidance
+		if _, statErr := os.Stat(pulumiDir); os.IsNotExist(statErr) {
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack state directory (.pulumi) is missing at %s", pulumiDir))
+			pe.jobManager.AppendOutput(jobID, "In file backend mode, stack state must be preserved after deployment for destroy operations.")
+		} else {
+			// .pulumi exists but stack selection failed - might be wrong stack name or corrupted state
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack state directory exists but stack '%s' could not be found", stackName))
+		}
+		
 		// For destroy operations, if stack doesn't exist, we consider it already destroyed
 		pe.jobManager.UpdateJobStatus(jobID, JobStatusDestroyed)
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy completed at %s (stack did not exist)", time.Now().Format(time.RFC3339)))
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy completed at %s (stack did not exist or state is missing)", time.Now().Format(time.RFC3339)))
 		return nil, nil // Special case: return nil to indicate stack didn't exist
 	}
 
@@ -678,8 +704,9 @@ func (pe *PulumiExecutor) Execute(jobID string) error {
 	pe.jobManager.UpdateJobStatus(jobID, JobStatusCompleted)
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Deployment completed successfully at %s", time.Now().Format(time.RFC3339)))
 
-	// Clean up the job directory since all necessary data has been extracted
-	if err := pe.cleanupJobDirectory(jobID); err != nil {
+	// Clean up source files but preserve .pulumi directory for file backend
+	// This ensures stack state is available for future destroy operations
+	if err := pe.cleanupJobDirectory(jobID, true); err != nil {
 		log.Printf("Warning: failed to cleanup job directory for %s: %v", jobID, err)
 		// Don't fail the job if cleanup fails
 	}
@@ -780,8 +807,9 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy completed at %s", time.Now().Format(time.RFC3339)))
 	pe.jobManager.AppendOutput(jobID, "✅ Stack destroyed successfully. You can recreate it using the same configuration.")
 
-	// Clean up the job directory since all resources have been destroyed
-	if err := pe.cleanupJobDirectory(jobID); err != nil {
+	// Clean up the job directory completely since all resources have been destroyed
+	// Stack state is no longer needed after destroy
+	if err := pe.cleanupJobDirectory(jobID, false); err != nil {
 		log.Printf("Warning: failed to cleanup job directory for %s: %v", jobID, err)
 		// Don't fail the job if cleanup fails
 	}
@@ -790,7 +818,8 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 }
 
 // cleanupJobDirectory removes the job's working directory after successful completion
-func (pe *PulumiExecutor) cleanupJobDirectory(jobID string) error {
+// If preservePulumiState is true, it preserves the .pulumi directory (needed for file backend destroy operations)
+func (pe *PulumiExecutor) cleanupJobDirectory(jobID string, preservePulumiState bool) error {
 	jobDir := filepath.Join(pe.workDir, jobID)
 
 	// Check if directory exists
@@ -799,12 +828,42 @@ func (pe *PulumiExecutor) cleanupJobDirectory(jobID string) error {
 		return nil
 	}
 
-	// Remove the entire job directory
-	if err := os.RemoveAll(jobDir); err != nil {
-		return fmt.Errorf("failed to remove job directory %s: %w", jobDir, err)
-	}
+	if preservePulumiState {
+		// For file backend, preserve .pulumi directory but clean up source files
+		// This allows destroy operations to find the stack state later
+		// Remove source files and other temporary files, but preserve .pulumi
+		entries, err := os.ReadDir(jobDir)
+		if err != nil {
+			return fmt.Errorf("failed to read job directory: %w", err)
+		}
 
-	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Cleaned up job directory: %s", jobDir))
+		removedCount := 0
+		for _, entry := range entries {
+			// Skip .pulumi directory
+			if entry.Name() == ".pulumi" {
+				continue
+			}
+
+			entryPath := filepath.Join(jobDir, entry.Name())
+			if err := os.RemoveAll(entryPath); err != nil {
+				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to remove %s: %v", entry.Name(), err))
+				continue
+			}
+			removedCount++
+		}
+
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Cleaned up job directory (preserved .pulumi for stack state): %s", jobDir))
+		if removedCount > 0 {
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Removed %d items, preserved .pulumi directory", removedCount))
+		}
+	} else {
+		// Remove the entire job directory (after destroy, stack state no longer needed)
+		if err := os.RemoveAll(jobDir); err != nil {
+			return fmt.Errorf("failed to remove job directory %s: %w", jobDir, err)
+		}
+
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Cleaned up job directory: %s", jobDir))
+	}
 	return nil
 }
 
