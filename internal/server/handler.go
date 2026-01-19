@@ -1,14 +1,20 @@
 package server
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
+	"easylab/coder"
+	"easylab/utils"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
-	"easylab/coder"
-	"easylab/utils"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -34,6 +40,46 @@ func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsM
 		templates:          make(map[string]*template.Template),
 		credentialsManager: credentialsManager,
 	}
+}
+
+// deriveEncryptionKey derives a 32-byte AES-256 key from email and student password
+func deriveEncryptionKey(email, studentPassword string) []byte {
+	// Combine email and password
+	combined := email + ":" + studentPassword
+	// Hash with SHA-256 to get 32 bytes (AES-256 key size)
+	hash := sha256.Sum256([]byte(combined))
+	return hash[:]
+}
+
+// encryptWorkspacePassword encrypts the workspace password using AES-256-GCM
+// Returns base64-encoded ciphertext with nonce prepended
+func encryptWorkspacePassword(plaintext, email, studentPassword string) (string, error) {
+	// Derive encryption key
+	key := deriveEncryptionKey(email, studentPassword)
+
+	// Create AES cipher
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	// Create GCM mode
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	// Generate random nonce
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return "", fmt.Errorf("failed to generate nonce: %w", err)
+	}
+
+	// Encrypt and authenticate
+	ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+
+	// Encode to base64 for storage
+	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
 // parseForm handles both multipart and urlencoded form data parsing
@@ -86,8 +132,8 @@ func (h *Handler) getProviderCredentials(w http.ResponseWriter, providerName str
 	creds, err := h.credentialsManager.GetCredentials(providerName)
 	if err != nil {
 		log.Printf("%s credentials not configured: %v", providerName, err)
-		h.renderHTMLError(w, fmt.Sprintf("%s Credentials Not Configured", strings.ToUpper(providerName)), 
-			fmt.Sprintf("Please configure your %s credentials first.", strings.ToUpper(providerName)), 
+		h.renderHTMLError(w, fmt.Sprintf("%s Credentials Not Configured", strings.ToUpper(providerName)),
+			fmt.Sprintf("Please configure your %s credentials first.", strings.ToUpper(providerName)),
 			`<a href="/ovh-credentials" class="btn btn-primary">Configure Credentials</a>`)
 		return nil, err
 	}
@@ -216,7 +262,7 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 		CoderDbName:        r.FormValue("coder_db_name"),
 		CoderTemplateName:  r.FormValue("coder_template_name"),
 		TemplateFilePath:   templateFilePath,
-		
+
 		// Template Source Configuration
 		TemplateSource:    r.FormValue("template_source"),
 		TemplateGitRepo:   r.FormValue("template_git_repo"),
@@ -430,7 +476,7 @@ func (h *Handler) CreateLab(w http.ResponseWriter, r *http.Request) {
 		// Backward compatibility: if no source specified, check for uploaded file
 		templateSource = "upload"
 	}
-	
+
 	if templateSource == "git" {
 		// Validate Git repository URL is provided
 		if initialConfig.TemplateGitRepo == "" {
@@ -535,7 +581,7 @@ func (h *Handler) DryRunLab(w http.ResponseWriter, r *http.Request) {
 		// Backward compatibility: if no source specified, check for uploaded file
 		templateSource = "upload"
 	}
-	
+
 	if templateSource == "git" {
 		// Validate Git repository URL is provided
 		if initialConfig.TemplateGitRepo == "" {
@@ -1014,7 +1060,57 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Build workspace URL
 	workspaceURL := fmt.Sprintf("%s/@%s/%s", coderURL, user.Username, workspace.Name)
 
+	// Create workspace info structure for cookie
+	// Note: password will be encrypted client-side using email + student password
+	workspaceInfo := map[string]interface{}{
+		"email":              email,
+		"workspace_url":      workspaceURL,
+		"password":           password, // Will be encrypted client-side before storing in cookie
+		"encrypted_password": "",       // Will be set by client-side encryption
+		"workspace_name":     workspace.Name,
+		"lab_id":             labID,
+		"created_at":         time.Now().Format(time.RFC3339),
+	}
+
+	// Encode workspace info as JSON
+	workspaceInfoJSON, err := json.Marshal(workspaceInfo)
+	if err != nil {
+		log.Printf("Failed to marshal workspace info: %v", err)
+		// Continue without cookie if marshaling fails
+	} else {
+		// Determine if we're using HTTPS (check if URL scheme is https or if request is secure)
+		isSecure := strings.HasPrefix(coderURL, "https://") || r.TLS != nil
+
+		// URL-encode the JSON string for cookie value (cookies need URL encoding for special characters)
+		cookieValue := url.QueryEscape(string(workspaceInfoJSON))
+
+		// Set cookie with workspace info
+		cookie := &http.Cookie{
+			Name:     "workspace_info",
+			Value:    cookieValue,
+			Path:     "/",
+			MaxAge:   86400, // 1 day in seconds
+			HttpOnly: false, // Allow JavaScript to read it
+			Secure:   isSecure,
+			SameSite: http.SameSiteLaxMode,
+		}
+		http.SetCookie(w, cookie)
+		log.Printf("Set workspace_info cookie for email: %s", email)
+	}
+
 	// Return success response with credentials
+	// Include workspace info as JSON in a data attribute for client-side encryption
+	workspaceInfoForClient := map[string]interface{}{
+		"email":          email,
+		"workspace_url":  workspaceURL,
+		"password":       password,
+		"workspace_name": workspace.Name,
+		"lab_id":         labID,
+		"created_at":     time.Now().Format(time.RFC3339),
+	}
+	workspaceInfoJSONForClient, _ := json.Marshal(workspaceInfoForClient)
+	workspaceInfoJSONEscaped := template.HTMLEscapeString(string(workspaceInfoJSONForClient))
+
 	w.Header().Set("Content-Type", "text/html")
 	var response strings.Builder
 	response.WriteString(`<div class="success-message">`)
@@ -1025,6 +1121,9 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	response.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Email:</label><div class="value">%s</div></div>`, template.HTMLEscapeString(email)))
 	response.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Password:</label><div class="value">%s</div></div>`, template.HTMLEscapeString(password)))
 	response.WriteString(`<p><strong>Important:</strong> Please save these credentials. You will need them to access your workspace.</p>`)
+	response.WriteString(`<p><small>Your workspace information can be encrypted and saved locally. Click "Encrypt & Save" below to store it securely.</small></p>`)
+	response.WriteString(fmt.Sprintf(`<div data-workspace-info='%s' style="display:none;"></div>`, workspaceInfoJSONEscaped))
+	response.WriteString(`<button onclick="encryptAndSaveWorkspaceInfo(this)" class="btn" style="margin-top: 1rem;">Encrypt & Save Workspace Info</button>`)
 	response.WriteString(`</div>`)
 	response.WriteString(`</div>`)
 

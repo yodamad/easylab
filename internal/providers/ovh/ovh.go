@@ -1,9 +1,9 @@
 package ovh
 
 import (
-	"fmt"
 	"easylab/internal/providers"
 	"easylab/utils"
+	"fmt"
 	"strconv"
 
 	"github.com/ovh/pulumi-ovh/sdk/v2/go/ovh/cloudproject"
