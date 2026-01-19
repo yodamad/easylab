@@ -15,6 +15,7 @@ import (
 
 // CreateLabProgram creates a Pulumi RunFunc that implements the lab infrastructure
 // This function replaces the template-based main.go generation
+// Note: This is currently not used - templates are copied directly instead
 func CreateLabProgram() pulumi.RunFunc {
 	return func(ctx *pulumi.Context) error {
 		serviceName := checkRequirements(ctx)

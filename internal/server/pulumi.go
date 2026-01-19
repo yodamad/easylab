@@ -20,8 +20,8 @@ import (
 
 // PulumiExecutor handles Pulumi command execution
 type PulumiExecutor struct {
-	jobManager  *JobManager
-	workDir     string
+	jobManager   *JobManager
+	workDir      string
 	templatesDir string
 }
 
@@ -98,7 +98,7 @@ func getLocalBackendEnvVars() map[string]string {
 		"PULUMI_BACKEND_URL":       "file://",
 		"PULUMI_SKIP_UPDATE_CHECK": "true",
 	}
-	
+
 	// Set Go cache directories if not already set (use writable locations)
 	if gomodcache := os.Getenv("GOMODCACHE"); gomodcache == "" {
 		envVars["GOMODCACHE"] = "/app/.go/pkg/mod"
@@ -110,24 +110,38 @@ func getLocalBackendEnvVars() map[string]string {
 	if gopath := os.Getenv("GOPATH"); gopath == "" {
 		envVars["GOPATH"] = "/app/.go"
 	}
-	
+
 	return envVars
 }
 
-// getPulumiEnvVars returns environment variables for Pulumi operations including OVH credentials
+// getPulumiEnvVars returns environment variables for Pulumi operations including provider credentials
 func getPulumiEnvVars(config *LabConfig) map[string]string {
 	envVars := getLocalBackendEnvVars()
-	
-	// Add OVH credentials to environment variables
+
+	// Add provider-specific credentials to environment variables
 	// These are needed by the Pulumi program when it runs (e.g., during go build)
 	if config != nil {
-		envVars["OVH_APPLICATION_KEY"] = config.OvhApplicationKey
-		envVars["OVH_APPLICATION_SECRET"] = config.OvhApplicationSecret
-		envVars["OVH_CONSUMER_KEY"] = config.OvhConsumerKey
-		envVars["OVH_SERVICE_NAME"] = config.OvhServiceName
-		// OVH_ENDPOINT is set via Pulumi config, not env var
+		provider := config.Provider
+		if provider == "" {
+			provider = "ovh" // Default to OVH for backward compatibility
+		}
+
+		// Add provider-specific environment variables
+		switch provider {
+		case "ovh":
+			envVars["OVH_APPLICATION_KEY"] = config.OvhApplicationKey
+			envVars["OVH_APPLICATION_SECRET"] = config.OvhApplicationSecret
+			envVars["OVH_CONSUMER_KEY"] = config.OvhConsumerKey
+			envVars["OVH_SERVICE_NAME"] = config.OvhServiceName
+			// OVH_ENDPOINT is set via Pulumi config, not env var
+			// Future providers can be added here:
+			// case "aws":
+			//     envVars["AWS_ACCESS_KEY_ID"] = config.AwsAccessKeyId
+			//     envVars["AWS_SECRET_ACCESS_KEY"] = config.AwsSecretAccessKey
+			//     ...
+		}
 	}
-	
+
 	return envVars
 }
 
@@ -135,7 +149,7 @@ func getPulumiEnvVars(config *LabConfig) map[string]string {
 func (pe *PulumiExecutor) getOrCreateStack(ctx context.Context, stackName, workDir, jobID string, config *LabConfig) (auto.Stack, error) {
 	// Get environment variables including OVH credentials
 	envVars := getPulumiEnvVars(config)
-	
+
 	// First, try to select the stack to check if it exists
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Checking if stack '%s' exists...", stackName))
 	stack, err := auto.SelectStackLocalSource(ctx, stackName, workDir,
@@ -266,13 +280,26 @@ func (pe *PulumiExecutor) setStackConfig(ctx context.Context, stack auto.Stack, 
 		}
 	}
 
-	// Set ovh:endpoint config
-	err := stack.SetConfig(ctx, "ovh:endpoint", auto.ConfigValue{
-		Value:  config.OvhEndpoint,
-		Secret: false,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to set config ovh:endpoint: %w", err)
+	// Set provider-specific config
+	provider := config.Provider
+	if provider == "" {
+		provider = "ovh" // Default to OVH for backward compatibility
+	}
+
+	switch provider {
+	case "ovh":
+		// Set ovh:endpoint config
+		err := stack.SetConfig(ctx, "ovh:endpoint", auto.ConfigValue{
+			Value:  config.OvhEndpoint,
+			Secret: false,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to set config ovh:endpoint: %w", err)
+		}
+		// Future providers can be added here:
+		// case "aws":
+		//     err := stack.SetConfig(ctx, "aws:region", auto.ConfigValue{...})
+		//     ...
 	}
 
 	return nil
@@ -324,13 +351,7 @@ func (pe *PulumiExecutor) prepareJob(jobID string, allowMissingDir bool) (*JobPr
 
 	// Write Pulumi.yaml
 	pe.jobManager.AppendOutput(jobID, "Writing Pulumi.yaml...")
-	pulumiYaml := `name: lab-as-code
-runtime: go
-description: OVHcloud Gateway and Managed Kubernetes infrastructure
-
-config:
-  ovh:endpoint: ` + config.OvhEndpoint + `
-`
+	pulumiYaml := pe.generatePulumiYaml(config)
 	if err := os.WriteFile(filepath.Join(jobDir, "Pulumi.yaml"), []byte(pulumiYaml), 0644); err != nil {
 		pe.jobManager.SetError(jobID, fmt.Errorf("failed to write Pulumi.yaml: %w", err))
 		return nil, err
@@ -338,7 +359,7 @@ config:
 
 	// Generate source files from templates
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Generating source files from templates in %s...", pe.templatesDir))
-	if err := pe.generateSourceFiles(jobDir); err != nil {
+	if err := pe.generateSourceFiles(jobDir, config); err != nil {
 		pe.jobManager.SetError(jobID, fmt.Errorf("failed to generate source files: %w", err))
 		return nil, err
 	}
@@ -448,13 +469,7 @@ func (pe *PulumiExecutor) prepareDestroyJob(jobID string) (*JobPreparation, erro
 		}
 
 		// Write Pulumi.yaml
-		pulumiYaml := `name: lab-as-code
-runtime: go
-description: OVHcloud Gateway and Managed Kubernetes infrastructure
-
-config:
-  ovh:endpoint: ` + config.OvhEndpoint + `
-`
+		pulumiYaml := pe.generatePulumiYaml(config)
 		if err := os.WriteFile(filepath.Join(jobDir, "Pulumi.yaml"), []byte(pulumiYaml), 0644); err != nil {
 			pe.jobManager.SetError(jobID, fmt.Errorf("failed to write Pulumi.yaml: %w", err))
 			return nil, err
@@ -462,7 +477,7 @@ config:
 
 		// Generate source files from templates (needed for pulumi destroy to know what to destroy)
 		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Generating source files from templates in %s...", pe.templatesDir))
-		if err := pe.generateSourceFiles(jobDir); err != nil {
+		if err := pe.generateSourceFiles(jobDir, config); err != nil {
 			pe.jobManager.SetError(jobID, fmt.Errorf("failed to generate source files: %w", err))
 			return nil, err
 		}
@@ -507,7 +522,7 @@ config:
 
 	// Get environment variables including OVH credentials for Pulumi Automation API
 	pulumiEnvVars := getPulumiEnvVars(config)
-	
+
 	// Check if .pulumi directory exists (required for file backend stack state)
 	pulumiDir := filepath.Join(jobDir, ".pulumi")
 	if _, err := os.Stat(pulumiDir); os.IsNotExist(err) {
@@ -518,7 +533,7 @@ config:
 	} else {
 		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Found .pulumi directory at %s", pulumiDir))
 	}
-	
+
 	// Try to select the stack (don't create if it doesn't exist)
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Selecting Pulumi stack '%s'...", stackName))
 	stack, err := auto.SelectStackLocalSource(ctx, stackName, jobDir,
@@ -531,7 +546,7 @@ config:
 		pe.jobManager.AppendOutput(jobID, "  1. The stack was never created")
 		pe.jobManager.AppendOutput(jobID, "  2. The .pulumi directory was deleted (stack state lost)")
 		pe.jobManager.AppendOutput(jobID, "  3. The stack name doesn't match")
-		
+
 		// Check if .pulumi directory exists to provide more specific guidance
 		if _, statErr := os.Stat(pulumiDir); os.IsNotExist(statErr) {
 			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack state directory (.pulumi) is missing at %s", pulumiDir))
@@ -540,7 +555,7 @@ config:
 			// .pulumi exists but stack selection failed - might be wrong stack name or corrupted state
 			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack state directory exists but stack '%s' could not be found", stackName))
 		}
-		
+
 		// For destroy operations, if stack doesn't exist, we consider it already destroyed
 		pe.jobManager.UpdateJobStatus(jobID, JobStatusDestroyed)
 		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy completed at %s (stack did not exist or state is missing)", time.Now().Format(time.RFC3339)))
@@ -782,7 +797,7 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 
 	// Get environment variables including OVH credentials
 	envVars := getPulumiEnvVars(job.Config)
-	
+
 	// Remove the stack from the workspace
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Removing stack '%s' from workspace...", stackName))
 	workspace, wsErr := auto.NewLocalWorkspace(prep.Context,
@@ -873,6 +888,34 @@ type configCommand struct {
 	secret bool
 }
 
+// generatePulumiYaml generates the Pulumi.yaml content based on the provider
+func (pe *PulumiExecutor) generatePulumiYaml(config *LabConfig) string {
+	provider := config.Provider
+	if provider == "" {
+		provider = "ovh" // Default to OVH for backward compatibility
+	}
+
+	description := "Multi-cloud Gateway and Managed Kubernetes infrastructure"
+	configSection := ""
+
+	switch provider {
+	case "ovh":
+		description = "OVHcloud Gateway and Managed Kubernetes infrastructure"
+		configSection = fmt.Sprintf("  ovh:endpoint: %s\n", config.OvhEndpoint)
+		// Future providers can be added here:
+		// case "aws":
+		//     description = "AWS Gateway and Managed Kubernetes infrastructure"
+		//     configSection = fmt.Sprintf("  aws:region: %s\n", config.AwsRegion)
+	}
+
+	return fmt.Sprintf(`name: lab-as-code
+runtime: go
+description: %s
+
+config:
+%s`, description, configSection)
+}
+
 func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 	// Prefix resource names with stack name
 	prefixedGatewayName := fmt.Sprintf("%s-%s", config.StackName, config.NetworkGatewayName)
@@ -933,14 +976,25 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 	return commands
 }
 
-func (pe *PulumiExecutor) generateSourceFiles(jobDir string) error {
+func (pe *PulumiExecutor) generateSourceFiles(jobDir string, config *LabConfig) error {
 	// Verify templates directory exists
 	if _, err := os.Stat(pe.templatesDir); os.IsNotExist(err) {
 		return fmt.Errorf("templates directory not found: %s", pe.templatesDir)
 	}
 
-	// Create subdirectories
-	dirs := []string{"coder", "k8s", "ovh", "utils"}
+	// Determine provider (default to ovh for backward compatibility)
+	provider := config.Provider
+	if provider == "" {
+		provider = "ovh"
+	}
+
+	// Create subdirectories - common directories plus provider-specific
+	dirs := []string{"coder", "k8s", "utils"}
+	// Add provider-specific directory
+	providerDir := provider
+	// For now, we use "ovh" directory, but structure allows for "providers/ovh" in future
+	dirs = append(dirs, providerDir)
+
 	for _, dir := range dirs {
 		if err := os.MkdirAll(filepath.Join(jobDir, dir), 0755); err != nil {
 			return fmt.Errorf("failed to create dir %s: %w", dir, err)
@@ -1005,10 +1059,10 @@ func (pe *PulumiExecutor) copyDir(srcDir, dstDir string) error {
 func (pe *PulumiExecutor) downloadGoModules(jobDir string, jobID string) error {
 	// Get Go environment variables
 	envVars := getLocalBackendEnvVars()
-	
+
 	// Build environment for the command - start with current environment
 	cmdEnv := os.Environ()
-	
+
 	// Add/override with Go-related environment variables
 	for key, value := range envVars {
 		// Add all Go-related env vars (GOMODCACHE, GOCACHE, GOPATH)
@@ -1023,25 +1077,34 @@ func (pe *PulumiExecutor) downloadGoModules(jobDir string, jobID string) error {
 			cmdEnv = append(cmdEnv, fmt.Sprintf("%s=%s", key, value))
 		}
 	}
-	
-	// Get job config to include OVH credentials in environment
+
+	// Get job config to include provider credentials in environment
 	job, exists := pe.jobManager.GetJob(jobID)
 	if exists && job.Config != nil {
-		// Add OVH credentials to command environment
-		cmdEnv = append(cmdEnv, fmt.Sprintf("OVH_APPLICATION_KEY=%s", job.Config.OvhApplicationKey))
-		cmdEnv = append(cmdEnv, fmt.Sprintf("OVH_APPLICATION_SECRET=%s", job.Config.OvhApplicationSecret))
-		cmdEnv = append(cmdEnv, fmt.Sprintf("OVH_CONSUMER_KEY=%s", job.Config.OvhConsumerKey))
-		cmdEnv = append(cmdEnv, fmt.Sprintf("OVH_SERVICE_NAME=%s", job.Config.OvhServiceName))
+		provider := job.Config.Provider
+		if provider == "" {
+			provider = "ovh" // Default to OVH for backward compatibility
+		}
+
+		// Add provider-specific credentials to command environment
+		switch provider {
+		case "ovh":
+			cmdEnv = append(cmdEnv, fmt.Sprintf("OVH_APPLICATION_KEY=%s", job.Config.OvhApplicationKey))
+			cmdEnv = append(cmdEnv, fmt.Sprintf("OVH_APPLICATION_SECRET=%s", job.Config.OvhApplicationSecret))
+			cmdEnv = append(cmdEnv, fmt.Sprintf("OVH_CONSUMER_KEY=%s", job.Config.OvhConsumerKey))
+			cmdEnv = append(cmdEnv, fmt.Sprintf("OVH_SERVICE_NAME=%s", job.Config.OvhServiceName))
+			// Future providers can be added here
+		}
 	}
-	
+
 	// Run go mod download with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	
+
 	cmd := exec.CommandContext(ctx, "go", "mod", "download")
 	cmd.Dir = jobDir
 	cmd.Env = cmdEnv
-	
+
 	// Capture output for logging
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -1049,6 +1112,6 @@ func (pe *PulumiExecutor) downloadGoModules(jobDir string, jobID string) error {
 		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Go mod download output: %s", string(output)))
 		return fmt.Errorf("go mod download failed: %w", err)
 	}
-	
+
 	return nil
 }

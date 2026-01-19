@@ -37,22 +37,26 @@
             <div class="wizard-progress">
                 <div class="progress-step active" data-step="1">
                     <span class="step-number">1</span>
-                    <span class="step-label">Pulumi</span>
+                    <span class="step-label">Provider</span>
                 </div>
                 <div class="progress-step" data-step="2">
                     <span class="step-number">2</span>
-                    <span class="step-label">Network</span>
+                    <span class="step-label">Pulumi</span>
                 </div>
                 <div class="progress-step" data-step="3">
                     <span class="step-number">3</span>
-                    <span class="step-label">Kubernetes</span>
+                    <span class="step-label">Network</span>
                 </div>
                 <div class="progress-step" data-step="4">
                     <span class="step-number">4</span>
-                    <span class="step-label">Node Pool</span>
+                    <span class="step-label">Kubernetes</span>
                 </div>
                 <div class="progress-step" data-step="5">
                     <span class="step-number">5</span>
+                    <span class="step-label">Node Pool</span>
+                </div>
+                <div class="progress-step" data-step="6">
+                    <span class="step-number">6</span>
                     <span class="step-label">Coder</span>
                 </div>
             </div>
@@ -74,8 +78,30 @@
                     <p>Submitting...</p>
                 </div>
 
-                <!-- Step 1: Pulumi Configuration -->
+                <!-- Step 1: Cloud Provider Selection -->
                 <section class="wizard-step active" data-step="1">
+                    <div class="step-header">
+                        <h2>Cloud Provider</h2>
+                        <p class="section-description">Select your cloud provider</p>
+                    </div>
+                    <div class="step-content">
+                        <div class="form-group">
+                            <label for="provider">Cloud Provider *</label>
+                            <select id="provider" name="provider" required>
+                                <option value="ovh" selected>OVHcloud</option>
+                                <!-- Future providers can be added here:
+                                <option value="aws">Amazon Web Services (AWS)</option>
+                                <option value="azure">Microsoft Azure</option>
+                                <option value="gcp">Google Cloud Platform (GCP)</option>
+                                -->
+                            </select>
+                            <small>Choose the cloud provider for your infrastructure deployment</small>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Step 2: Pulumi Configuration -->
+                <section class="wizard-step" data-step="2">
                     <div class="step-header">
                         <h2>Pulumi Configuration</h2>
                         <p class="section-description">Configure your Pulumi stack settings</p>
@@ -89,8 +115,8 @@
                     </div>
                 </section>
 
-                <!-- Step 2: Network Configuration -->
-                <section class="wizard-step" data-step="2">
+                <!-- Step 3: Network Configuration -->
+                <section class="wizard-step" data-step="3">
                     <div class="step-header">
                         <h2>Network Configuration</h2>
                         <p class="section-description">Configure private network and gateway settings</p>
@@ -150,8 +176,8 @@
                     </div>
                 </section>
 
-                <!-- Step 3: Kubernetes Configuration -->
-                <section class="wizard-step" data-step="3">
+                <!-- Step 4: Kubernetes Configuration -->
+                <section class="wizard-step" data-step="4">
                     <div class="step-header">
                         <h2>Kubernetes Configuration</h2>
                         <p class="section-description">Configure your managed Kubernetes cluster</p>
@@ -164,8 +190,8 @@
                     </div>
                 </section>
 
-                <!-- Step 4: Node Pool Configuration -->
-                <section class="wizard-step" data-step="4">
+                <!-- Step 5: Node Pool Configuration -->
+                <section class="wizard-step" data-step="5">
                     <div class="step-header">
                         <h2>Node Pool Configuration</h2>
                         <p class="section-description">Configure Kubernetes node pool settings</p>
@@ -205,8 +231,8 @@
                     </div>
                 </section>
 
-                <!-- Step 5: Coder Configuration -->
-                <section class="wizard-step" data-step="5">
+                <!-- Step 6: Coder Configuration -->
+                <section class="wizard-step" data-step="6">
                     <div class="step-header">
                         <h2>Coder Configuration</h2>
                         <p class="section-description">Configure the Coder IDE platform</p>

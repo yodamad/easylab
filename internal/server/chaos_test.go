@@ -185,8 +185,8 @@ func TestChaos_CredentialsManager_ConcurrentSetAndGet(t *testing.T) {
 		// Getter
 		go func() {
 			defer wg.Done()
-			cm.GetCredentials()
-			cm.HasCredentials()
+			cm.GetCredentials("ovh")
+			cm.HasCredentials("ovh")
 		}()
 	}
 
@@ -700,9 +700,9 @@ func TestChaos_Recovery_AfterCredentialsCleared(t *testing.T) {
 	})
 
 	// Clear and try to use
-	cm.ClearCredentials()
+	cm.ClearCredentials("ovh")
 
-	_, err := cm.GetCredentials()
+	_, err := cm.GetCredentials("ovh")
 	if err == nil {
 		t.Error("Expected error after clearing credentials")
 	}

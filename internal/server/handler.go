@@ -66,15 +66,32 @@ func (h *Handler) parseForm(w http.ResponseWriter, r *http.Request, maxSize int6
 	return nil
 }
 
-// getOVHCredentials retrieves OVH credentials and returns an HTML error if not configured
+// getOVHCredentials retrieves OVH credentials and returns an HTML error if not configured (backward compatibility)
 func (h *Handler) getOVHCredentials(w http.ResponseWriter) (*OVHCredentials, error) {
-	ovhCreds, err := h.credentialsManager.GetCredentials()
+	creds, err := h.credentialsManager.GetCredentials("ovh")
 	if err != nil {
 		log.Printf("OVH credentials not configured: %v", err)
 		h.renderHTMLError(w, "OVH Credentials Not Configured", "Please configure your OVH credentials first.", `<a href="/ovh-credentials" class="btn btn-primary">Configure OVH Credentials</a>`)
 		return nil, err
 	}
-	return ovhCreds, nil
+	return creds.(*OVHCredentials), nil
+}
+
+// getProviderCredentials retrieves provider credentials based on provider name
+func (h *Handler) getProviderCredentials(w http.ResponseWriter, providerName string) (ProviderCredentials, error) {
+	if providerName == "" {
+		providerName = "ovh" // Default to OVH for backward compatibility
+	}
+
+	creds, err := h.credentialsManager.GetCredentials(providerName)
+	if err != nil {
+		log.Printf("%s credentials not configured: %v", providerName, err)
+		h.renderHTMLError(w, fmt.Sprintf("%s Credentials Not Configured", strings.ToUpper(providerName)), 
+			fmt.Sprintf("Please configure your %s credentials first.", strings.ToUpper(providerName)), 
+			`<a href="/ovh-credentials" class="btn btn-primary">Configure Credentials</a>`)
+		return nil, err
+	}
+	return creds, nil
 }
 
 // saveUploadedTemplateFile handles template file upload and saves it to the job directory
@@ -151,12 +168,18 @@ func (h *Handler) saveUploadedTemplateFile(r *http.Request, jobDir string) (stri
 	return finalPath, nil
 }
 
-// createLabConfigFromForm creates a LabConfig from form data and OVH credentials
-func (h *Handler) createLabConfigFromForm(r *http.Request, ovhCreds *OVHCredentials, templateFilePath string) *LabConfig {
+// createLabConfigFromForm creates a LabConfig from form data and provider credentials
+func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds ProviderCredentials, templateFilePath string) *LabConfig {
 	// Parse integer fields
 	desiredNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_desired_node_count"))
 	minNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_min_node_count"))
 	maxNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_max_node_count"))
+
+	// Get provider from form (default to "ovh" for backward compatibility)
+	provider := r.FormValue("provider")
+	if provider == "" {
+		provider = "ovh"
+	}
 
 	// Get stack name with default
 	stackName := r.FormValue("stack_name")
@@ -164,15 +187,9 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, ovhCreds *OVHCredenti
 		stackName = "dev"
 	}
 
-	return &LabConfig{
+	config := &LabConfig{
 		StackName: stackName,
-
-		// Use credentials from in-memory storage
-		OvhApplicationKey:    ovhCreds.ApplicationKey,
-		OvhApplicationSecret: ovhCreds.ApplicationSecret,
-		OvhConsumerKey:       ovhCreds.ConsumerKey,
-		OvhServiceName:       ovhCreds.ServiceName,
-		OvhEndpoint:          ovhCreds.Endpoint,
+		Provider:  provider,
 
 		NetworkGatewayName:        r.FormValue("network_gateway_name"),
 		NetworkGatewayModel:       r.FormValue("network_gateway_model"),
@@ -206,6 +223,22 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, ovhCreds *OVHCredenti
 		TemplateGitFolder: r.FormValue("template_git_folder"),
 		TemplateGitBranch: r.FormValue("template_git_branch"),
 	}
+
+	// Add provider-specific credentials
+	if ovhCreds, ok := providerCreds.(*OVHCredentials); ok {
+		config.OvhApplicationKey = ovhCreds.ApplicationKey
+		config.OvhApplicationSecret = ovhCreds.ApplicationSecret
+		config.OvhConsumerKey = ovhCreds.ConsumerKey
+		config.OvhServiceName = ovhCreds.ServiceName
+		config.OvhEndpoint = ovhCreds.Endpoint
+	}
+	// Future providers can be added here:
+	// if awsCreds, ok := providerCreds.(*AWSCredentials); ok {
+	//     config.AwsAccessKeyId = awsCreds.AccessKeyId
+	//     ...
+	// }
+
+	return config
 }
 
 // executeLabJob creates a job and starts execution, returning the job ID and HTML response
@@ -350,7 +383,7 @@ func (h *Handler) ServeUI(w http.ResponseWriter, r *http.Request) {
 // ServeAdminUI serves the admin HTML UI
 func (h *Handler) ServeAdminUI(w http.ResponseWriter, r *http.Request) {
 	// Check if credentials are configured
-	hasCredentials := h.credentialsManager.HasCredentials()
+	hasCredentials := h.credentialsManager.HasCredentials("ovh")
 
 	data := map[string]interface{}{
 		"HasCredentials": hasCredentials,
@@ -376,14 +409,20 @@ func (h *Handler) CreateLab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get OVH credentials from in-memory storage
-	ovhCreds, err := h.getOVHCredentials(w)
+	// Get provider from form (default to "ovh" for backward compatibility)
+	provider := r.FormValue("provider")
+	if provider == "" {
+		provider = "ovh"
+	}
+
+	// Get provider credentials from in-memory storage
+	providerCreds, err := h.getProviderCredentials(w, provider)
 	if err != nil {
 		return
 	}
 
 	// Create initial config without template file path
-	initialConfig := h.createLabConfigFromForm(r, ovhCreds, "")
+	initialConfig := h.createLabConfigFromForm(r, providerCreds, "")
 
 	// Validate template source configuration
 	templateSource := initialConfig.TemplateSource
@@ -475,14 +514,20 @@ func (h *Handler) DryRunLab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get OVH credentials from in-memory storage
-	ovhCreds, err := h.getOVHCredentials(w)
+	// Get provider from form (default to "ovh" for backward compatibility)
+	provider := r.FormValue("provider")
+	if provider == "" {
+		provider = "ovh"
+	}
+
+	// Get provider credentials from in-memory storage
+	providerCreds, err := h.getProviderCredentials(w, provider)
 	if err != nil {
 		return
 	}
 
 	// Create initial config without template file path
-	initialConfig := h.createLabConfigFromForm(r, ovhCreds, "")
+	initialConfig := h.createLabConfigFromForm(r, providerCreds, "")
 
 	// Validate template source configuration
 	templateSource := initialConfig.TemplateSource
@@ -1040,12 +1085,14 @@ func extractStringFromConfigValue(val string) string {
 func (h *Handler) ServeOVHCredentials(w http.ResponseWriter, r *http.Request) {
 	// Get current credentials status (without exposing secrets)
 	var currentCreds map[string]interface{}
-	creds, err := h.credentialsManager.GetCredentials()
+	creds, err := h.credentialsManager.GetCredentials("ovh")
 	if err == nil {
-		currentCreds = map[string]interface{}{
-			"configured":   true,
-			"service_name": creds.ServiceName,
-			"endpoint":     creds.Endpoint,
+		if ovhCreds, ok := creds.(*OVHCredentials); ok {
+			currentCreds = map[string]interface{}{
+				"configured":   true,
+				"service_name": ovhCreds.ServiceName,
+				"endpoint":     ovhCreds.Endpoint,
+			}
 		}
 	} else {
 		currentCreds = map[string]interface{}{
@@ -1145,11 +1192,13 @@ func (h *Handler) SetOVHCredentials(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify credentials were saved
-	verifyCreds, verifyErr := h.credentialsManager.GetCredentials()
+	verifyCreds, verifyErr := h.credentialsManager.GetCredentials("ovh")
 	if verifyErr != nil {
 		log.Printf("Warning: Credentials saved but verification failed: %v", verifyErr)
 	} else {
-		log.Printf("Credentials verified - Service: %s, Endpoint: %s", verifyCreds.ServiceName, verifyCreds.Endpoint)
+		if ovhCreds, ok := verifyCreds.(*OVHCredentials); ok {
+			log.Printf("Credentials verified - Service: %s, Endpoint: %s", ovhCreds.ServiceName, ovhCreds.Endpoint)
+		}
 	}
 
 	log.Printf("OVH credentials saved successfully for service: %s", creds.ServiceName)
@@ -1167,7 +1216,7 @@ func (h *Handler) GetOVHCredentials(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	creds, err := h.credentialsManager.GetCredentials()
+	creds, err := h.credentialsManager.GetCredentials("ovh")
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
@@ -1175,14 +1224,22 @@ func (h *Handler) GetOVHCredentials(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ovhCreds, ok := creds.(*OVHCredentials)
+	if !ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid credentials type"})
+		return
+	}
+
 	// Return limited info (not the actual secrets)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"configured":          true,
-		"service_name":        creds.ServiceName,
-		"endpoint":            creds.Endpoint,
-		"has_application_key": creds.ApplicationKey != "",
-		"has_consumer_key":    creds.ConsumerKey != "",
+		"service_name":        ovhCreds.ServiceName,
+		"endpoint":            ovhCreds.Endpoint,
+		"has_application_key": ovhCreds.ApplicationKey != "",
+		"has_consumer_key":    ovhCreds.ConsumerKey != "",
 	})
 }
 

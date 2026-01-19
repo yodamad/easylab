@@ -16,6 +16,17 @@ type OVHCredentials struct {
 	Endpoint          string `json:"endpoint"`
 }
 
+// ProviderCredentials is a generic interface for provider credentials
+// For now, we keep OVHCredentials as the concrete type, but this allows for future expansion
+type ProviderCredentials interface {
+	GetProviderName() string
+}
+
+// GetProviderName returns the provider name for OVH credentials
+func (c *OVHCredentials) GetProviderName() string {
+	return "ovh"
+}
+
 // loadCredentialsFromEnv attempts to load OVH credentials from environment variables
 func loadCredentialsFromEnv() *OVHCredentials {
 	appKey := os.Getenv("OVH_APPLICATION_KEY")
@@ -38,19 +49,19 @@ func loadCredentialsFromEnv() *OVHCredentials {
 	}
 }
 
-// CredentialsManager manages OVH credentials in memory
+// CredentialsManager manages credentials for multiple providers in memory
 type CredentialsManager struct {
-	credentials *OVHCredentials
+	credentials map[string]ProviderCredentials // key is provider name
 	mu          sync.RWMutex
 }
 
 // NewCredentialsManager creates a new credentials manager and loads credentials from environment variables
 func NewCredentialsManager() *CredentialsManager {
 	cm := &CredentialsManager{
-		credentials: nil,
+		credentials: make(map[string]ProviderCredentials),
 	}
 
-	// Try to load credentials from environment variables
+	// Try to load OVH credentials from environment variables
 	if creds := loadCredentialsFromEnv(); creds != nil {
 		if err := cm.SetCredentials(creds); err != nil {
 			log.Printf("Warning: Failed to load OVH credentials from environment variables: %v", err)
@@ -62,50 +73,81 @@ func NewCredentialsManager() *CredentialsManager {
 	return cm
 }
 
-// SetCredentials stores OVH credentials in memory
-func (cm *CredentialsManager) SetCredentials(creds *OVHCredentials) error {
-	if creds.ApplicationKey == "" || creds.ApplicationSecret == "" ||
-		creds.ConsumerKey == "" || creds.ServiceName == "" || creds.Endpoint == "" {
+// SetCredentials stores provider credentials in memory
+func (cm *CredentialsManager) SetCredentials(creds ProviderCredentials) error {
+	ovhCreds, ok := creds.(*OVHCredentials)
+	if !ok {
+		return fmt.Errorf("unsupported credentials type")
+	}
+
+	if ovhCreds.ApplicationKey == "" || ovhCreds.ApplicationSecret == "" ||
+		ovhCreds.ConsumerKey == "" || ovhCreds.ServiceName == "" || ovhCreds.Endpoint == "" {
 		return fmt.Errorf("all OVH credentials are required")
 	}
 
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	cm.credentials = creds
+	providerName := creds.GetProviderName()
+	cm.credentials[providerName] = creds
 	return nil
 }
 
-// GetCredentials retrieves OVH credentials from memory
-func (cm *CredentialsManager) GetCredentials() (*OVHCredentials, error) {
+// GetCredentials retrieves credentials for a specific provider
+func (cm *CredentialsManager) GetCredentials(providerName string) (ProviderCredentials, error) {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
-	if cm.credentials == nil {
-		return nil, fmt.Errorf("OVH credentials not configured")
+	if providerName == "" {
+		providerName = "ovh" // Default to OVH for backward compatibility
 	}
 
-	// Return a copy to prevent external modification
-	return &OVHCredentials{
-		ApplicationKey:    cm.credentials.ApplicationKey,
-		ApplicationSecret: cm.credentials.ApplicationSecret,
-		ConsumerKey:       cm.credentials.ConsumerKey,
-		ServiceName:       cm.credentials.ServiceName,
-		Endpoint:          cm.credentials.Endpoint,
-	}, nil
+	creds, exists := cm.credentials[providerName]
+	if !exists {
+		return nil, fmt.Errorf("%s credentials not configured", providerName)
+	}
+
+	// Return OVH credentials as a copy to prevent external modification
+	if ovhCreds, ok := creds.(*OVHCredentials); ok {
+		return &OVHCredentials{
+			ApplicationKey:    ovhCreds.ApplicationKey,
+			ApplicationSecret: ovhCreds.ApplicationSecret,
+			ConsumerKey:       ovhCreds.ConsumerKey,
+			ServiceName:       ovhCreds.ServiceName,
+			Endpoint:          ovhCreds.Endpoint,
+		}, nil
+	}
+
+	return creds, nil
 }
 
-// HasCredentials checks if credentials are configured
-func (cm *CredentialsManager) HasCredentials() bool {
+// GetOVHCredentials retrieves OVH credentials (backward compatibility method)
+func (cm *CredentialsManager) GetOVHCredentials() (*OVHCredentials, error) {
+	creds, err := cm.GetCredentials("ovh")
+	if err != nil {
+		return nil, err
+	}
+	return creds.(*OVHCredentials), nil
+}
+
+// HasCredentials checks if credentials are configured for a provider
+func (cm *CredentialsManager) HasCredentials(providerName string) bool {
+	if providerName == "" {
+		providerName = "ovh" // Default to OVH for backward compatibility
+	}
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
-	return cm.credentials != nil
+	_, exists := cm.credentials[providerName]
+	return exists
 }
 
-// ClearCredentials clears stored credentials (for testing/debugging)
-func (cm *CredentialsManager) ClearCredentials() {
+// ClearCredentials clears stored credentials for a provider (for testing/debugging)
+func (cm *CredentialsManager) ClearCredentials(providerName string) {
+	if providerName == "" {
+		providerName = "ovh" // Default to OVH for backward compatibility
+	}
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
-	cm.credentials = nil
+	delete(cm.credentials, providerName)
 }
 

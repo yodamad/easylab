@@ -47,25 +47,30 @@ func TestCredentialsManager_SetAndGetCredentials(t *testing.T) {
 		t.Fatalf("SetCredentials() error = %v", err)
 	}
 
-	got, err := cm.GetCredentials()
+	got, err := cm.GetCredentials("ovh")
 	if err != nil {
 		t.Fatalf("GetCredentials() error = %v", err)
 	}
 
-	if got.ApplicationKey != creds.ApplicationKey {
-		t.Errorf("ApplicationKey = %s, want %s", got.ApplicationKey, creds.ApplicationKey)
+	ovhGot, ok := got.(*OVHCredentials)
+	if !ok {
+		t.Fatalf("GetCredentials() returned wrong type")
 	}
-	if got.ApplicationSecret != creds.ApplicationSecret {
-		t.Errorf("ApplicationSecret = %s, want %s", got.ApplicationSecret, creds.ApplicationSecret)
+
+	if ovhGot.ApplicationKey != creds.ApplicationKey {
+		t.Errorf("ApplicationKey = %s, want %s", ovhGot.ApplicationKey, creds.ApplicationKey)
 	}
-	if got.ConsumerKey != creds.ConsumerKey {
-		t.Errorf("ConsumerKey = %s, want %s", got.ConsumerKey, creds.ConsumerKey)
+	if ovhGot.ApplicationSecret != creds.ApplicationSecret {
+		t.Errorf("ApplicationSecret = %s, want %s", ovhGot.ApplicationSecret, creds.ApplicationSecret)
 	}
-	if got.ServiceName != creds.ServiceName {
-		t.Errorf("ServiceName = %s, want %s", got.ServiceName, creds.ServiceName)
+	if ovhGot.ConsumerKey != creds.ConsumerKey {
+		t.Errorf("ConsumerKey = %s, want %s", ovhGot.ConsumerKey, creds.ConsumerKey)
 	}
-	if got.Endpoint != creds.Endpoint {
-		t.Errorf("Endpoint = %s, want %s", got.Endpoint, creds.Endpoint)
+	if ovhGot.ServiceName != creds.ServiceName {
+		t.Errorf("ServiceName = %s, want %s", ovhGot.ServiceName, creds.ServiceName)
+	}
+	if ovhGot.Endpoint != creds.Endpoint {
+		t.Errorf("Endpoint = %s, want %s", ovhGot.Endpoint, creds.Endpoint)
 	}
 }
 
@@ -157,7 +162,7 @@ func TestCredentialsManager_SetCredentials_Validation(t *testing.T) {
 func TestCredentialsManager_GetCredentials_NotConfigured(t *testing.T) {
 	cm := &CredentialsManager{}
 
-	_, err := cm.GetCredentials()
+	_, err := cm.GetCredentials("ovh")
 	if err == nil {
 		t.Error("GetCredentials() expected error for unconfigured credentials")
 	}
@@ -167,7 +172,7 @@ func TestCredentialsManager_HasCredentials(t *testing.T) {
 	cm := &CredentialsManager{}
 
 	// Initially no credentials
-	if cm.HasCredentials() {
+	if cm.HasCredentials("ovh") {
 		t.Error("HasCredentials() = true, want false for new manager")
 	}
 
@@ -182,7 +187,7 @@ func TestCredentialsManager_HasCredentials(t *testing.T) {
 	cm.SetCredentials(creds)
 
 	// Now should have credentials
-	if !cm.HasCredentials() {
+	if !cm.HasCredentials("ovh") {
 		t.Error("HasCredentials() = false, want true after setting credentials")
 	}
 }
@@ -201,19 +206,19 @@ func TestCredentialsManager_ClearCredentials(t *testing.T) {
 	cm.SetCredentials(creds)
 
 	// Verify they're set
-	if !cm.HasCredentials() {
+	if !cm.HasCredentials("ovh") {
 		t.Fatal("Credentials should be set")
 	}
 
 	// Clear credentials
-	cm.ClearCredentials()
+	cm.ClearCredentials("ovh")
 
 	// Verify they're cleared
-	if cm.HasCredentials() {
+	if cm.HasCredentials("ovh") {
 		t.Error("HasCredentials() = true after ClearCredentials()")
 	}
 
-	_, err := cm.GetCredentials()
+	_, err := cm.GetCredentials("ovh")
 	if err == nil {
 		t.Error("GetCredentials() should return error after ClearCredentials()")
 	}
@@ -231,14 +236,20 @@ func TestCredentialsManager_GetCredentialsReturnsCopy(t *testing.T) {
 	}
 	cm.SetCredentials(creds)
 
-	got1, _ := cm.GetCredentials()
-	got2, _ := cm.GetCredentials()
+	got1, _ := cm.GetCredentials("ovh")
+	got2, _ := cm.GetCredentials("ovh")
+
+	ovhGot1, ok1 := got1.(*OVHCredentials)
+	ovhGot2, ok2 := got2.(*OVHCredentials)
+	if !ok1 || !ok2 {
+		t.Fatal("GetCredentials() returned wrong type")
+	}
 
 	// Modify got1
-	got1.ApplicationKey = "modified"
+	ovhGot1.ApplicationKey = "modified"
 
 	// got2 should still have original value
-	if got2.ApplicationKey != "key" {
+	if ovhGot2.ApplicationKey != "key" {
 		t.Error("GetCredentials() does not return a copy")
 	}
 }
@@ -327,8 +338,8 @@ func TestCredentialsManager_ConcurrentAccess(t *testing.T) {
 	// Concurrent reads
 	go func() {
 		for i := 0; i < 100; i++ {
-			cm.GetCredentials()
-			cm.HasCredentials()
+			cm.GetCredentials("ovh")
+			cm.HasCredentials("ovh")
 		}
 		done <- true
 	}()
@@ -336,7 +347,7 @@ func TestCredentialsManager_ConcurrentAccess(t *testing.T) {
 	// Concurrent clears
 	go func() {
 		for i := 0; i < 100; i++ {
-			cm.ClearCredentials()
+			cm.ClearCredentials("ovh")
 		}
 		done <- true
 	}()

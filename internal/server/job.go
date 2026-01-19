@@ -46,7 +46,10 @@ type LabConfig struct {
 	// Pulumi Stack Name
 	StackName string `json:"stack_name"`
 
-	// OVH Environment Variables
+	// Cloud Provider
+	Provider string `json:"provider"` // "ovh", "aws", "azure", etc.
+
+	// OVH Environment Variables (kept for backward compatibility)
 	OvhApplicationKey    string `json:"ovh_application_key"`
 	OvhApplicationSecret string `json:"ovh_application_secret"`
 	OvhConsumerKey       string `json:"ovh_consumer_key"`
