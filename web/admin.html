@@ -234,17 +234,63 @@
                         </div>
 
                         <div class="form-group">
-                            <label for="template_file">Template File (Optional)</label>
-                            <div class="file-upload-wrapper">
-                                <input type="file" id="template_file" name="template_file" accept=".zip,.tf" class="file-input">
-                                <label for="template_file" class="file-upload-label">
-                                    <span class="file-upload-icon">📁</span>
-                                    <span class="file-upload-text">Choose file or drag it here</span>
-                                    <span class="file-upload-button">Browse</span>
-                                </label>
-                                <div class="file-name-display" id="file-name-display"></div>
+                            <label>Template Source *</label>
+                            <div class="button-group">
+                                <!-- Hidden radio inputs for form submission -->
+                                <input type="radio" name="template_source" value="upload" id="template_source_upload" style="display: none;">
+                                <input type="radio" name="template_source" value="git" id="template_source_git" style="display: none;">
+                                
+                                <button type="button" class="source-button" data-source="upload" id="source-button-upload">
+                                    <span class="source-icon">📁</span>
+                                    <div class="source-content">
+                                        <span class="source-title">Upload File</span>
+                                        <span class="source-description">Upload a template file</span>
+                                    </div>
+                                </button>
+                                
+                                <button type="button" class="source-button" data-source="git" id="source-button-git">
+                                    <span class="source-icon">🔗</span>
+                                    <div class="source-content">
+                                        <span class="source-title">Git Repository</span>
+                                        <span class="source-description">Use template from Git</span>
+                                    </div>
+                                </button>
                             </div>
-                            <small>Upload a template file (.zip or .tf). If not provided, the default Git-based template will be used.</small>
+                            <small>Choose how you want to provide the template</small>
+                        </div>
+
+                        <div id="template_upload_section" class="template-source-section" style="display: none;">
+                            <div class="form-group">
+                                <label for="template_file">Template File *</label>
+                                <div class="file-upload-wrapper">
+                                    <input type="file" id="template_file" name="template_file" accept=".zip,.tf" class="file-input">
+                                    <label for="template_file" class="file-upload-label">
+                                        <span class="file-upload-icon">📁</span>
+                                        <span class="file-upload-text">Choose file or drag it here</span>
+                                        <span class="file-upload-button">Browse</span>
+                                    </label>
+                                    <div class="file-name-display" id="file-name-display"></div>
+                                </div>
+                                <small>Upload a template file (.zip or .tf)</small>
+                            </div>
+                        </div>
+
+                        <div id="template_git_section" class="template-source-section" style="display: none;">
+                            <div class="form-group">
+                                <label for="template_git_repo">Repository URL *</label>
+                                <input type="text" id="template_git_repo" name="template_git_repo" placeholder="https://gitlab.com/user/repo.git">
+                                <small>Git repository URL containing the template files</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="template_git_folder">Folder Path (Optional)</label>
+                                <input type="text" id="template_git_folder" name="template_git_folder" placeholder="Leave empty for repository root">
+                                <small>Path to folder containing template files. Leave empty to use repository root.</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="template_git_branch">Branch (Optional)</label>
+                                <input type="text" id="template_git_branch" name="template_git_branch" value="main" placeholder="main">
+                                <small>Git branch to use. Defaults to "main" if not specified.</small>
+                            </div>
                         </div>
 
                         <h3 class="subsection-title">Database Configuration</h3>
@@ -831,6 +877,93 @@
         document.body.addEventListener('htmx:afterSettle', function(event) {
             scrollOutputToBottom();
         });
+
+        // Template source selection handler with button group
+        const templateSourceRadios = document.querySelectorAll('input[name="template_source"]');
+        const sourceButtons = document.querySelectorAll('.source-button');
+        const templateUploadSection = document.getElementById('template_upload_section');
+        const templateGitSection = document.getElementById('template_git_section');
+        const templateFileInput = document.getElementById('template_file');
+        const templateGitRepoInput = document.getElementById('template_git_repo');
+
+        function updateButtonStates(selectedSource) {
+            // Update button visual states
+            sourceButtons.forEach(button => {
+                const buttonSource = button.getAttribute('data-source');
+                if (buttonSource === selectedSource) {
+                    button.classList.add('selected');
+                } else {
+                    button.classList.remove('selected');
+                }
+            });
+        }
+
+        function updateTemplateSourceVisibility() {
+            const selectedSource = document.querySelector('input[name="template_source"]:checked')?.value;
+            
+            // Update button visual states
+            updateButtonStates(selectedSource);
+            
+            if (selectedSource === 'git') {
+                // Show Git section, hide upload section
+                templateUploadSection.style.display = 'none';
+                templateGitSection.style.display = 'block';
+                // Update required attributes
+                if (templateFileInput) {
+                    templateFileInput.removeAttribute('required');
+                }
+                if (templateGitRepoInput) {
+                    templateGitRepoInput.setAttribute('required', 'required');
+                }
+            } else if (selectedSource === 'upload') {
+                // Show upload section, hide Git section
+                templateUploadSection.style.display = 'block';
+                templateGitSection.style.display = 'none';
+                // Update required attributes
+                if (templateFileInput) {
+                    templateFileInput.setAttribute('required', 'required');
+                }
+                if (templateGitRepoInput) {
+                    templateGitRepoInput.removeAttribute('required');
+                }
+            } else {
+                // No selection - hide both sections
+                templateUploadSection.style.display = 'none';
+                templateGitSection.style.display = 'none';
+                // Remove required attributes
+                if (templateFileInput) {
+                    templateFileInput.removeAttribute('required');
+                }
+                if (templateGitRepoInput) {
+                    templateGitRepoInput.removeAttribute('required');
+                }
+            }
+        }
+
+        // Add event listeners to source buttons
+        sourceButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                const source = this.getAttribute('data-source');
+                const radio = document.getElementById('template_source_' + source);
+                
+                if (radio) {
+                    // Check the corresponding radio button
+                    radio.checked = true;
+                    // Trigger change event for any listeners
+                    radio.dispatchEvent(new Event('change', { bubbles: true }));
+                    // Update visibility
+                    updateTemplateSourceVisibility();
+                }
+            });
+        });
+
+        // Also listen to radio changes (for form reset or programmatic changes)
+        templateSourceRadios.forEach(radio => {
+            radio.addEventListener('change', updateTemplateSourceVisibility);
+        });
+
+        // Initialize visibility on page load (both sections hidden by default)
+        updateTemplateSourceVisibility();
 
         // File upload display handler with drag and drop support
         const fileInput = document.getElementById('template_file');

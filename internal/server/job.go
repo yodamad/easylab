@@ -81,6 +81,12 @@ type LabConfig struct {
 	CoderDbName        string `json:"coder_db_name"`
 	CoderTemplateName  string `json:"coder_template_name"`
 	TemplateFilePath   string `json:"template_file_path,omitempty"` // Path to uploaded template file (zip or tf)
+	
+	// Template Source Configuration
+	TemplateSource   string `json:"template_source,omitempty"`   // "upload" or "git"
+	TemplateGitRepo  string `json:"template_git_repo,omitempty"` // Git repository URL (mandatory for git source)
+	TemplateGitFolder string `json:"template_git_folder,omitempty"` // Folder path in repository (optional, empty = root)
+	TemplateGitBranch string `json:"template_git_branch,omitempty"` // Git branch (optional, default "main")
 
 	// OVH Endpoint
 	OvhEndpoint string `json:"ovh_endpoint"`

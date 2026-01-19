@@ -70,6 +70,10 @@ const CoderDbPassword = "dbPassword"
 const CoderDbName = "dbName"
 const CoderTemplateName = "templateName"
 const CoderTemplateFilePath = "templateFilePath"
+const CoderTemplateSource = "templateSource"
+const CoderTemplateGitRepo = "templateGitRepo"
+const CoderTemplateGitFolder = "templateGitFolder"
+const CoderTemplateGitBranch = "templateGitBranch"
 
 func CoderConfig(ctx *pulumi.Context, key string) string {
 	return getConfig(ctx, CoderGroup, key)

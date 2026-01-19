@@ -101,7 +101,7 @@ func main() {
 			// Use default Git-based template
 			utils.LogInfo(ctx, "No template file uploaded, using Git-based template")
 			var gitErr error
-			zipFile, gitErr = utils.CloneFolderFromGitAndZipIt("https://gitlab.com/yodamad-workshops/coder-templates#", "docker")
+			zipFile, gitErr = utils.CloneFolderFromGitAndZipIt("https://gitlab.com/yodamad-workshops/coder-templates#", "docker", "main")
 			if gitErr != nil {
 				return fmt.Errorf("failed to clone and zip template from Git: %w", gitErr)
 			}

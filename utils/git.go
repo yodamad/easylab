@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 )
 
 // createZipFile creates a zip file and returns the writer and absolute path
@@ -63,7 +64,7 @@ func addFileToZip(zipWriter *zip.Writer, filePath string, zipEntryName string) e
 	return nil
 }
 
-func CloneFolderFromGitAndZipIt(repoUrl string, folder string) (string, error) {
+func CloneFolderFromGitAndZipIt(repoUrl string, folder string, branch string) (string, error) {
 	// Create temporary directory for clone
 	tempDir, err := os.MkdirTemp("", "git-clone-*")
 	if err != nil {
@@ -71,22 +72,48 @@ func CloneFolderFromGitAndZipIt(repoUrl string, folder string) (string, error) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	// Clone repository
-	_, err = git.PlainClone(tempDir, false, &git.CloneOptions{
+	// Default branch to "main" if not specified
+	if branch == "" {
+		branch = "main"
+	}
+
+	// Prepare clone options with branch reference
+	cloneOptions := &git.CloneOptions{
 		URL: repoUrl,
-	})
+	}
+	
+	// Set branch reference if specified
+	if branch != "" {
+		cloneOptions.ReferenceName = plumbing.NewBranchReferenceName(branch)
+		cloneOptions.SingleBranch = true
+	}
+
+	// Clone repository
+	_, err = git.PlainClone(tempDir, false, cloneOptions)
 	if err != nil {
 		return "", fmt.Errorf("failed to clone repository: %w", err)
 	}
 
-	// Build path to target folder
-	targetPath := filepath.Join(tempDir, folder)
-	if _, err := os.Stat(targetPath); err != nil {
-		return "", fmt.Errorf("folder '%s' not found in repository: %w", folder, err)
+	// Determine target path
+	var targetPath string
+	if folder == "" {
+		// Use repository root if folder is empty
+		targetPath = tempDir
+	} else {
+		// Build path to target folder
+		targetPath = filepath.Join(tempDir, folder)
+		if _, err := os.Stat(targetPath); err != nil {
+			return "", fmt.Errorf("folder '%s' not found in repository: %w", folder, err)
+		}
 	}
 
-	// Create zip file
-	zipFileName := strings.ReplaceAll(folder, "/", "-") + ".zip"
+	// Create zip file name
+	var zipFileName string
+	if folder == "" {
+		zipFileName = "repository-root.zip"
+	} else {
+		zipFileName = strings.ReplaceAll(folder, "/", "-") + ".zip"
+	}
 	zipWriter, zipFile, absPath, err := createZipFile(zipFileName)
 	if err != nil {
 		return "", err
@@ -98,6 +125,11 @@ func CloneFolderFromGitAndZipIt(repoUrl string, folder string) (string, error) {
 	err = filepath.Walk(targetPath, func(filePath string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+
+		// Skip the .git directory
+		if info.IsDir() && info.Name() == ".git" {
+			return filepath.SkipDir
 		}
 
 		// Create relative path for zip entry

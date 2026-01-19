@@ -897,6 +897,96 @@ select:focus-visible {
     border-radius: var(--radius);
 }
 
+/* ============================================
+   BUTTON GROUP / SOURCE SELECTION
+   ============================================ */
+
+.button-group {
+    display: flex;
+    gap: 1rem;
+    margin-top: 0.5rem;
+}
+
+.source-button {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.25rem 1.5rem;
+    background: var(--background);
+    border: 2px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: left;
+    font-family: inherit;
+    box-shadow: var(--shadow);
+}
+
+.source-button:hover {
+    border-color: var(--primary-color);
+    background: var(--surface);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+}
+
+.source-button.selected {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: white;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+}
+
+.source-button.selected:hover {
+    background: var(--primary-hover);
+    border-color: var(--primary-hover);
+    transform: translateY(-2px);
+}
+
+.source-icon {
+    font-size: 2rem;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.source-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex: 1;
+}
+
+.source-title {
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.2;
+}
+
+.source-description {
+    font-size: 0.875rem;
+    opacity: 0.8;
+    line-height: 1.3;
+}
+
+.source-button.selected .source-description {
+    opacity: 0.9;
+}
+
+.source-button:active {
+    transform: translateY(0);
+}
+
+/* Responsive design for button group */
+@media (max-width: 640px) {
+    .button-group {
+        flex-direction: column;
+    }
+    
+    .source-button {
+        width: 100%;
+    }
+}
+
 /* Smooth transitions - but respect reduced motion preference */
 @media (prefers-reduced-motion: no-preference) {
     * {

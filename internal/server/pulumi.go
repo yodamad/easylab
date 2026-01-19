@@ -907,9 +907,27 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 		commands = append(commands, configCommand{"network:networkId", config.NetworkID, false})
 	}
 
-	// Add template file path if provided
+	// Add template source configuration
+	if config.TemplateSource != "" {
+		commands = append(commands, configCommand{"coder:templateSource", config.TemplateSource, false})
+	}
+
+	// Add template file path if provided (for upload source)
 	if config.TemplateFilePath != "" {
 		commands = append(commands, configCommand{"coder:templateFilePath", config.TemplateFilePath, false})
+	}
+
+	// Add Git template configuration if source is git
+	if config.TemplateSource == "git" {
+		if config.TemplateGitRepo != "" {
+			commands = append(commands, configCommand{"coder:templateGitRepo", config.TemplateGitRepo, false})
+		}
+		if config.TemplateGitFolder != "" {
+			commands = append(commands, configCommand{"coder:templateGitFolder", config.TemplateGitFolder, false})
+		}
+		if config.TemplateGitBranch != "" {
+			commands = append(commands, configCommand{"coder:templateGitBranch", config.TemplateGitBranch, false})
+		}
 	}
 
 	return commands

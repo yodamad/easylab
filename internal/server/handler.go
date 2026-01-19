@@ -199,6 +199,12 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, ovhCreds *OVHCredenti
 		CoderDbName:        r.FormValue("coder_db_name"),
 		CoderTemplateName:  r.FormValue("coder_template_name"),
 		TemplateFilePath:   templateFilePath,
+		
+		// Template Source Configuration
+		TemplateSource:    r.FormValue("template_source"),
+		TemplateGitRepo:   r.FormValue("template_git_repo"),
+		TemplateGitFolder: r.FormValue("template_git_folder"),
+		TemplateGitBranch: r.FormValue("template_git_branch"),
 	}
 }
 
@@ -379,6 +385,24 @@ func (h *Handler) CreateLab(w http.ResponseWriter, r *http.Request) {
 	// Create initial config without template file path
 	initialConfig := h.createLabConfigFromForm(r, ovhCreds, "")
 
+	// Validate template source configuration
+	templateSource := initialConfig.TemplateSource
+	if templateSource == "" {
+		// Backward compatibility: if no source specified, check for uploaded file
+		templateSource = "upload"
+	}
+	
+	if templateSource == "git" {
+		// Validate Git repository URL is provided
+		if initialConfig.TemplateGitRepo == "" {
+			h.renderHTMLError(w, "Template Configuration Error", "Repository URL is required when using Git template source")
+			return
+		}
+	} else if templateSource == "upload" {
+		// Validate file upload is provided
+		// This will be checked when saving the file
+	}
+
 	// Create job first to get jobID
 	jobID := h.jobManager.CreateJob(initialConfig)
 
@@ -390,23 +414,39 @@ func (h *Handler) CreateLab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle template file upload
-	templateFilePath, err := h.saveUploadedTemplateFile(r, jobDir)
-	if err != nil {
-		log.Printf("Failed to save template file: %v", err)
-		h.renderHTMLError(w, "Template Upload Error", fmt.Sprintf("Failed to save template file: %v", err))
-		return
-	}
-
-	// Update config with template file path (relative to job directory)
-	if templateFilePath != "" {
-		// Store as relative path, will be resolved in main.go
+	// Handle template file upload only if source is "upload"
+	var templateFilePath string
+	if templateSource == "upload" {
+		var err error
+		templateFilePath, err = h.saveUploadedTemplateFile(r, jobDir)
+		if err != nil {
+			log.Printf("Failed to save template file: %v", err)
+			h.renderHTMLError(w, "Template Upload Error", fmt.Sprintf("Failed to save template file: %v", err))
+			return
+		}
+		if templateFilePath == "" {
+			h.renderHTMLError(w, "Template Configuration Error", "Template file is required when using upload source")
+			return
+		}
+		// Update config with template file path (relative to job directory)
 		initialConfig.TemplateFilePath = templateFilePath
 		// Update job config
 		job, exists := h.jobManager.GetJob(jobID)
 		if exists {
 			job.mu.Lock()
 			job.Config.TemplateFilePath = templateFilePath
+			job.Config.TemplateSource = templateSource
+			job.mu.Unlock()
+		}
+	} else {
+		// Update job config with Git template info
+		job, exists := h.jobManager.GetJob(jobID)
+		if exists {
+			job.mu.Lock()
+			job.Config.TemplateSource = templateSource
+			job.Config.TemplateGitRepo = initialConfig.TemplateGitRepo
+			job.Config.TemplateGitFolder = initialConfig.TemplateGitFolder
+			job.Config.TemplateGitBranch = initialConfig.TemplateGitBranch
 			job.mu.Unlock()
 		}
 	}
@@ -444,6 +484,24 @@ func (h *Handler) DryRunLab(w http.ResponseWriter, r *http.Request) {
 	// Create initial config without template file path
 	initialConfig := h.createLabConfigFromForm(r, ovhCreds, "")
 
+	// Validate template source configuration
+	templateSource := initialConfig.TemplateSource
+	if templateSource == "" {
+		// Backward compatibility: if no source specified, check for uploaded file
+		templateSource = "upload"
+	}
+	
+	if templateSource == "git" {
+		// Validate Git repository URL is provided
+		if initialConfig.TemplateGitRepo == "" {
+			h.renderHTMLError(w, "Template Configuration Error", "Repository URL is required when using Git template source")
+			return
+		}
+	} else if templateSource == "upload" {
+		// Validate file upload is provided
+		// This will be checked when saving the file
+	}
+
 	// Create job first to get jobID
 	jobID := h.jobManager.CreateJob(initialConfig)
 
@@ -455,23 +513,39 @@ func (h *Handler) DryRunLab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle template file upload
-	templateFilePath, err := h.saveUploadedTemplateFile(r, jobDir)
-	if err != nil {
-		log.Printf("Failed to save template file: %v", err)
-		h.renderHTMLError(w, "Template Upload Error", fmt.Sprintf("Failed to save template file: %v", err))
-		return
-	}
-
-	// Update config with template file path (relative to job directory)
-	if templateFilePath != "" {
-		// Store as relative path, will be resolved in main.go
+	// Handle template file upload only if source is "upload"
+	var templateFilePath string
+	if templateSource == "upload" {
+		var err error
+		templateFilePath, err = h.saveUploadedTemplateFile(r, jobDir)
+		if err != nil {
+			log.Printf("Failed to save template file: %v", err)
+			h.renderHTMLError(w, "Template Upload Error", fmt.Sprintf("Failed to save template file: %v", err))
+			return
+		}
+		if templateFilePath == "" {
+			h.renderHTMLError(w, "Template Configuration Error", "Template file is required when using upload source")
+			return
+		}
+		// Update config with template file path (relative to job directory)
 		initialConfig.TemplateFilePath = templateFilePath
 		// Update job config
 		job, exists := h.jobManager.GetJob(jobID)
 		if exists {
 			job.mu.Lock()
 			job.Config.TemplateFilePath = templateFilePath
+			job.Config.TemplateSource = templateSource
+			job.mu.Unlock()
+		}
+	} else {
+		// Update job config with Git template info
+		job, exists := h.jobManager.GetJob(jobID)
+		if exists {
+			job.mu.Lock()
+			job.Config.TemplateSource = templateSource
+			job.Config.TemplateGitRepo = initialConfig.TemplateGitRepo
+			job.Config.TemplateGitFolder = initialConfig.TemplateGitFolder
+			job.Config.TemplateGitBranch = initialConfig.TemplateGitBranch
 			job.mu.Unlock()
 		}
 	}
