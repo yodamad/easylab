@@ -1,10 +1,10 @@
-# Lab-as-Code Kubernetes Deployment
+# EasyLab Kubernetes Deployment
 
-This directory contains Kubernetes manifests for deploying the Lab-as-Code application with persistent volume support.
+This directory contains Kubernetes manifests for deploying the EasyLab application with persistent volume support.
 
 ## Files Overview
 
-- **`namespace.yaml`**: Creates the `lab-as-code` namespace
+- **`namespace.yaml`**: Creates the `easylab` namespace
 - **`pvc.yaml`**: PersistentVolumeClaims for jobs (10Gi) and data (5Gi) storage
 - **`configmap.yaml`**: Non-sensitive configuration (ports, directories)
 - **`secret.yaml`**: Sensitive configuration (OVH credentials, passwords)
@@ -17,8 +17,8 @@ This directory contains Kubernetes manifests for deploying the Lab-as-Code appli
 ## Key Features
 
 ### 🔄 Persistent Storage
-- **Jobs Storage**: `/app/jobs` mounted to `lab-as-code-jobs-pvc` (10Gi)
-- **Data Storage**: `/app/data` mounted to `lab-as-code-data-pvc` (5Gi)
+- **Jobs Storage**: `/app/jobs` mounted to `easylab-jobs-pvc` (10Gi)
+- **Data Storage**: `/app/data` mounted to `easylab-data-pvc` (5Gi)
 - Data persists across container restarts and pod rescheduling
 
 ### 🔒 Security
@@ -40,14 +40,14 @@ This directory contains Kubernetes manifests for deploying the Lab-as-Code appli
 
 ```bash
 # Build and tag your image
-docker build -t your-registry/lab-as-code:latest ../
-docker push your-registry/lab-as-code:latest
+docker build -t your-registry/easylab:latest ../
+docker push your-registry/easylab:latest
 
 # Deploy
 ./deploy.sh
 
 # Update image if needed
-kubectl set image deployment/lab-as-code lab-as-code=your-registry/lab-as-code:latest -n lab-as-code
+kubectl set image deployment/easylab easylab=your-registry/easylab:latest -n easylab
 ```
 
 ## Configuration
@@ -56,7 +56,7 @@ kubectl set image deployment/lab-as-code lab-as-code=your-registry/lab-as-code:l
 
 1. **Update secrets** with real OVH credentials:
    ```bash
-   kubectl edit secret lab-as-code-secrets -n lab-as-code
+   kubectl edit secret easylab-secrets -n easylab
    ```
 
 2. **Update ingress host**:
@@ -86,14 +86,14 @@ Currently configured for single replica. For multi-replica:
 
 ```bash
 # Check status
-kubectl get all -n lab-as-code
+kubectl get all -n easylab
 
 # View logs
-kubectl logs -f deployment/lab-as-code -n lab-as-code
+kubectl logs -f deployment/easylab -n easylab
 
 # Check PVC status
-kubectl get pvc -n lab-as-code
+kubectl get pvc -n easylab
 
 # Debug pods
-kubectl describe pod -n lab-as-code
+kubectl describe pod -n easylab
 ```

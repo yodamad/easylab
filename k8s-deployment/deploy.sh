@@ -9,7 +9,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}🚀 Deploying Lab-as-Code to Kubernetes${NC}"
+echo -e "${BLUE}🚀 Deploying EasyLab to Kubernetes${NC}"
 
 # Check if kubectl is available
 if ! command -v kubectl &> /dev/null; then
@@ -36,8 +36,8 @@ fi
 
 # Build and push Docker image (optional - uncomment if you want to build)
 # echo -e "${BLUE}🔨 Building Docker image...${NC}"
-# docker build -t lab-as-code:latest ../
-# docker push lab-as-code:latest
+# docker build -t easylab:latest ../
+# docker push easylab:latest
 
 echo -e "${BLUE}📦 Deploying to Kubernetes...${NC}"
 
@@ -48,23 +48,23 @@ echo -e "${GREEN}✅ Deployment completed!${NC}"
 
 # Wait for deployment to be ready
 echo -e "${BLUE}⏳ Waiting for deployment to be ready...${NC}"
-kubectl wait --for=condition=available --timeout=300s deployment/lab-as-code -n lab-as-code
+kubectl wait --for=condition=available --timeout=300s deployment/easylab -n easylab
 
 # Get service information
 echo -e "${GREEN}🎉 Deployment successful!${NC}"
 echo ""
 echo -e "${BLUE}Service Information:${NC}"
-kubectl get svc lab-as-code-service -n lab-as-code
+kubectl get svc easylab-service -n easylab
 echo ""
 echo -e "${BLUE}Pod Status:${NC}"
-kubectl get pods -n lab-as-code -l app=lab-as-code
+kubectl get pods -n easylab -l app=easylab
 echo ""
 echo -e "${YELLOW}📝 Next steps:${NC}"
 echo "1. Update the ingress host in ingress.yaml with your domain"
 echo "2. Configure DNS to point to your ingress controller"
 echo "3. Update secrets with your actual OVH credentials:"
-echo "   kubectl edit secret lab-as-code-secrets -n lab-as-code"
+echo "   kubectl edit secret easylab-secrets -n easylab"
 echo ""
 echo -e "${BLUE}Application will be available at:${NC}"
-echo "http://lab-as-code-service.lab-as-code.svc.cluster.local"
+echo "http://easylab-service.easylab.svc.cluster.local"
 echo "(or through ingress if configured)"

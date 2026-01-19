@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
-	"labascode/coder"
-	"labascode/k8s"
-	"labascode/ovh"
-	"labascode/utils"
+	"easylab/coder"
+	"easylab/k8s"
+	"easylab/ovh"
+	"easylab/utils"
 	"os"
 	"path/filepath"
 	"slices"

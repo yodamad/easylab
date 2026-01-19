@@ -1,4 +1,4 @@
-# Lab-as-Code Makefile
+# EasyLab Makefile
 # Go parameters
 GOCMD=go
 GOBUILD=$(GOCMD) build
@@ -6,9 +6,9 @@ GOTEST=$(GOCMD) test
 GOCLEAN=$(GOCMD) clean
 GOGET=$(GOCMD) get
 GOMOD=$(GOCMD) mod
-BINARY_NAME=lab-as-code
+BINARY_NAME=easylab
 BINARY_UNIX=$(BINARY_NAME)_unix
-SERVER_BINARY=lab-as-code-server
+SERVER_BINARY=easylab-server
 
 # NPM parameters
 NPMCMD=npm
@@ -254,7 +254,7 @@ ci-coverage:
 ## Help
 
 help:
-	@echo "Lab-as-Code Makefile"
+	@echo "EasyLab Makefile"
 	@echo ""
 	@echo "Build targets:"
 	@echo "  build          - Build the main Pulumi application"

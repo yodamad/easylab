@@ -1,10 +1,10 @@
-# Lab-as-Code
+# EasyLab
 
 A web application for managing cloud infrastructure labs with OVHcloud integration. Provides an admin interface for creating and managing infrastructure labs, and a student interface for requesting and accessing development workspaces.
 
 ## Overview
 
-Lab-as-Code is a comprehensive platform that simplifies cloud infrastructure lab management. It enables:
+EasyLab is a comprehensive platform that simplifies cloud infrastructure lab management. It enables:
 
 - **Admin Interface**: Create and manage cloud infrastructure labs with OVHcloud
 - **Student Interface**: Request and access development workspaces
@@ -53,8 +53,8 @@ The application consists of two main components:
 ### Command-Line Arguments
 
 - `-port`: HTTP server port (default: `8080`)
-- `-work-dir`: Directory for job workspaces (default: `/tmp/lab-as-code-jobs` or `$WORK_DIR`)
-- `-data-dir`: Directory for application data (default: `/tmp/lab-as-code-data` or `$DATA_DIR`)
+- `-work-dir`: Directory for job workspaces (default: `/tmp/easylab-jobs` or `$WORK_DIR`)
+- `-data-dir`: Directory for application data (default: `/tmp/easylab-data` or `$DATA_DIR`)
 - `-env-file`: Path to an environment file to load at startup. The file should contain `KEY=VALUE` pairs (one per line). Lines starting with `#` are treated as comments. Both `KEY=VALUE` and `export KEY=VALUE` formats are supported.
 
 Example `.env` file:
@@ -112,7 +112,7 @@ go run cmd/server/main.go -env-file=.env -port=8080
 ```bash
 # Clone repository
 git clone <repository-url>
-cd lab-as-code
+cd easylab
 
 # Install dependencies
 go mod tidy
@@ -154,7 +154,7 @@ export OVH_SERVICE_NAME="your-service-name"
 docker-compose up -d
 
 # View logs
-docker-compose logs -f lab-as-code
+docker-compose logs -f easylab
 ```
 
 #### Configuration
@@ -177,16 +177,16 @@ The Docker setup includes:
 #### Quick Deployment
 ```bash
 # Build and push container image
-docker build -t lab-as-code:latest .
-docker tag lab-as-code:latest your-registry/lab-as-code:latest
-docker push your-registry/lab-as-code:latest
+docker build -t easylab:latest .
+docker tag easylab:latest your-registry/easylab:latest
+docker push your-registry/easylab:latest
 
 # Deploy to Kubernetes
 cd k8s-deployment
 ./deploy.sh
 
 # Configure secrets with OVH credentials
-kubectl edit secret lab-as-code-secrets -n lab-as-code
+kubectl edit secret easylab-secrets -n easylab
 ```
 
 #### Manual Deployment
@@ -210,7 +210,7 @@ kubectl apply -f ingress.yaml
 - **Resource Limits**: Configured CPU and memory limits
 
 #### Access
-- **Internal Service**: `http://lab-as-code-service.lab-as-code.svc.cluster.local`
+- **Internal Service**: `http://easylab-service.easylab.svc.cluster.local`
 - **External Access**: Configure ingress with your domain
 
 ## Development
@@ -218,10 +218,10 @@ kubectl apply -f ingress.yaml
 ### Building
 ```bash
 # Build web application
-go build -o lab-as-code cmd/server/main.go
+go build -o easylab cmd/server/main.go
 
 # Build Docker image
-docker build -t lab-as-code .
+docker build -t easylab .
 
 # Build infrastructure (Pulumi)
 go build -o infrastructure main.go

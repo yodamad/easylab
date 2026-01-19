@@ -1,6 +1,6 @@
 # Docker Deployment Guide
 
-This guide explains how to deploy the Lab-as-Code application using Docker and Docker Compose.
+This guide explains how to deploy the EasyLab application using Docker and Docker Compose.
 
 ## Prerequisites
 
@@ -12,7 +12,7 @@ This guide explains how to deploy the Lab-as-Code application using Docker and D
 1. **Clone the repository and navigate to the project directory:**
    ```bash
    git clone <repository-url>
-   cd lab-as-code
+   cd easylab
    ```
 
 2. **Set the admin password (optional but recommended):**
@@ -31,7 +31,7 @@ This guide explains how to deploy the Lab-as-Code application using Docker and D
 
 5. **View logs:**
    ```bash
-   docker-compose logs -f lab-as-code
+   docker-compose logs -f easylab
    ```
 
 ## Configuration
@@ -58,7 +58,7 @@ The Docker Compose setup includes two named volumes for data persistence:
 
 ### Build the image manually:
 ```bash
-docker build -t lab-as-code .
+docker build -t easylab .
 ```
 
 ### Run with Docker Compose:
@@ -84,12 +84,12 @@ docker volume create lab_data
 
 # Run the container
 docker run -d \
-  --name lab-as-code \
+  --name easylab \
   -p 8080:8080 \
   -v lab_jobs:/app/jobs \
   -v lab_data:/app/data \
   -e LAB_ADMIN_PASSWORD="your-password" \
-  lab-as-code
+  easylab
 ```
 
 ## Data Management
@@ -121,7 +121,7 @@ docker-compose down
 docker volume rm lab_jobs lab_data
 
 # Remove images
-docker rmi lab-as-code
+docker rmi easylab
 ```
 
 ## Health Monitoring
@@ -168,7 +168,7 @@ docker-compose ps
 4. **Application not starting:**
    ```bash
    # Check logs
-   docker-compose logs lab-as-code
+   docker-compose logs easylab
 
    # Check health
    curl http://localhost:8080/health
@@ -178,13 +178,13 @@ docker-compose ps
 
 ```bash
 # View application logs
-docker-compose logs -f lab-as-code
+docker-compose logs -f easylab
 
 # Enter container for debugging
-docker-compose exec lab-as-code sh
+docker-compose exec easylab sh
 
 # Check running processes
-docker-compose exec lab-as-code ps aux
+docker-compose exec easylab ps aux
 ```
 
 ## Production Deployment
@@ -201,7 +201,7 @@ For production deployment, consider:
 Example production docker-compose.yml additions:
 ```yaml
 services:
-  lab-as-code:
+  easylab:
     deploy:
       resources:
         limits:
@@ -215,7 +215,7 @@ services:
 
 If you encounter issues:
 
-1. Check the application logs: `docker-compose logs lab-as-code`
+1. Check the application logs: `docker-compose logs easylab`
 2. Verify Docker and Docker Compose versions
 3. Ensure all prerequisites are met
 4. Check the main README.md for application-specific configuration

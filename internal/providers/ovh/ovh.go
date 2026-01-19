@@ -2,8 +2,8 @@ package ovh
 
 import (
 	"fmt"
-	"labascode/internal/providers"
-	"labascode/utils"
+	"easylab/internal/providers"
+	"easylab/utils"
 	"strconv"
 
 	"github.com/ovh/pulumi-ovh/sdk/v2/go/ovh/cloudproject"

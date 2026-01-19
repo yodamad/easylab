@@ -1,6 +1,6 @@
 # Testing Documentation
 
-This document provides a comprehensive overview of all tests implemented in the Lab-as-Code project, including how to run them and what they cover.
+This document provides a comprehensive overview of all tests implemented in the EasyLab project, including how to run them and what they cover.
 
 ## Table of Contents
 

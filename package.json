@@ -1,7 +1,7 @@
 {
-  "name": "lab-as-code",
+  "name": "easylab",
   "version": "1.0.0",
-  "description": "Lab as Code - Web application for managing cloud infrastructure labs",
+  "description": "EasyLab - Web application for managing cloud infrastructure labs",
   "scripts": {
     "test": "playwright test",
     "test:ui": "playwright test --ui",

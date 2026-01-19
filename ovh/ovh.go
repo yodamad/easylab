@@ -2,7 +2,7 @@ package ovh
 
 import (
 	"fmt"
-	"labascode/utils"
+	"easylab/utils"
 	"strconv"
 
 	"github.com/ovh/pulumi-ovh/sdk/v2/go/ovh/cloudproject"

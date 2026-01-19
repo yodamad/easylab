@@ -1,6 +1,6 @@
 package ovh
 
-import "labascode/internal/providers"
+import "easylab/internal/providers"
 
 // OVHConfig holds OVH-specific configuration
 type OVHConfig struct {

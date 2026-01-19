@@ -1,4 +1,4 @@
-name: lab-as-code
+name: easylab
 runtime: go
 description: OVHcloud Gateway and Managed Kubernetes infrastructure
 

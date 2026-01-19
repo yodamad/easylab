@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Lab as Code - Playwright Configuration
+ * EasyLab - Playwright Configuration
  * @see https://playwright.dev/docs/test-configuration
  */
 export default defineConfig({
@@ -41,7 +41,7 @@ export default defineConfig({
 
   /* Run your local dev server before starting the tests */
   webServer: {
-    command: 'rm -rf test-results/ && go build -o test-results/build/lab-as-code-server cmd/server/main.go && ./test-results/build/lab-as-code-server -env-file=env.test.sh',
+    command: 'rm -rf test-results/ && go build -o test-results/build/easylab-server cmd/server/main.go && ./test-results/build/easylab-server -env-file=env.test.sh',
     url: 'http://localhost:8080/health',
     reuseExistingServer: !process.env.CI,
     timeout: 120000, // 2 minutes for Go build + server start

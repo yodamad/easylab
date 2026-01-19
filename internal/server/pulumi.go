@@ -908,7 +908,7 @@ func (pe *PulumiExecutor) generatePulumiYaml(config *LabConfig) string {
 		//     configSection = fmt.Sprintf("  aws:region: %s\n", config.AwsRegion)
 	}
 
-	return fmt.Sprintf(`name: lab-as-code
+	return fmt.Sprintf(`name: easylab
 runtime: go
 description: %s
 
