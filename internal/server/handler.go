@@ -117,7 +117,7 @@ func (h *Handler) getOVHCredentials(w http.ResponseWriter) (*OVHCredentials, err
 	creds, err := h.credentialsManager.GetCredentials("ovh")
 	if err != nil {
 		log.Printf("OVH credentials not configured: %v", err)
-		h.renderHTMLError(w, "OVH Credentials Not Configured", "Please configure your OVH credentials first.", `<a href="/ovh-credentials" class="btn btn-primary">Configure OVH Credentials</a>`)
+		h.renderHTMLError(w, "OVH Credentials Not Configured", "Please configure your OVH credentials first.", `<a href="/credentials?provider=ovh" class="btn btn-primary">Configure OVH Credentials</a>`)
 		return nil, err
 	}
 	return creds.(*OVHCredentials), nil
@@ -134,7 +134,7 @@ func (h *Handler) getProviderCredentials(w http.ResponseWriter, providerName str
 		log.Printf("%s credentials not configured: %v", providerName, err)
 		h.renderHTMLError(w, fmt.Sprintf("%s Credentials Not Configured", strings.ToUpper(providerName)),
 			fmt.Sprintf("Please configure your %s credentials first.", strings.ToUpper(providerName)),
-			`<a href="/ovh-credentials" class="btn btn-primary">Configure Credentials</a>`)
+			fmt.Sprintf(`<a href="/credentials?provider=%s" class="btn btn-primary">Configure Credentials</a>`, providerName))
 		return nil, err
 	}
 	return creds, nil
@@ -397,7 +397,8 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 		"index.html":             "web/index.html",
 		"admin.html":             "web/admin.html",
 		"student-dashboard.html": "web/student-dashboard.html",
-		"ovh-credentials.html":   "web/ovh-credentials.html",
+		"credentials.html":       "web/credentials.html",
+		"ovh-credentials.html":   "web/ovh-credentials.html", // Keep for backward compatibility
 		"jobs-list.html":         "web/jobs-list.html",
 	}
 
@@ -1180,34 +1181,50 @@ func extractStringFromConfigValue(val string) string {
 	return val
 }
 
-// ServeOVHCredentials serves the OVH credentials configuration page
-func (h *Handler) ServeOVHCredentials(w http.ResponseWriter, r *http.Request) {
+// ServeCredentials serves the provider credentials configuration page
+func (h *Handler) ServeCredentials(w http.ResponseWriter, r *http.Request) {
+	// Get provider from query parameter (default to "ovh" for backward compatibility)
+	provider := r.URL.Query().Get("provider")
+	if provider == "" {
+		provider = "ovh"
+	}
+
 	// Get current credentials status (without exposing secrets)
 	var currentCreds map[string]interface{}
-	creds, err := h.credentialsManager.GetCredentials("ovh")
+	creds, err := h.credentialsManager.GetCredentials(provider)
 	if err == nil {
 		if ovhCreds, ok := creds.(*OVHCredentials); ok {
 			currentCreds = map[string]interface{}{
 				"configured":   true,
+				"provider":     provider,
 				"service_name": ovhCreds.ServiceName,
 				"endpoint":     ovhCreds.Endpoint,
 			}
 		}
+		// Future: Add handling for other provider types here
 	} else {
 		currentCreds = map[string]interface{}{
 			"configured": false,
+			"provider":   provider,
 		}
 	}
 
 	data := map[string]interface{}{
 		"CurrentCreds": currentCreds,
+		"Provider":     provider,
 	}
 
-	h.serveTemplate(w, "ovh-credentials.html", data)
+	h.serveTemplate(w, "credentials.html", data)
 }
 
-// SetOVHCredentials handles setting OVH credentials
-func (h *Handler) SetOVHCredentials(w http.ResponseWriter, r *http.Request) {
+// ServeOVHCredentials serves the OVH credentials configuration page (backward compatibility)
+func (h *Handler) ServeOVHCredentials(w http.ResponseWriter, r *http.Request) {
+	// Redirect to new credentials page with OVH provider
+	http.Redirect(w, r, "/credentials?provider=ovh", http.StatusMovedPermanently)
+}
+
+// SetCredentials handles setting provider credentials
+func (h *Handler) SetCredentials(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -1222,17 +1239,41 @@ func (h *Handler) SetOVHCredentials(w http.ResponseWriter, r *http.Request) {
 	// Parse form data - handle both multipart and urlencoded
 	if err := h.parseForm(w, r, 10<<20); err != nil {
 		// Return HTML error for HTMX compatibility
-		log.Printf("SetOVHCredentials - Failed to parse form: %v", err)
+		log.Printf("SetCredentials - Failed to parse form: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
 		h.renderHTMLError(w, "Failed to Parse Form", err.Error())
 		return
 	}
 
-	// Debug: log received form values (without secrets)
-	log.Printf("SetOVHCredentials - Content-Type: %s", r.Header.Get("Content-Type"))
-	log.Printf("SetOVHCredentials - Form keys: %v", getFormKeys(r))
-	log.Printf("SetOVHCredentials - PostForm keys: %v", getPostFormKeys(r))
+	// Get provider from form data
+	provider := r.PostFormValue("provider")
+	if provider == "" {
+		provider = r.FormValue("provider")
+	}
+	if provider == "" {
+		provider = "ovh" // Default to OVH for backward compatibility
+	}
 
+	// Debug: log received form values (without secrets)
+	log.Printf("SetCredentials - Provider: %s, Content-Type: %s", provider, r.Header.Get("Content-Type"))
+	log.Printf("SetCredentials - Form keys: %v", getFormKeys(r))
+
+	// Handle provider-specific credential creation
+	switch provider {
+	case "ovh":
+		h.setOVHCredentialsFromForm(w, r)
+	default:
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `
+			<div class="error-message">
+				<h3>Unsupported Provider</h3>
+				<p>Provider "%s" is not yet supported.</p>
+			</div>`, template.HTMLEscapeString(provider))
+	}
+}
+
+// setOVHCredentialsFromForm handles OVH-specific credential setting
+func (h *Handler) setOVHCredentialsFromForm(w http.ResponseWriter, r *http.Request) {
 	// Try PostFormValue first (POST-only), then FormValue (includes query params)
 	applicationKey := r.PostFormValue("ovh_application_key")
 	if applicationKey == "" {
@@ -1259,11 +1300,11 @@ func (h *Handler) SetOVHCredentials(w http.ResponseWriter, r *http.Request) {
 		endpoint = r.FormValue("ovh_endpoint")
 	}
 
-	log.Printf("SetOVHCredentials - Service Name present: %v, value: %s", serviceName != "", serviceName)
-	log.Printf("SetOVHCredentials - Endpoint present: %v, value: %s", endpoint != "", endpoint)
-	log.Printf("SetOVHCredentials - ApplicationKey present: %v", applicationKey != "")
-	log.Printf("SetOVHCredentials - ApplicationSecret present: %v", applicationSecret != "")
-	log.Printf("SetOVHCredentials - ConsumerKey present: %v", consumerKey != "")
+	log.Printf("SetCredentials(OVH) - Service Name present: %v, value: %s", serviceName != "", serviceName)
+	log.Printf("SetCredentials(OVH) - Endpoint present: %v, value: %s", endpoint != "", endpoint)
+	log.Printf("SetCredentials(OVH) - ApplicationKey present: %v", applicationKey != "")
+	log.Printf("SetCredentials(OVH) - ApplicationSecret present: %v", applicationSecret != "")
+	log.Printf("SetCredentials(OVH) - ConsumerKey present: %v", consumerKey != "")
 
 	creds := &OVHCredentials{
 		ApplicationKey:    applicationKey,
@@ -1274,12 +1315,10 @@ func (h *Handler) SetOVHCredentials(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Debug: log what we're trying to save (without secrets)
-	log.Printf("SetOVHCredentials - Attempting to save credentials for service: %s, endpoint: %s", creds.ServiceName, creds.Endpoint)
-	log.Printf("SetOVHCredentials - ApplicationKey empty: %v, ApplicationSecret empty: %v, ConsumerKey empty: %v",
-		creds.ApplicationKey == "", creds.ApplicationSecret == "", creds.ConsumerKey == "")
+	log.Printf("SetCredentials(OVH) - Attempting to save credentials for service: %s, endpoint: %s", creds.ServiceName, creds.Endpoint)
 
 	if err := h.credentialsManager.SetCredentials(creds); err != nil {
-		log.Printf("Failed to set credentials: %v", err)
+		log.Printf("Failed to set OVH credentials: %v", err)
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprintf(w, `
 			<div class="error-message">
@@ -1293,10 +1332,10 @@ func (h *Handler) SetOVHCredentials(w http.ResponseWriter, r *http.Request) {
 	// Verify credentials were saved
 	verifyCreds, verifyErr := h.credentialsManager.GetCredentials("ovh")
 	if verifyErr != nil {
-		log.Printf("Warning: Credentials saved but verification failed: %v", verifyErr)
+		log.Printf("Warning: OVH credentials saved but verification failed: %v", verifyErr)
 	} else {
 		if ovhCreds, ok := verifyCreds.(*OVHCredentials); ok {
-			log.Printf("Credentials verified - Service: %s, Endpoint: %s", ovhCreds.ServiceName, ovhCreds.Endpoint)
+			log.Printf("OVH credentials verified - Service: %s, Endpoint: %s", ovhCreds.ServiceName, ovhCreds.Endpoint)
 		}
 	}
 
@@ -1304,42 +1343,116 @@ func (h *Handler) SetOVHCredentials(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	fmt.Fprintf(w, `
 		<div class="success-message">
-			<p>✅ Credentials saved successfully</p>
+			<p>✅ OVH credentials saved successfully</p>
 		</div>`)
 }
 
-// GetOVHCredentials handles getting OVH credentials status
-func (h *Handler) GetOVHCredentials(w http.ResponseWriter, r *http.Request) {
+// SetOVHCredentials handles setting OVH credentials (backward compatibility)
+func (h *Handler) SetOVHCredentials(w http.ResponseWriter, r *http.Request) {
+	h.SetCredentials(w, r)
+}
+
+// GetCredentials handles getting provider credentials status
+func (h *Handler) GetCredentials(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	creds, err := h.credentialsManager.GetCredentials("ovh")
+	// Get provider from query parameter
+	provider := r.URL.Query().Get("provider")
+	if provider == "" {
+		provider = "ovh" // Default to OVH for backward compatibility
+	}
+
+	creds, err := h.credentialsManager.GetCredentials(provider)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]bool{"configured": false})
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"configured": false,
+			"provider":   provider,
+		})
 		return
 	}
 
-	ovhCreds, ok := creds.(*OVHCredentials)
-	if !ok {
+	// Handle provider-specific response
+	switch provider {
+	case "ovh":
+		ovhCreds, ok := creds.(*OVHCredentials)
+		if !ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Invalid credentials type"})
+			return
+		}
+
+		// Return limited info (not the actual secrets)
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid credentials type"})
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"configured":          true,
+			"provider":            provider,
+			"service_name":        ovhCreds.ServiceName,
+			"endpoint":            ovhCreds.Endpoint,
+			"has_application_key": ovhCreds.ApplicationKey != "",
+			"has_consumer_key":    ovhCreds.ConsumerKey != "",
+		})
+	default:
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"configured": false,
+			"provider":   provider,
+			"error":      "Provider not supported",
+		})
+	}
+}
+
+// GetOVHCredentials handles getting OVH credentials status (backward compatibility)
+func (h *Handler) GetOVHCredentials(w http.ResponseWriter, r *http.Request) {
+	// Add provider=ovh to query and delegate to GetCredentials
+	q := r.URL.Query()
+	q.Set("provider", "ovh")
+	r.URL.RawQuery = q.Encode()
+	h.GetCredentials(w, r)
+}
+
+// ListProviders returns the list of available providers
+func (h *Handler) ListProviders(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Return limited info (not the actual secrets)
+	// Define available providers with their configuration
+	providers := []map[string]interface{}{
+		{
+			"id":      "ovh",
+			"name":    "OVHcloud",
+			"enabled": true,
+			"fields": []map[string]interface{}{
+				{"name": "ovh_application_key", "label": "Application Key", "type": "password", "required": true},
+				{"name": "ovh_application_secret", "label": "Application Secret", "type": "password", "required": true},
+				{"name": "ovh_consumer_key", "label": "Consumer Key", "type": "password", "required": true},
+				{"name": "ovh_service_name", "label": "Service Name (Project ID)", "type": "text", "required": true},
+				{"name": "ovh_endpoint", "label": "OVH Endpoint", "type": "select", "required": true, "options": []string{"ovh-eu", "ovh-us", "ovh-ca"}},
+			},
+		},
+		// Future providers can be added here
+		{
+			"id":      "aws",
+			"name":    "Amazon Web Services",
+			"enabled": false,
+			"fields": []map[string]interface{}{
+				{"name": "aws_access_key_id", "label": "Access Key ID", "type": "password", "required": true},
+				{"name": "aws_secret_access_key", "label": "Secret Access Key", "type": "password", "required": true},
+				{"name": "aws_region", "label": "Region", "type": "select", "required": true, "options": []string{"us-east-1", "us-west-2", "eu-west-1", "eu-central-1"}},
+			},
+		},
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"configured":          true,
-		"service_name":        ovhCreds.ServiceName,
-		"endpoint":            ovhCreds.Endpoint,
-		"has_application_key": ovhCreds.ApplicationKey != "",
-		"has_consumer_key":    ovhCreds.ConsumerKey != "",
-	})
+	json.NewEncoder(w).Encode(providers)
 }
 
 // ServeJobsList serves the jobs list page

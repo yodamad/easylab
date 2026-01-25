@@ -214,6 +214,21 @@ func main() {
 	// Protected routes (auth required)
 	mux.HandleFunc("/admin", authHandler.RequireAuth(handler.ServeAdminUI))
 	mux.HandleFunc("/jobs", authHandler.RequireAuth(handler.ServeJobsList))
+
+	// New generic credentials routes
+	mux.HandleFunc("/credentials", authHandler.RequireAuth(handler.ServeCredentials))
+	mux.HandleFunc("/api/credentials", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			handler.SetCredentials(w, r)
+		} else if r.Method == http.MethodGet {
+			handler.GetCredentials(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	}))
+	mux.HandleFunc("/api/providers", authHandler.RequireAuth(handler.ListProviders))
+
+	// Backward compatibility routes for OVH-specific endpoints
 	mux.HandleFunc("/ovh-credentials", authHandler.RequireAuth(handler.ServeOVHCredentials))
 	mux.HandleFunc("/api/ovh-credentials", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {

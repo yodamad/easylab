@@ -20,7 +20,7 @@
                         <span class="btn-icon">📋</span>
                         <span class="btn-text">Jobs</span>
                     </a>
-                    <a href="/ovh-credentials" class="header-btn" title="OVH Credentials">
+                    <a href="/credentials" class="header-btn" title="Provider Credentials">
                         <span class="btn-icon">🔐</span>
                         <span class="btn-text">Credentials</span>
                     </a>
@@ -61,12 +61,12 @@
                 </div>
             </div>
 
-            <!-- OVH Credentials Notice -->
-            <div id="ovh-credentials-notice" class="info-box" style="margin-bottom: 2rem; display: none;">
-                <h3>🔐 OVH Credentials Required</h3>
-                <p>Before creating a lab, please configure your OVHcloud API credentials. These credentials will be stored in memory and reused for all lab deployments.</p>
-                <a href="/ovh-credentials" class="btn btn-primary">
-                    <span class="btn-icon">⚙️</span> Configure OVH Credentials
+            <!-- Provider Credentials Notice -->
+            <div id="provider-credentials-notice" class="info-box" style="margin-bottom: 2rem; display: none;">
+                <h3>🔐 Provider Credentials Required</h3>
+                <p>Before creating a lab, please configure your cloud provider API credentials. These credentials will be stored in memory and reused for all lab deployments.</p>
+                <a href="/credentials" class="btn btn-primary">
+                    <span class="btn-icon">⚙️</span> Configure Credentials
                 </a>
             </div>
 
@@ -346,7 +346,7 @@
                         <span class="btn-icon">←</span> Previous
                     </button>
                     <div class="step-indicator">
-                        Step <span id="current-step-num">1</span> of <span id="total-steps">5</span>
+                        Step <span id="current-step-num">1</span> of <span id="total-steps">6</span>
                     </div>
                     <button type="button" id="btn-next" class="btn btn-primary">
                         Next <span class="btn-icon">→</span>
@@ -369,7 +369,7 @@
         // Wizard functionality
         const wizard = {
             currentStep: 1,
-            totalSteps: 5,
+            totalSteps: 6,
             
             init() {
                 this.bindEvents();
@@ -636,7 +636,11 @@
 
         // Check credentials status and show/hide disclaimer
         function checkCredentialsStatus() {
-            fetch('/api/ovh-credentials')
+            // Get the selected provider from the form
+            const providerSelect = document.getElementById('provider');
+            const provider = providerSelect ? providerSelect.value : 'ovh';
+            
+            fetch(`/api/credentials?provider=${provider}`)
                 .then(response => {
                     if (response.ok) {
                         return response.json();
@@ -646,7 +650,7 @@
                     return { configured: false };
                 })
                 .then(data => {
-                    const notice = document.getElementById('ovh-credentials-notice');
+                    const notice = document.getElementById('provider-credentials-notice');
                     if (notice) {
                         notice.style.display = data.configured ? 'none' : 'block';
                     }
@@ -654,7 +658,7 @@
                 .catch(error => {
                     console.error('Error checking credentials:', error);
                     // Show notice on error to be safe
-                    const notice = document.getElementById('ovh-credentials-notice');
+                    const notice = document.getElementById('provider-credentials-notice');
                     if (notice) {
                         notice.style.display = 'block';
                     }
