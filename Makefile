@@ -30,7 +30,7 @@ COVERAGE_THRESHOLD=50
 # See .coverignore for details on what's excluded and why
 COVERAGE_PKGS=./internal/... ./utils/... ./coder/...
 
-.PHONY: all build clean test test-all test-backend test-frontend test-verbose test-race coverage coverage-html coverage-check coverage-frontend coverage-all coverage-report coverage-pkg deps deps-all deps-update npm-install npm-update lint help server run-server npm-test-ui npm-test-headed npm-test-debug npm-test-chaos npm-test-chaos-headed npm-test-chaos-network npm-test-chaos-server npm-test-chaos-ui npm-test-chaos-api ci ci-coverage
+.PHONY: all build clean test test-all test-backend test-frontend test-verbose test-race coverage coverage-html coverage-check coverage-frontend coverage-all coverage-report coverage-pkg deps deps-all deps-update npm-install npm-update lint help server run-server dev npm-test-ui npm-test-headed npm-test-debug npm-test-chaos npm-test-chaos-headed npm-test-chaos-network npm-test-chaos-server npm-test-chaos-ui npm-test-chaos-api ci ci-coverage
 
 # Default target
 all: deps-all test-all build
@@ -48,6 +48,10 @@ server:
 # Run the server
 run-server: server
 	./$(BUILD_DIR)/$(SERVER_BINARY)
+
+# Run the server with hot reload (requires air: go install github.com/cosmtrek/air@latest)
+dev:
+	air
 
 # Clean build artifacts, coverage files, and test results
 clean:
@@ -260,6 +264,7 @@ help:
 	@echo "  build          - Build the main Pulumi application"
 	@echo "  server         - Build the web server"
 	@echo "  run-server     - Build and run the web server"
+	@echo "  dev            - Run server with hot reload (requires air)"
 	@echo "  clean          - Remove build artifacts, coverage files, and test results"
 	@echo ""
 	@echo "Test targets:"

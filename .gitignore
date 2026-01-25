@@ -12,6 +12,7 @@
 *.out
 go.work
 build/
+tmp/
 
 # IDE
 .idea/

@@ -1,0 +1,70 @@
+# Air configuration for hot-reload development
+# Install: go install github.com/cosmtrek/air@latest
+# Run: air (or make dev)
+
+root = "."
+testdata_dir = "testdata"
+tmp_dir = "tmp"
+
+[build]
+  # Arguments passed to the binary when running
+  args_bin = ["-env-file=./env.sh"]
+  # Binary output path
+  bin = "./tmp/easylab-server"
+  # Build command
+  cmd = "go build -o ./tmp/easylab-server ./cmd/server"
+  # Delay before rebuild (milliseconds) - wait for multiple saves
+  delay = 10000
+  # Directories to exclude from watching
+  exclude_dir = ["tmp", "vendor", "node_modules", "testdata", "build", ".git", "coverage", "playwright-report", "test-results"]
+  # Regex patterns to exclude
+  exclude_regex = ["_test.go$", ".*_test\\.go$"]
+  # File extensions to exclude
+  exclude_unchanged = false
+  # Follow symlinks
+  follow_symlink = false
+  # Full binary path for running
+  full_bin = ""
+  # File extensions to watch
+  include_ext = ["go", "tpl", "tmpl", "html", "css"]
+  # Additional directories to watch
+  include_dir = ["cmd", "internal", "utils", "web", "coder", "k8s", "ovh"]
+  # File patterns to include
+  include_file = []
+  # Kill delay
+  kill_delay = "0s"
+  # Log output
+  log = "build-errors.log"
+  # Poll for changes (set true if filesystem events don't work)
+  poll = false
+  # Poll interval
+  poll_interval = 0
+  # Rerun on change
+  rerun = false
+  # Rerun delay
+  rerun_delay = 5000
+  # Send interrupt signal before killing
+  send_interrupt = false
+  # Stop on error
+  stop_on_error = false
+
+[color]
+  # Colorize build output
+  app = ""
+  build = "yellow"
+  main = "magenta"
+  runner = "green"
+  watcher = "cyan"
+
+[log]
+  # Add timestamp to log
+  main_only = false
+  time = false
+
+[misc]
+  # Clean up tmp on exit
+  clean_on_exit = false
+
+[screen]
+  clear_on_rebuild = false
+  keep_scroll = true
