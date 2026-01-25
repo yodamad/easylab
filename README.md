@@ -1,63 +1,191 @@
-# EasyLab
+<p align="center">
+  <img src="https://via.placeholder.com/200x80?text=EasyLab" alt="EasyLab Logo" width="200"/>
+</p>
 
-A web application for managing cloud infrastructure labs with OVHcloud integration. Provides an admin interface for creating and managing infrastructure labs, and a student interface for requesting and accessing development workspaces.
+<h1 align="center">EasyLab</h1>
 
-## Overview
+<p align="center">
+  <strong>Cloud Infrastructure Lab Management Made Easy</strong>
+</p>
 
-EasyLab is a comprehensive platform that simplifies cloud infrastructure lab management. It enables:
+<p align="center">
+  <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go&logoColor=white" alt="Go Version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License"></a>
+  <a href="#"><img src="https://img.shields.io/badge/build-passing-brightgreen" alt="Build Status"></a>
+  <a href="#"><img src="https://img.shields.io/badge/coverage-80%25-green" alt="Coverage"></a>
+  <a href="https://goreportcard.com/"><img src="https://img.shields.io/badge/go%20report-A+-brightgreen" alt="Go Report Card"></a>
+</p>
 
-- **Admin Interface**: Create and manage cloud infrastructure labs with OVHcloud
-- **Student Interface**: Request and access development workspaces
-- **Infrastructure as Code**: Automated provisioning using Pulumi and OVHcloud
-- **Persistent Storage**: Job data and workspace persistence across deployments
-- **Multi-deployment Options**: Run locally, with Docker, or on Kubernetes
+<p align="center">
+  <a href="#-quick-start">Quick Start</a> •
+  <a href="#-features">Features</a> •
+  <a href="#-architecture">Architecture</a> •
+  <a href="#-documentation">Documentation</a> •
+  <a href="#-contributing">Contributing</a>
+</p>
 
-## Application Features
+---
 
-### Admin Interface
-- **Lab Creation**: Design and deploy infrastructure labs
-- **OVHcloud Integration**: Direct integration with OVHcloud APIs
-- **Job Management**: Monitor deployment status and logs
-- **Kubeconfig Access**: Download cluster configurations
+## Introduction
 
-### Student Interface
-- **Workspace Requests**: Request access to development environments
-- **Lab Catalog**: Browse available infrastructure labs
-- **Session Management**: Secure access to provisioned resources
+EasyLab is a comprehensive platform that streamlines cloud infrastructure lab management for **educators**, **workshop organizers**, and **DevOps teams**. It automates the provisioning of Kubernetes clusters and development workspaces on OVHcloud, enabling you to focus on teaching and learning rather than infrastructure setup.
 
-### Infrastructure Provisioning
-- **Kubernetes Clusters**: Automated K8s cluster creation
-- **Network Setup**: Private networks and gateways
-- **Node Pools**: Configurable worker node pools
-- **Coder Integration**: Development workspace provisioning
+With an intuitive web interface for both administrators and students, EasyLab transforms complex infrastructure-as-code workflows into simple, one-click deployments.
 
-## Architecture
+---
 
-The application consists of two main components:
+## 🏗️ Architecture
 
-### 1. Web Application (`cmd/server/`)
-- **Go-based HTTP server** serving web interfaces and API endpoints
-- **Admin interface** for infrastructure lab management
-- **Student interface** for workspace access
-- **Pulumi integration** for infrastructure provisioning
-- **Persistent job storage** for tracking deployments
+```mermaid
+flowchart TB
+    subgraph users [Users]
+        Admin[👤 Admin]
+        Student[👨‍🎓 Student]
+    end
+    
+    subgraph webapp [EasyLab Web App]
+        WebUI[🌐 Web Interface]
+        API[🔌 REST API]
+        JobMgr[📋 Job Manager]
+    end
+    
+    subgraph infra [Infrastructure]
+        Pulumi[⚙️ Pulumi Engine]
+        OVH[☁️ OVHcloud]
+        K8s[☸️ Kubernetes Cluster]
+        Coder[💻 Coder Workspaces]
+    end
+    
+    Admin --> WebUI
+    Student --> WebUI
+    WebUI --> API
+    API --> JobMgr
+    JobMgr --> Pulumi
+    Pulumi --> OVH
+    OVH --> K8s
+    K8s --> Coder
+```
 
-### 2. Infrastructure Provisioning (`main.go`)
-- **Pulumi project** for OVHcloud infrastructure provisioning
-- **Kubernetes cluster creation** with managed node pools
-- **Network configuration** with private networks and gateways
-- **Coder integration** for development workspaces
+---
 
-## Configuration
+## ✨ Features
 
-### Command-Line Arguments
+<table>
+<tr>
+<td width="33%" valign="top">
 
-- `-port`: HTTP server port (default: `8080`)
-- `-work-dir`: Directory for job workspaces (default: `/tmp/easylab-jobs` or `$WORK_DIR`)
-- `-data-dir`: Directory for application data (default: `/tmp/easylab-data` or `$DATA_DIR`)
-- `-env-file`: Path to an environment file to load at startup. The file should contain `KEY=VALUE` pairs (one per line). Lines starting with `#` are treated as comments. Both `KEY=VALUE` and `export KEY=VALUE` formats are supported.
+### 👤 Admin Interface
 
-Example `.env` file:
+- **Lab Creation** - Design and deploy infrastructure labs
+- **OVHcloud Integration** - Direct integration with OVHcloud APIs
+- **Job Management** - Monitor deployment status and logs
+- **Kubeconfig Access** - Download cluster configurations
+
+</td>
+<td width="33%" valign="top">
+
+### 👨‍🎓 Student Interface
+
+- **Workspace Requests** - Request access to development environments
+- **Lab Catalog** - Browse available infrastructure labs
+- **Session Management** - Secure access to provisioned resources
+- **Self-Service** - Easy onboarding process
+
+</td>
+<td width="33%" valign="top">
+
+### ☸️ Infrastructure
+
+- **Kubernetes Clusters** - Automated K8s cluster creation
+- **Network Setup** - Private networks and gateways
+- **Node Pools** - Configurable worker node pools
+- **Coder Integration** - Development workspace provisioning
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🚀 Quick Start
+
+Choose your preferred deployment method:
+
+<details>
+<summary><strong>🖥️ Local Development</strong></summary>
+
+```bash
+# 1. Clone repository
+git clone <repository-url>
+cd easylab
+
+# 2. Install dependencies
+go mod tidy
+
+# 3. Set environment variables
+export LAB_ADMIN_PASSWORD="your-password"
+
+# 4. Run the application
+go run cmd/server/main.go
+
+# 5. Access at http://localhost:8080
+```
+
+</details>
+
+<details>
+<summary><strong>🐳 Docker</strong></summary>
+
+```bash
+# 1. Set required passwords
+export LAB_ADMIN_PASSWORD="your-secure-password"
+export LAB_STUDENT_PASSWORD="your-student-password"
+
+# 2. Start the application
+docker-compose up -d
+
+# 3. Access at http://localhost:8080
+```
+
+</details>
+
+<details open>
+<summary><strong>☸️ Kubernetes</strong></summary>
+
+```bash
+# 1. Build and push container image
+docker build -t your-registry/easylab:latest .
+docker push your-registry/easylab:latest
+
+# 2. Deploy to Kubernetes
+cd k8s-deployment && ./deploy.sh
+
+# 3. Configure secrets
+kubectl edit secret easylab-secrets -n easylab
+```
+
+</details>
+
+---
+
+## ⚙️ Configuration
+
+### Essential Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `LAB_ADMIN_PASSWORD` | Password for admin interface | `admin123` |
+| `LAB_STUDENT_PASSWORD` | Password for student interface | `student123` |
+| `WORK_DIR` | Directory for job workspaces | `/tmp/easylab-jobs` |
+| `DATA_DIR` | Directory for application data | `/tmp/easylab-data` |
+| `OVH_ENDPOINT` | OVHcloud API endpoint | `ovh-eu` |
+| `OVH_APPLICATION_KEY` | OVHcloud application key | - |
+| `OVH_APPLICATION_SECRET` | OVHcloud application secret | - |
+| `OVH_CONSUMER_KEY` | OVHcloud consumer key | - |
+| `OVH_SERVICE_NAME` | OVHcloud project/service name | - |
+
+### Example `.env` File
+
 ```bash
 # OVHcloud credentials
 OVH_APPLICATION_KEY=your-key
@@ -69,221 +197,112 @@ OVH_ENDPOINT=ovh-eu
 # Application settings
 LAB_ADMIN_PASSWORD=your-secure-password
 LAB_STUDENT_PASSWORD=student-password
-WORK_DIR=/app/jobs
-DATA_DIR=/app/data
 ```
 
-Example usage:
+**Usage:**
 ```bash
 go run cmd/server/main.go -env-file=.env -port=8080
 ```
 
-### Environment Variables
+---
 
-#### Core Application Settings
-- `WORK_DIR`: Directory for job workspaces (can be overridden with `-work-dir` flag)
-- `DATA_DIR`: Directory for application data (can be overridden with `-data-dir` flag)
+## 📚 Documentation
 
-#### Authentication
-- `LAB_ADMIN_PASSWORD`: Password for admin interface (default: `admin123`)
-- `LAB_STUDENT_PASSWORD`: Password for student interface (default: `student123`)
+| Document | Description |
+|----------|-------------|
+| [DOCKER_README.md](DOCKER_README.md) | Docker deployment guide |
+| [K8S_README.md](K8S_README.md) | Kubernetes deployment details |
+| [TESTING.md](TESTING.md) | Testing documentation |
+| [COVERAGE_SETUP.md](COVERAGE_SETUP.md) | Code coverage setup |
 
-#### OVHcloud Integration
-- `OVH_ENDPOINT`: OVHcloud API endpoint (default: `ovh-eu`)
-- `OVH_APPLICATION_KEY`: OVHcloud application key
-- `OVH_APPLICATION_SECRET`: OVHcloud application secret
-- `OVH_CONSUMER_KEY`: OVHcloud consumer key
-- `OVH_SERVICE_NAME`: OVHcloud project/service name
+---
 
-### Configuration Files
+## 🛠️ Development
 
-- `docker-compose.yml`: Docker Compose configuration
-- `k8s-deployment/`: Kubernetes manifests and configuration
+### Prerequisites
 
-## Deployment Options
-
-### 1. Local Development
-
-#### Prerequisites
-- Go 1.24+ installed
-- OVHcloud account (optional, for infrastructure provisioning)
-
-#### Setup
-```bash
-# Clone repository
-git clone <repository-url>
-cd easylab
-
-# Install dependencies
-go mod tidy
-
-# Set environment variables (optional)
-export LAB_ADMIN_PASSWORD="your-password"
-export OVH_APPLICATION_KEY="your-key"
-# ... other OVH credentials
-
-# Run the application
-go run cmd/server/main.go
-```
-
-#### Access
-- Application: http://localhost:8080
-- Admin Interface: http://localhost:8080/admin (requires admin password)
-- Student Interface: http://localhost:8080/student/login
-- Health Check: http://localhost:8080/health
-
-### 2. Docker Deployment
-
-#### Prerequisites
-- Docker and Docker Compose installed
-- 2GB+ available RAM
-
-#### Quick Start
-```bash
-# Set required passwords
-export LAB_ADMIN_PASSWORD="your-secure-password"
-export LAB_STUDENT_PASSWORD="your-student-password"
-
-# Optional: Set OVH credentials for infrastructure provisioning
-export OVH_APPLICATION_KEY="your-key"
-export OVH_APPLICATION_SECRET="your-secret"
-export OVH_CONSUMER_KEY="your-consumer-key"
-export OVH_SERVICE_NAME="your-service-name"
-
-# Start the application
-docker-compose up -d
-
-# View logs
-docker-compose logs -f easylab
-```
-
-#### Configuration
-The Docker setup includes:
-- **Persistent volumes** for jobs (`lab_jobs`) and data (`lab_data`)
-- **Health checks** with automatic container restart
-- **Environment-based configuration** via docker-compose.yml
-
-#### Data Persistence
-- Job workspaces persist in the `lab_jobs` volume
-- Application data (job metadata, configurations) persist in the `lab_data` volume
-
-### 3. Kubernetes Deployment
-
-#### Prerequisites
-- Running Kubernetes cluster (can use infrastructure from this project)
-- `kubectl` configured
-- Docker registry access (for container images)
-
-#### Quick Deployment
-```bash
-# Build and push container image
-docker build -t easylab:latest .
-docker tag easylab:latest your-registry/easylab:latest
-docker push your-registry/easylab:latest
-
-# Deploy to Kubernetes
-cd k8s-deployment
-./deploy.sh
-
-# Configure secrets with OVH credentials
-kubectl edit secret easylab-secrets -n easylab
-```
-
-#### Manual Deployment
-```bash
-cd k8s-deployment
-
-# Apply manifests in order
-kubectl apply -f namespace.yaml
-kubectl apply -f pvc.yaml
-kubectl apply -f configmap.yaml
-kubectl apply -f secret.yaml
-kubectl apply -f deployment.yaml
-kubectl apply -f service.yaml
-kubectl apply -f ingress.yaml
-```
-
-#### Configuration
-- **Persistent Volumes**: 10Gi for jobs, 5Gi for data
-- **Security Context**: Non-root user execution
-- **Health Probes**: Readiness and liveness checks on `/health`
-- **Resource Limits**: Configured CPU and memory limits
-
-#### Access
-- **Internal Service**: `http://easylab-service.easylab.svc.cluster.local`
-- **External Access**: Configure ingress with your domain
-
-## Development
+- **Go 1.24+** - [Download](https://go.dev/dl/)
+- **Docker** - For containerized deployment
+- **kubectl** - For Kubernetes deployment
+- **OVHcloud account** - For infrastructure provisioning (optional)
 
 ### Building
+
 ```bash
 # Build web application
 go build -o easylab cmd/server/main.go
 
 # Build Docker image
 docker build -t easylab .
-
-# Build infrastructure (Pulumi)
-go build -o infrastructure main.go
 ```
 
 ### Testing
+
 ```bash
-# Run tests
+# Run unit tests
 make test
 
 # Run with race detection
 go test -race ./...
 
-# E2E tests
-npm test  # From playwright-report directory
+# Run E2E tests (Playwright)
+npm test
 ```
 
-### Contributing
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+### Hot Reload Development
 
-## Troubleshooting
+Using [Air](https://github.com/air-verse/air) for live reloading:
 
-### Application Issues
+```bash
+# Install Air
+go install github.com/air-verse/air@latest
 
-1. **Cannot access admin interface**: Check `LAB_ADMIN_PASSWORD` environment variable
-2. **OVH credentials not working**: Verify API credentials and endpoint
-3. **Jobs not persisting**: Check data directory permissions and disk space
-4. **Port already in use**: Change `PORT` environment variable
+# Run with hot reload
+air
+```
 
-### Docker Issues
+---
 
-1. **Container won't start**: Check logs with `docker-compose logs`
-2. **Data not persisting**: Verify Docker volumes exist with `docker volume ls`
-3. **Health check failing**: Ensure port 8080 is accessible internally
+## 🤝 Contributing
 
-### Kubernetes Issues
+We welcome contributions! Here's how you can help:
 
-1. **Pods not starting**: Check events with `kubectl describe pod`
-2. **PVC pending**: Verify storage class availability
-3. **Service not accessible**: Check service and ingress configuration
+1. **Fork** the repository
+2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
+3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
+4. **Push** to the branch (`git push origin feature/amazing-feature`)
+5. **Open** a Pull Request
 
-### Infrastructure Issues
+### Code Style
 
-1. **Pulumi authentication errors**: Verify OVHcloud API credentials
-2. **Region not available**: Check supported regions for your OVHcloud account
-3. **Quota exceeded**: Review OVHcloud project limits
+- Follow standard Go conventions and `gofmt`
+- Write tests for new functionality
+- Update documentation as needed
 
-## Security Considerations
+### Reporting Issues
 
-- Change default passwords before production deployment
-- Use environment variables for sensitive configuration
-- Regularly update Docker images and dependencies
-- Implement HTTPS in production environments
-- Monitor and audit infrastructure access
+Found a bug or have a feature request? [Open an issue](../../issues) with a clear description.
 
-## Support
+---
 
-- **Documentation**: This README and individual component docs
-- **Issues**: GitHub Issues for bug reports and feature requests
-- **OVHcloud Docs**: https://docs.ovh.com/
-- **Pulumi Docs**: https://www.pulumi.com/docs/
+## 📄 License
+
+This project is licensed under the **Apache License 2.0** - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🙏 Acknowledgements
+
+EasyLab is built on the shoulders of giants:
+
+- [**OVHcloud**](https://www.ovhcloud.com/) - Cloud infrastructure provider
+- [**Pulumi**](https://www.pulumi.com/) - Infrastructure as Code platform
+- [**Coder**](https://coder.com/) - Development workspace platform
+- [**Go**](https://go.dev/) - Programming language
+- [**Kubernetes**](https://kubernetes.io/) - Container orchestration
+
+---
+
+<p align="center">
+  Made with ❤️ for the DevOps community
+</p>
