@@ -23,7 +23,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}=== Lab as Code Coverage Report ===${NC}\n"
+echo -e "${BLUE}=== EasyLab Coverage Report ===${NC}\n"
 
 # Function to check if command exists
 command_exists() {
@@ -172,7 +172,7 @@ echo ""
 # Save report to file
 REPORT_FILE="$COVERAGE_DIR/coverage-report.txt"
 cat > "$REPORT_FILE" <<EOF
-Lab as Code Coverage Report
+EasyLab Coverage Report
 Generated: $(date)
 
 Coverage Scope:

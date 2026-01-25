@@ -14,7 +14,7 @@ test.describe('Error Handling - Authentication', () => {
 
     // Check for error indication (error alert div or invalid state)
     // The page should indicate login failed somehow
-    await expect(page.locator('h1')).toContainText('Lab as Code');
+    await expect(page.locator('h1')).toContainText('EasyLab');
   });
 
   test('should display error message on failed student login', async ({ page }) => {

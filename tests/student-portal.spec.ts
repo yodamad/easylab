@@ -187,7 +187,7 @@ test.describe('Student Dashboard', () => {
 
     // Should be redirected to home page
     await expect(page).toHaveURL('/');
-    await expect(page.locator('h1')).toContainText('Lab as Code');
+    await expect(page.locator('h1')).toContainText('EasyLab');
     // Check for the home page options (student and admin cards)
     await expect(page.locator('text=Student Space')).toBeVisible();
     await expect(page.locator('text=Admin Space')).toBeVisible();
@@ -226,7 +226,7 @@ test.describe('Student Portal Access Control', () => {
     await page.waitForLoadState('networkidle');
 
     // Should still be on admin login page
-    await expect(page.locator('h1')).toContainText('Lab as Code');
+    await expect(page.locator('h1')).toContainText('EasyLab');
     await expect(page.locator('input[type="password"]')).toBeVisible();
   });
 });

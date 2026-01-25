@@ -180,7 +180,7 @@ test.describe('Network Chaos - Jobs List', () => {
       await page.waitForLoadState('domcontentloaded');
       
       // Page header should be visible even with slow network
-      await expect(page.locator('h1')).toContainText('Lab as Code');
+      await expect(page.locator('h1')).toContainText('EasyLab');
     });
   });
 
@@ -204,7 +204,7 @@ test.describe('Network Chaos - Offline Mode', () => {
   test('static page content remains accessible in offline mode', async ({ page }) => {
     // First load the page while online
     await page.goto('/login');
-    await expect(page.locator('h1')).toContainText('Lab as Code');
+    await expect(page.locator('h1')).toContainText('EasyLab');
     
     // Now go offline
     await withOfflineMode(page, async () => {
@@ -326,7 +326,7 @@ test.describe('Network Chaos - Navigation Resilience', () => {
     
     // Network is back, navigation should work
     await page.goto('/jobs');
-    await expect(page.locator('h1')).toContainText('Lab as Code');
+    await expect(page.locator('h1')).toContainText('EasyLab');
   });
 });
 

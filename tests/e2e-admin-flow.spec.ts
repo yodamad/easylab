@@ -16,7 +16,7 @@ test.describe('Admin End-to-End Flow', () => {
     await expect(page).toHaveTitle(/Create New Lab/);
 
     // Check header
-    await expect(page.locator('h1')).toContainText('Lab as Code');
+    await expect(page.locator('h1')).toContainText('EasyLab');
     await expect(page.locator('text=Create a new lab environment')).toBeVisible();
 
     // Check wizard progress steps
@@ -134,7 +134,7 @@ test.describe('Admin End-to-End Flow', () => {
 
   test('should maintain session across page navigations', async ({ page }) => {
     await page.goto('/admin');
-    await expect(page.locator('h1')).toContainText('Lab as Code');
+    await expect(page.locator('h1')).toContainText('EasyLab');
 
     // Navigate to jobs list
     await page.locator('a[href="/jobs"]').click();
@@ -147,7 +147,7 @@ test.describe('Admin End-to-End Flow', () => {
 
     // Should still be logged in
     await expect(page).toHaveURL(/\/admin/);
-    await expect(page.locator('h1')).toContainText('Lab as Code');
+    await expect(page.locator('h1')).toContainText('EasyLab');
   });
 
   test('should update resource names based on stack name', async ({ page }) => {

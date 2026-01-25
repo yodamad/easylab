@@ -1,5 +1,5 @@
 #!/bin/bash
-# Test environment variables for Lab as Code
+# Test environment variables for EasyLab
 # This file contains test-specific configuration
 
 # Authentication passwords for testing

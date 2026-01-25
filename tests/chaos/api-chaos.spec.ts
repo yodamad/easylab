@@ -514,7 +514,7 @@ test.describe('API Chaos - Error Recovery', () => {
 
     // Navigation to other pages should still work
     await page.goto('/admin');
-    await expect(page.locator('h1')).toContainText('Lab as Code');
+    await expect(page.locator('h1')).toContainText('EasyLab');
 
     await page.goto('/ovh-credentials');
     await expect(page.locator('h1')).toContainText('OVH Credentials');

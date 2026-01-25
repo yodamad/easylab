@@ -16,7 +16,7 @@ test.describe('Jobs List Page', () => {
     await expect(page).toHaveTitle(/Jobs List/);
 
     // Check header
-    await expect(page.locator('h1')).toContainText('Lab as Code');
+    await expect(page.locator('h1')).toContainText('EasyLab');
     await expect(page.locator('text=Jobs History')).toBeVisible();
 
     // Check navigation links in header
@@ -46,7 +46,7 @@ test.describe('Jobs List Page', () => {
 
     // Should be on admin page
     await expect(page).toHaveURL(/\/admin/);
-    await expect(page.locator('h1')).toContainText('Lab as Code');
+    await expect(page.locator('h1')).toContainText('EasyLab');
   });
 
   test('should navigate to new lab from header', async ({ page }) => {

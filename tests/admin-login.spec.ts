@@ -5,10 +5,10 @@ test.describe('Login Page', () => {
     await page.goto('/login');
 
     // Check page title
-    await expect(page).toHaveTitle(/Lab as Code/);
+    await expect(page).toHaveTitle(/EasyLab/);
 
     // Check main heading
-    await expect(page.locator('h1')).toContainText('Lab as Code');
+    await expect(page.locator('h1')).toContainText('EasyLab');
 
     // Check subtitle
     await expect(page.locator('text=Enter password to continue')).toBeVisible();
@@ -41,7 +41,7 @@ test.describe('Login Page', () => {
     await page.waitForLoadState('networkidle');
 
     // Check if still on login page (authentication failed)
-    await expect(page.locator('h1')).toContainText('Lab as Code');
+    await expect(page.locator('h1')).toContainText('EasyLab');
     await expect(page.locator('input[type="password"]')).toBeVisible();
   });
 
@@ -61,7 +61,7 @@ test.describe('Login Page', () => {
     await expect(page).toHaveURL(/\/admin/);
 
     // Check admin page loaded
-    await expect(page.locator('h1')).toContainText('Lab as Code');
+    await expect(page.locator('h1')).toContainText('EasyLab');
   });
 
   test('should logout successfully', async ({ page }) => {
@@ -80,7 +80,7 @@ test.describe('Login Page', () => {
 
     // Should be redirected to home page
     await expect(page).toHaveURL('/');
-    await expect(page.locator('h1')).toContainText('Lab as Code');
+    await expect(page.locator('h1')).toContainText('EasyLab');
     // Check for the home page options (student and admin cards)
     await expect(page.locator('text=Student Space')).toBeVisible();
     await expect(page.locator('text=Admin Space')).toBeVisible();

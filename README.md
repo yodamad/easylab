@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://via.placeholder.com/200x80?text=EasyLab" alt="EasyLab Logo" width="200"/>
+  <img src="assets/logo.png" alt="EasyLab Logo" width="200"/>
 </p>
 
 <h1 align="center">EasyLab</h1>
@@ -19,7 +19,6 @@
 <p align="center">
   <a href="#-quick-start">Quick Start</a> •
   <a href="#-features">Features</a> •
-  <a href="#-architecture">Architecture</a> •
   <a href="#-documentation">Documentation</a> •
   <a href="#-contributing">Contributing</a>
 </p>
@@ -31,6 +30,8 @@
 EasyLab is a comprehensive platform that streamlines cloud infrastructure lab management for **educators**, **workshop organizers**, and **DevOps teams**. It automates the provisioning of Kubernetes clusters and development workspaces based on [Coder](https://coder.com/) on potentially any cloud providers with [Pulumi](https://www.pulumi.com/), enabling you to focus on teaching and learning rather than infrastructure setup.
 
 With an intuitive web interface for both administrators and students, EasyLab transforms complex infrastructure-as-code workflows into simple, one-click deployments.
+
+![EasyLab Homepage](./assets/homepage.png)
 
 For now, EasyLab is only supported on OVHcloud, but we are working on adding support for other cloud providers.
 
