@@ -9,10 +9,10 @@
 </p>
 
 <p align="center">
-  <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go&logoColor=white" alt="Go Version"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License"></a>
+  <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go&logoColor=white" alt="Go Version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License"></a>
   <a href="#"><img src="https://img.shields.io/badge/build-passing-brightgreen" alt="Build Status"></a>
-  <a href="#"><img src="https://img.shields.io/badge/coverage-80%25-green" alt="Coverage"></a>
+  <a href="#"><img src="https://img.shields.io/badge/coverage-90%25-green" alt="Coverage"></a>
   <a href="https://goreportcard.com/"><img src="https://img.shields.io/badge/go%20report-A+-brightgreen" alt="Go Report Card"></a>
 </p>
 
@@ -183,7 +183,7 @@ go run cmd/server/main.go -env-file=.env -port=8080
 
 ### Prerequisites
 
-- **Go 1.24+** - [Download](https://go.dev/dl/)
+- **Go 1.25+** - [Download](https://go.dev/dl/)
 - **Docker** - For containerized deployment
 - **kubectl** - For Kubernetes deployment
 - **OVHcloud account** - For infrastructure provisioning (optional)
