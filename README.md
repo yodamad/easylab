@@ -28,51 +28,17 @@
 
 ## Introduction
 
-EasyLab is a comprehensive platform that streamlines cloud infrastructure lab management for **educators**, **workshop organizers**, and **DevOps teams**. It automates the provisioning of Kubernetes clusters and development workspaces on OVHcloud, enabling you to focus on teaching and learning rather than infrastructure setup.
+EasyLab is a comprehensive platform that streamlines cloud infrastructure lab management for **educators**, **workshop organizers**, and **DevOps teams**. It automates the provisioning of Kubernetes clusters and development workspaces based on [Coder](https://coder.com/) on potentially any cloud providers with [Pulumi](https://www.pulumi.com/), enabling you to focus on teaching and learning rather than infrastructure setup.
 
 With an intuitive web interface for both administrators and students, EasyLab transforms complex infrastructure-as-code workflows into simple, one-click deployments.
 
----
-
-## 🏗️ Architecture
-
-```mermaid
-flowchart TB
-    subgraph users [Users]
-        Admin[👤 Admin]
-        Student[👨‍🎓 Student]
-    end
-    
-    subgraph webapp [EasyLab Web App]
-        WebUI[🌐 Web Interface]
-        API[🔌 REST API]
-        JobMgr[📋 Job Manager]
-    end
-    
-    subgraph infra [Infrastructure]
-        Pulumi[⚙️ Pulumi Engine]
-        OVH[☁️ OVHcloud]
-        K8s[☸️ Kubernetes Cluster]
-        Coder[💻 Coder Workspaces]
-    end
-    
-    Admin --> WebUI
-    Student --> WebUI
-    WebUI --> API
-    API --> JobMgr
-    JobMgr --> Pulumi
-    Pulumi --> OVH
-    OVH --> K8s
-    K8s --> Coder
-```
-
----
+For now, EasyLab is only supported on OVHcloud, but we are working on adding support for other cloud providers.
 
 ## ✨ Features
 
 <table>
 <tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ### 👤 Admin Interface
 
@@ -82,7 +48,7 @@ flowchart TB
 - **Kubeconfig Access** - Download cluster configurations
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ### 👨‍🎓 Student Interface
 
@@ -90,16 +56,6 @@ flowchart TB
 - **Lab Catalog** - Browse available infrastructure labs
 - **Session Management** - Secure access to provisioned resources
 - **Self-Service** - Easy onboarding process
-
-</td>
-<td width="33%" valign="top">
-
-### ☸️ Infrastructure
-
-- **Kubernetes Clusters** - Automated K8s cluster creation
-- **Network Setup** - Private networks and gateways
-- **Node Pools** - Configurable worker node pools
-- **Coder Integration** - Development workspace provisioning
 
 </td>
 </tr>
@@ -178,6 +134,11 @@ kubectl edit secret easylab-secrets -n easylab
 | `LAB_STUDENT_PASSWORD` | Password for student interface | `student123` |
 | `WORK_DIR` | Directory for job workspaces | `/tmp/easylab-jobs` |
 | `DATA_DIR` | Directory for application data | `/tmp/easylab-data` |
+
+### OVHcloud Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
 | `OVH_ENDPOINT` | OVHcloud API endpoint | `ovh-eu` |
 | `OVH_APPLICATION_KEY` | OVHcloud application key | - |
 | `OVH_APPLICATION_SECRET` | OVHcloud application secret | - |
