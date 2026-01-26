@@ -1,4 +1,4 @@
-# GitLab CI/CD Pipeline using to-be-continuous Docker Component
+# GitLab CI/CD Pipeline
 # 
 # This pipeline builds and publishes Docker images to Docker Hub.
 # 
@@ -7,40 +7,171 @@
 #   - DOCKER_REGISTRY_PASSWORD: Docker Hub password or access token (masked, protected)
 #
 # Image Tagging Strategy:
-#   - Snapshot images: Always pushed with branch/tag slug (e.g., main, feature-branch, v1.0.0)
-#   - Release images: 
-#     * Tagged as "dev" for branch commits
-#     * Tagged with Git tag name for Git tag commits (e.g., v1.0.0)
-
-include:
-  # Docker component for building and publishing images
-  - component: $CI_SERVER_FQDN/to-be-continuous/docker/gitlab-ci-docker@8.0.10
-    inputs:
-      # Docker Hub registry configuration
-      # Snapshot images: pushed on every commit for traceability
-      snapshot-image: "docker.io/${DOCKER_REGISTRY_USER}/easylab/snapshot:$CI_COMMIT_REF_SLUG"
-      # Release images: will be overridden in .docker-base to use conditional tag logic
-      release-image: "docker.io/${DOCKER_REGISTRY_USER}/easylab:placeholder"
+#   - Tagged as "dev" for branch commits
+#   - Tagged with Git tag name for Git tag commits (e.g., v1.0.0)
 
 variables:
-  # Build tool: Buildah (default, secure, daemonless)
-  # Can be overridden to "kaniko" or "dind" if needed
-  DOCKER_BUILD_TOOL: "dind"
+  GO_VERSION: "1.25"
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+  IMAGE_NAME: "docker.io/${DOCKER_REGISTRY_USER}/easylab"
 
-# Override the Docker base job to compute the release tag conditionally
-# CI_COMMIT_TAG is set when pipeline is triggered by a Git tag
-# CI_COMMIT_REF_NAME contains branch name or tag name
-# Dependencies: go-build-test (from Go component) runs both build and test
-.docker-base:
+stages:
+  - build
+  - test
+  - lint
+  - package
+  - security
+  - deploy
+
+# Base job for Go jobs
+.go-base:
+  image: golang:${GO_VERSION}
+  before_script:
+    - go version
+    - go mod download
+    - go mod verify
+
+# Build the Go application
+build:
+  extends: .go-base
+  stage: build
+  script:
+    - echo "Building EasyLab server..."
+    - go build -v ./cmd/server
+    - echo "Build completed successfully"
+  artifacts:
+    paths:
+      - cmd/server/
+    expire_in: 1 hour
+
+# Run Go tests
+test:
+  extends: .go-base
+  stage: test
+  script:
+    - echo "Running Go tests with race detector..."
+    - mkdir -p reports
+    - go test -v -race -coverprofile=coverage.out ./...
+    - go tool cover -func=coverage.out
+    - echo "Tests completed successfully"
+  coverage: '/total:\s+\(statements\)\s+\d+\.\d+%/'
+  artifacts:
+    paths:
+      - coverage.out
+      - reports/
+    expire_in: 1 week
+    when: always
+
+# Lint Dockerfile with Hadolint
+hadolint:
+  stage: lint
+  image: hadolint/hadolint:latest-alpine
+  script:
+    - echo "Linting Dockerfile with Hadolint..."
+    - hadolint Dockerfile
+    - echo "Dockerfile linting completed"
+  allow_failure: false
+
+# Build Docker image
+docker-build:
+  stage: package
+  image: docker:24-dind
+  services:
+    - docker:24-dind
+  dependencies:
+    - build
+    - test
   before_script:
     - |
-      # Compute release tag: use Git tag name if available, otherwise "dev"
+      # Compute image tag: use Git tag name if available, otherwise "dev"
       if [ -n "$CI_COMMIT_TAG" ]; then
-        # Git tag: use the tag name
-        export DOCKER_RELEASE_IMAGE="docker.io/${DOCKER_REGISTRY_USER}/easylab:${CI_COMMIT_REF_NAME}"
-        echo "Release image (from Git tag): $DOCKER_RELEASE_IMAGE"
+        export IMAGE_TAG="$CI_COMMIT_REF_NAME"
+        echo "Building release image with tag: $IMAGE_TAG"
       else
-        # Branch: use "dev"
-        export DOCKER_RELEASE_IMAGE="docker.io/${DOCKER_REGISTRY_USER}/easylab:dev"
-        echo "Release image (from branch): $DOCKER_RELEASE_IMAGE"
+        export IMAGE_TAG="dev"
+        echo "Building dev image with tag: $IMAGE_TAG"
       fi
+    - echo "Building Docker image: ${IMAGE_NAME}:${IMAGE_TAG}"
+  script:
+    - docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
+    - docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
+    - echo "Saving image for Trivy scanning..."
+    - docker save ${IMAGE_NAME}:${IMAGE_TAG} -o image.tar
+    - echo "Docker image built successfully"
+  artifacts:
+    paths:
+      - image.tar
+    expire_in: 1 hour
+  only:
+    - branches
+    - tags
+
+# Security scan with Trivy
+trivy-scan:
+  stage: security
+  image: aquasec/trivy:latest
+  dependencies:
+    - docker-build
+  before_script:
+    - |
+      # Compute image tag: use Git tag name if available, otherwise "dev"
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        export IMAGE_TAG="$CI_COMMIT_REF_NAME"
+      else
+        export IMAGE_TAG="dev"
+      fi
+  script:
+    - echo "Scanning Docker image for vulnerabilities: ${IMAGE_NAME}:${IMAGE_TAG}"
+    - trivy image --input image.tar --exit-code 0 --severity HIGH,CRITICAL --format table
+    - trivy image --input image.tar --exit-code 0 --severity HIGH,CRITICAL --format json --output gl-container-scanning-report.json || true
+    - echo "Security scan completed"
+  artifacts:
+    reports:
+      container_scanning: gl-container-scanning-report.json
+    paths:
+      - gl-container-scanning-report.json
+    expire_in: 1 week
+    when: always
+  allow_failure: true
+  only:
+    - branches
+    - tags
+
+# Push Docker image to Docker Hub
+docker-push:
+  stage: deploy
+  image: docker:24-dind
+  services:
+    - docker:24-dind
+  dependencies:
+    - docker-build
+    - trivy-scan
+  before_script:
+    - |
+      # Compute image tag: use Git tag name if available, otherwise "dev"
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        export IMAGE_TAG="$CI_COMMIT_REF_NAME"
+        echo "Pushing release image with tag: $IMAGE_TAG"
+      else
+        export IMAGE_TAG="dev"
+        echo "Pushing dev image with tag: $IMAGE_TAG"
+      fi
+    - echo "Loading Docker image from artifact..."
+    - docker load -i image.tar
+    - echo "Logging in to Docker Hub..."
+    - echo "$DOCKER_REGISTRY_PASSWORD" | docker login -u "$DOCKER_REGISTRY_USER" --password-stdin
+    - echo "Pushing Docker image: ${IMAGE_NAME}:${IMAGE_TAG}"
+  script:
+    - docker push ${IMAGE_NAME}:${IMAGE_TAG}
+    - |
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        echo "Pushing latest tag for release..."
+        docker push ${IMAGE_NAME}:latest
+      fi
+    - echo "Docker image pushed successfully"
+  after_script:
+    - docker logout
+  only:
+    - branches
+    - tags
