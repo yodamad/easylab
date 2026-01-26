@@ -13,17 +13,6 @@
 #     * Tagged with Git tag name for Git tag commits (e.g., v1.0.0)
 
 include:
-  # Go component for build and test
-  - component: $CI_SERVER_FQDN/to-be-continuous/golang/gitlab-ci-golang@4.15.3
-    inputs:
-      # Go version matching go.mod
-      image: "docker.io/library/golang:1.25"
-      # Build mode: application (since we have main.go in cmd/server)
-      build-mode: "application"
-      # Build the server binary
-      build-packages: "./cmd/server"
-      # Test flags with race detector
-      test-flags: "-mod=readonly -v -race"
   # Docker component for building and publishing images
   - component: $CI_SERVER_FQDN/to-be-continuous/docker/gitlab-ci-docker@8.0.10
     inputs:
