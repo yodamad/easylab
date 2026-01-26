@@ -32,7 +32,7 @@ func TestOVHCredentials_Fields(t *testing.T) {
 }
 
 func TestCredentialsManager_SetAndGetCredentials(t *testing.T) {
-	cm := &CredentialsManager{}
+	cm := NewCredentialsManager()
 
 	creds := &OVHCredentials{
 		ApplicationKey:    "test-key",
@@ -150,7 +150,7 @@ func TestCredentialsManager_SetCredentials_Validation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cm := &CredentialsManager{}
+			cm := NewCredentialsManager()
 			err := cm.SetCredentials(tt.creds)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("SetCredentials() error = %v, wantErr %v", err, tt.wantErr)
@@ -160,7 +160,7 @@ func TestCredentialsManager_SetCredentials_Validation(t *testing.T) {
 }
 
 func TestCredentialsManager_GetCredentials_NotConfigured(t *testing.T) {
-	cm := &CredentialsManager{}
+	cm := NewCredentialsManager()
 
 	_, err := cm.GetCredentials("ovh")
 	if err == nil {
@@ -169,7 +169,7 @@ func TestCredentialsManager_GetCredentials_NotConfigured(t *testing.T) {
 }
 
 func TestCredentialsManager_HasCredentials(t *testing.T) {
-	cm := &CredentialsManager{}
+	cm := NewCredentialsManager()
 
 	// Initially no credentials
 	if cm.HasCredentials("ovh") {
@@ -193,7 +193,7 @@ func TestCredentialsManager_HasCredentials(t *testing.T) {
 }
 
 func TestCredentialsManager_ClearCredentials(t *testing.T) {
-	cm := &CredentialsManager{}
+	cm := NewCredentialsManager()
 
 	// Set credentials
 	creds := &OVHCredentials{
@@ -225,7 +225,7 @@ func TestCredentialsManager_ClearCredentials(t *testing.T) {
 }
 
 func TestCredentialsManager_GetCredentialsReturnsCopy(t *testing.T) {
-	cm := &CredentialsManager{}
+	cm := NewCredentialsManager()
 
 	creds := &OVHCredentials{
 		ApplicationKey:    "key",
@@ -315,7 +315,7 @@ func TestLoadCredentialsFromEnv(t *testing.T) {
 }
 
 func TestCredentialsManager_ConcurrentAccess(t *testing.T) {
-	cm := &CredentialsManager{}
+	cm := NewCredentialsManager()
 
 	creds := &OVHCredentials{
 		ApplicationKey:    "key",
@@ -357,4 +357,3 @@ func TestCredentialsManager_ConcurrentAccess(t *testing.T) {
 	<-done
 	<-done
 }
-

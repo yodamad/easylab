@@ -72,7 +72,7 @@ func TestChaos_JobManager_ConcurrentCreateAndRead(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			
+
 			// Randomly create or read
 			if idx%2 == 0 {
 				id := jm.CreateJob(config)
@@ -158,7 +158,7 @@ func TestChaos_JobManager_ConcurrentOutputAppend(t *testing.T) {
 }
 
 func TestChaos_CredentialsManager_ConcurrentSetAndGet(t *testing.T) {
-	cm := &CredentialsManager{}
+	cm := NewCredentialsManager()
 
 	var wg sync.WaitGroup
 	errCount := int32(0)
@@ -332,7 +332,7 @@ func TestChaos_JobManager_SpecialCharacters(t *testing.T) {
 }
 
 func TestChaos_CredentialsManager_MalformedInputs(t *testing.T) {
-	cm := &CredentialsManager{}
+	cm := NewCredentialsManager()
 
 	malformedCreds := []*OVHCredentials{
 		nil,
@@ -411,7 +411,7 @@ func TestChaos_GenerateSecurePassword_Stress(t *testing.T) {
 
 func TestChaos_Handler_MalformedRequests(t *testing.T) {
 	jm := NewJobManager("")
-	h := NewHandler(jm, &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager())
 
 	tests := []struct {
 		name        string
@@ -459,7 +459,7 @@ func TestChaos_Handler_MalformedRequests(t *testing.T) {
 
 func TestChaos_Handler_ConcurrentRequests(t *testing.T) {
 	jm := NewJobManager("")
-	h := NewHandler(jm, &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager())
 
 	var wg sync.WaitGroup
 	requestCount := 100
@@ -482,7 +482,7 @@ func TestChaos_Handler_ConcurrentRequests(t *testing.T) {
 }
 
 func TestChaos_Handler_RapidFormSubmissions(t *testing.T) {
-	cm := &CredentialsManager{}
+	cm := NewCredentialsManager()
 	jm := NewJobManager("")
 	h := NewHandler(jm, &PulumiExecutor{}, cm)
 
@@ -514,7 +514,7 @@ func TestChaos_Handler_RapidFormSubmissions(t *testing.T) {
 
 func TestChaos_Handler_MixedConcurrentOperations(t *testing.T) {
 	jm := NewJobManager("")
-	cm := &CredentialsManager{}
+	cm := NewCredentialsManager()
 	h := NewHandler(jm, &PulumiExecutor{}, cm)
 
 	// Set up credentials
@@ -688,7 +688,7 @@ func TestChaos_JobManager_RapidSaveAndLoad(t *testing.T) {
 // =============================================================================
 
 func TestChaos_Recovery_AfterCredentialsCleared(t *testing.T) {
-	cm := &CredentialsManager{}
+	cm := NewCredentialsManager()
 
 	// Set credentials
 	cm.SetCredentials(&OVHCredentials{
@@ -806,7 +806,7 @@ func TestChaos_Password_GenerationTimeout(t *testing.T) {
 
 func TestChaos_Handler_ContextCancellation(t *testing.T) {
 	jm := NewJobManager("")
-	h := NewHandler(jm, &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager())
 
 	// Create a request with cancelled context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -882,7 +882,7 @@ func TestChaos_JobManager_LargeOutput(t *testing.T) {
 
 func TestChaos_Handler_DirectoryTraversalAttempts(t *testing.T) {
 	jm := NewJobManager("")
-	h := NewHandler(jm, &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager())
 
 	traversalPaths := []string{
 		"/static/../../../etc/passwd",
@@ -905,7 +905,7 @@ func TestChaos_Handler_DirectoryTraversalAttempts(t *testing.T) {
 
 func TestChaos_Handler_HTTPMethodMismatch(t *testing.T) {
 	jm := NewJobManager("")
-	h := NewHandler(jm, &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager())
 
 	// Try wrong methods on various endpoints
 	methodTests := []struct {
@@ -942,4 +942,3 @@ func min(a, b int) int {
 	}
 	return b
 }
-

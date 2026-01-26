@@ -84,7 +84,7 @@ func TestGetFormKeys(t *testing.T) {
 func TestNewHandler(t *testing.T) {
 	jm := NewJobManager("")
 	pe := &PulumiExecutor{}
-	cm := &CredentialsManager{}
+	cm := NewCredentialsManager()
 
 	h := NewHandler(jm, pe, cm)
 
@@ -110,7 +110,7 @@ func TestNewHandler(t *testing.T) {
 }
 
 func TestHandler_ServeUI_NotRoot(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/notroot", nil)
 	w := httptest.NewRecorder()
@@ -123,7 +123,7 @@ func TestHandler_ServeUI_NotRoot(t *testing.T) {
 }
 
 func TestHandler_CreateLab_WrongMethod(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/api/labs", nil)
 	w := httptest.NewRecorder()
@@ -136,7 +136,7 @@ func TestHandler_CreateLab_WrongMethod(t *testing.T) {
 }
 
 func TestHandler_DryRunLab_WrongMethod(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/api/labs/dry-run", nil)
 	w := httptest.NewRecorder()
@@ -149,7 +149,7 @@ func TestHandler_DryRunLab_WrongMethod(t *testing.T) {
 }
 
 func TestHandler_LaunchLab_WrongMethod(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/api/labs/launch", nil)
 	w := httptest.NewRecorder()
@@ -162,7 +162,7 @@ func TestHandler_LaunchLab_WrongMethod(t *testing.T) {
 }
 
 func TestHandler_LaunchLab_MissingJobID(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("POST", "/api/labs/launch", nil)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -176,7 +176,7 @@ func TestHandler_LaunchLab_MissingJobID(t *testing.T) {
 }
 
 func TestHandler_LaunchLab_JobNotFound(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	form := url.Values{}
 	form.Set("job_id", "nonexistent")
@@ -192,7 +192,7 @@ func TestHandler_LaunchLab_JobNotFound(t *testing.T) {
 }
 
 func TestHandler_GetJobStatus_InvalidPath(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/invalid/path", nil)
 	w := httptest.NewRecorder()
@@ -205,7 +205,7 @@ func TestHandler_GetJobStatus_InvalidPath(t *testing.T) {
 }
 
 func TestHandler_GetJobStatus_JobNotFound(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/api/jobs/nonexistent/status", nil)
 	w := httptest.NewRecorder()
@@ -222,7 +222,7 @@ func TestHandler_GetJobStatus_Found(t *testing.T) {
 	config := &LabConfig{StackName: "test"}
 	jobID := jm.CreateJob(config)
 
-	h := NewHandler(jm, &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/api/jobs/"+jobID+"/status", nil)
 	w := httptest.NewRecorder()
@@ -239,7 +239,7 @@ func TestHandler_GetJobStatus_Found(t *testing.T) {
 }
 
 func TestHandler_GetJobStatusJSON_InvalidPath(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/invalid/path", nil)
 	w := httptest.NewRecorder()
@@ -252,7 +252,7 @@ func TestHandler_GetJobStatusJSON_InvalidPath(t *testing.T) {
 }
 
 func TestHandler_GetJobStatusJSON_JobNotFound(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/api/jobs/nonexistent", nil)
 	w := httptest.NewRecorder()
@@ -269,7 +269,7 @@ func TestHandler_GetJobStatusJSON_Found(t *testing.T) {
 	config := &LabConfig{StackName: "test"}
 	jobID := jm.CreateJob(config)
 
-	h := NewHandler(jm, &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/api/jobs/"+jobID, nil)
 	w := httptest.NewRecorder()
@@ -287,7 +287,7 @@ func TestHandler_GetJobStatusJSON_Found(t *testing.T) {
 }
 
 func TestHandler_DownloadKubeconfig_InvalidPath(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/invalid/path", nil)
 	w := httptest.NewRecorder()
@@ -300,7 +300,7 @@ func TestHandler_DownloadKubeconfig_InvalidPath(t *testing.T) {
 }
 
 func TestHandler_DownloadKubeconfig_JobNotFound(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/api/jobs/nonexistent/kubeconfig", nil)
 	w := httptest.NewRecorder()
@@ -317,7 +317,7 @@ func TestHandler_DownloadKubeconfig_NotCompleted(t *testing.T) {
 	config := &LabConfig{StackName: "test"}
 	jobID := jm.CreateJob(config) // Status is pending, not completed
 
-	h := NewHandler(jm, &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/api/jobs/"+jobID+"/kubeconfig", nil)
 	w := httptest.NewRecorder()
@@ -335,7 +335,7 @@ func TestHandler_DownloadKubeconfig_NoKubeconfig(t *testing.T) {
 	jobID := jm.CreateJob(config)
 	jm.UpdateJobStatus(jobID, JobStatusCompleted)
 
-	h := NewHandler(jm, &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/api/jobs/"+jobID+"/kubeconfig", nil)
 	w := httptest.NewRecorder()
@@ -354,7 +354,7 @@ func TestHandler_DownloadKubeconfig_Success(t *testing.T) {
 	jm.UpdateJobStatus(jobID, JobStatusCompleted)
 	jm.SetKubeconfig(jobID, "apiVersion: v1\nkind: Config")
 
-	h := NewHandler(jm, &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/api/jobs/"+jobID+"/kubeconfig", nil)
 	w := httptest.NewRecorder()
@@ -383,7 +383,7 @@ func TestHandler_DownloadKubeconfig_FailedJobWithKubeconfig(t *testing.T) {
 	jm.UpdateJobStatus(jobID, JobStatusFailed)
 	jm.SetKubeconfig(jobID, "apiVersion: v1\nkind: Config")
 
-	h := NewHandler(jm, &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/api/jobs/"+jobID+"/kubeconfig", nil)
 	w := httptest.NewRecorder()
@@ -418,7 +418,7 @@ func TestHandler_ListLabs(t *testing.T) {
 	jobID3 := jm.CreateJob(config)
 	jm.UpdateJobStatus(jobID3, JobStatusCompleted)
 
-	h := NewHandler(jm, &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/api/labs", nil)
 	w := httptest.NewRecorder()
@@ -436,7 +436,7 @@ func TestHandler_ListLabs(t *testing.T) {
 }
 
 func TestHandler_RequestWorkspace_WrongMethod(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/api/workspace/request", nil)
 	w := httptest.NewRecorder()
@@ -449,7 +449,7 @@ func TestHandler_RequestWorkspace_WrongMethod(t *testing.T) {
 }
 
 func TestHandler_SetOVHCredentials_WrongMethod(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/api/ovh-credentials", nil)
 	w := httptest.NewRecorder()
@@ -462,7 +462,7 @@ func TestHandler_SetOVHCredentials_WrongMethod(t *testing.T) {
 }
 
 func TestHandler_GetOVHCredentials_WrongMethod(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("POST", "/api/ovh-credentials", nil)
 	w := httptest.NewRecorder()
@@ -475,7 +475,7 @@ func TestHandler_GetOVHCredentials_WrongMethod(t *testing.T) {
 }
 
 func TestHandler_GetOVHCredentials_NotConfigured(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/api/ovh-credentials", nil)
 	w := httptest.NewRecorder()
@@ -488,7 +488,7 @@ func TestHandler_GetOVHCredentials_NotConfigured(t *testing.T) {
 }
 
 func TestHandler_GetOVHCredentials_Configured(t *testing.T) {
-	cm := &CredentialsManager{}
+	cm := NewCredentialsManager()
 	cm.SetCredentials(&OVHCredentials{
 		ApplicationKey:    "key",
 		ApplicationSecret: "secret",
@@ -516,7 +516,7 @@ func TestHandler_GetOVHCredentials_Configured(t *testing.T) {
 }
 
 func TestHandler_DestroyStack_WrongMethod(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/api/stack/destroy", nil)
 	w := httptest.NewRecorder()
@@ -529,7 +529,7 @@ func TestHandler_DestroyStack_WrongMethod(t *testing.T) {
 }
 
 func TestHandler_DestroyStack_MissingJobID(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("POST", "/api/stack/destroy", nil)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -543,7 +543,7 @@ func TestHandler_DestroyStack_MissingJobID(t *testing.T) {
 }
 
 func TestHandler_DestroyStack_JobNotFound(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	form := url.Values{}
 	form.Set("job_id", "nonexistent")
@@ -559,7 +559,7 @@ func TestHandler_DestroyStack_JobNotFound(t *testing.T) {
 }
 
 func TestHandler_RecreateLab_WrongMethod(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/api/labs/recreate", nil)
 	w := httptest.NewRecorder()
@@ -572,7 +572,7 @@ func TestHandler_RecreateLab_WrongMethod(t *testing.T) {
 }
 
 func TestHandler_RecreateLab_MissingJobID(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("POST", "/api/labs/recreate", nil)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -586,7 +586,7 @@ func TestHandler_RecreateLab_MissingJobID(t *testing.T) {
 }
 
 func TestHandler_RecreateLab_JobNotFound(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	form := url.Values{}
 	form.Set("job_id", "nonexistent")
@@ -602,7 +602,7 @@ func TestHandler_RecreateLab_JobNotFound(t *testing.T) {
 }
 
 func TestHandler_ServeStatic_DirectoryTraversal(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/static/../../../etc/passwd", nil)
 	w := httptest.NewRecorder()
@@ -617,7 +617,7 @@ func TestHandler_ServeStatic_DirectoryTraversal(t *testing.T) {
 func TestHandler_DestroyStack_FailedJob(t *testing.T) {
 	// Test that destroy works for failed jobs
 	jm := NewJobManager("")
-	h := NewHandler(jm, &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager())
 
 	// Create a job with failed status
 	jobID := jm.CreateJob(&LabConfig{
@@ -641,7 +641,7 @@ func TestHandler_DestroyStack_FailedJob(t *testing.T) {
 }
 
 func TestHandler_ServeStatic_NotFound(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	req := httptest.NewRequest("GET", "/static/nonexistent.css", nil)
 	w := httptest.NewRecorder()
@@ -654,7 +654,7 @@ func TestHandler_ServeStatic_NotFound(t *testing.T) {
 }
 
 func TestHandler_RenderHTMLError(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	w := httptest.NewRecorder()
 	h.renderHTMLError(w, "Test Title", "Test Message")
@@ -672,7 +672,7 @@ func TestHandler_RenderHTMLError(t *testing.T) {
 }
 
 func TestHandler_RenderHTMLError_WithLink(t *testing.T) {
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, &CredentialsManager{})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager())
 
 	w := httptest.NewRecorder()
 	h.renderHTMLError(w, "Test Title", "Test Message", `<a href="/test">Test Link</a>`)

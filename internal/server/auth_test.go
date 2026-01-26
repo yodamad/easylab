@@ -165,7 +165,7 @@ func TestAuthHandler_CreateSession(t *testing.T) {
 	_, exists := ah.sessions[token]
 	session := ah.sessions[token]
 	ah.mu.RUnlock()
-	
+
 	if !exists {
 		t.Error("createSession() did not add session to map")
 	}
@@ -230,7 +230,7 @@ func TestAuthHandler_DeleteSession(t *testing.T) {
 	ah.mu.RLock()
 	_, exists := ah.sessions[token]
 	ah.mu.RUnlock()
-	
+
 	if exists {
 		t.Error("deleteSession() did not remove session")
 	}
@@ -377,25 +377,25 @@ func createRequestWithExpiredCookie(method, url string, authHandler *AuthHandler
 
 func TestRequireAuth_Unauthenticated(t *testing.T) {
 	ah := createTestAuthHandler()
-	
+
 	// Create a simple handler that should be protected
 	protectedHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	}
-	
+
 	wrappedHandler := ah.RequireAuth(protectedHandler)
-	
+
 	req := createUnauthenticatedRequest("GET", "/protected")
 	w := httptest.NewRecorder()
-	
+
 	wrappedHandler(w, req)
-	
+
 	// Should redirect to login
 	if w.Code != http.StatusSeeOther {
 		t.Errorf("RequireAuth() unauthenticated status = %d, want %d", w.Code, http.StatusSeeOther)
 	}
-	
+
 	location := w.Header().Get("Location")
 	if location != "/login" {
 		t.Errorf("RequireAuth() unauthenticated Location = %s, want /login", location)
@@ -404,24 +404,24 @@ func TestRequireAuth_Unauthenticated(t *testing.T) {
 
 func TestRequireAuth_Authenticated(t *testing.T) {
 	ah := createTestAuthHandler()
-	
+
 	protectedHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	}
-	
+
 	wrappedHandler := ah.RequireAuth(protectedHandler)
-	
+
 	req := createAuthenticatedRequest("GET", "/protected", ah)
 	w := httptest.NewRecorder()
-	
+
 	wrappedHandler(w, req)
-	
+
 	// Should succeed
 	if w.Code != http.StatusOK {
 		t.Errorf("RequireAuth() authenticated status = %d, want %d", w.Code, http.StatusOK)
 	}
-	
+
 	if w.Body.String() != "OK" {
 		t.Errorf("RequireAuth() authenticated body = %s, want OK", w.Body.String())
 	}
@@ -429,24 +429,24 @@ func TestRequireAuth_Authenticated(t *testing.T) {
 
 func TestRequireAuth_InvalidCookie(t *testing.T) {
 	ah := createTestAuthHandler()
-	
+
 	protectedHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	}
-	
+
 	wrappedHandler := ah.RequireAuth(protectedHandler)
-	
+
 	req := createRequestWithInvalidCookie("GET", "/protected")
 	w := httptest.NewRecorder()
-	
+
 	wrappedHandler(w, req)
-	
+
 	// Should redirect to login
 	if w.Code != http.StatusSeeOther {
 		t.Errorf("RequireAuth() invalid cookie status = %d, want %d", w.Code, http.StatusSeeOther)
 	}
-	
+
 	location := w.Header().Get("Location")
 	if location != "/login" {
 		t.Errorf("RequireAuth() invalid cookie Location = %s, want /login", location)
@@ -455,24 +455,24 @@ func TestRequireAuth_InvalidCookie(t *testing.T) {
 
 func TestRequireAuth_ExpiredSession(t *testing.T) {
 	ah := createTestAuthHandler()
-	
+
 	protectedHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	}
-	
+
 	wrappedHandler := ah.RequireAuth(protectedHandler)
-	
+
 	req := createRequestWithExpiredCookie("GET", "/protected", ah)
 	w := httptest.NewRecorder()
-	
+
 	wrappedHandler(w, req)
-	
+
 	// Should redirect to login
 	if w.Code != http.StatusSeeOther {
 		t.Errorf("RequireAuth() expired session status = %d, want %d", w.Code, http.StatusSeeOther)
 	}
-	
+
 	location := w.Header().Get("Location")
 	if location != "/login" {
 		t.Errorf("RequireAuth() expired session Location = %s, want /login", location)
@@ -483,24 +483,24 @@ func TestRequireAuth_ExpiredSession(t *testing.T) {
 
 func TestRequireStudentAuth_Unauthenticated(t *testing.T) {
 	ah := createTestAuthHandler()
-	
+
 	protectedHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	}
-	
+
 	wrappedHandler := ah.RequireStudentAuth(protectedHandler)
-	
+
 	req := createUnauthenticatedRequest("GET", "/student/protected")
 	w := httptest.NewRecorder()
-	
+
 	wrappedHandler(w, req)
-	
+
 	// Should redirect to student login
 	if w.Code != http.StatusSeeOther {
 		t.Errorf("RequireStudentAuth() unauthenticated status = %d, want %d", w.Code, http.StatusSeeOther)
 	}
-	
+
 	location := w.Header().Get("Location")
 	if location != "/student/login" {
 		t.Errorf("RequireStudentAuth() unauthenticated Location = %s, want /student/login", location)
@@ -509,24 +509,24 @@ func TestRequireStudentAuth_Unauthenticated(t *testing.T) {
 
 func TestRequireStudentAuth_Authenticated(t *testing.T) {
 	ah := createTestAuthHandler()
-	
+
 	protectedHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	}
-	
+
 	wrappedHandler := ah.RequireStudentAuth(protectedHandler)
-	
+
 	req := createStudentAuthenticatedRequest("GET", "/student/protected", ah)
 	w := httptest.NewRecorder()
-	
+
 	wrappedHandler(w, req)
-	
+
 	// Should succeed
 	if w.Code != http.StatusOK {
 		t.Errorf("RequireStudentAuth() authenticated status = %d, want %d", w.Code, http.StatusOK)
 	}
-	
+
 	if w.Body.String() != "OK" {
 		t.Errorf("RequireStudentAuth() authenticated body = %s, want OK", w.Body.String())
 	}
@@ -534,28 +534,28 @@ func TestRequireStudentAuth_Authenticated(t *testing.T) {
 
 func TestRequireStudentAuth_InvalidCookie(t *testing.T) {
 	ah := createTestAuthHandler()
-	
+
 	protectedHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	}
-	
+
 	wrappedHandler := ah.RequireStudentAuth(protectedHandler)
-	
+
 	req := httptest.NewRequest("GET", "/student/protected", nil)
 	req.AddCookie(&http.Cookie{
 		Name:  StudentSessionCookieName,
 		Value: "invalid-token",
 	})
 	w := httptest.NewRecorder()
-	
+
 	wrappedHandler(w, req)
-	
+
 	// Should redirect to student login
 	if w.Code != http.StatusSeeOther {
 		t.Errorf("RequireStudentAuth() invalid cookie status = %d, want %d", w.Code, http.StatusSeeOther)
 	}
-	
+
 	location := w.Header().Get("Location")
 	if location != "/student/login" {
 		t.Errorf("RequireStudentAuth() invalid cookie Location = %s, want /student/login", location)
@@ -570,19 +570,19 @@ func TestRequireStudentAuth_Disabled(t *testing.T) {
 		studentSessions:     make(map[string]*Session),
 		templates:           make(map[string]*template.Template),
 	}
-	
+
 	protectedHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	}
-	
+
 	wrappedHandler := ah.RequireStudentAuth(protectedHandler)
-	
+
 	req := createStudentAuthenticatedRequest("GET", "/student/protected", ah)
 	w := httptest.NewRecorder()
-	
+
 	wrappedHandler(w, req)
-	
+
 	// Should return 403 Forbidden when student login is disabled
 	if w.Code != http.StatusForbidden {
 		t.Errorf("RequireStudentAuth() disabled status = %d, want %d", w.Code, http.StatusForbidden)
@@ -595,9 +595,9 @@ func TestProtectedAdminEndpoints_Unauthenticated(t *testing.T) {
 	ah := createTestAuthHandler()
 	jm := NewJobManager("")
 	pe := &PulumiExecutor{}
-	cm := &CredentialsManager{}
+	cm := NewCredentialsManager()
 	h := NewHandler(jm, pe, cm)
-	
+
 	tests := []struct {
 		name     string
 		method   string
@@ -711,18 +711,18 @@ func TestProtectedAdminEndpoints_Unauthenticated(t *testing.T) {
 			wantLoc:  "/login",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := createUnauthenticatedRequest(tt.method, tt.path)
 			w := httptest.NewRecorder()
-			
+
 			tt.handler(w, req)
-			
+
 			if w.Code != tt.wantCode {
 				t.Errorf("status = %d, want %d", w.Code, tt.wantCode)
 			}
-			
+
 			location := w.Header().Get("Location")
 			if location != tt.wantLoc {
 				t.Errorf("Location = %s, want %s", location, tt.wantLoc)
@@ -735,9 +735,9 @@ func TestProtectedAdminEndpoints_Authenticated(t *testing.T) {
 	ah := createTestAuthHandler()
 	jm := NewJobManager("")
 	pe := &PulumiExecutor{}
-	cm := &CredentialsManager{}
+	cm := NewCredentialsManager()
 	h := NewHandler(jm, pe, cm)
-	
+
 	tests := []struct {
 		name     string
 		method   string
@@ -781,20 +781,20 @@ func TestProtectedAdminEndpoints_Authenticated(t *testing.T) {
 			wantCode: http.StatusNotFound, // Job doesn't exist
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := createAuthenticatedRequest(tt.method, tt.path, ah)
 			w := httptest.NewRecorder()
-			
+
 			tt.handler(w, req)
-			
+
 			// Should not redirect (authenticated)
 			if w.Code == http.StatusSeeOther {
 				location := w.Header().Get("Location")
 				t.Errorf("authenticated request redirected to %s, should not redirect", location)
 			}
-			
+
 			// Should get expected status code (or at least not redirect)
 			if w.Code == http.StatusSeeOther {
 				t.Errorf("status = %d (redirect), want non-redirect status", w.Code)
@@ -809,9 +809,9 @@ func TestProtectedStudentEndpoints_Unauthenticated(t *testing.T) {
 	ah := createTestAuthHandler()
 	jm := NewJobManager("")
 	pe := &PulumiExecutor{}
-	cm := &CredentialsManager{}
+	cm := NewCredentialsManager()
 	h := NewHandler(jm, pe, cm)
-	
+
 	tests := []struct {
 		name     string
 		method   string
@@ -845,18 +845,18 @@ func TestProtectedStudentEndpoints_Unauthenticated(t *testing.T) {
 			wantLoc:  "/student/login",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := createUnauthenticatedRequest(tt.method, tt.path)
 			w := httptest.NewRecorder()
-			
+
 			tt.handler(w, req)
-			
+
 			if w.Code != tt.wantCode {
 				t.Errorf("status = %d, want %d", w.Code, tt.wantCode)
 			}
-			
+
 			location := w.Header().Get("Location")
 			if location != tt.wantLoc {
 				t.Errorf("Location = %s, want %s", location, tt.wantLoc)
@@ -869,9 +869,9 @@ func TestProtectedStudentEndpoints_Authenticated(t *testing.T) {
 	ah := createTestAuthHandler()
 	jm := NewJobManager("")
 	pe := &PulumiExecutor{}
-	cm := &CredentialsManager{}
+	cm := NewCredentialsManager()
 	h := NewHandler(jm, pe, cm)
-	
+
 	tests := []struct {
 		name     string
 		method   string
@@ -894,20 +894,20 @@ func TestProtectedStudentEndpoints_Authenticated(t *testing.T) {
 			wantCode: http.StatusOK,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := createStudentAuthenticatedRequest(tt.method, tt.path, ah)
 			w := httptest.NewRecorder()
-			
+
 			tt.handler(w, req)
-			
+
 			// Should not redirect (authenticated)
 			if w.Code == http.StatusSeeOther {
 				location := w.Header().Get("Location")
 				t.Errorf("authenticated request redirected to %s, should not redirect", location)
 			}
-			
+
 			// Should get expected status code (or at least not redirect)
 			if w.Code == http.StatusSeeOther {
 				t.Errorf("status = %d (redirect), want non-redirect status", w.Code)
@@ -922,9 +922,9 @@ func TestPublicEndpoints_NoAuthRequired(t *testing.T) {
 	ah := createTestAuthHandler()
 	jm := NewJobManager("")
 	pe := &PulumiExecutor{}
-	cm := &CredentialsManager{}
+	cm := NewCredentialsManager()
 	h := NewHandler(jm, pe, cm)
-	
+
 	tests := []struct {
 		name     string
 		method   string
@@ -947,9 +947,9 @@ func TestPublicEndpoints_NoAuthRequired(t *testing.T) {
 			wantCode: http.StatusOK,
 		},
 		{
-			name:     "/health",
-			method:   "GET",
-			path:     "/health",
+			name:   "/health",
+			method: "GET",
+			path:   "/health",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte("OK"))
@@ -964,16 +964,16 @@ func TestPublicEndpoints_NoAuthRequired(t *testing.T) {
 			wantCode: http.StatusOK,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		// Capture loop variable to avoid potential race conditions
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			req := createUnauthenticatedRequest(tt.method, tt.path)
 			w := httptest.NewRecorder()
-			
+
 			tt.handler(w, req)
-			
+
 			// Should not redirect (public endpoint) - this is the main test
 			// Public endpoints should not require authentication
 			if w.Code == http.StatusSeeOther || w.Code == http.StatusFound {
@@ -981,7 +981,7 @@ func TestPublicEndpoints_NoAuthRequired(t *testing.T) {
 				t.Errorf("public endpoint redirected to %s (status %d), should not redirect", location, w.Code)
 				return
 			}
-			
+
 			// Template loading might fail in tests (files may not exist)
 			// So accept either 200 (success) or 500 (template error), but not redirects
 			if tt.wantCode == http.StatusOK {

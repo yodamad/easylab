@@ -150,4 +150,3 @@ func (cm *CredentialsManager) ClearCredentials(providerName string) {
 	defer cm.mu.Unlock()
 	delete(cm.credentials, providerName)
 }
-

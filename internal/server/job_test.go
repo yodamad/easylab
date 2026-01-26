@@ -48,7 +48,7 @@ func TestNewJobManager(t *testing.T) {
 	jm.mu.RLock()
 	jobsNil := jm.jobs == nil
 	jm.mu.RUnlock()
-	
+
 	if jobsNil {
 		t.Error("NewJobManager() jobs map is nil")
 	}
@@ -552,4 +552,3 @@ func TestJobManager_ConcurrentAccess(t *testing.T) {
 		t.Error("Expected at least some jobs to be created")
 	}
 }
-
