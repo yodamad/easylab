@@ -32,8 +32,6 @@ variables:
 # CI_COMMIT_REF_NAME contains branch name or tag name
 # Dependencies: go-build-test (from Go component) runs both build and test
 .docker-base:
-  dependencies:
-    - go-build-test
   before_script:
     - |
       # Compute release tag: use Git tag name if available, otherwise "dev"
