@@ -1,0 +1,59 @@
+# GitLab CI/CD Pipeline using to-be-continuous Docker Component
+# 
+# This pipeline builds and publishes Docker images to Docker Hub.
+# 
+# Required GitLab CI/CD Variables (set in Project Settings > CI/CD > Variables):
+#   - DOCKER_REGISTRY_USER: Docker Hub username
+#   - DOCKER_REGISTRY_PASSWORD: Docker Hub password or access token (masked, protected)
+#
+# Image Tagging Strategy:
+#   - Snapshot images: Always pushed with branch/tag slug (e.g., main, feature-branch, v1.0.0)
+#   - Release images: 
+#     * Tagged as "dev" for branch commits
+#     * Tagged with Git tag name for Git tag commits (e.g., v1.0.0)
+
+include:
+  # Go component for build and test
+  - component: $CI_SERVER_FQDN/to-be-continuous/golang/gitlab-ci-golang@4.15.3
+    inputs:
+      # Go version matching go.mod
+      image: "docker.io/library/golang:1.25"
+      # Build mode: application (since we have main.go in cmd/server)
+      build-mode: "application"
+      # Build the server binary
+      build-packages: "./cmd/server"
+      # Test flags with race detector
+      test-flags: "-mod=readonly -v -race"
+  # Docker component for building and publishing images
+  - component: $CI_SERVER_FQDN/to-be-continuous/docker/gitlab-ci-docker@8.0.10
+    inputs:
+      # Docker Hub registry configuration
+      # Snapshot images: pushed on every commit for traceability
+      snapshot-image: "docker.io/${DOCKER_REGISTRY_USER}/easylab/snapshot:$CI_COMMIT_REF_SLUG"
+      # Release images: will be overridden in .docker-base to use conditional tag logic
+      release-image: "docker.io/${DOCKER_REGISTRY_USER}/easylab:placeholder"
+
+variables:
+  # Build tool: Buildah (default, secure, daemonless)
+  # Can be overridden to "kaniko" or "dind" if needed
+  DOCKER_BUILD_TOOL: "buildah"
+
+# Override the Docker base job to compute the release tag conditionally
+# CI_COMMIT_TAG is set when pipeline is triggered by a Git tag
+# CI_COMMIT_REF_NAME contains branch name or tag name
+# Dependencies: go-build-test (from Go component) runs both build and test
+.docker-base:
+  dependencies:
+    - go-build-test
+  before_script:
+    - |
+      # Compute release tag: use Git tag name if available, otherwise "dev"
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        # Git tag: use the tag name
+        export DOCKER_RELEASE_IMAGE="docker.io/${DOCKER_REGISTRY_USER}/easylab:${CI_COMMIT_REF_NAME}"
+        echo "Release image (from Git tag): $DOCKER_RELEASE_IMAGE"
+      else
+        # Branch: use "dev"
+        export DOCKER_RELEASE_IMAGE="docker.io/${DOCKER_REGISTRY_USER}/easylab:dev"
+        echo "Release image (from branch): $DOCKER_RELEASE_IMAGE"
+      fi
