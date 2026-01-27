@@ -23,11 +23,9 @@ spec:
         runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000
-      imagePullSecrets:
-      - name: gitlabcredz                
       containers:
       - name: easylab
-        image: registry.gitlab.com/yodamad-workshops/easylab/easylab:0.9.3  # Replace with your actual image
+        image: docker.io/easylab/easylab:dev  # Change the image to the latest tag for non-development environments
         imagePullPolicy: Always
         ports:
         - containerPort: 8080

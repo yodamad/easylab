@@ -110,14 +110,10 @@ docker-compose up -d
 <summary><strong>☸️ Kubernetes</strong></summary>
 
 ```bash
-# 1. Build and push container image
-docker build -t your-registry/easylab:latest .
-docker push your-registry/easylab:latest
-
-# 2. Deploy to Kubernetes
+# 1. Deploy to Kubernetes
 cd k8s-deployment && ./deploy.sh
 
-# 3. Configure secrets
+# 2. Configure secrets
 kubectl edit secret easylab-secrets -n easylab
 ```
 
@@ -224,42 +220,17 @@ go install github.com/air-verse/air@latest
 air
 ```
 
-### CI/CD Pipeline
-
-The project uses [to-be-continuous](https://to-be-continuous.gitlab.io/) Docker component for automated builds and publishing to Docker Hub.
-
-#### Setup
-
-1. **Configure GitLab CI/CD Variables** (Project Settings > CI/CD > Variables):
-   - `DOCKER_REGISTRY_USER`: Your Docker Hub username
-   - `DOCKER_REGISTRY_PASSWORD`: Your Docker Hub password or access token (mark as **masked** and **protected**)
-
-2. **Image Tagging Strategy**:
-   - **Snapshot images**: Pushed on every commit with branch/tag slug (e.g., `docker.io/{username}/easylab/snapshot:main`)
-   - **Release images**: 
-     - Tagged as `dev` for branch commits (e.g., `docker.io/{username}/easylab:dev`)
-     - Tagged with Git tag name for Git tag commits (e.g., `docker.io/{username}/easylab:v1.0.0`)
-
-3. **Pipeline Jobs**:
-   - Dockerfile linting (Hadolint)
-   - Image building and security scanning (Trivy)
-   - SBOM generation
-   - Health check validation
-   - Automatic publishing to Docker Hub
-
-The pipeline automatically runs on every push and tag creation.
-
 ---
 
 ## 🤝 Contributing
 
 We welcome contributions! Here's how you can help:
 
-1. **Fork** the repository
+1. **Fork** the repository on [🦊 GitLab](https://gitlab.com/yodamad-workshops/easylab)
 2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
 3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
 4. **Push** to the branch (`git push origin feature/amazing-feature`)
-5. **Open** a Pull Request
+5. **Open** a Merge Request
 
 ### Code Style
 
