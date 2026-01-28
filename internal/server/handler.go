@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,6 +31,35 @@ type Handler struct {
 	templates          map[string]*template.Template
 	templatesMu        sync.RWMutex
 	credentialsManager *CredentialsManager
+}
+
+// emailRegex is a simple email validation regex
+var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+
+// validateEmail validates an email address format
+func validateEmail(email string) bool {
+	if email == "" {
+		return false
+	}
+	return emailRegex.MatchString(email)
+}
+
+// validateURL validates a URL format
+func validateURL(urlStr string) bool {
+	if urlStr == "" {
+		return false
+	}
+	u, err := url.Parse(urlStr)
+	return err == nil && u.Scheme != "" && u.Host != ""
+}
+
+// getFormValue gets a form value, trying PostFormValue first, then FormValue
+func getFormValue(r *http.Request, key string) string {
+	value := r.PostFormValue(key)
+	if value == "" {
+		value = r.FormValue(key)
+	}
+	return value
 }
 
 // NewHandler creates a new HTTP handler
@@ -270,6 +300,19 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 		TemplateGitBranch: r.FormValue("template_git_branch"),
 	}
 
+	// Validate email if provided
+	if config.CoderAdminEmail != "" && !validateEmail(config.CoderAdminEmail) {
+		// Will be validated when used, but log warning
+		log.Printf("Warning: Invalid email format in CoderAdminEmail: %s", config.CoderAdminEmail)
+	}
+
+	// Validate Git repository URL if provided
+	if config.TemplateSource == "git" && config.TemplateGitRepo != "" {
+		if !validateURL(config.TemplateGitRepo) {
+			log.Printf("Warning: Invalid Git repository URL format: %s", config.TemplateGitRepo)
+		}
+	}
+
 	// Add provider-specific credentials
 	if ovhCreds, ok := providerCreds.(*OVHCredentials); ok {
 		config.OvhApplicationKey = ovhCreds.ApplicationKey
@@ -439,16 +482,8 @@ func (h *Handler) ServeAdminUI(w http.ResponseWriter, r *http.Request) {
 	h.serveTemplate(w, "admin.html", data)
 }
 
-// CreateLab handles lab creation requests
-func (h *Handler) CreateLab(w http.ResponseWriter, r *http.Request) {
-	log.Printf("CreateLab called: method=%s, path=%s", r.Method, r.URL.Path)
-
-	if r.Method != http.MethodPost {
-		log.Printf("Method not allowed: %s", r.Method)
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
+// processLabRequest handles common lab request processing logic
+func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDryRun bool) {
 	// Parse form data - handle both multipart and urlencoded (50MB for template files)
 	if err := h.parseForm(w, r, 50<<20); err != nil {
 		log.Printf("Failed to parse form: %v", err)
@@ -517,31 +552,50 @@ func (h *Handler) CreateLab(w http.ResponseWriter, r *http.Request) {
 		// Update config with template file path (relative to job directory)
 		initialConfig.TemplateFilePath = templateFilePath
 		// Update job config
-		job, exists := h.jobManager.GetJob(jobID)
-		if exists {
-			job.mu.Lock()
-			job.Config.TemplateFilePath = templateFilePath
-			job.Config.TemplateSource = templateSource
-			job.mu.Unlock()
-		}
+		h.updateJobConfig(jobID, func(config *LabConfig) {
+			config.TemplateFilePath = templateFilePath
+			config.TemplateSource = templateSource
+		})
 	} else {
 		// Update job config with Git template info
-		job, exists := h.jobManager.GetJob(jobID)
-		if exists {
-			job.mu.Lock()
-			job.Config.TemplateSource = templateSource
-			job.Config.TemplateGitRepo = initialConfig.TemplateGitRepo
-			job.Config.TemplateGitFolder = initialConfig.TemplateGitFolder
-			job.Config.TemplateGitBranch = initialConfig.TemplateGitBranch
-			job.mu.Unlock()
-		}
+		h.updateJobConfig(jobID, func(config *LabConfig) {
+			config.TemplateSource = templateSource
+			config.TemplateGitRepo = initialConfig.TemplateGitRepo
+			config.TemplateGitFolder = initialConfig.TemplateGitFolder
+			config.TemplateGitBranch = initialConfig.TemplateGitBranch
+		})
 	}
 
-	_, html := h.executeLabJobWithID(initialConfig, false, jobID)
+	_, html := h.executeLabJobWithID(initialConfig, isDryRun, jobID)
 
 	// Return job status div for HTMX to display with proper polling
 	w.Header().Set("Content-Type", "text/html")
 	fmt.Fprint(w, html)
+}
+
+// updateJobConfig updates a job's configuration using a callback function
+func (h *Handler) updateJobConfig(jobID string, updater func(*LabConfig)) {
+	job, exists := h.jobManager.GetJob(jobID)
+	if exists {
+		job.mu.Lock()
+		if job.Config != nil {
+			updater(job.Config)
+		}
+		job.mu.Unlock()
+	}
+}
+
+// CreateLab handles lab creation requests
+func (h *Handler) CreateLab(w http.ResponseWriter, r *http.Request) {
+	log.Printf("CreateLab called: method=%s, path=%s", r.Method, r.URL.Path)
+
+	if r.Method != http.MethodPost {
+		log.Printf("Method not allowed: %s", r.Method)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	h.processLabRequest(w, r, false)
 }
 
 // DryRunLab handles dry run requests
@@ -554,99 +608,7 @@ func (h *Handler) DryRunLab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse form data - handle both multipart and urlencoded (50MB for template files)
-	if err := h.parseForm(w, r, 50<<20); err != nil {
-		log.Printf("Failed to parse form: %v", err)
-		h.renderHTMLError(w, "Form Parse Error", fmt.Sprintf("Failed to parse form: %v", err))
-		return
-	}
-
-	// Get provider from form (default to "ovh" for backward compatibility)
-	provider := r.FormValue("provider")
-	if provider == "" {
-		provider = "ovh"
-	}
-
-	// Get provider credentials from in-memory storage
-	providerCreds, err := h.getProviderCredentials(w, provider)
-	if err != nil {
-		return
-	}
-
-	// Create initial config without template file path
-	initialConfig := h.createLabConfigFromForm(r, providerCreds, "")
-
-	// Validate template source configuration
-	templateSource := initialConfig.TemplateSource
-	if templateSource == "" {
-		// Backward compatibility: if no source specified, check for uploaded file
-		templateSource = "upload"
-	}
-
-	if templateSource == "git" {
-		// Validate Git repository URL is provided
-		if initialConfig.TemplateGitRepo == "" {
-			h.renderHTMLError(w, "Template Configuration Error", "Repository URL is required when using Git template source")
-			return
-		}
-	} else if templateSource == "upload" {
-		// Validate file upload is provided
-		// This will be checked when saving the file
-	}
-
-	// Create job first to get jobID
-	jobID := h.jobManager.CreateJob(initialConfig)
-
-	// Create job directory
-	jobDir := filepath.Join(h.pulumiExec.GetWorkDir(), jobID)
-	if err := os.MkdirAll(jobDir, 0755); err != nil {
-		log.Printf("Failed to create job directory: %v", err)
-		h.renderHTMLError(w, "Job Creation Error", fmt.Sprintf("Failed to create job directory: %v", err))
-		return
-	}
-
-	// Handle template file upload only if source is "upload"
-	var templateFilePath string
-	if templateSource == "upload" {
-		var err error
-		templateFilePath, err = h.saveUploadedTemplateFile(r, jobDir)
-		if err != nil {
-			log.Printf("Failed to save template file: %v", err)
-			h.renderHTMLError(w, "Template Upload Error", fmt.Sprintf("Failed to save template file: %v", err))
-			return
-		}
-		if templateFilePath == "" {
-			h.renderHTMLError(w, "Template Configuration Error", "Template file is required when using upload source")
-			return
-		}
-		// Update config with template file path (relative to job directory)
-		initialConfig.TemplateFilePath = templateFilePath
-		// Update job config
-		job, exists := h.jobManager.GetJob(jobID)
-		if exists {
-			job.mu.Lock()
-			job.Config.TemplateFilePath = templateFilePath
-			job.Config.TemplateSource = templateSource
-			job.mu.Unlock()
-		}
-	} else {
-		// Update job config with Git template info
-		job, exists := h.jobManager.GetJob(jobID)
-		if exists {
-			job.mu.Lock()
-			job.Config.TemplateSource = templateSource
-			job.Config.TemplateGitRepo = initialConfig.TemplateGitRepo
-			job.Config.TemplateGitFolder = initialConfig.TemplateGitFolder
-			job.Config.TemplateGitBranch = initialConfig.TemplateGitBranch
-			job.mu.Unlock()
-		}
-	}
-
-	_, html := h.executeLabJobWithID(initialConfig, true, jobID)
-
-	// Return job status div for HTMX to display with proper polling
-	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprint(w, html)
+	h.processLabRequest(w, r, true)
 }
 
 // LaunchLab handles launching a real deployment after a successful dry run
@@ -931,33 +893,23 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try PostFormValue first (POST-only), then FormValue (includes query params)
-	email := r.PostFormValue("email")
-	if email == "" {
-		email = r.FormValue("email")
-	}
-
-	labID := r.PostFormValue("lab_id")
-	if labID == "" {
-		labID = r.FormValue("lab_id")
-	}
-
-	// Debug logging - show all form values
-	log.Printf("RequestWorkspace - PostForm: %v", r.PostForm)
-	log.Printf("RequestWorkspace - Form: %v", r.Form)
-	log.Printf("RequestWorkspace - Email: %q, LabID: %q", email, labID)
+	// Get form values using helper
+	email := getFormValue(r, "email")
+	labID := getFormValue(r, "lab_id")
 
 	// Validate email
 	if email == "" {
-		log.Printf("RequestWorkspace - Email validation failed. Available form keys: %v", getFormKeys(r))
-		http.Error(w, fmt.Sprintf("Email is required. Received form data: %v", getFormKeys(r)), http.StatusBadRequest)
+		http.Error(w, "Email is required", http.StatusBadRequest)
+		return
+	}
+	if !validateEmail(email) {
+		http.Error(w, "Invalid email format", http.StatusBadRequest)
 		return
 	}
 
 	// Validate lab ID
 	if labID == "" {
-		log.Printf("RequestWorkspace - LabID validation failed. Available form keys: %v", getFormKeys(r))
-		http.Error(w, fmt.Sprintf("Lab ID is required. Received form data: %v", getFormKeys(r)), http.StatusBadRequest)
+		http.Error(w, "Lab ID is required", http.StatusBadRequest)
 		return
 	}
 
@@ -1246,17 +1198,10 @@ func (h *Handler) SetCredentials(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get provider from form data
-	provider := r.PostFormValue("provider")
-	if provider == "" {
-		provider = r.FormValue("provider")
-	}
+	provider := getFormValue(r, "provider")
 	if provider == "" {
 		provider = "ovh" // Default to OVH for backward compatibility
 	}
-
-	// Debug: log received form values (without secrets)
-	log.Printf("SetCredentials - Provider: %s, Content-Type: %s", provider, r.Header.Get("Content-Type"))
-	log.Printf("SetCredentials - Form keys: %v", getFormKeys(r))
 
 	// Handle provider-specific credential creation
 	switch provider {
@@ -1274,37 +1219,12 @@ func (h *Handler) SetCredentials(w http.ResponseWriter, r *http.Request) {
 
 // setOVHCredentialsFromForm handles OVH-specific credential setting
 func (h *Handler) setOVHCredentialsFromForm(w http.ResponseWriter, r *http.Request) {
-	// Try PostFormValue first (POST-only), then FormValue (includes query params)
-	applicationKey := r.PostFormValue("ovh_application_key")
-	if applicationKey == "" {
-		applicationKey = r.FormValue("ovh_application_key")
-	}
-
-	applicationSecret := r.PostFormValue("ovh_application_secret")
-	if applicationSecret == "" {
-		applicationSecret = r.FormValue("ovh_application_secret")
-	}
-
-	consumerKey := r.PostFormValue("ovh_consumer_key")
-	if consumerKey == "" {
-		consumerKey = r.FormValue("ovh_consumer_key")
-	}
-
-	serviceName := r.PostFormValue("ovh_service_name")
-	if serviceName == "" {
-		serviceName = r.FormValue("ovh_service_name")
-	}
-
-	endpoint := r.PostFormValue("ovh_endpoint")
-	if endpoint == "" {
-		endpoint = r.FormValue("ovh_endpoint")
-	}
-
-	log.Printf("SetCredentials(OVH) - Service Name present: %v, value: %s", serviceName != "", serviceName)
-	log.Printf("SetCredentials(OVH) - Endpoint present: %v, value: %s", endpoint != "", endpoint)
-	log.Printf("SetCredentials(OVH) - ApplicationKey present: %v", applicationKey != "")
-	log.Printf("SetCredentials(OVH) - ApplicationSecret present: %v", applicationSecret != "")
-	log.Printf("SetCredentials(OVH) - ConsumerKey present: %v", consumerKey != "")
+	// Get form values using helper
+	applicationKey := getFormValue(r, "ovh_application_key")
+	applicationSecret := getFormValue(r, "ovh_application_secret")
+	consumerKey := getFormValue(r, "ovh_consumer_key")
+	serviceName := getFormValue(r, "ovh_service_name")
+	endpoint := getFormValue(r, "ovh_endpoint")
 
 	creds := &OVHCredentials{
 		ApplicationKey:    applicationKey,
@@ -1313,9 +1233,6 @@ func (h *Handler) setOVHCredentialsFromForm(w http.ResponseWriter, r *http.Reque
 		ServiceName:       serviceName,
 		Endpoint:          endpoint,
 	}
-
-	// Debug: log what we're trying to save (without secrets)
-	log.Printf("SetCredentials(OVH) - Attempting to save credentials for service: %s, endpoint: %s", creds.ServiceName, creds.Endpoint)
 
 	if err := h.credentialsManager.SetCredentials(creds); err != nil {
 		log.Printf("Failed to set OVH credentials: %v", err)
@@ -1329,17 +1246,7 @@ func (h *Handler) setOVHCredentialsFromForm(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Verify credentials were saved
-	verifyCreds, verifyErr := h.credentialsManager.GetCredentials("ovh")
-	if verifyErr != nil {
-		log.Printf("Warning: OVH credentials saved but verification failed: %v", verifyErr)
-	} else {
-		if ovhCreds, ok := verifyCreds.(*OVHCredentials); ok {
-			log.Printf("OVH credentials verified - Service: %s, Endpoint: %s", ovhCreds.ServiceName, ovhCreds.Endpoint)
-		}
-	}
-
-	log.Printf("OVH credentials saved successfully for service: %s", creds.ServiceName)
+	log.Printf("OVH credentials saved successfully")
 	w.Header().Set("Content-Type", "text/html")
 	fmt.Fprintf(w, `
 		<div class="success-message">

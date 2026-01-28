@@ -356,24 +356,50 @@ func TestChaos_CredentialsManager_MalformedInputs(t *testing.T) {
 }
 
 func TestChaos_HashPassword_EdgeCases(t *testing.T) {
-	edgeCases := []string{
+	// Test cases that should succeed (within bcrypt's 72-byte limit)
+	validCases := []string{
 		"",
 		" ",
 		"\t\n\r",
-		strings.Repeat("a", 100000),
-		string(randomBytes(1000)),
+		strings.Repeat("a", 72), // Exactly at the limit
+		string(randomBytes(72)), // Exactly at the limit
 	}
 
-	for _, input := range edgeCases {
+	for _, input := range validCases {
 		defer func() {
 			if r := recover(); r != nil {
 				t.Errorf("Panic on input length %d: %v", len(input), r)
 			}
 		}()
 
-		hash := hashPassword(input)
-		if len(hash) != 64 {
-			t.Errorf("Hash length %d for input length %d", len(hash), len(input))
+		hash, err := hashPassword(input)
+		if err != nil {
+			t.Errorf("hashPassword() error for input length %d: %v", len(input), err)
+			continue
+		}
+		// Bcrypt hashes are typically 60 characters
+		if len(hash) < 50 {
+			t.Errorf("Hash length %d for input length %d (expected >= 50)", len(hash), len(input))
+		}
+	}
+
+	// Test cases that should fail (exceed bcrypt's 72-byte limit)
+	invalidCases := []string{
+		strings.Repeat("a", 100000), // Way over the limit
+		string(randomBytes(1000)),   // Way over the limit
+	}
+
+	for _, input := range invalidCases {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("Panic on input length %d: %v", len(input), r)
+			}
+		}()
+
+		hash, err := hashPassword(input)
+		// Bcrypt should reject passwords longer than 72 bytes
+		if err == nil {
+			t.Errorf("hashPassword() should return error for input length %d (exceeds 72-byte limit), got hash length %d", len(input), len(hash))
 		}
 	}
 }

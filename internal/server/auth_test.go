@@ -1,11 +1,12 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
-	"strings"
 	"testing"
 	"time"
 )
@@ -14,62 +15,77 @@ func TestHashPassword(t *testing.T) {
 	tests := []struct {
 		name     string
 		password string
-		wantLen  int
 	}{
 		{
 			name:     "simple password",
 			password: "admin",
-			wantLen:  64, // SHA-256 produces 64 hex characters
 		},
 		{
 			name:     "complex password",
 			password: "MyP@ssw0rd!123",
-			wantLen:  64,
 		},
 		{
 			name:     "empty password",
 			password: "",
-			wantLen:  64,
 		},
 		{
 			name:     "unicode password",
 			password: "пароль日本語",
-			wantLen:  64,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := hashPassword(tt.password)
-			if len(got) != tt.wantLen {
-				t.Errorf("hashPassword() = %v, want length %v", len(got), tt.wantLen)
+			got, err := hashPassword(tt.password)
+			if err != nil {
+				t.Errorf("hashPassword() error = %v", err)
+				return
 			}
-
-			// Verify it's a valid hex string
-			for _, c := range got {
-				if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
-					t.Errorf("hashPassword() contains invalid hex character: %c", c)
-				}
+			if len(got) == 0 {
+				t.Errorf("hashPassword() returned empty hash")
+			}
+			// Bcrypt hashes are typically 60 characters
+			if len(got) < 50 {
+				t.Errorf("hashPassword() = %v, want length >= 50", len(got))
 			}
 		})
 	}
 }
 
-func TestHashPasswordDeterministic(t *testing.T) {
+func TestHashPasswordNotDeterministic(t *testing.T) {
 	password := "testpassword123"
-	hash1 := hashPassword(password)
-	hash2 := hashPassword(password)
+	hash1, err1 := hashPassword(password)
+	hash2, err2 := hashPassword(password)
 
-	if hash1 != hash2 {
-		t.Errorf("hashPassword() is not deterministic: %s != %s", hash1, hash2)
+	if err1 != nil || err2 != nil {
+		t.Errorf("hashPassword() error: %v, %v", err1, err2)
+		return
+	}
+
+	// Bcrypt should produce different hashes each time (due to salt)
+	if hash1 == hash2 {
+		t.Errorf("hashPassword() should not be deterministic with bcrypt: %s == %s", hash1, hash2)
+	}
+
+	// But both should verify correctly
+	if !comparePassword(hash1, password) {
+		t.Errorf("hash1 does not verify correctly")
+	}
+	if !comparePassword(hash2, password) {
+		t.Errorf("hash2 does not verify correctly")
 	}
 }
 
 func TestHashPasswordDifferentForDifferentInputs(t *testing.T) {
 	password1 := "password1"
 	password2 := "password2"
-	hash1 := hashPassword(password1)
-	hash2 := hashPassword(password2)
+	hash1, err1 := hashPassword(password1)
+	hash2, err2 := hashPassword(password2)
+
+	if err1 != nil || err2 != nil {
+		t.Errorf("hashPassword() error: %v, %v", err1, err2)
+		return
+	}
 
 	if hash1 == hash2 {
 		t.Errorf("hashPassword() produced same hash for different passwords")
@@ -290,14 +306,26 @@ func TestConstants(t *testing.T) {
 	}
 }
 
-func TestHashPasswordKnownValue(t *testing.T) {
-	// Test with a known input/output pair (SHA-256 of "admin")
-	password := "admin"
-	expected := "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918"
-	got := hashPassword(password)
+func TestComparePassword(t *testing.T) {
+	password := "testpassword123"
+	// Hash password with SHA-256 first, then bcrypt (matching server behavior)
+	sha256Hash := sha256.Sum256([]byte(password))
+	passwordHashHex := hex.EncodeToString(sha256Hash[:])
+	hash, err := hashPassword(passwordHashHex)
+	if err != nil {
+		t.Fatalf("hashPassword() error = %v", err)
+	}
 
-	if !strings.EqualFold(got, expected) {
-		t.Errorf("hashPassword(%q) = %s, want %s", password, got, expected)
+	// Correct password hash should match
+	if !comparePassword(hash, passwordHashHex) {
+		t.Errorf("comparePassword() failed for correct password hash")
+	}
+
+	// Wrong password hash should not match
+	wrongSha256Hash := sha256.Sum256([]byte("wrongpassword"))
+	wrongPasswordHashHex := hex.EncodeToString(wrongSha256Hash[:])
+	if comparePassword(hash, wrongPasswordHashHex) {
+		t.Errorf("comparePassword() succeeded for wrong password hash")
 	}
 }
 
@@ -305,9 +333,16 @@ func TestHashPasswordKnownValue(t *testing.T) {
 
 // createTestAuthHandler creates an AuthHandler for testing
 func createTestAuthHandler() *AuthHandler {
+	// Hash passwords with SHA-256 first, then bcrypt (matching server behavior)
+	adminSha256 := sha256.Sum256([]byte("test-admin"))
+	adminHash, _ := hashPassword(hex.EncodeToString(adminSha256[:]))
+
+	studentSha256 := sha256.Sum256([]byte("test-student"))
+	studentHash, _ := hashPassword(hex.EncodeToString(studentSha256[:]))
+
 	return &AuthHandler{
-		passwordHash:        hashPassword("test-admin"),
-		studentPasswordHash: hashPassword("test-student"),
+		passwordHash:        adminHash,
+		studentPasswordHash: studentHash,
 		sessions:            make(map[string]*Session),
 		studentSessions:     make(map[string]*Session),
 		templates:           make(map[string]*template.Template),
@@ -563,8 +598,11 @@ func TestRequireStudentAuth_InvalidCookie(t *testing.T) {
 }
 
 func TestRequireStudentAuth_Disabled(t *testing.T) {
+	// Hash password with SHA-256 first, then bcrypt (matching server behavior)
+	adminSha256 := sha256.Sum256([]byte("test-admin"))
+	adminHash, _ := hashPassword(hex.EncodeToString(adminSha256[:]))
 	ah := &AuthHandler{
-		passwordHash:        hashPassword("test-admin"),
+		passwordHash:        adminHash,
 		studentPasswordHash: "", // Student login disabled
 		sessions:            make(map[string]*Session),
 		studentSessions:     make(map[string]*Session),

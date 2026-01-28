@@ -154,7 +154,7 @@
     </div>
 
     <script>
-        // Hash password using SHA-256 before sending
+        // Hash password with SHA-256 before submission
         async function hashPassword(password) {
             const encoder = new TextEncoder();
             const data = encoder.encode(password);
@@ -165,27 +165,31 @@
         }
 
         document.getElementById('login-form').addEventListener('submit', async function(e) {
-            e.preventDefault();
+            e.preventDefault(); // Prevent default form submission
             
-            const submitBtn = document.getElementById('submit-btn');
             const passwordInput = document.getElementById('password');
             const passwordHashInput = document.getElementById('password_hash');
+            const submitBtn = document.getElementById('submit-btn');
             
-            // Disable button while processing
+            const password = passwordInput.value;
+            if (!password) {
+                return; // Let HTML5 validation handle empty password
+            }
+            
+            // Disable submit button
             submitBtn.disabled = true;
             submitBtn.textContent = 'Logging in...';
             
             try {
-                // Hash the password
-                const password = passwordInput.value;
-                const hashedPassword = await hashPassword(password);
+                // Hash password with SHA-256
+                const hash = await hashPassword(password);
                 
-                // Set the hashed password in the hidden field
-                passwordHashInput.value = hashedPassword;
+                // Set the hash in hidden field
+                passwordHashInput.value = hash;
                 
-                // Clear the plain password field (don't send it)
+                // Clear the plaintext password field
                 passwordInput.value = '';
-                passwordInput.name = ''; // Remove name so it's not submitted
+                passwordInput.name = ''; // Remove name to prevent submission
                 
                 // Submit the form
                 this.submit();
@@ -193,7 +197,7 @@
                 console.error('Error hashing password:', error);
                 submitBtn.disabled = false;
                 submitBtn.textContent = 'Login';
-                alert('Error processing login. Please try again.');
+                alert('An error occurred. Please try again.');
             }
         });
     </script>

@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 )
@@ -401,12 +402,12 @@ func (jm *JobManager) GetAllJobs() []*Job {
 	}
 
 	// Sort by CreatedAt descending (newest first)
-	for i := 0; i < len(jobs)-1; i++ {
-		for j := i + 1; j < len(jobs); j++ {
-			if jobs[i].CreatedAt.Before(jobs[j].CreatedAt) {
-				jobs[i], jobs[j] = jobs[j], jobs[i]
-			}
-		}
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i].CreatedAt.Before(jobs[j].CreatedAt)
+	})
+	// Reverse to get newest first
+	for i, j := 0, len(jobs)-1; i < j; i, j = i+1, j-1 {
+		jobs[i], jobs[j] = jobs[j], jobs[i]
 	}
 
 	return jobs

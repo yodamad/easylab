@@ -12,6 +12,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -44,22 +46,34 @@ type AuthHandler struct {
 	mu                  sync.RWMutex
 }
 
-// hashPassword creates a SHA-256 hash of the password
-func hashPassword(password string) string {
-	hash := sha256.Sum256([]byte(password))
-	return hex.EncodeToString(hash[:])
+// hashPassword creates a bcrypt hash of the password
+func hashPassword(password string) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", fmt.Errorf("failed to hash password: %w", err)
+	}
+	return string(hash), nil
+}
+
+// comparePassword compares a plaintext password with a bcrypt hash
+func comparePassword(hashedPassword, plainPassword string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(plainPassword))
+	return err == nil
 }
 
 // NewAuthHandler creates a new auth handler
-func NewAuthHandler() *AuthHandler {
+func NewAuthHandler() (*AuthHandler, error) {
 	password := os.Getenv(EnvAdminPassword)
 	if password == "" {
-		log.Printf("WARNING: %s environment variable not set. Using default password 'admin'", EnvAdminPassword)
-		password = "admin"
+		return nil, fmt.Errorf("%s environment variable not set. Admin password is required", EnvAdminPassword)
 	}
 
-	// Store the hash of the password
-	passwordHash := hashPassword(password)
+	// Hash password with SHA-256 first, then bcrypt for secure storage
+	sha256Hash := sha256.Sum256([]byte(password))
+	passwordHash, err := hashPassword(hex.EncodeToString(sha256Hash[:]))
+	if err != nil {
+		return nil, fmt.Errorf("failed to hash admin password: %w", err)
+	}
 	log.Printf("Admin password hash initialized")
 
 	// Initialize student password
@@ -69,7 +83,12 @@ func NewAuthHandler() *AuthHandler {
 		log.Printf("WARNING: %s environment variable not set. Student login will be disabled.", EnvStudentPassword)
 		studentPasswordHash = ""
 	} else {
-		studentPasswordHash = hashPassword(studentPassword)
+		// Hash password with SHA-256 first, then bcrypt for secure storage
+		sha256Hash := sha256.Sum256([]byte(studentPassword))
+		studentPasswordHash, err = hashPassword(hex.EncodeToString(sha256Hash[:]))
+		if err != nil {
+			return nil, fmt.Errorf("failed to hash student password: %w", err)
+		}
 		log.Printf("Student password hash initialized")
 	}
 
@@ -79,7 +98,7 @@ func NewAuthHandler() *AuthHandler {
 		sessions:            make(map[string]*Session),
 		studentSessions:     make(map[string]*Session),
 		templates:           make(map[string]*template.Template),
-	}
+	}, nil
 }
 
 // generateToken creates a secure random token
@@ -150,7 +169,7 @@ func (ah *AuthHandler) getTemplate(filename string) (*template.Template, error) 
 
 	// Map filename to full path
 	templatePaths := map[string]string{
-		"login.html":        "web/login.html",
+		"login.html":         "web/login.html",
 		"student-login.html": "web/student-login.html",
 	}
 
@@ -213,11 +232,16 @@ func (ah *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The client sends the password already hashed
-	receivedHash := r.FormValue("password_hash")
+	// Get password hash from form (client-side SHA-256 hashed)
+	passwordHash := r.FormValue("password_hash")
+	if passwordHash == "" {
+		log.Printf("Failed login attempt: empty password hash")
+		http.Redirect(w, r, "/login?error=Invalid+password", http.StatusSeeOther)
+		return
+	}
 
-	// Compare hashes
-	if receivedHash != ah.passwordHash {
+	// Compare received SHA-256 hash with stored bcrypt(SHA-256(password)) hash
+	if !comparePassword(ah.passwordHash, passwordHash) {
 		log.Printf("Failed login attempt")
 		http.Redirect(w, r, "/login?error=Invalid+password", http.StatusSeeOther)
 		return
@@ -226,13 +250,16 @@ func (ah *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	// Create session
 	token := ah.createSession()
 
+	// Determine if HTTPS is being used
+	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+
 	// Set cookie
 	http.SetCookie(w, &http.Cookie{
 		Name:     SessionCookieName,
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false, // Set to true in production with HTTPS
+		Secure:   isSecure,
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(SessionExpiry.Seconds()),
 	})
@@ -360,11 +387,16 @@ func (ah *AuthHandler) HandleStudentLogin(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// The client sends the password already hashed
-	receivedHash := r.FormValue("password_hash")
+	// Get password hash from form (client-side SHA-256 hashed)
+	passwordHash := r.FormValue("password_hash")
+	if passwordHash == "" {
+		log.Printf("Failed student login attempt: empty password hash")
+		http.Redirect(w, r, "/student/login?error=Invalid+password", http.StatusSeeOther)
+		return
+	}
 
-	// Compare hashes
-	if receivedHash != ah.studentPasswordHash {
+	// Compare received SHA-256 hash with stored bcrypt(SHA-256(password)) hash
+	if !comparePassword(ah.studentPasswordHash, passwordHash) {
 		log.Printf("Failed student login attempt")
 		http.Redirect(w, r, "/student/login?error=Invalid+password", http.StatusSeeOther)
 		return
@@ -373,13 +405,16 @@ func (ah *AuthHandler) HandleStudentLogin(w http.ResponseWriter, r *http.Request
 	// Create session
 	token := ah.createStudentSession()
 
+	// Determine if HTTPS is being used
+	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+
 	// Set cookie
 	http.SetCookie(w, &http.Cookie{
 		Name:     StudentSessionCookieName,
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false, // Set to true in production with HTTPS
+		Secure:   isSecure,
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(SessionExpiry.Seconds()),
 	})

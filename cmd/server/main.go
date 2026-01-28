@@ -3,10 +3,10 @@ package main
 import (
 	"bufio"
 	"context"
-	"flag"
-	"fmt"
 	"easylab/internal/server"
 	"easylab/utils"
+	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -159,7 +159,11 @@ func main() {
 	// Initialize authHandler
 	go func() {
 		defer wg.Done()
-		authHandler = server.NewAuthHandler()
+		var err error
+		authHandler, err = server.NewAuthHandler()
+		if err != nil {
+			log.Fatalf("Failed to initialize auth handler: %v", err)
+		}
 	}()
 
 	// Wait for independent components
