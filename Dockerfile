@@ -42,6 +42,15 @@ COPY --from=builder /app/templates ./templates
 # Create directories for data persistence and Go cache (including sumdb)
 RUN mkdir -p /app/data /app/jobs /app/.go/pkg/mod /app/.go/pkg/sumdb /app/.go/cache
 
+# Install required Pulumi plugins before switching to non-root user
+# Set PULUMI_HOME to a writable location
+ENV PULUMI_HOME=/app/.pulumi
+RUN mkdir -p /app/.pulumi/plugins && \
+    pulumi plugin install resource kubernetes v4.24.1 && \
+    pulumi plugin install resource command v1.1.3 && \
+    pulumi plugin install resource ovh v2.10.0 --server github://api.github.com/ovh/pulumi-ovh && \
+    chown -R appuser:appgroup /app/.pulumi
+
 # Change ownership of all files to appuser (including web directory and Go cache)
 RUN chown -R appuser:appgroup /app
 
@@ -65,6 +74,8 @@ ENV TEMPLATES_DIR=/app/templates
 ENV PULUMI_BACKEND_URL=file://
 ENV PULUMI_SKIP_UPDATE_CHECK=true
 ENV PULUMI_CONFIG_PASSPHRASE=passphrase
+# Set Pulumi home directory for plugins
+ENV PULUMI_HOME=/app/.pulumi
 # Set Go cache directories to writable locations
 ENV GOMODCACHE=/app/.go/pkg/mod
 ENV GOCACHE=/app/.go/cache
