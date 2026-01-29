@@ -1375,6 +1375,24 @@ body.student-dashboard-page {
     font-size: 1.5rem;
 }
 
+.student-form-group {
+    margin-bottom: 1.5rem;
+}
+
+.student-form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.student-form-group small {
+    display: block;
+    margin-top: 0.25rem;
+    font-size: 0.875rem;
+    color: var(--text-light);
+}
+
 .student-form-group input,
 .student-form-group select {
     width: 100%;
@@ -1473,6 +1491,20 @@ body.student-dashboard-page {
     padding: 0.5rem;
     border-radius: var(--radius);
     word-break: break-all;
+}
+
+.student-credential-item-value a {
+    color: #2563eb;
+    text-decoration: underline;
+}
+
+.student-credential-item-value a:hover {
+    color: #1d4ed8;
+}
+
+.student-credential-item-value em {
+    font-style: italic;
+    color: var(--text-light);
 }
 
 .student-loading {
