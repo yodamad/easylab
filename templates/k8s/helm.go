@@ -30,6 +30,7 @@ func InitHelm(ctx *pulumi.Context, provider *k8s.Provider, chart HelmChartInfo, 
 		SkipCrds: pulumi.Bool(chart.crds),
 		Version:  pulumi.String(chart.Version),
 		Values:   chart.Values,
+		Timeout:  pulumi.Int(900), // 15 minutes timeout
 	}, pulumi.Provider(provider), pulumi.DependsOn([]pulumi.Resource{namespace}))
 	if err != nil {
 		return nil, err
