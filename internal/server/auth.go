@@ -179,11 +179,13 @@ func (ah *AuthHandler) getTemplate(filename string) (*template.Template, error) 
 	}
 
 	var err error
-	tmpl, err = template.ParseFiles(tmplPath)
+	// Parse base template and page template together
+	tmpl, err = template.ParseFiles("web/base.html", tmplPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load template %s: %w", tmplPath, err)
 	}
 
+	// Execute the base template which will include the page-specific blocks
 	ah.templates[filename] = tmpl
 	return tmpl, nil
 }
@@ -215,7 +217,7 @@ func (ah *AuthHandler) ServeLogin(w http.ResponseWriter, r *http.Request) {
 		"Error": r.URL.Query().Get("error"),
 	}
 
-	if err := tmpl.Execute(w, data); err != nil {
+	if err := tmpl.ExecuteTemplate(w, "base", data); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to execute template: %v", err), http.StatusInternalServerError)
 	}
 }
@@ -365,7 +367,7 @@ func (ah *AuthHandler) ServeStudentLogin(w http.ResponseWriter, r *http.Request)
 		"Error": r.URL.Query().Get("error"),
 	}
 
-	if err := tmpl.Execute(w, data); err != nil {
+	if err := tmpl.ExecuteTemplate(w, "base", data); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to execute template: %v", err), http.StatusInternalServerError)
 	}
 }

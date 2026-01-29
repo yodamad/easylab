@@ -1,206 +1,35 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EasyLab - Student Login</title>
-    <link rel="stylesheet" href="/static/style.css">
-    <style>
-        body {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            padding: 1rem;
-            background: linear-gradient(135deg, #4a5568 0%, #2d3748 100%);
-        }
+{{define "title"}}Student Login{{end}}
 
-        .login-container {
-            max-width: 400px;
-            width: 100%;
-            background: var(--background);
-            border-radius: var(--radius);
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-            overflow: hidden;
-        }
+{{define "body-class"}}student-login-page{{end}}
 
-        .login-header {
-            background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
-            color: white;
-            padding: 2rem;
-            text-align: center;
-        }
-
-        .login-header h1 {
-            font-size: 1.75rem;
-            font-weight: 700;
-            margin-bottom: 0.5rem;
-        }
-
-        .login-header .icon {
-            font-size: 3rem;
-            margin-bottom: 1rem;
-        }
-
-        .login-form {
-            padding: 2rem;
-        }
-
-        .login-form .form-group {
-            margin-bottom: 1.5rem;
-        }
-
-        .login-form label {
-            display: block;
-            font-weight: 500;
-            margin-bottom: 0.5rem;
-            color: var(--text);
-        }
-
-        .login-form input[type="password"] {
-            width: 100%;
-            padding: 0.875rem;
-            border: 2px solid var(--border);
-            border-radius: var(--radius);
-            font-size: 1rem;
-            transition: all 0.2s;
-        }
-
-        .login-form input[type="password"]:focus {
-            outline: none;
-            border-color: #48bb78;
-            box-shadow: 0 0 0 3px rgba(72, 187, 120, 0.1);
-        }
-
-        .login-form .btn {
-            width: 100%;
-            padding: 1rem;
-            font-size: 1rem;
-            font-weight: 600;
-            background: #48bb78;
-        }
-
-        .login-form .btn:hover {
-            background: #38a169;
-        }
-
-        .login-form .btn:disabled {
-            opacity: 0.7;
-            cursor: not-allowed;
-        }
-
-        .error-alert {
-            background: #fee2e2;
-            border: 1px solid #fecaca;
-            color: #991b1b;
-            padding: 0.75rem 1rem;
-            border-radius: var(--radius);
-            margin-bottom: 1.5rem;
-            font-size: 0.875rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .error-alert::before {
-            content: '⚠️';
-        }
-
-        .login-footer {
-            text-align: center;
-            padding: 1rem 2rem 2rem;
-            color: var(--text-light);
-            font-size: 0.875rem;
-        }
-
-        .secure-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.25rem;
-            font-size: 0.75rem;
-            color: var(--success);
-            margin-top: 0.5rem;
-        }
-    </style>
-</head>
-<body>
-    <div class="login-container">
-        <div class="login-header">
-            <div class="icon">🎓</div>
-            <h1>Student Portal</h1>
-            <p>Request your workspace</p>
-        </div>
-
-        <form id="login-form" class="login-form" action="/student/login" method="POST">
-            {{if .Error}}
-            <div class="error-alert">
-                {{.Error}}
-            </div>
-            {{end}}
-
-            <div class="form-group">
-                <label for="password">Student Password</label>
-                <input type="password" id="password" name="password_plain" required autofocus placeholder="Enter student password" autocomplete="current-password">
-                <input type="hidden" id="password_hash" name="password_hash">
-                <div class="secure-badge">🔒 Password is hashed before transmission</div>
-            </div>
-
-            <button type="submit" id="submit-btn" class="btn btn-primary">Login</button>
-        </form>
-
-        <div class="login-footer">
-            <p>Contact your instructor if you need access.</p>
-        </div>
+{{define "body"}}
+<div class="login-container">
+    <div class="login-header student-login-header">
+        <img src="/static/logo.png" alt="EasyLab Logo" class="login-logo">
+        <h1>Student Portal</h1>
+        <p>Request your workspace</p>
     </div>
 
-    <script>
-        // Hash password with SHA-256 before submission
-        async function hashPassword(password) {
-            const encoder = new TextEncoder();
-            const data = encoder.encode(password);
-            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-            return hashHex;
-        }
+    <form id="login-form" class="login-form student-login-form" action="/student/login" method="POST">
+        {{if .Error}}
+        <div class="error-alert">
+            {{.Error}}
+        </div>
+        {{end}}
 
-        document.getElementById('login-form').addEventListener('submit', async function(e) {
-            e.preventDefault(); // Prevent default form submission
-            
-            const passwordInput = document.getElementById('password');
-            const passwordHashInput = document.getElementById('password_hash');
-            const submitBtn = document.getElementById('submit-btn');
-            
-            const password = passwordInput.value;
-            if (!password) {
-                return; // Let HTML5 validation handle empty password
-            }
-            
-            // Disable submit button
-            submitBtn.disabled = true;
-            submitBtn.textContent = 'Logging in...';
-            
-            try {
-                // Hash password with SHA-256
-                const hash = await hashPassword(password);
-                
-                // Set the hash in hidden field
-                passwordHashInput.value = hash;
-                
-                // Clear the plaintext password field
-                passwordInput.value = '';
-                passwordInput.name = ''; // Remove name to prevent submission
-                
-                // Submit the form
-                this.submit();
-            } catch (error) {
-                console.error('Error hashing password:', error);
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Login';
-                alert('An error occurred. Please try again.');
-            }
-        });
-    </script>
-</body>
-</html>
+        <div class="form-group">
+            <label for="password">Student Password</label>
+            <input type="password" id="password" name="password_plain" required autofocus placeholder="Enter student password" autocomplete="current-password">
+            <input type="hidden" id="password_hash" name="password_hash">
+            <div class="secure-badge">🔒 Password is hashed before transmission</div>
+        </div>
 
+        <button type="submit" id="submit-btn" class="btn btn-primary">Login</button>
+    </form>
+
+    <div class="login-footer">
+        <p>Contact your instructor if you need access.</p>
+    </div>
+</div>
+<script src="/static/login.js"></script>
+{{end}}

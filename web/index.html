@@ -1,165 +1,33 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EasyLab - Home</title>
-    <link rel="stylesheet" href="/static/style.css">
-    <style>
-        body {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            padding: 1rem;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        }
+{{define "title"}}Home{{end}}
 
-        .home-container {
-            max-width: 800px;
-            width: 100%;
-            background: var(--background);
-            border-radius: var(--radius);
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-            overflow: hidden;
-        }
+{{define "body-class"}}home-page{{end}}
 
-        .home-header {
-            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
-            color: white;
-            padding: 3rem 2rem;
-            text-align: center;
-        }
+{{define "body"}}
+<div class="home-container">
+    <div class="home-header">
+        <img src="/static/logo.png" alt="EasyLab Logo" class="home-logo">
+        <h1>EasyLab</h1>
+        <p>Welcome to the EasyLab platform</p>
+    </div>
 
-        .home-header h1 {
-            font-size: 2.5rem;
-            font-weight: 700;
-            margin-bottom: 0.5rem;
-        }
+    <div class="home-content">
+        <p class="home-content-intro">
+            Choose your space to get started
+        </p>
 
-        .home-header .icon {
-            font-size: 4rem;
-            margin-bottom: 1rem;
-        }
+        <div class="options-grid">
+            <a href="/student/login" class="option-card student">
+                <div class="card-icon">🎓</div>
+                <h2>Student Space</h2>
+                <p>Access your workspace and request a new development environment</p>
+            </a>
 
-        .home-header p {
-            font-size: 1.125rem;
-            opacity: 0.95;
-        }
-
-        .home-content {
-            padding: 3rem 2rem;
-        }
-
-        .options-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 2rem;
-            margin-top: 2rem;
-        }
-
-        .option-card {
-            background: var(--surface);
-            border: 2px solid var(--border);
-            border-radius: var(--radius);
-            padding: 2rem;
-            text-align: center;
-            transition: all 0.3s ease;
-            cursor: pointer;
-            text-decoration: none;
-            color: var(--text);
-            display: block;
-        }
-
-        .option-card:hover {
-            transform: translateY(-4px);
-            box-shadow: var(--shadow-lg);
-            border-color: var(--primary-color);
-        }
-
-        .option-card .card-icon {
-            font-size: 3.5rem;
-            margin-bottom: 1rem;
-        }
-
-        .option-card h2 {
-            font-size: 1.5rem;
-            font-weight: 600;
-            margin-bottom: 0.75rem;
-            color: var(--text);
-        }
-
-        .option-card p {
-            color: var(--text-light);
-            font-size: 0.9375rem;
-            line-height: 1.6;
-        }
-
-        .option-card.student {
-            border-color: #48bb78;
-        }
-
-        .option-card.student:hover {
-            border-color: #38a169;
-            background: #f0fff4;
-        }
-
-        .option-card.admin {
-            border-color: var(--primary-color);
-        }
-
-        .option-card.admin:hover {
-            border-color: var(--primary-hover);
-            background: #eff6ff;
-        }
-
-        @media (max-width: 768px) {
-            .home-header h1 {
-                font-size: 2rem;
-            }
-
-            .home-header .icon {
-                font-size: 3rem;
-            }
-
-            .options-grid {
-                grid-template-columns: 1fr;
-                gap: 1.5rem;
-            }
-
-            .home-content {
-                padding: 2rem 1.5rem;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="home-container">
-        <div class="home-header">
-            <div class="icon">🚀</div>
-            <h1>EasyLab</h1>
-            <p>Welcome to the EasyLab platform</p>
-        </div>
-
-        <div class="home-content">
-            <p style="text-align: center; color: var(--text-light); margin-bottom: 1rem;">
-                Choose your space to get started
-            </p>
-
-            <div class="options-grid">
-                <a href="/student/login" class="option-card student">
-                    <div class="card-icon">🎓</div>
-                    <h2>Student Space</h2>
-                    <p>Access your workspace and request a new development environment</p>
-                </a>
-
-                <a href="/login" class="option-card admin">
-                    <div class="card-icon">⚙️</div>
-                    <h2>Admin Space</h2>
-                    <p>Create and manage lab environments, configure infrastructure</p>
-                </a>
-            </div>
+            <a href="/login" class="option-card admin">
+                <div class="card-icon">⚙️</div>
+                <h2>Admin Space</h2>
+                <p>Create and manage lab environments, configure infrastructure</p>
+            </a>
         </div>
     </div>
-</body>
-</html>
+</div>
+{{end}}

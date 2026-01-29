@@ -57,6 +57,15 @@ header {
 
 .header-title {
     text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.header-logo {
+    height: 2.5rem;
+    width: auto;
+    object-fit: contain;
 }
 
 header h1 {
@@ -998,5 +1007,737 @@ select:focus-visible {
     * {
         transition: none !important;
         animation: none !important;
+    }
+}
+
+/* ============================================
+   HOME PAGE STYLES
+   ============================================ */
+
+body.home-page {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 1rem;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.home-container {
+    max-width: 800px;
+    width: 100%;
+    background: var(--background);
+    border-radius: var(--radius);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+
+.home-header {
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+    color: white;
+    padding: 3rem 2rem;
+    text-align: center;
+}
+
+.home-header h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+}
+
+.home-logo {
+    height: 4rem;
+    width: auto;
+    margin-bottom: 1rem;
+    object-fit: contain;
+}
+
+.home-header p {
+    font-size: 1.125rem;
+    opacity: 0.95;
+}
+
+.home-content {
+    padding: 3rem 2rem;
+}
+
+.options-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 2rem;
+    margin-top: 2rem;
+}
+
+.option-card {
+    background: var(--surface);
+    border: 2px solid var(--border);
+    border-radius: var(--radius);
+    padding: 2rem;
+    text-align: center;
+    transition: all 0.3s ease;
+    cursor: pointer;
+    text-decoration: none;
+    color: var(--text);
+    display: block;
+}
+
+.option-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lg);
+    border-color: var(--primary-color);
+}
+
+.option-card .card-icon {
+    font-size: 3.5rem;
+    margin-bottom: 1rem;
+}
+
+.option-card h2 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+    color: var(--text);
+}
+
+.option-card p {
+    color: var(--text-light);
+    font-size: 0.9375rem;
+    line-height: 1.6;
+}
+
+.option-card.student {
+    border-color: #48bb78;
+}
+
+.option-card.student:hover {
+    border-color: #38a169;
+    background: #f0fff4;
+}
+
+.option-card.admin {
+    border-color: var(--primary-color);
+}
+
+.option-card.admin:hover {
+    border-color: var(--primary-hover);
+    background: #eff6ff;
+}
+
+.home-content-intro {
+    text-align: center;
+    color: var(--text-light);
+    margin-bottom: 1rem;
+}
+
+@media (max-width: 768px) {
+    .home-header h1 {
+        font-size: 2rem;
+    }
+
+    .home-logo {
+        height: 3rem;
+    }
+
+    .options-grid {
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
+    }
+
+    .home-content {
+        padding: 2rem 1.5rem;
+    }
+}
+
+/* ============================================
+   LOGIN PAGE STYLES
+   ============================================ */
+
+body.login-page {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 1rem;
+    background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%);
+}
+
+.login-container {
+    max-width: 400px;
+    width: 100%;
+    background: var(--background);
+    border-radius: var(--radius);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+
+.login-header {
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+    color: white;
+    padding: 2rem;
+    text-align: center;
+}
+
+.login-header h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+}
+
+.login-logo {
+    height: 3rem;
+    width: auto;
+    margin-bottom: 1rem;
+    object-fit: contain;
+}
+
+.login-form {
+    padding: 2rem;
+}
+
+.login-form .form-group {
+    margin-bottom: 1.5rem;
+}
+
+.login-form label {
+    display: block;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+    color: var(--text);
+}
+
+.login-form input[type="password"] {
+    width: 100%;
+    padding: 0.875rem;
+    border: 2px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 1rem;
+    transition: all 0.2s;
+}
+
+.login-form input[type="password"]:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.login-form .btn {
+    width: 100%;
+    padding: 1rem;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.login-form .btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+.error-alert {
+    background: #fee2e2;
+    border: 1px solid #fecaca;
+    color: #991b1b;
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius);
+    margin-bottom: 1.5rem;
+    font-size: 0.875rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.error-alert::before {
+    content: '⚠️';
+}
+
+.login-footer {
+    text-align: center;
+    padding: 1rem 2rem 2rem;
+    color: var(--text-light);
+    font-size: 0.875rem;
+}
+
+.secure-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.75rem;
+    color: var(--success);
+    margin-top: 0.5rem;
+}
+
+/* ============================================
+   STUDENT LOGIN PAGE STYLES
+   ============================================ */
+
+body.student-login-page {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 1rem;
+    background: linear-gradient(135deg, #4a5568 0%, #2d3748 100%);
+}
+
+.student-login-header {
+    background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+    color: white;
+    padding: 2rem;
+    text-align: center;
+}
+
+.student-login-header h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+}
+
+.student-login-form input[type="password"]:focus {
+    outline: none;
+    border-color: #48bb78;
+    box-shadow: 0 0 0 3px rgba(72, 187, 120, 0.1);
+}
+
+.student-login-form .btn {
+    width: 100%;
+    padding: 1rem;
+    font-size: 1rem;
+    font-weight: 600;
+    background: #48bb78;
+}
+
+.student-login-form .btn:hover {
+    background: #38a169;
+}
+
+/* ============================================
+   STUDENT DASHBOARD STYLES
+   ============================================ */
+
+body.student-dashboard-page {
+    background: linear-gradient(135deg, #4a5568 0%, #2d3748 100%);
+    min-height: 100vh;
+}
+
+.student-dashboard-container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 2rem;
+}
+
+.student-dashboard-header {
+    background: var(--background);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.student-dashboard-header-title h1 {
+    color: #48bb78;
+    margin: 0;
+    font-size: 1.75rem;
+}
+
+.student-dashboard-header-title .subtitle {
+    color: var(--text-light);
+    margin: 0.25rem 0 0 0;
+    font-size: 0.875rem;
+}
+
+.student-logout-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: #48bb78;
+    color: white;
+    text-decoration: none;
+    border-radius: var(--radius);
+    font-weight: 500;
+    transition: background 0.2s;
+}
+
+.student-logout-btn:hover {
+    background: #38a169;
+}
+
+.student-card {
+    background: var(--background);
+    border-radius: var(--radius);
+    padding: 2rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.student-card h2 {
+    margin-top: 0;
+    color: var(--text);
+    font-size: 1.5rem;
+}
+
+.student-form-group input,
+.student-form-group select {
+    width: 100%;
+    padding: 0.75rem;
+    border: 2px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 1rem;
+    transition: border-color 0.2s;
+}
+
+.student-form-group input:focus,
+.student-form-group select:focus {
+    outline: none;
+    border-color: #48bb78;
+    box-shadow: 0 0 0 3px rgba(72, 187, 120, 0.1);
+}
+
+.student-btn {
+    padding: 0.75rem 1.5rem;
+    background: #48bb78;
+    color: white;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.student-btn:hover {
+    background: #38a169;
+}
+
+.student-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+.labs-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.lab-item {
+    padding: 1rem;
+    border: 2px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 1rem;
+    background: var(--background);
+}
+
+.lab-item:hover {
+    border-color: #48bb78;
+}
+
+.lab-item strong {
+    color: var(--text);
+    display: block;
+    margin-bottom: 0.5rem;
+}
+
+.lab-item .lab-meta {
+    color: var(--text-light);
+    font-size: 0.875rem;
+}
+
+.student-credentials-box {
+    background: #f0f9ff;
+    border: 2px solid #48bb78;
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    margin-top: 1.5rem;
+}
+
+.student-credentials-box h3 {
+    margin-top: 0;
+    color: #48bb78;
+}
+
+.student-credential-item {
+    margin-bottom: 1rem;
+}
+
+.student-credential-item label {
+    font-weight: 600;
+    color: var(--text);
+    display: block;
+    margin-bottom: 0.25rem;
+}
+
+.student-credential-item .value,
+.student-credential-item-value {
+    font-family: monospace;
+    background: white;
+    padding: 0.5rem;
+    border-radius: var(--radius);
+    word-break: break-all;
+}
+
+.student-loading {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-light);
+}
+
+.student-credentials-box-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.student-credentials-box-header h3 {
+    margin: 0;
+}
+
+.student-btn-danger {
+    background: #e53e3e;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+}
+
+.student-btn-small {
+    margin-top: 0.5rem;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+}
+
+/* ============================================
+   JOBS LIST PAGE STYLES
+   ============================================ */
+
+.jobs-page-container {
+    max-width: 1400px;
+}
+
+.jobs-table-wrapper {
+    overflow-x: auto;
+    margin-top: 1.5rem;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.jobs-table {
+    width: 100%;
+    min-width: 1200px;
+    border-collapse: collapse;
+    background: var(--background);
+}
+
+.jobs-table thead {
+    background: var(--surface);
+}
+
+.jobs-table th {
+    padding: 1rem 1.25rem;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text);
+    border-bottom: 2px solid var(--border);
+    font-size: 0.875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+}
+
+.jobs-table th:nth-child(1) {
+    width: 200px;
+    min-width: 200px;
+}
+
+.jobs-table th:nth-child(2) {
+    width: 150px;
+    min-width: 150px;
+}
+
+.jobs-table th:nth-child(3) {
+    width: 120px;
+    min-width: 120px;
+}
+
+.jobs-table th:nth-child(4) {
+    width: 140px;
+    min-width: 140px;
+}
+
+.jobs-table th:nth-child(5) {
+    width: 180px;
+    min-width: 180px;
+}
+
+.jobs-table th:nth-child(6) {
+    width: 180px;
+    min-width: 180px;
+}
+
+.jobs-table th:nth-child(7) {
+    width: 120px;
+    min-width: 120px;
+}
+
+.jobs-table td {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    vertical-align: middle;
+}
+
+.jobs-table tbody tr:hover {
+    background: var(--surface);
+}
+
+.jobs-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.job-id {
+    font-family: monospace;
+    font-size: 0.875rem;
+    color: var(--primary-color);
+    word-break: break-all;
+}
+
+.job-id a {
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+.job-id a:hover {
+    text-decoration: underline;
+}
+
+.stack-name {
+    font-weight: 500;
+    color: var(--text);
+}
+
+.job-type-badge {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.job-type-dry-run {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.job-type-real {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 3rem 2rem;
+    color: var(--text-light);
+}
+
+.empty-state-icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+}
+
+.stats-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: var(--radius);
+    margin-bottom: 1.5rem;
+}
+
+.stats-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.stats-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--primary-color);
+}
+
+.stats-label {
+    font-size: 0.875rem;
+    color: var(--text-light);
+}
+
+.timestamp {
+    font-size: 0.875rem;
+    color: var(--text-light);
+    white-space: nowrap;
+}
+
+.actions-cell {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.actions-cell .btn {
+    white-space: nowrap;
+    padding: 0.5rem;
+    min-width: 2.5rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.actions-cell .btn-icon-only {
+    padding: 0.5rem;
+    min-width: 2.5rem;
+    height: 2.5rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.actions-cell .btn-icon-only svg {
+    width: 1.25rem;
+    height: 1.25rem;
+    stroke-width: 2;
+}
+
+.actions-cell .btn-icon-only:hover svg {
+    stroke-width: 2.5;
+}
+
+@media (max-width: 1400px) {
+    .jobs-page-container {
+        max-width: 100%;
+    }
+}
+
+@media (max-width: 768px) {
+    .jobs-table {
+        font-size: 0.875rem;
+        min-width: 1000px;
+    }
+
+    .jobs-table th,
+    .jobs-table td {
+        padding: 0.75rem 1rem;
+    }
+
+    .stats-bar {
+        flex-direction: column;
+        gap: 1rem;
+        align-items: flex-start;
+    }
+
+    .actions-cell {
+        flex-direction: column;
+    }
+
+    .actions-cell .btn {
+        width: 100%;
     }
 }

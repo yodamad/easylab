@@ -396,7 +396,8 @@ func (h *Handler) serveTemplate(w http.ResponseWriter, templateName string, data
 	w.Header().Set("Expires", "0")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	if err := tmpl.Execute(w, data); err != nil {
+	// Execute the base template which includes all page-specific blocks
+	if err := tmpl.ExecuteTemplate(w, "base", data); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to execute template: %v", err), http.StatusInternalServerError)
 		return err
 	}
@@ -451,11 +452,13 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 	}
 
 	var err error
-	tmpl, err = template.ParseFiles(tmplPath)
+	// Parse base template and page template together
+	tmpl, err = template.ParseFiles("web/base.html", tmplPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load template %s: %w", tmplPath, err)
 	}
 
+	// Execute the base template which will include the page-specific blocks
 	h.templates[filename] = tmpl
 	return tmpl, nil
 }
@@ -809,6 +812,8 @@ func (h *Handler) ServeStatic(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/css")
 	} else if strings.HasSuffix(path, ".js") {
 		w.Header().Set("Content-Type", "application/javascript")
+	} else if strings.HasSuffix(path, ".png") {
+		w.Header().Set("Content-Type", "image/png")
 	}
 
 	io.Copy(w, file)
