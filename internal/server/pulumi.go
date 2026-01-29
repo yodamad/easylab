@@ -95,8 +95,17 @@ func (pe *PulumiExecutor) GetWorkDir() string {
 // getLocalBackendEnvVars returns environment variables for local file backend and Go cache
 func getLocalBackendEnvVars() map[string]string {
 	envVars := map[string]string{
-		"PULUMI_BACKEND_URL":       "file://",
-		"PULUMI_SKIP_UPDATE_CHECK": "true",
+		"PULUMI_BACKEND_URL":                          "file://",
+		"PULUMI_SKIP_UPDATE_CHECK":                    "true",
+		"PULUMI_DISABLE_AUTOMATIC_PLUGIN_ACQUISITION": "true",
+		"PULUMI_SKIP_CONFIRMATIONS":                   "true",
+	}
+
+	// Set PULUMI_CONFIG_PASSPHRASE if not already set (required for file backend encryption)
+	if passphrase := os.Getenv("PULUMI_CONFIG_PASSPHRASE"); passphrase == "" {
+		envVars["PULUMI_CONFIG_PASSPHRASE"] = "passphrase"
+	} else {
+		envVars["PULUMI_CONFIG_PASSPHRASE"] = passphrase
 	}
 
 	// Set Go cache directories if not already set (use writable locations)
@@ -374,8 +383,14 @@ func (pe *PulumiExecutor) prepareJob(jobID string, allowMissingDir bool) (*JobPr
 		pe.jobManager.AppendOutput(jobID, "Go modules downloaded successfully")
 	}
 
-	// Set up environment variables
+	// Set up environment variables - both OS env vars and Pulumi Automation API env vars
+	// Pulumi CLI reads from OS environment, so we need to set these as OS env vars too
 	originalEnv := make(map[string]string)
+
+	// Get Pulumi backend environment variables first
+	pulumiBackendEnvVars := getLocalBackendEnvVars()
+
+	// Combine OVH credentials and Pulumi backend env vars
 	envVars := map[string]string{
 		"OVH_APPLICATION_KEY":    config.OvhApplicationKey,
 		"OVH_APPLICATION_SECRET": config.OvhApplicationSecret,
@@ -383,10 +398,21 @@ func (pe *PulumiExecutor) prepareJob(jobID string, allowMissingDir bool) (*JobPr
 		"OVH_SERVICE_NAME":       config.OvhServiceName,
 	}
 
+	// Add Pulumi backend environment variables to OS environment
+	for key, value := range pulumiBackendEnvVars {
+		if original, exists := os.LookupEnv(key); exists {
+			originalEnv[key] = original
+		}
+		os.Setenv(key, value)
+		envVars[key] = value // Track for cleanup
+	}
+
 	// Save original values and set new ones
 	for key, value := range envVars {
 		if original, exists := os.LookupEnv(key); exists {
-			originalEnv[key] = original
+			if _, alreadyTracked := originalEnv[key]; !alreadyTracked {
+				originalEnv[key] = original
+			}
 		}
 		os.Setenv(key, value)
 	}
@@ -413,6 +439,137 @@ func (pe *PulumiExecutor) prepareJob(jobID string, allowMissingDir bool) (*JobPr
 
 	// Set all config values
 	pe.jobManager.AppendOutput(jobID, "Setting Pulumi configuration...")
+	if err := pe.setStackConfig(ctx, stack, config); err != nil {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to set some config: %v", err))
+		// Continue anyway - some configs might already be set
+	}
+
+	// Create output writer for streaming
+	outputWriter := &jobOutputWriter{
+		jobID:      jobID,
+		jobManager: pe.jobManager,
+	}
+	defer outputWriter.Flush()
+
+	return &JobPreparation{
+		Stack:   stack,
+		Writer:  outputWriter,
+		Context: ctx,
+	}, nil
+}
+
+// isJobDirectoryReady checks if the job directory exists and has all required files for retry
+// Returns true if directory exists and contains Pulumi.yaml, main.go, and go.mod
+func (pe *PulumiExecutor) isJobDirectoryReady(jobID string) bool {
+	jobDir := filepath.Join(pe.workDir, jobID)
+
+	// Check if directory exists
+	if _, err := os.Stat(jobDir); os.IsNotExist(err) {
+		return false
+	}
+
+	// Check for required files
+	requiredFiles := []string{
+		"Pulumi.yaml",
+		"main.go",
+		"go.mod",
+	}
+
+	for _, file := range requiredFiles {
+		filePath := filepath.Join(jobDir, file)
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// prepareJobForRetry handles setup for retrying a failed job by reusing existing files
+// This skips file generation and template processing, but still updates stack config
+func (pe *PulumiExecutor) prepareJobForRetry(jobID string) (*JobPreparation, error) {
+	// Validate job exists
+	job, exists := pe.jobManager.GetJob(jobID)
+	if !exists {
+		return nil, fmt.Errorf("job %s not found", jobID)
+	}
+	config := job.Config
+
+	// Check if job directory is ready
+	if !pe.isJobDirectoryReady(jobID) {
+		pe.jobManager.AppendOutput(jobID, "Job directory not ready, falling back to full regeneration...")
+		// Fall back to normal preparation
+		return pe.prepareJob(jobID, false)
+	}
+
+	// Create context
+	ctx := context.Background()
+
+	// Update status to running
+	pe.jobManager.UpdateJobStatus(jobID, JobStatusRunning)
+
+	// Get job directory
+	jobDir := filepath.Join(pe.workDir, jobID)
+
+	pe.jobManager.AppendOutput(jobID, "Reusing existing job directory and files...")
+
+	// Set up environment variables - both OS env vars and Pulumi Automation API env vars
+	// Pulumi CLI reads from OS environment, so we need to set these as OS env vars too
+	originalEnv := make(map[string]string)
+
+	// Get Pulumi backend environment variables first
+	pulumiBackendEnvVars := getLocalBackendEnvVars()
+
+	// Combine OVH credentials and Pulumi backend env vars
+	envVars := map[string]string{
+		"OVH_APPLICATION_KEY":    config.OvhApplicationKey,
+		"OVH_APPLICATION_SECRET": config.OvhApplicationSecret,
+		"OVH_CONSUMER_KEY":       config.OvhConsumerKey,
+		"OVH_SERVICE_NAME":       config.OvhServiceName,
+	}
+
+	// Add Pulumi backend environment variables to OS environment
+	for key, value := range pulumiBackendEnvVars {
+		if original, exists := os.LookupEnv(key); exists {
+			originalEnv[key] = original
+		}
+		os.Setenv(key, value)
+		envVars[key] = value // Track for cleanup
+	}
+
+	// Save original values and set new ones
+	for key, value := range envVars {
+		if original, exists := os.LookupEnv(key); exists {
+			if _, alreadyTracked := originalEnv[key]; !alreadyTracked {
+				originalEnv[key] = original
+			}
+		}
+		os.Setenv(key, value)
+	}
+
+	// Restore original env vars when done
+	defer func() {
+		for key, value := range originalEnv {
+			os.Setenv(key, value)
+		}
+		for key := range envVars {
+			if _, wasSet := originalEnv[key]; !wasSet {
+				os.Unsetenv(key)
+			}
+		}
+	}()
+
+	// Get existing stack (should exist from previous run)
+	// getOrCreateStack will create it if it doesn't exist
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Selecting existing Pulumi stack '%s'...", config.StackName))
+	stack, err := pe.getOrCreateStack(ctx, config.StackName, jobDir, jobID, config)
+	if err != nil {
+		pe.jobManager.SetError(jobID, fmt.Errorf("failed to get or create stack: %w", err))
+		return nil, err
+	}
+
+	// Update stack configuration (credentials may have changed)
+	pe.jobManager.AppendOutput(jobID, "Updating Pulumi configuration...")
 	if err := pe.setStackConfig(ctx, stack, config); err != nil {
 		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to set some config: %v", err))
 		// Continue anyway - some configs might already be set
@@ -493,8 +650,49 @@ func (pe *PulumiExecutor) prepareDestroyJob(jobID string) (*JobPreparation, erro
 		}
 	}
 
-	// Set up environment variables
+	// CRITICAL FIX: Ensure Pulumi.yaml exists even if directory exists
+	// After cleanupJobDirectory(jobID, true), .pulumi is preserved but Pulumi.yaml is removed
+	// Pulumi requires Pulumi.yaml to select stacks, so we must regenerate it
+	pulumiYamlPath := filepath.Join(jobDir, "Pulumi.yaml")
+	if _, err := os.Stat(pulumiYamlPath); os.IsNotExist(err) {
+		pe.jobManager.AppendOutput(jobID, "Pulumi.yaml not found, regenerating it...")
+		pulumiYaml := pe.generatePulumiYaml(config)
+		if err := os.WriteFile(pulumiYamlPath, []byte(pulumiYaml), 0644); err != nil {
+			pe.jobManager.SetError(jobID, fmt.Errorf("failed to write Pulumi.yaml: %w", err))
+			return nil, err
+		}
+		pe.jobManager.AppendOutput(jobID, "Pulumi.yaml regenerated successfully")
+	}
+
+	// Ensure source files exist (needed for pulumi destroy to know what to destroy)
+	// Check if main.go exists as indicator of source files
+	mainGoPath := filepath.Join(jobDir, "main.go")
+	if _, err := os.Stat(mainGoPath); os.IsNotExist(err) {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Source files not found, regenerating from templates in %s...", pe.templatesDir))
+		if err := pe.generateSourceFiles(jobDir, config); err != nil {
+			pe.jobManager.SetError(jobID, fmt.Errorf("failed to generate source files: %w", err))
+			return nil, err
+		}
+		pe.jobManager.AppendOutput(jobID, "Source files regenerated successfully")
+
+		// Pre-download Go modules if we just regenerated source files
+		pe.jobManager.AppendOutput(jobID, "Pre-downloading Go modules...")
+		if err := pe.downloadGoModules(jobDir, jobID); err != nil {
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to pre-download Go modules: %v. Pulumi will download them during compilation.", err))
+			// Don't fail - Pulumi can still download modules during compilation
+		} else {
+			pe.jobManager.AppendOutput(jobID, "Go modules downloaded successfully")
+		}
+	}
+
+	// Set up environment variables - both OS env vars and Pulumi Automation API env vars
+	// Pulumi CLI reads from OS environment, so we need to set these as OS env vars too
 	originalEnv := make(map[string]string)
+
+	// Get Pulumi backend environment variables first
+	pulumiBackendEnvVars := getLocalBackendEnvVars()
+
+	// Combine OVH credentials and Pulumi backend env vars
 	osEnvVars := map[string]string{
 		"OVH_APPLICATION_KEY":    config.OvhApplicationKey,
 		"OVH_APPLICATION_SECRET": config.OvhApplicationSecret,
@@ -502,9 +700,21 @@ func (pe *PulumiExecutor) prepareDestroyJob(jobID string) (*JobPreparation, erro
 		"OVH_SERVICE_NAME":       config.OvhServiceName,
 	}
 
-	for key, value := range osEnvVars {
+	// Add Pulumi backend environment variables to OS environment
+	for key, value := range pulumiBackendEnvVars {
 		if original, exists := os.LookupEnv(key); exists {
 			originalEnv[key] = original
+		}
+		os.Setenv(key, value)
+		osEnvVars[key] = value // Track for cleanup
+	}
+
+	// Set OVH credentials as OS environment variables
+	for key, value := range osEnvVars {
+		if original, exists := os.LookupEnv(key); exists {
+			if _, alreadyTracked := originalEnv[key]; !alreadyTracked {
+				originalEnv[key] = original
+			}
 		}
 		os.Setenv(key, value)
 	}
@@ -540,26 +750,105 @@ func (pe *PulumiExecutor) prepareDestroyJob(jobID string) (*JobPreparation, erro
 		auto.WorkDir(jobDir),
 		auto.EnvVars(pulumiEnvVars))
 	if err != nil {
-		// Provide detailed error message for file backend
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Error: failed to select stack '%s': %v", stackName, err))
-		pe.jobManager.AppendOutput(jobID, "This may occur if:")
-		pe.jobManager.AppendOutput(jobID, "  1. The stack was never created")
-		pe.jobManager.AppendOutput(jobID, "  2. The .pulumi directory was deleted (stack state lost)")
-		pe.jobManager.AppendOutput(jobID, "  3. The stack name doesn't match")
+		// Selection failed - try to verify if stack actually exists by listing stacks
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Initial stack selection failed: %v. Verifying stack existence...", err))
 
-		// Check if .pulumi directory exists to provide more specific guidance
-		if _, statErr := os.Stat(pulumiDir); os.IsNotExist(statErr) {
-			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack state directory (.pulumi) is missing at %s", pulumiDir))
-			pe.jobManager.AppendOutput(jobID, "In file backend mode, stack state must be preserved after deployment for destroy operations.")
-		} else {
-			// .pulumi exists but stack selection failed - might be wrong stack name or corrupted state
-			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack state directory exists but stack '%s' could not be found", stackName))
+		// Try to list stacks to verify if the stack exists
+		workspace, wsErr := auto.NewLocalWorkspace(ctx,
+			auto.WorkDir(jobDir),
+			auto.EnvVars(pulumiEnvVars))
+		if wsErr != nil {
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to create workspace for verification: %v", wsErr))
+			// Can't verify, assume stack doesn't exist
+			pe.jobManager.AppendOutput(jobID, "Cannot verify stack existence. Assuming stack does not exist.")
+			pe.jobManager.UpdateJobStatus(jobID, JobStatusDestroyed)
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy completed at %s (stack did not exist or state is missing)", time.Now().Format(time.RFC3339)))
+			return nil, nil
 		}
 
-		// For destroy operations, if stack doesn't exist, we consider it already destroyed
-		pe.jobManager.UpdateJobStatus(jobID, JobStatusDestroyed)
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy completed at %s (stack did not exist or state is missing)", time.Now().Format(time.RFC3339)))
-		return nil, nil // Special case: return nil to indicate stack didn't exist
+		stacks, listErr := workspace.ListStacks(ctx)
+		if listErr != nil {
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to list stacks: %v", listErr))
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Diagnostic: Pulumi.yaml exists: %v", func() bool {
+				_, err := os.Stat(filepath.Join(jobDir, "Pulumi.yaml"))
+				return err == nil
+			}()))
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Diagnostic: .pulumi directory exists: %v", func() bool {
+				_, err := os.Stat(pulumiDir)
+				return err == nil
+			}()))
+			// Can't list stacks, assume stack doesn't exist
+			pe.jobManager.AppendOutput(jobID, "Cannot list stacks. Assuming stack does not exist.")
+			pe.jobManager.UpdateJobStatus(jobID, JobStatusDestroyed)
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy completed at %s (stack did not exist or state is missing)", time.Now().Format(time.RFC3339)))
+			return nil, nil
+		}
+
+		// Log all available stacks for diagnostic purposes
+		if len(stacks) > 0 {
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Found %d stack(s) in workspace:", len(stacks)))
+			for _, s := range stacks {
+				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("  - %s", s.Name))
+			}
+		} else {
+			pe.jobManager.AppendOutput(jobID, "No stacks found in workspace.")
+		}
+
+		// Verify stack exists in the list
+		stackExists := false
+		for _, s := range stacks {
+			if s.Name == stackName {
+				stackExists = true
+				break
+			}
+		}
+
+		if !stackExists {
+			// Stack doesn't exist in the list - it's truly gone
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' not found in workspace. It may have been already destroyed.", stackName))
+			pe.jobManager.UpdateJobStatus(jobID, JobStatusDestroyed)
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy completed at %s (stack did not exist)", time.Now().Format(time.RFC3339)))
+			return nil, nil
+		}
+
+		// Stack exists in list but selection failed - retry selection
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' exists in workspace but selection failed. Retrying selection...", stackName))
+		stack, err = auto.SelectStackLocalSource(ctx, stackName, jobDir,
+			auto.WorkDir(jobDir),
+			auto.EnvVars(pulumiEnvVars))
+		if err != nil {
+			// Retry also failed - provide detailed error message with diagnostics
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Error: retry also failed to select stack '%s': %v", stackName, err))
+			pe.jobManager.AppendOutput(jobID, "This may occur if:")
+			pe.jobManager.AppendOutput(jobID, "  1. The stack state is corrupted")
+			pe.jobManager.AppendOutput(jobID, "  2. The stack name doesn't match exactly")
+			pe.jobManager.AppendOutput(jobID, "  3. There are permission issues accessing the stack state")
+			pe.jobManager.AppendOutput(jobID, "  4. Pulumi.yaml is missing or has incorrect project name")
+
+			// Diagnostic information
+			pulumiYamlPath := filepath.Join(jobDir, "Pulumi.yaml")
+			if _, statErr := os.Stat(pulumiYamlPath); os.IsNotExist(statErr) {
+				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Diagnostic: Pulumi.yaml is MISSING at %s", pulumiYamlPath))
+				pe.jobManager.AppendOutput(jobID, "This should have been regenerated. This may indicate a bug in the destroy preparation.")
+			} else {
+				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Diagnostic: Pulumi.yaml exists at %s", pulumiYamlPath))
+			}
+
+			if _, statErr := os.Stat(pulumiDir); os.IsNotExist(statErr) {
+				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Diagnostic: Stack state directory (.pulumi) is MISSING at %s", pulumiDir))
+				pe.jobManager.AppendOutput(jobID, "In file backend mode, stack state must be preserved after deployment for destroy operations.")
+			} else {
+				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Diagnostic: Stack state directory (.pulumi) EXISTS at %s", pulumiDir))
+				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Diagnostic: Stack '%s' exists in workspace list but selection failed", stackName))
+				pe.jobManager.AppendOutput(jobID, "The stack state may be corrupted or there may be a project name mismatch.")
+				pe.jobManager.AppendOutput(jobID, "Check that Pulumi.yaml has the correct project name (should be 'easylab').")
+			}
+
+			// Return error instead of silently failing - this is a real problem
+			pe.jobManager.SetError(jobID, fmt.Errorf("failed to select stack '%s' for destruction: %w", stackName, err))
+			return nil, fmt.Errorf("failed to select stack '%s' after retry: %w", stackName, err)
+		}
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' selected successfully on retry", stackName))
 	}
 
 	// Create output writer for streaming
@@ -735,6 +1024,102 @@ func (pe *PulumiExecutor) Execute(jobID string) error {
 	return nil
 }
 
+// ExecuteRetry runs pulumi up for a retried job, reusing existing configuration and files
+func (pe *PulumiExecutor) ExecuteRetry(jobID string) error {
+	// Prepare job with retry-optimized setup
+	prep, err := pe.prepareJobForRetry(jobID)
+	if err != nil {
+		return err
+	}
+
+	// Add execution-specific output
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Retry started at %s", time.Now().Format(time.RFC3339)))
+
+	// Run pulumi up with streaming output
+	pe.jobManager.AppendOutput(jobID, "Running pulumi up...")
+	upResult, err := prep.Stack.Up(prep.Context, optup.ProgressStreams(prep.Writer))
+	if err != nil {
+		pe.jobManager.SetError(jobID, fmt.Errorf("pulumi up failed: %w", err))
+
+		// Even if pulumi up failed, try to extract kubeconfig if cluster was created
+		pe.jobManager.AppendOutput(jobID, "Checking for kubeconfig despite deployment failure...")
+		if len(upResult.Outputs) > 0 {
+			pe.extractKubeconfigFromOutputs(jobID, upResult.Outputs)
+		} else {
+			// Try to refresh stack and get outputs directly
+			pe.jobManager.AppendOutput(jobID, "Attempting to refresh stack to get outputs...")
+			if _, refreshErr := prep.Stack.Refresh(prep.Context); refreshErr == nil {
+				if outputs, outErr := prep.Stack.Outputs(prep.Context); outErr == nil {
+					pe.extractKubeconfigFromOutputs(jobID, outputs)
+				} else {
+					pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Could not retrieve stack outputs: %v", outErr))
+				}
+			} else {
+				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Could not refresh stack: %v", refreshErr))
+			}
+		}
+
+		// Persist failed job to disk
+		if saveErr := pe.jobManager.SaveJob(jobID); saveErr != nil {
+			log.Printf("Warning: failed to persist failed job %s: %v", jobID, saveErr)
+			// Don't fail the job if persistence fails
+		}
+		return err
+	}
+
+	// Extract outputs from the result
+	pe.jobManager.AppendOutput(jobID, "Extracting stack outputs...")
+
+	// Extract kubeconfig if cluster was created
+	pe.extractKubeconfigFromOutputs(jobID, upResult.Outputs)
+
+	// Extract Coder configuration from stack outputs
+	pe.jobManager.AppendOutput(jobID, "Extracting Coder configuration...")
+	if coderURLVal, ok := upResult.Outputs["coderServerURL"]; ok {
+		job, _ := pe.jobManager.GetJob(jobID) // We know job exists from prepareJobForRetry
+		config := job.Config
+
+		coderURL := pe.outputValueToString(coderURLVal)
+		if coderURL != "" {
+			coderSessionToken := ""
+			coderOrganizationID := ""
+
+			if tokenVal, ok := upResult.Outputs["coderSessionToken"]; ok {
+				coderSessionToken = pe.outputValueToString(tokenVal)
+			}
+			if orgIDVal, ok := upResult.Outputs["coderOrganizationID"]; ok {
+				coderOrganizationID = pe.outputValueToString(orgIDVal)
+			}
+
+			// Store Coder config in job
+			if err := pe.jobManager.SetCoderConfig(jobID, coderURL, config.CoderAdminEmail, config.CoderAdminPassword, coderSessionToken, coderOrganizationID); err != nil {
+				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to store Coder config: %v", err))
+			} else {
+				pe.jobManager.AppendOutput(jobID, "Coder configuration extracted and stored successfully")
+			}
+		}
+	}
+
+	// Success
+	pe.jobManager.UpdateJobStatus(jobID, JobStatusCompleted)
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Deployment completed successfully at %s", time.Now().Format(time.RFC3339)))
+
+	// Clean up source files but preserve .pulumi directory for file backend
+	// This ensures stack state is available for future destroy operations
+	if err := pe.cleanupJobDirectory(jobID, true); err != nil {
+		log.Printf("Warning: failed to cleanup job directory for %s: %v", jobID, err)
+		// Don't fail the job if cleanup fails
+	}
+
+	// Persist completed job to disk
+	if err := pe.jobManager.SaveJob(jobID); err != nil {
+		log.Printf("Warning: failed to persist job %s: %v", jobID, err)
+		// Don't fail the job if persistence fails
+	}
+
+	return nil
+}
+
 // Preview runs pulumi preview for a given job (dry run)
 func (pe *PulumiExecutor) Preview(jobID string) error {
 	// Prepare job with common setup
@@ -789,38 +1174,61 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 
 	// Run pulumi destroy with streaming output
 	pe.jobManager.AppendOutput(jobID, "Running pulumi destroy...")
-	_, err = prep.Stack.Destroy(prep.Context, optdestroy.ProgressStreams(prep.Writer))
+	destroyResult, err := prep.Stack.Destroy(prep.Context, optdestroy.ProgressStreams(prep.Writer))
 	if err != nil {
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: pulumi destroy failed: %v. Continuing with stack removal...", err))
-		// Continue with stack removal even if destroy failed
+		// Destroy failed - don't continue with stack removal or mark as destroyed
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("ERROR: pulumi destroy failed: %v", err))
+		pe.jobManager.AppendOutput(jobID, "Destroy operation failed. Resources may still exist in the cloud.")
+		pe.jobManager.AppendOutput(jobID, "Stack state is preserved. You can retry the destroy operation.")
+		pe.jobManager.SetError(jobID, fmt.Errorf("pulumi destroy failed: %w", err))
+
+		// Persist failed job to disk so it can be retried
+		if saveErr := pe.jobManager.SaveJob(jobID); saveErr != nil {
+			log.Printf("Warning: failed to persist failed destroy job %s: %v", jobID, saveErr)
+		}
+
+		return fmt.Errorf("destroy failed: %w", err)
+	}
+
+	// Destroy succeeded - verify stack is empty before proceeding
+	pe.jobManager.AppendOutput(jobID, "Destroy completed successfully. Verifying stack state...")
+	if destroyResult.Summary.ResourceChanges != nil {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy summary: %+v", destroyResult.Summary))
 	}
 
 	// Get environment variables including OVH credentials
 	envVars := getPulumiEnvVars(job.Config)
 
-	// Remove the stack from the workspace
+	// Remove the stack from the workspace only after successful destroy
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Removing stack '%s' from workspace...", stackName))
 	workspace, wsErr := auto.NewLocalWorkspace(prep.Context,
 		auto.WorkDir(jobDir),
 		auto.EnvVars(envVars))
 	if wsErr != nil {
 		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to create workspace for stack removal: %v", wsErr))
-		// Continue with cleanup even if workspace creation failed
+		pe.jobManager.AppendOutput(jobID, "Stack resources were destroyed, but stack metadata removal failed.")
+		// Don't fail the job - resources are destroyed, just metadata cleanup failed
 	} else {
 		if removeErr := workspace.RemoveStack(prep.Context, stackName); removeErr != nil {
 			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to remove stack from workspace: %v", removeErr))
-			// Continue with cleanup even if stack removal failed
+			pe.jobManager.AppendOutput(jobID, "Stack resources were destroyed, but stack metadata removal failed.")
+			// Don't fail the job - resources are destroyed, just metadata cleanup failed
 		} else {
 			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' removed from workspace successfully", stackName))
 		}
 	}
 
-	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' resources destroyed and stack removed.", stackName))
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' resources destroyed successfully.", stackName))
 
-	// Success - mark as destroyed
+	// Success - mark as destroyed only after successful destroy
 	pe.jobManager.UpdateJobStatus(jobID, JobStatusDestroyed)
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy completed at %s", time.Now().Format(time.RFC3339)))
 	pe.jobManager.AppendOutput(jobID, "✅ Stack destroyed successfully. You can recreate it using the same configuration.")
+
+	// Persist destroyed job to disk
+	if err := pe.jobManager.SaveJob(jobID); err != nil {
+		log.Printf("Warning: failed to persist destroyed job %s: %v", jobID, err)
+	}
 
 	// Clean up the job directory completely since all resources have been destroyed
 	// Stack state is no longer needed after destroy

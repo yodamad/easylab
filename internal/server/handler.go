@@ -1665,10 +1665,10 @@ func (h *Handler) RetryJob(w http.ResponseWriter, r *http.Request) {
 	// Add retry message to output
 	h.jobManager.AppendOutput(jobID, fmt.Sprintf("Retrying job at %s", time.Now().Format(time.RFC3339)))
 
-	// Start Pulumi execution in a goroutine
+	// Start Pulumi execution in a goroutine using retry-optimized path
 	go func() {
 		log.Printf("Starting Pulumi execution for retried job: %s", jobID)
-		if err := h.pulumiExec.Execute(jobID); err != nil {
+		if err := h.pulumiExec.ExecuteRetry(jobID); err != nil {
 			log.Printf("Pulumi execution failed for retried job %s: %v", jobID, err)
 			return
 		}
