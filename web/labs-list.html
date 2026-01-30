@@ -1,0 +1,160 @@
+{{define "title"}}Labs List{{end}}
+{{define "body-class"}}{{end}}
+{{define "head-extra"}}
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.0/dist/htmx.min.js" integrity="sha384-LAnQFtNXh8s0hn9mOc8bezfn16i4Zo4y3i4dMT8PtV9yip8jGehR3RxCJrmHV11d" crossorigin="anonymous"></script>
+{{end}}
+
+{{define "body"}}
+    <div class="container labs-page-container">
+        <header>
+            <div class="header-content">
+                <div class="header-title">
+                    <img src="/static/logo.png" alt="EasyLab Logo" class="header-logo">
+                    <div>
+                        <h1>EasyLab</h1>
+                        <p class="subtitle">Labs History</p>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <a href="/admin" class="header-btn" title="Create Lab">
+                        <span class="btn-icon">➕</span>
+                        <span class="btn-text">New Lab</span>
+                    </a>
+                    <a href="/credentials" class="header-btn" title="Provider Credentials">
+                        <span class="btn-icon">🔐</span>
+                        <span class="btn-text">Credentials</span>
+                    </a>
+                    <a href="/logout" class="logout-btn" title="Logout">
+                        <span class="logout-icon">🚪</span>
+                        <span class="logout-text">Logout</span>
+                    </a>
+                </div>
+            </div>
+        </header>
+
+        <main>
+            {{if .Labs}}
+            <div class="stats-bar">
+                <div class="stats-item">
+                    <span class="stats-value">{{.Count}}</span>
+                    <span class="stats-label">Total Labs</span>
+                </div>
+            </div>
+
+            <div class="labs-grid">
+                {{range .Labs}}
+                <div class="lab-card">
+                    <div class="lab-card-header">
+                        <div class="lab-header-left">
+                            <span class="status-badge status-{{.Status}}" title="{{.Status}}">
+                                {{if eq .Status "completed"}}✓{{else if eq .Status "failed"}}✗{{else if eq .Status "running"}}⟳{{else if eq .Status "pending"}}⏳{{else if eq .Status "destroyed"}}🗑{{else}}{{.Status}}{{end}}
+                            </span>
+                            <span class="lab-type-badge" title="{{if .IsDryRun}}Dry Run{{else}}Real Run{{end}}">
+                                {{if .IsDryRun}}🔍{{else}}🚀{{end}}
+                            </span>
+                        </div>
+                        <div class="lab-id-short" title="{{.ID}}">{{.IDShort}}</div>
+                    </div>
+                    
+                    <div class="lab-card-body">
+                        <div class="lab-stack-name">{{if .StackName}}{{.StackName}}{{else}}<span class="no-stack-name">No stack name</span>{{end}}</div>
+                        <div class="lab-meta">
+                            <span class="lab-meta-label">Created:</span>
+                            <span class="lab-meta-value">{{.CreatedAt}}</span>
+                        </div>
+                    </div>
+
+                    <div class="lab-card-footer">
+                        <a href="/admin?job={{.ID}}" class="btn btn-primary btn-sm">
+                            <span class="btn-icon">👁️</span>
+                            <span class="btn-text">View Details</span>
+                        </a>
+                        <div class="lab-actions-menu">
+                            <button type="button" class="btn btn-secondary btn-sm btn-icon-only" onclick="toggleActionsMenu(this)" title="More actions">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
+                                </svg>
+                            </button>
+                            <div class="actions-dropdown">
+                                {{if .HasKubeconfig}}
+                                <a href="/api/labs/{{.ID}}/kubeconfig" class="dropdown-item" download="kubeconfig-{{.ID}}.yaml">
+                                    <span class="dropdown-icon">⬇️</span>
+                                    <span>Download kubeconfig</span>
+                                </a>
+                                {{end}}
+                                {{if eq .Status "completed"}}
+                                <a href="/labs/{{.ID}}/workspaces" class="dropdown-item">
+                                    <span class="dropdown-icon">📦</span>
+                                    <span>View workspaces</span>
+                                </a>
+                                {{end}}
+                                {{if eq .Status "failed"}}
+                                <button type="button" class="dropdown-item" onclick="retryLab('{{.ID}}')">
+                                    <span class="dropdown-icon">🔄</span>
+                                    <span>Retry lab</span>
+                                </button>
+                                {{end}}
+                                {{if and .StackName (or (eq .Status "completed") (eq .Status "failed"))}}
+                                <button type="button" class="dropdown-item dropdown-item-danger" onclick="destroyStack('{{.ID}}')">
+                                    <span class="dropdown-icon">🗑️</span>
+                                    <span>Destroy stack</span>
+                                </button>
+                                {{end}}
+                                {{if .IsDestroyed}}
+                                <button type="button" class="dropdown-item" onclick="recreateLab('{{.ID}}')">
+                                    <span class="dropdown-icon">♻️</span>
+                                    <span>Recreate lab</span>
+                                </button>
+                                {{end}}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {{end}}
+            </div>
+            {{else}}
+            <div class="empty-state">
+                <div class="empty-state-icon">📋</div>
+                <h2>No Labs Yet</h2>
+                <p>You haven't created any labs yet. Start by creating your first lab!</p>
+                <a href="/admin" class="btn btn-primary" style="margin-top: 1.5rem;">
+                    <span class="btn-icon">➕</span> Create New Lab
+                </a>
+            </div>
+            {{end}}
+
+        </main>
+    </div>
+
+    <script src="/static/labs-list.js"></script>
+    <script>
+        function toggleActionsMenu(button) {
+            const menu = button.closest('.lab-actions-menu');
+            const dropdown = menu.querySelector('.actions-dropdown');
+            const isOpen = dropdown.classList.contains('show');
+            
+            // Close all other menus
+            document.querySelectorAll('.actions-dropdown.show').forEach(d => {
+                if (d !== dropdown) {
+                    d.classList.remove('show');
+                }
+            });
+            
+            // Toggle current menu
+            if (isOpen) {
+                dropdown.classList.remove('show');
+            } else {
+                dropdown.classList.add('show');
+            }
+        }
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(event) {
+            if (!event.target.closest('.lab-actions-menu')) {
+                document.querySelectorAll('.actions-dropdown.show').forEach(d => {
+                    d.classList.remove('show');
+                });
+            }
+        });
+    </script>
+{{end}}

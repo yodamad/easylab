@@ -217,7 +217,9 @@ func main() {
 
 	// Protected routes (auth required)
 	mux.HandleFunc("/admin", authHandler.RequireAuth(handler.ServeAdminUI))
-	mux.HandleFunc("/jobs", authHandler.RequireAuth(handler.ServeJobsList))
+	mux.HandleFunc("/labs", authHandler.RequireAuth(handler.ServeLabsList))
+	// Backward compatibility route
+	mux.HandleFunc("/jobs", authHandler.RequireAuth(handler.ServeLabsList))
 
 	// New generic credentials routes
 	mux.HandleFunc("/credentials", authHandler.RequireAuth(handler.ServeCredentials))
@@ -248,6 +250,45 @@ func main() {
 	mux.HandleFunc("/api/labs/launch", authHandler.RequireAuth(handler.LaunchLab))
 	mux.HandleFunc("/api/labs/recreate", authHandler.RequireAuth(handler.RecreateLab))
 	mux.HandleFunc("/api/stacks/destroy", authHandler.RequireAuth(handler.DestroyStack))
+	mux.HandleFunc("/api/labs/", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		// Check if this is a workspace listing request
+		if strings.Contains(r.URL.Path, "/workspaces") && !strings.Contains(r.URL.Path, "/delete") {
+			if r.Method == http.MethodGet {
+				handler.ListLabWorkspaces(w, r)
+				return
+			}
+		}
+		// Check if this is a workspace delete request
+		if strings.Contains(r.URL.Path, "/workspaces/") && strings.Contains(r.URL.Path, "/delete") {
+			if r.Method == http.MethodPost {
+				handler.DeleteWorkspace(w, r)
+				return
+			}
+		}
+		// Check if this is a bulk workspace delete request
+		if strings.HasSuffix(r.URL.Path, "/workspaces/bulk-delete") {
+			if r.Method == http.MethodPost {
+				handler.DeleteWorkspace(w, r)
+				return
+			}
+		}
+		// Check if this is a retry request
+		if strings.HasSuffix(r.URL.Path, "/retry") {
+			handler.RetryJob(w, r)
+			return
+		}
+		// Check if this is a kubeconfig download request
+		if strings.HasSuffix(r.URL.Path, "/kubeconfig") {
+			handler.DownloadKubeconfig(w, r)
+			return
+		}
+		if r.URL.Query().Get("format") == "json" {
+			handler.GetJobStatusJSON(w, r)
+		} else {
+			handler.GetJobStatus(w, r)
+		}
+	}))
+	// Backward compatibility route
 	mux.HandleFunc("/api/jobs/", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
 		// Check if this is a retry request
 		if strings.HasSuffix(r.URL.Path, "/retry") {
@@ -264,6 +305,15 @@ func main() {
 		} else {
 			handler.GetJobStatus(w, r)
 		}
+	}))
+	// Workspace management routes
+	mux.HandleFunc("/labs/", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		// Check if this is a workspace page request
+		if strings.HasSuffix(r.URL.Path, "/workspaces") {
+			handler.ServeLabWorkspaces(w, r)
+			return
+		}
+		http.NotFound(w, r)
 	}))
 
 	// Configure server with timeouts

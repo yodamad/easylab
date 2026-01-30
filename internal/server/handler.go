@@ -22,6 +22,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Handler handles HTTP requests
@@ -443,7 +445,8 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 		"student-dashboard.html": "web/student-dashboard.html",
 		"credentials.html":       "web/credentials.html",
 		"ovh-credentials.html":   "web/ovh-credentials.html", // Keep for backward compatibility
-		"jobs-list.html":         "web/jobs-list.html",
+		"labs-list.html":         "web/labs-list.html",
+		"lab-workspaces.html":    "web/lab-workspaces.html",
 	}
 
 	tmplPath, ok := templatePaths[filename]
@@ -1367,14 +1370,23 @@ func (h *Handler) ListProviders(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(providers)
 }
 
-// ServeJobsList serves the jobs list page
-func (h *Handler) ServeJobsList(w http.ResponseWriter, r *http.Request) {
-	// Get all jobs
+// ServeLabsList serves the labs list page
+func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
+	// Get all jobs (labs)
 	allJobs := h.jobManager.GetAllJobs()
 
-	// Prepare job data for template (without sensitive info)
-	type JobDisplay struct {
+	// Helper function to shorten lab ID
+	shortenLabID := func(id string) string {
+		if len(id) <= 16 {
+			return id
+		}
+		return id[:8] + "..." + id[len(id)-4:]
+	}
+
+	// Prepare lab data for template (without sensitive info)
+	type LabDisplay struct {
 		ID            string
+		IDShort       string
 		Status        string
 		CreatedAt     string
 		UpdatedAt     string
@@ -1386,7 +1398,7 @@ func (h *Handler) ServeJobsList(w http.ResponseWriter, r *http.Request) {
 		IsDestroyed   bool
 	}
 
-	jobsDisplay := make([]JobDisplay, 0, len(allJobs))
+	labsDisplay := make([]LabDisplay, 0, len(allJobs))
 	for _, job := range allJobs {
 		job.mu.RLock()
 		status := string(job.Status)
@@ -1403,8 +1415,9 @@ func (h *Handler) ServeJobsList(w http.ResponseWriter, r *http.Request) {
 		updatedAt := job.UpdatedAt.Format("2006-01-02 15:04:05")
 		job.mu.RUnlock()
 
-		jobsDisplay = append(jobsDisplay, JobDisplay{
+		labsDisplay = append(labsDisplay, LabDisplay{
 			ID:            job.ID,
+			IDShort:       shortenLabID(job.ID),
 			Status:        status,
 			CreatedAt:     createdAt,
 			UpdatedAt:     updatedAt,
@@ -1418,11 +1431,396 @@ func (h *Handler) ServeJobsList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := map[string]interface{}{
-		"Jobs":  jobsDisplay,
-		"Count": len(jobsDisplay),
+		"Labs":  labsDisplay,
+		"Count": len(labsDisplay),
 	}
 
-	h.serveTemplate(w, "jobs-list.html", data)
+	h.serveTemplate(w, "labs-list.html", data)
+}
+
+// ServeLabWorkspaces serves the workspaces page for a lab
+func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
+	// Extract lab ID from path like /labs/{id}/workspaces
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 3 || pathParts[0] != "labs" || pathParts[2] != "workspaces" {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	labID := pathParts[1]
+
+	// Get the lab (job)
+	job, exists := h.jobManager.GetJob(labID)
+	if !exists {
+		http.Error(w, "Lab not found", http.StatusNotFound)
+		return
+	}
+
+	job.mu.RLock()
+	status := job.Status
+	coderURL := job.CoderURL
+	coderSessionToken := job.CoderSessionToken
+	coderOrganizationID := job.CoderOrganizationID
+	coderAdminEmail := job.CoderAdminEmail
+	coderAdminPassword := job.CoderAdminPassword
+	templateName := ""
+	if job.Config != nil {
+		templateName = job.Config.CoderTemplateName
+	}
+	stackName := ""
+	if job.Config != nil {
+		stackName = job.Config.StackName
+	}
+	job.mu.RUnlock()
+
+	if status != JobStatusCompleted {
+		http.Error(w, "Lab is not ready yet", http.StatusBadRequest)
+		return
+	}
+
+	// Clean up any malformed ConfigValue JSON strings
+	coderURL = extractStringFromConfigValue(coderURL)
+	coderSessionToken = extractStringFromConfigValue(coderSessionToken)
+	coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
+	coderAdminEmail = extractStringFromConfigValue(coderAdminEmail)
+	coderAdminPassword = extractStringFromConfigValue(coderAdminPassword)
+
+	if coderURL == "" || coderSessionToken == "" || coderOrganizationID == "" {
+		http.Error(w, "Lab Coder configuration not available", http.StatusInternalServerError)
+		return
+	}
+
+	// Get template ID from template name
+	coderConfig := coder.CoderClientConfig{
+		ServerURL:      coderURL,
+		SessionToken:   coderSessionToken,
+		OrganizationID: coderOrganizationID,
+	}
+
+	templates, err := coder.GetTemplatesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword)
+	if err != nil {
+		log.Printf("Failed to get templates: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to get templates: %s", err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	var templateID uuid.UUID
+	found := false
+	for _, tmpl := range templates {
+		if tmpl.Name == templateName {
+			templateID = tmpl.ID
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		http.Error(w, "Template not found in Coder", http.StatusNotFound)
+		return
+	}
+
+	// Get workspaces for this template
+	workspaces, updatedConfig, err := coder.ListWorkspacesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, templateID)
+	if err != nil {
+		log.Printf("Failed to list workspaces: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to list workspaces: %s", err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	// Update config if token was refreshed
+	coderConfig = updatedConfig
+
+	// Prepare workspace data for template
+	type WorkspaceDisplay struct {
+		ID        string
+		Name      string
+		Owner     string
+		Status    string
+		CreatedAt string
+		UpdatedAt string
+	}
+
+	workspacesDisplay := make([]WorkspaceDisplay, 0, len(workspaces))
+	for _, ws := range workspaces {
+		createdAt := ""
+		if !ws.CreatedAt.IsZero() {
+			createdAt = ws.CreatedAt.Format("2006-01-02 15:04:05")
+		}
+		updatedAt := ""
+		if !ws.UpdatedAt.IsZero() {
+			updatedAt = ws.UpdatedAt.Format("2006-01-02 15:04:05")
+		}
+
+		workspacesDisplay = append(workspacesDisplay, WorkspaceDisplay{
+			ID:        ws.ID.String(),
+			Name:      ws.Name,
+			Owner:     ws.OwnerName,
+			Status:    string(ws.LatestBuild.Job.Status),
+			CreatedAt: createdAt,
+			UpdatedAt: updatedAt,
+		})
+	}
+
+	data := map[string]interface{}{
+		"LabID":      labID,
+		"StackName":  stackName,
+		"Workspaces": workspacesDisplay,
+		"Count":      len(workspacesDisplay),
+	}
+
+	h.serveTemplate(w, "lab-workspaces.html", data)
+}
+
+// ListLabWorkspaces returns JSON list of workspaces for a lab
+func (h *Handler) ListLabWorkspaces(w http.ResponseWriter, r *http.Request) {
+	// Extract lab ID from path like /api/labs/{id}/workspaces
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 4 || pathParts[0] != "api" || pathParts[1] != "labs" || pathParts[3] != "workspaces" {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	labID := pathParts[2]
+
+	// Get the lab (job)
+	job, exists := h.jobManager.GetJob(labID)
+	if !exists {
+		http.Error(w, "Lab not found", http.StatusNotFound)
+		return
+	}
+
+	job.mu.RLock()
+	status := job.Status
+	coderURL := job.CoderURL
+	coderSessionToken := job.CoderSessionToken
+	coderOrganizationID := job.CoderOrganizationID
+	coderAdminEmail := job.CoderAdminEmail
+	coderAdminPassword := job.CoderAdminPassword
+	templateName := ""
+	if job.Config != nil {
+		templateName = job.Config.CoderTemplateName
+	}
+	job.mu.RUnlock()
+
+	if status != JobStatusCompleted {
+		http.Error(w, "Lab is not ready yet", http.StatusBadRequest)
+		return
+	}
+
+	// Clean up any malformed ConfigValue JSON strings
+	coderURL = extractStringFromConfigValue(coderURL)
+	coderSessionToken = extractStringFromConfigValue(coderSessionToken)
+	coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
+	coderAdminEmail = extractStringFromConfigValue(coderAdminEmail)
+	coderAdminPassword = extractStringFromConfigValue(coderAdminPassword)
+
+	if coderURL == "" || coderSessionToken == "" || coderOrganizationID == "" {
+		http.Error(w, "Lab Coder configuration not available", http.StatusInternalServerError)
+		return
+	}
+
+	// Get template ID from template name
+	coderConfig := coder.CoderClientConfig{
+		ServerURL:      coderURL,
+		SessionToken:   coderSessionToken,
+		OrganizationID: coderOrganizationID,
+	}
+
+	templates, err := coder.GetTemplatesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword)
+	if err != nil {
+		log.Printf("Failed to get templates: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to get templates: %s", err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	var templateID uuid.UUID
+	found := false
+	for _, tmpl := range templates {
+		if tmpl.Name == templateName {
+			templateID = tmpl.ID
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		http.Error(w, "Template not found in Coder", http.StatusNotFound)
+		return
+	}
+
+	// Get workspaces for this template
+	workspaces, _, err := coder.ListWorkspacesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, templateID)
+	if err != nil {
+		log.Printf("Failed to list workspaces: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to list workspaces: %s", err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(workspaces)
+}
+
+// DeleteWorkspace handles workspace deletion requests
+func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse form data
+	if err := r.ParseForm(); err != nil {
+		log.Printf("Failed to parse form: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Check if this is a bulk delete request
+	workspaceIDsStr := r.FormValue("workspace_ids")
+	if workspaceIDsStr != "" {
+		// Bulk delete
+		var workspaceIDs []string
+		if err := json.Unmarshal([]byte(workspaceIDsStr), &workspaceIDs); err != nil {
+			http.Error(w, "Invalid workspace_ids format", http.StatusBadRequest)
+			return
+		}
+
+		labID := r.FormValue("lab_id")
+		if labID == "" {
+			http.Error(w, "lab_id is required", http.StatusBadRequest)
+			return
+		}
+
+		// Get the lab (job)
+		job, exists := h.jobManager.GetJob(labID)
+		if !exists {
+			http.Error(w, "Lab not found", http.StatusNotFound)
+			return
+		}
+
+		job.mu.RLock()
+		coderURL := job.CoderURL
+		coderSessionToken := job.CoderSessionToken
+		coderOrganizationID := job.CoderOrganizationID
+		coderAdminEmail := job.CoderAdminEmail
+		coderAdminPassword := job.CoderAdminPassword
+		job.mu.RUnlock()
+
+		// Clean up any malformed ConfigValue JSON strings
+		coderURL = extractStringFromConfigValue(coderURL)
+		coderSessionToken = extractStringFromConfigValue(coderSessionToken)
+		coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
+		coderAdminEmail = extractStringFromConfigValue(coderAdminEmail)
+		coderAdminPassword = extractStringFromConfigValue(coderAdminPassword)
+
+		coderConfig := coder.CoderClientConfig{
+			ServerURL:      coderURL,
+			SessionToken:   coderSessionToken,
+			OrganizationID: coderOrganizationID,
+		}
+
+		var errors []string
+		for _, wsIDStr := range workspaceIDs {
+			wsID, err := uuid.Parse(wsIDStr)
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("Invalid workspace ID %s: %v", wsIDStr, err))
+				continue
+			}
+
+			_, err = coder.DeleteWorkspaceWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, wsID)
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("Failed to delete workspace %s: %v", wsIDStr, err))
+			}
+		}
+
+		if len(errors) > 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPartialContent)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"errors":  errors,
+			})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": fmt.Sprintf("Successfully deleted %d workspace(s)", len(workspaceIDs)),
+		})
+		return
+	}
+
+	// Single workspace delete
+	workspaceIDStr := r.FormValue("workspace_id")
+	if workspaceIDStr == "" {
+		// Try to extract from URL path
+		pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(pathParts) >= 5 && pathParts[4] == "delete" {
+			workspaceIDStr = pathParts[3]
+		} else {
+			http.Error(w, "workspace_id is required", http.StatusBadRequest)
+			return
+		}
+	}
+
+	workspaceID, err := uuid.Parse(workspaceIDStr)
+	if err != nil {
+		http.Error(w, "Invalid workspace ID", http.StatusBadRequest)
+		return
+	}
+
+	labID := r.FormValue("lab_id")
+	if labID == "" {
+		// Try to extract from URL path
+		pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(pathParts) >= 3 {
+			labID = pathParts[2]
+		} else {
+			http.Error(w, "lab_id is required", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Get the lab (job)
+	job, exists := h.jobManager.GetJob(labID)
+	if !exists {
+		http.Error(w, "Lab not found", http.StatusNotFound)
+		return
+	}
+
+	job.mu.RLock()
+	coderURL := job.CoderURL
+	coderSessionToken := job.CoderSessionToken
+	coderOrganizationID := job.CoderOrganizationID
+	coderAdminEmail := job.CoderAdminEmail
+	coderAdminPassword := job.CoderAdminPassword
+	job.mu.RUnlock()
+
+	// Clean up any malformed ConfigValue JSON strings
+	coderURL = extractStringFromConfigValue(coderURL)
+	coderSessionToken = extractStringFromConfigValue(coderSessionToken)
+	coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
+	coderAdminEmail = extractStringFromConfigValue(coderAdminEmail)
+	coderAdminPassword = extractStringFromConfigValue(coderAdminPassword)
+
+	coderConfig := coder.CoderClientConfig{
+		ServerURL:      coderURL,
+		SessionToken:   coderSessionToken,
+		OrganizationID: coderOrganizationID,
+	}
+
+	_, err = coder.DeleteWorkspaceWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, workspaceID)
+	if err != nil {
+		log.Printf("Failed to delete workspace: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to delete workspace: %s", err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Workspace deleted successfully",
+	})
 }
 
 // DestroyStack handles stack destruction requests

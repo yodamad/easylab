@@ -3,10 +3,10 @@ package coder
 import (
 	"bytes"
 	"context"
-	"fmt"
-	"io"
 	internalK8s "easylab/k8s"
 	"easylab/utils"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -581,4 +581,127 @@ func CreateWorkspaceWithRetry(config CoderClientConfig, adminEmail, adminPasswor
 		return workspace, refreshedConfig, nil
 	}
 	return workspace, config, nil
+}
+
+// ListWorkspaces lists all workspaces for a given template
+func ListWorkspaces(config CoderClientConfig, templateID uuid.UUID) ([]codersdk.Workspace, error) {
+	serverURL, err := url.Parse(config.ServerURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse server URL: %w", err)
+	}
+
+	client := codersdk.New(serverURL)
+	client.SetSessionToken(config.SessionToken)
+
+	// List all workspaces in the organization
+	workspaces, err := client.Workspaces(context.Background(), codersdk.WorkspaceFilter{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list workspaces: %w", err)
+	}
+
+	// Filter workspaces by template ID
+	var filteredWorkspaces []codersdk.Workspace
+	for _, ws := range workspaces.Workspaces {
+		if ws.TemplateID == templateID {
+			filteredWorkspaces = append(filteredWorkspaces, ws)
+		}
+	}
+
+	return filteredWorkspaces, nil
+}
+
+// ListWorkspacesWithRetry lists workspaces with automatic token refresh on failure
+func ListWorkspacesWithRetry(config CoderClientConfig, adminEmail, adminPassword string, templateID uuid.UUID) ([]codersdk.Workspace, CoderClientConfig, error) {
+	workspaces, err := ListWorkspaces(config, templateID)
+	if err != nil {
+		// If it fails, try to refresh token and retry
+		log.Printf("Workspace listing failed, attempting token refresh...")
+		refreshedConfig, refreshErr := RefreshToken(config, adminEmail, adminPassword)
+		if refreshErr != nil {
+			return nil, config, fmt.Errorf("failed to refresh token: %w", refreshErr)
+		}
+
+		// Retry with refreshed token
+		workspaces, err = ListWorkspaces(refreshedConfig, templateID)
+		if err != nil {
+			return nil, refreshedConfig, fmt.Errorf("failed to list workspaces even after token refresh: %w", err)
+		}
+
+		log.Printf("Token refreshed successfully")
+		return workspaces, refreshedConfig, nil
+	}
+	return workspaces, config, nil
+}
+
+// DeleteWorkspace deletes a workspace by ID
+func DeleteWorkspace(config CoderClientConfig, workspaceID uuid.UUID) error {
+	serverURL, err := url.Parse(config.ServerURL)
+	if err != nil {
+		return fmt.Errorf("failed to parse server URL: %w", err)
+	}
+
+	client := codersdk.New(serverURL)
+	client.SetSessionToken(config.SessionToken)
+
+	// Get workspace details first to find owner
+	workspace, err := client.Workspace(context.Background(), workspaceID)
+	if err != nil {
+		return fmt.Errorf("failed to get workspace: %w", err)
+	}
+
+	// Delete workspace using owner and name
+	// The SDK method signature may vary, so we use the workspace owner and name
+	organizationID, err := uuid.Parse(config.OrganizationID)
+	if err != nil {
+		return fmt.Errorf("failed to parse organization ID: %w", err)
+	}
+
+	// Use HTTP client directly to delete workspace
+	// Coder API: DELETE /api/v2/organizations/{organization}/members/{user}/workspaces/{workspace}
+	deleteURL := fmt.Sprintf("%s/api/v2/organizations/%s/members/%s/workspaces/%s",
+		config.ServerURL, organizationID.String(), workspace.OwnerID.String(), workspace.Name)
+
+	req, err := http.NewRequestWithContext(context.Background(), "DELETE", deleteURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create delete request: %w", err)
+	}
+
+	req.Header.Set("Coder-Session-Token", config.SessionToken)
+
+	httpClient := &http.Client{}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to delete workspace: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to delete workspace: HTTP %d - %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// DeleteWorkspaceWithRetry deletes a workspace with automatic token refresh on failure
+func DeleteWorkspaceWithRetry(config CoderClientConfig, adminEmail, adminPassword string, workspaceID uuid.UUID) (CoderClientConfig, error) {
+	err := DeleteWorkspace(config, workspaceID)
+	if err != nil {
+		// If it fails, try to refresh token and retry
+		log.Printf("Workspace deletion failed, attempting token refresh...")
+		refreshedConfig, refreshErr := RefreshToken(config, adminEmail, adminPassword)
+		if refreshErr != nil {
+			return config, fmt.Errorf("failed to refresh token: %w", refreshErr)
+		}
+
+		// Retry with refreshed token
+		err = DeleteWorkspace(refreshedConfig, workspaceID)
+		if err != nil {
+			return refreshedConfig, fmt.Errorf("failed to delete workspace even after token refresh: %w", err)
+		}
+
+		log.Printf("Token refreshed successfully")
+		return refreshedConfig, nil
+	}
+	return config, nil
 }

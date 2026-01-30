@@ -597,6 +597,18 @@ a.btn {
     font-size: 1.1rem;
 }
 
+.btn-info {
+    background: #0ea5e9;
+    color: white;
+    border: none;
+}
+
+.btn-info:hover:not(:disabled) {
+    background: #0284c7;
+    transform: translateY(-1px);
+    box-shadow: var(--shadow);
+}
+
 /* ============================================
    HTMX INDICATORS
    ============================================ */
@@ -1540,7 +1552,8 @@ body.student-dashboard-page {
    JOBS LIST PAGE STYLES
    ============================================ */
 
-.jobs-page-container {
+.jobs-page-container,
+.labs-page-container {
     max-width: 1400px;
 }
 
@@ -1714,6 +1727,10 @@ body.student-dashboard-page {
     align-items: center;
 }
 
+.labs-table .actions-cell .status-badge {
+    margin-right: 0.25rem;
+}
+
 .actions-cell .btn {
     white-space: nowrap;
     padding: 0.5rem;
@@ -1770,6 +1787,516 @@ body.student-dashboard-page {
     }
 
     .actions-cell .btn {
+        width: 100%;
+    }
+}
+
+/* ============================================
+   WORKSPACES PAGE STYLES
+   ============================================ */
+
+.workspaces-page-container {
+    max-width: 1400px;
+}
+
+.workspaces-actions-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: var(--radius);
+    margin-bottom: 1.5rem;
+    gap: 1rem;
+}
+
+.actions-group {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.workspaces-actions-bar .btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    white-space: nowrap;
+}
+
+.message-container {
+    margin-top: 1.5rem;
+    padding: 0 1.5rem;
+}
+
+.message {
+    padding: 1rem 1.25rem;
+    border-radius: var(--radius);
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.message-success {
+    background: #d1fae5;
+    color: #065f46;
+    border: 1px solid #a7f3d0;
+}
+
+.message-error {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+}
+
+.labs-table-wrapper {
+    overflow-x: auto;
+    margin-top: 1.5rem;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.labs-table {
+    width: 100%;
+    min-width: 900px;
+    border-collapse: collapse;
+    background: var(--background);
+}
+
+.labs-table thead {
+    background: var(--surface);
+}
+
+.labs-table th {
+    padding: 1rem 1.25rem;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text);
+    border-bottom: 2px solid var(--border);
+    font-size: 0.875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+}
+
+.labs-table th:first-child {
+    width: 220px;
+    min-width: 220px;
+    text-align: left;
+}
+
+.labs-table th:nth-child(2) {
+    width: 150px;
+    min-width: 150px;
+}
+
+.labs-table th:nth-child(3) {
+    width: 150px;
+    min-width: 150px;
+}
+
+.labs-table th:nth-child(4) {
+    width: 120px;
+    min-width: 120px;
+}
+
+.labs-table th:nth-child(5) {
+    width: 180px;
+    min-width: 180px;
+}
+
+.labs-table th:nth-child(6) {
+    width: 180px;
+    min-width: 180px;
+}
+
+.labs-table th:nth-child(7) {
+    width: 120px;
+    min-width: 120px;
+}
+
+.labs-table td {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    vertical-align: middle;
+}
+
+.labs-table tbody tr:hover {
+    background: var(--surface);
+}
+
+.labs-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.labs-table td:first-child {
+    text-align: center;
+}
+
+.labs-table input[type="checkbox"] {
+    width: 1.25rem;
+    height: 1.25rem;
+    cursor: pointer;
+    accent-color: var(--primary-color);
+}
+
+.workspace-name {
+    font-weight: 500;
+    color: var(--text);
+    font-family: monospace;
+    font-size: 0.875rem;
+}
+
+.workspace-owner {
+    color: var(--text-light);
+    font-size: 0.875rem;
+}
+
+.lab-type-badge {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.lab-type-dry-run {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.lab-type-real {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.lab-id {
+    font-family: monospace;
+    font-size: 0.8125rem;
+    color: var(--primary-color);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    max-width: 100%;
+}
+
+.lab-type-icon {
+    font-size: 1rem;
+    flex-shrink: 0;
+    display: inline-block;
+}
+
+.lab-id-link {
+    color: var(--primary-color);
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+}
+
+.lab-id-link:hover {
+    text-decoration: underline;
+}
+
+.labs-table .status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-weight: 600;
+    min-width: 2rem;
+    height: 2rem;
+    font-size: 1.1rem;
+    line-height: 1;
+    margin-bottom: 0;
+}
+
+@media (max-width: 1400px) {
+    .workspaces-page-container {
+        max-width: 100%;
+    }
+}
+
+@media (max-width: 768px) {
+    .workspaces-actions-bar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .actions-group {
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .workspaces-actions-bar .btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .labs-table {
+        font-size: 0.875rem;
+        min-width: 700px;
+    }
+    
+    .lab-id-link {
+        font-size: 0.75rem;
+    }
+
+    .labs-table th,
+    .labs-table td {
+        padding: 0.75rem 1rem;
+    }
+}
+
+/* ============================================
+   LABS CARD GRID LAYOUT
+   ============================================ */
+
+.labs-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 1.5rem;
+    margin-top: 1.5rem;
+}
+
+.lab-card {
+    background: var(--background);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0;
+    transition: all 0.3s ease;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.lab-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+    border-color: var(--primary-color);
+}
+
+.lab-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.25rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    gap: 0.75rem;
+}
+
+.lab-header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 1;
+    min-width: 0;
+}
+
+.lab-card-header .status-badge {
+    flex-shrink: 0;
+    margin-bottom: 0;
+    font-size: 1rem;
+    min-width: 2rem;
+    height: 2rem;
+}
+
+.lab-type-badge {
+    font-size: 1rem;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.25rem;
+    background: rgba(37, 99, 235, 0.1);
+}
+
+.lab-id-short {
+    font-family: monospace;
+    font-size: 0.8125rem;
+    color: var(--text-light);
+    font-weight: 500;
+    flex-shrink: 0;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.lab-card-body {
+    padding: 1.25rem;
+    flex: 1;
+}
+
+.lab-stack-name {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 0.75rem;
+    word-break: break-word;
+}
+
+.lab-stack-name .no-stack-name {
+    color: var(--text-light);
+    font-weight: 400;
+    font-style: italic;
+}
+
+.lab-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    color: var(--text-light);
+}
+
+.lab-meta-label {
+    font-weight: 500;
+}
+
+.lab-meta-value {
+    color: var(--text);
+}
+
+.lab-card-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.25rem;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    gap: 0.5rem;
+}
+
+.lab-card-footer .btn {
+    flex: 1;
+    justify-content: center;
+}
+
+.btn-sm {
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+}
+
+.lab-actions-menu {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.lab-actions-menu .btn-icon-only {
+    width: 2.5rem;
+    height: 2.5rem;
+    padding: 0;
+}
+
+.actions-dropdown {
+    position: absolute;
+    bottom: 100%;
+    right: 0;
+    margin-bottom: 0.5rem;
+    background: var(--background);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    min-width: 200px;
+    z-index: 100;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.actions-dropdown.show {
+    display: flex;
+}
+
+.dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    color: var(--text);
+    text-decoration: none;
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: background 0.2s;
+    font-family: inherit;
+}
+
+.dropdown-item:hover {
+    background: var(--surface);
+}
+
+.dropdown-item-danger {
+    color: var(--error);
+}
+
+.dropdown-item-danger:hover {
+    background: #fee2e2;
+}
+
+.dropdown-icon {
+    font-size: 1rem;
+    flex-shrink: 0;
+    width: 1.25rem;
+    text-align: center;
+}
+
+/* Responsive adjustments for card grid */
+@media (max-width: 1024px) {
+    .labs-grid {
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 1.25rem;
+    }
+}
+
+@media (max-width: 768px) {
+    .labs-grid {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+
+    .lab-card-header {
+        flex-wrap: wrap;
+    }
+
+    .lab-id-short {
+        width: 100%;
+        text-align: left;
+        margin-top: 0.5rem;
+        padding-top: 0.5rem;
+        border-top: 1px solid var(--border);
+    }
+
+    .lab-card-footer {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .lab-card-footer .btn {
+        width: 100%;
+    }
+
+    .lab-actions-menu {
+        width: 100%;
+    }
+
+    .actions-dropdown {
+        position: static;
+        margin-bottom: 0;
+        margin-top: 0.5rem;
         width: 100%;
     }
 }
