@@ -65,49 +65,53 @@
                     </div>
 
                     <div class="lab-card-footer">
-                        <a href="/admin?job={{.ID}}" class="btn btn-primary btn-sm">
-                            <span class="btn-icon">👁️</span>
-                            <span class="btn-text">View Details</span>
+                        <a href="/admin?job={{.ID}}" class="btn btn-secondary btn-icon-only tooltip-trigger" title="View lab details and logs">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                            </svg>
+                            <span class="tooltip">View Details</span>
                         </a>
-                        <div class="lab-actions-menu">
-                            <button type="button" class="btn btn-secondary btn-sm btn-icon-only" onclick="toggleActionsMenu(this)" title="More actions">
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
-                                </svg>
-                            </button>
-                            <div class="actions-dropdown">
-                                {{if .HasKubeconfig}}
-                                <a href="/api/labs/{{.ID}}/kubeconfig" class="dropdown-item" download="kubeconfig-{{.ID}}.yaml">
-                                    <span class="dropdown-icon">⬇️</span>
-                                    <span>Download kubeconfig</span>
-                                </a>
-                                {{end}}
-                                {{if eq .Status "completed"}}
-                                <a href="/labs/{{.ID}}/workspaces" class="dropdown-item">
-                                    <span class="dropdown-icon">📦</span>
-                                    <span>View workspaces</span>
-                                </a>
-                                {{end}}
-                                {{if eq .Status "failed"}}
-                                <button type="button" class="dropdown-item" onclick="retryLab('{{.ID}}')">
-                                    <span class="dropdown-icon">🔄</span>
-                                    <span>Retry lab</span>
-                                </button>
-                                {{end}}
-                                {{if and .StackName (or (eq .Status "completed") (eq .Status "failed"))}}
-                                <button type="button" class="dropdown-item dropdown-item-danger" onclick="destroyStack('{{.ID}}')">
-                                    <span class="dropdown-icon">🗑️</span>
-                                    <span>Destroy stack</span>
-                                </button>
-                                {{end}}
-                                {{if .IsDestroyed}}
-                                <button type="button" class="dropdown-item" onclick="recreateLab('{{.ID}}')">
-                                    <span class="dropdown-icon">♻️</span>
-                                    <span>Recreate lab</span>
-                                </button>
-                                {{end}}
-                            </div>
-                        </div>
+                        {{if .HasKubeconfig}}
+                        <a href="/api/labs/{{.ID}}/kubeconfig" class="btn btn-download btn-icon-only tooltip-trigger" title="Download Kubernetes kubeconfig file" download="kubeconfig-{{.ID}}.yaml">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                            <span class="tooltip">Download kubeconfig</span>
+                        </a>
+                        {{end}}
+                        {{if eq .Status "completed"}}
+                        <a href="/labs/{{.ID}}/workspaces" class="btn btn-info btn-icon-only tooltip-trigger" title="View and manage workspaces created for this lab">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                            </svg>
+                            <span class="tooltip">View Workspaces</span>
+                        </a>
+                        {{end}}
+                        {{if eq .Status "failed"}}
+                        <button type="button" class="btn btn-primary btn-icon-only tooltip-trigger" title="Retry this failed lab deployment" onclick="retryLab('{{.ID}}')">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            <span class="tooltip">Retry Lab</span>
+                        </button>
+                        {{end}}
+                        {{if and .StackName (or (eq .Status "completed") (eq .Status "failed"))}}
+                        <button type="button" class="btn btn-danger btn-icon-only tooltip-trigger" title="Destroy stack and all resources (pulumi destroy)" onclick="destroyStack('{{.ID}}')">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            <span class="tooltip">Destroy Stack</span>
+                        </button>
+                        {{end}}
+                        {{if .IsDestroyed}}
+                        <button type="button" class="btn btn-success btn-icon-only tooltip-trigger" title="Recreate this lab with the same configuration" onclick="recreateLab('{{.ID}}')">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            <span class="tooltip">Recreate Lab</span>
+                        </button>
+                        {{end}}
                     </div>
                 </div>
                 {{end}}
@@ -127,34 +131,4 @@
     </div>
 
     <script src="/static/labs-list.js"></script>
-    <script>
-        function toggleActionsMenu(button) {
-            const menu = button.closest('.lab-actions-menu');
-            const dropdown = menu.querySelector('.actions-dropdown');
-            const isOpen = dropdown.classList.contains('show');
-            
-            // Close all other menus
-            document.querySelectorAll('.actions-dropdown.show').forEach(d => {
-                if (d !== dropdown) {
-                    d.classList.remove('show');
-                }
-            });
-            
-            // Toggle current menu
-            if (isOpen) {
-                dropdown.classList.remove('show');
-            } else {
-                dropdown.classList.add('show');
-            }
-        }
-
-        // Close dropdown when clicking outside
-        document.addEventListener('click', function(event) {
-            if (!event.target.closest('.lab-actions-menu')) {
-                document.querySelectorAll('.actions-dropdown.show').forEach(d => {
-                    d.classList.remove('show');
-                });
-            }
-        });
-    </script>
 {{end}}

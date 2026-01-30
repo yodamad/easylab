@@ -2169,89 +2169,64 @@ body.student-dashboard-page {
 
 .lab-card-footer {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-start;
     align-items: center;
     padding: 1rem 1.25rem;
     background: var(--surface);
     border-top: 1px solid var(--border);
     gap: 0.5rem;
+    flex-wrap: wrap;
 }
 
-.lab-card-footer .btn {
-    flex: 1;
-    justify-content: center;
-}
-
-.btn-sm {
-    padding: 0.5rem 1rem;
-    font-size: 0.875rem;
-}
-
-.lab-actions-menu {
-    position: relative;
-    flex-shrink: 0;
-}
-
-.lab-actions-menu .btn-icon-only {
+.lab-card-footer .btn-icon-only {
     width: 2.5rem;
     height: 2.5rem;
     padding: 0;
+    flex-shrink: 0;
+    position: relative;
 }
 
-.actions-dropdown {
+.lab-card-footer .btn-icon-only .icon {
+    width: 1.25rem;
+    height: 1.25rem;
+    stroke-width: 2;
+}
+
+.tooltip-trigger {
+    position: relative;
+}
+
+.tooltip {
     position: absolute;
     bottom: 100%;
-    right: 0;
+    left: 50%;
+    transform: translateX(-50%);
     margin-bottom: 0.5rem;
-    background: var(--background);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-lg);
-    min-width: 200px;
-    z-index: 100;
-    display: none;
-    flex-direction: column;
-    overflow: hidden;
+    padding: 0.5rem 0.75rem;
+    background: rgba(0, 0, 0, 0.9);
+    color: white;
+    font-size: 0.75rem;
+    white-space: nowrap;
+    border-radius: 0.25rem;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+    z-index: 1000;
+    font-weight: 500;
 }
 
-.actions-dropdown.show {
-    display: flex;
+.tooltip-trigger:hover .tooltip {
+    opacity: 1;
 }
 
-.dropdown-item {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.75rem 1rem;
-    color: var(--text);
-    text-decoration: none;
-    border: none;
-    background: none;
-    width: 100%;
-    text-align: left;
-    font-size: 0.875rem;
-    cursor: pointer;
-    transition: background 0.2s;
-    font-family: inherit;
-}
-
-.dropdown-item:hover {
-    background: var(--surface);
-}
-
-.dropdown-item-danger {
-    color: var(--error);
-}
-
-.dropdown-item-danger:hover {
-    background: #fee2e2;
-}
-
-.dropdown-icon {
-    font-size: 1rem;
-    flex-shrink: 0;
-    width: 1.25rem;
-    text-align: center;
+.tooltip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 4px solid transparent;
+    border-top-color: rgba(0, 0, 0, 0.9);
 }
 
 /* Responsive adjustments for card grid */
@@ -2281,22 +2256,6 @@ body.student-dashboard-page {
     }
 
     .lab-card-footer {
-        flex-direction: column;
-        align-items: stretch;
-    }
-
-    .lab-card-footer .btn {
-        width: 100%;
-    }
-
-    .lab-actions-menu {
-        width: 100%;
-    }
-
-    .actions-dropdown {
-        position: static;
-        margin-bottom: 0;
-        margin-top: 0.5rem;
-        width: 100%;
+        justify-content: center;
     }
 }
