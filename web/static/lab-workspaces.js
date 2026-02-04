@@ -44,9 +44,9 @@ function deleteSelected() {
 
     const workspaceIds = Array.from(checkboxes).map(cb => cb.value);
     const workspaceNames = Array.from(checkboxes).map(cb => {
-        const row = cb.closest('tr');
-        return row.querySelector('.workspace-name').textContent;
-    });
+        const card = cb.closest('.workspace-card');
+        return card ? card.querySelector('.workspace-name').textContent : '';
+    }).filter(name => name);
 
     if (!confirm(`Are you sure you want to delete ${workspaceIds.length} workspace(s)?\n\n${workspaceNames.join('\n')}\n\nThis action cannot be undone.`)) {
         return;
@@ -90,11 +90,32 @@ function deleteSelected() {
 function toggleSelectAll() {
     const selectAllCheckbox = document.getElementById('select-all-checkbox');
     const checkboxes = document.querySelectorAll('.workspace-checkbox');
-    const isChecked = selectAllCheckbox.checked;
-
+    const selectAllIcon = document.getElementById('select-all-icon');
+    
+    if (checkboxes.length === 0) {
+        return;
+    }
+    
+    // Determine if we should select all or deselect all
+    const checkedCount = Array.from(checkboxes).filter(cb => cb.checked).length;
+    const isChecked = checkedCount < checkboxes.length;
+    
     checkboxes.forEach(checkbox => {
         checkbox.checked = isChecked;
     });
+    
+    if (selectAllCheckbox) {
+        selectAllCheckbox.checked = isChecked;
+    }
+    
+    // Update icon to show checked/unchecked state
+    if (selectAllIcon) {
+        if (isChecked) {
+            selectAllIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />';
+        } else {
+            selectAllIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />';
+        }
+    }
 
     updateDeleteButton();
 }
@@ -103,19 +124,33 @@ function toggleSelectAll() {
 function updateDeleteButton() {
     const checkboxes = document.querySelectorAll('.workspace-checkbox:checked');
     const deleteBtn = document.getElementById('delete-selected-btn');
+    const selectAllCheckbox = document.getElementById('select-all-checkbox');
+    const selectAllIcon = document.getElementById('select-all-icon');
+    const allCheckboxes = document.querySelectorAll('.workspace-checkbox');
     
     if (checkboxes.length > 0) {
-        deleteBtn.style.display = 'inline-block';
-        deleteBtn.textContent = `Delete Selected (${checkboxes.length})`;
+        deleteBtn.style.display = 'inline-flex';
+        // Update tooltip text
+        const tooltip = deleteBtn.querySelector('.tooltip');
+        if (tooltip) {
+            tooltip.textContent = `Delete Selected (${checkboxes.length})`;
+        }
     } else {
         deleteBtn.style.display = 'none';
     }
 
-    // Update select all checkbox state
-    const allCheckboxes = document.querySelectorAll('.workspace-checkbox');
-    const selectAllCheckbox = document.getElementById('select-all-checkbox');
-    if (allCheckboxes.length > 0) {
-        selectAllCheckbox.checked = checkboxes.length === allCheckboxes.length;
+    // Update select all checkbox and icon state
+    if (selectAllCheckbox && allCheckboxes.length > 0) {
+        const allChecked = checkboxes.length === allCheckboxes.length;
+        selectAllCheckbox.checked = allChecked;
+        
+        if (selectAllIcon) {
+            if (allChecked) {
+                selectAllIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />';
+            } else {
+                selectAllIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />';
+            }
+        }
     }
 }
 

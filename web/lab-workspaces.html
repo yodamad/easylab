@@ -39,60 +39,76 @@
 
             <div class="workspaces-actions-bar">
                 <div class="actions-group">
-                    <button type="button" id="select-all-btn" class="btn btn-secondary" onclick="toggleSelectAll()">
-                        <span class="btn-icon">☑️</span>
-                        <span class="btn-text">Select All</span>
+                    <button type="button" id="select-all-btn" class="btn btn-secondary btn-icon-only tooltip-trigger" onclick="toggleSelectAll()" title="Select or deselect all workspaces">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon" id="select-all-icon">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span class="tooltip">Select All</span>
                     </button>
-                    <button type="button" id="delete-selected-btn" class="btn btn-danger" onclick="deleteSelected()" style="display: none;">
-                        <span class="btn-icon">🗑️</span>
-                        <span class="btn-text">Delete Selected</span>
+                    <input type="checkbox" id="select-all-checkbox" style="display: none;" onchange="toggleSelectAll()">
+                    <button type="button" id="delete-selected-btn" class="btn btn-danger btn-icon-only tooltip-trigger" onclick="deleteSelected()" style="display: none;" title="Delete selected workspaces">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                        <span class="tooltip">Delete Selected</span>
                     </button>
                 </div>
-                <button type="button" class="btn btn-secondary" onclick="refreshWorkspaces()">
-                    <span class="btn-icon">🔄</span>
-                    <span class="btn-text">Refresh</span>
+                <button type="button" class="btn btn-secondary btn-icon-only tooltip-trigger" onclick="refreshWorkspaces()" title="Refresh workspace list">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span class="tooltip">Refresh</span>
                 </button>
             </div>
 
-            <div class="labs-table-wrapper">
-                <table class="labs-table">
-                    <thead>
-                        <tr>
-                            <th style="width: 40px;">
-                                <input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll()">
-                            </th>
-                            <th>Workspace Name</th>
-                            <th>Owner</th>
-                            <th>Status</th>
-                            <th>Created</th>
-                            <th>Updated</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {{range .Workspaces}}
-                        <tr>
-                            <td>
-                                <input type="checkbox" class="workspace-checkbox" value="{{.ID}}" onchange="updateDeleteButton()">
-                            </td>
-                            <td class="workspace-name">{{.Name}}</td>
-                            <td class="workspace-owner">{{.Owner}}</td>
-                            <td>
-                                <span class="status-badge status-{{.Status}}">{{.Status}}</span>
-                            </td>
-                            <td class="timestamp">{{.CreatedAt}}</td>
-                            <td class="timestamp">{{.UpdatedAt}}</td>
-                            <td class="actions-cell">
-                                <button type="button" class="btn btn-danger btn-icon-only" title="Delete workspace" onclick="deleteWorkspace('{{.ID}}', '{{.Name}}')">
-                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                                    </svg>
-                                </button>
-                            </td>
-                        </tr>
-                        {{end}}
-                    </tbody>
-                </table>
+            <div class="workspaces-grid">
+                {{range .Workspaces}}
+                <div class="workspace-card" data-workspace-id="{{.ID}}">
+                    <div class="workspace-card-header">
+                        <div class="workspace-card-checkbox">
+                            <input type="checkbox" class="workspace-checkbox" value="{{.ID}}" id="workspace-{{.ID}}" onchange="updateDeleteButton()">
+                            <label for="workspace-{{.ID}}"></label>
+                        </div>
+                        <div class="workspace-status-badge status-{{.Status}}">
+                            {{if eq .Status "running"}}✓{{else if eq .Status "stopped"}}⏸{{else if eq .Status "starting"}}⟳{{else if eq .Status "stopping"}}⟳{{else if eq .Status "failed"}}✗{{else}}⏳{{end}}
+                        </div>
+                        <div class="workspace-name-header">
+                            <div class="workspace-name">{{.Name}}</div>
+                        </div>
+                    </div>
+                    <div class="workspace-card-body">
+                        <div class="workspace-info-item">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="info-icon">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                            </svg>
+                            <span class="info-label">Owner:</span>
+                            <span class="info-value">{{.Owner}}</span>
+                        </div>
+                        <div class="workspace-info-item">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="info-icon">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                            <span class="info-label">Created:</span>
+                            <span class="info-value">{{.CreatedAt}}</span>
+                        </div>
+                        <div class="workspace-info-item">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="info-icon">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            <span class="info-label">Updated:</span>
+                            <span class="info-value">{{.UpdatedAt}}</span>
+                        </div>
+                    </div>
+                    <div class="workspace-card-footer">
+                        <button type="button" class="btn btn-danger btn-icon-only tooltip-trigger" title="Delete this workspace" onclick="deleteWorkspace('{{.ID}}', '{{.Name}}')">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            <span class="tooltip">Delete Workspace</span>
+                        </button>
+                    </div>
+                </div>
+                {{end}}
             </div>
             {{else}}
             <div class="empty-state">

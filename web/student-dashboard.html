@@ -26,16 +26,17 @@
 
         <main>
             <!-- Saved Workspace Info -->
-            <div class="student-card" id="workspace-info-card" style="display: none;">
-                <h2>My Workspace Information</h2>
-                <div id="workspace-info-container"></div>
-            </div>
-
-            <!-- Available Labs -->
-            <div class="student-card">
-                <h2>Available Labs</h2>
-                <div id="labs-container">
-                    <div class="student-loading">Loading available labs...</div>
+            <div class="student-card collapsible-card" id="workspace-info-card" style="display: none;">
+                <div class="collapsible-header" onclick="toggleWorkspaceInfo()">
+                    <h2>My Workspace Information</h2>
+                    <button class="collapsible-toggle" aria-label="Toggle workspace information">
+                        <svg class="chevron-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </button>
+                </div>
+                <div class="collapsible-content" id="workspace-info-content">
+                    <div id="workspace-info-container"></div>
                 </div>
             </div>
 

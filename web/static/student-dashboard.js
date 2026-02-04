@@ -1,7 +1,8 @@
 // Load labs on page load
 document.addEventListener('DOMContentLoaded', function() {
     loadLabs();
-    loadAndDecryptWorkspaceInfo();
+    loadWorkspaceInfo();
+    // Collapsible state will be initialized when workspace info is displayed
 });
 
 // Cookie utility functions
@@ -22,9 +23,20 @@ function deleteCookie(name) {
     document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/;`;
 }
 
-// Legacy function - kept for compatibility but now uses decryption
+// Load workspace info without decrypting (on-demand decryption)
 function loadWorkspaceInfo() {
-    loadAndDecryptWorkspaceInfo();
+    const cookieValue = getCookie('workspace_info');
+    if (!cookieValue) {
+        return; // No workspace info cookie
+    }
+
+    try {
+        const workspaceInfo = JSON.parse(decodeURIComponent(cookieValue));
+        // Don't decrypt automatically - just display encrypted state
+        displayWorkspaceInfo(workspaceInfo);
+    } catch (error) {
+        console.error('Failed to load workspace info:', error);
+    }
 }
 
 // Display workspace info in the UI
@@ -36,6 +48,7 @@ function displayWorkspaceInfo(info) {
     }
 
     const createdAt = new Date(info.created_at).toLocaleString();
+    const isEncrypted = info.encrypted_password && !info.password;
     
     container.innerHTML = `
         <div class="student-credentials-box">
@@ -47,21 +60,40 @@ function displayWorkspaceInfo(info) {
             </div>
             <div class="student-credential-item">
                 <label>Workspace URL:</label>
-                <div class="student-credential-item-value">
+                <div class="student-credential-item-value credential-with-copy">
                     <a href="${info.workspace_url}" target="_blank">${info.workspace_url}</a>
+                    <button class="copy-btn" data-copy-text="${escapeHtml(info.workspace_url)}" title="Copy URL">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="copy-icon">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                    </button>
                 </div>
             </div>
             <div class="student-credential-item">
                 <label>Email:</label>
-                <div class="student-credential-item-value">${escapeHtml(info.email)}</div>
+                <div class="student-credential-item-value credential-with-copy">
+                    <span>${escapeHtml(info.email)}</span>
+                    <button class="copy-btn" data-copy-text="${escapeHtml(info.email)}" title="Copy Email">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="copy-icon">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                    </button>
+                </div>
             </div>
             <div class="student-credential-item">
                 <label>Password:</label>
-                <div class="student-credential-item-value" id="workspace-password-display">
-                    ${info.password ? escapeHtml(info.password) : '<em>Encrypted - click to decrypt</em>'}
+                <div class="student-credential-item-value credential-with-copy ${isEncrypted ? 'encrypted-state' : ''}" id="workspace-password-display">
+                    ${info.password ? 
+                        `<span class="password-value">${escapeHtml(info.password)}</span>
+                         <button class="copy-btn" data-copy-text="${escapeHtml(info.password)}" title="Copy Password">
+                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="copy-icon">
+                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                             </svg>
+                         </button>` : 
+                        `<em class="encrypted-indicator">🔒 Encrypted - click to decrypt</em>`}
                 </div>
-                ${info.encrypted_password && !info.password ? 
-                    '<button onclick="decryptAndShowPassword()" class="student-btn student-btn-small">Decrypt Password</button>' : 
+                ${isEncrypted ? 
+                    '<button onclick="decryptAndShowPassword()" class="student-btn student-btn-small decrypt-btn">Decrypt Password</button>' : 
                     ''}
             </div>
             <div class="student-credential-item">
@@ -81,6 +113,12 @@ function displayWorkspaceInfo(info) {
     
     // Show the card
     card.style.display = 'block';
+    
+    // Initialize collapsible state and attach copy button listeners after content is rendered
+    setTimeout(() => {
+        initializeCollapsibleState();
+        attachCopyButtonListeners();
+    }, 10);
 }
 
 // Decrypt and show password
@@ -101,10 +139,32 @@ async function decryptAndShowPassword() {
         const studentPassword = await promptStudentPassword('Enter your student password to decrypt the workspace password:');
         const decryptedPassword = await decryptPassword(workspaceInfo.encrypted_password, workspaceInfo.email, studentPassword);
         
-        // Update display
+        // Update display with decrypted password and copy button
         const passwordDisplay = document.getElementById('workspace-password-display');
         if (passwordDisplay) {
-            passwordDisplay.innerHTML = escapeHtml(decryptedPassword);
+            passwordDisplay.className = 'student-credential-item-value credential-with-copy';
+            passwordDisplay.innerHTML = `
+                <span class="password-value">${escapeHtml(decryptedPassword)}</span>
+                <button class="copy-btn" data-copy-text="${escapeHtml(decryptedPassword)}" title="Copy Password">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="copy-icon">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                </button>
+            `;
+            
+            // Attach event listener to copy button
+            const copyBtn = passwordDisplay.querySelector('.copy-btn');
+            if (copyBtn) {
+                copyBtn.addEventListener('click', function() {
+                    copyToClipboard(decryptedPassword, this);
+                });
+            }
+            
+            // Remove decrypt button
+            const decryptBtn = passwordDisplay.parentElement.querySelector('.decrypt-btn');
+            if (decryptBtn) {
+                decryptBtn.remove();
+            }
         }
     } catch (error) {
         console.error('Failed to decrypt password:', error);
@@ -264,7 +324,7 @@ async function saveWorkspaceInfoWithEncryption(workspaceInfo) {
         
         alert('Workspace information encrypted and saved successfully!');
         // Reload to show encrypted version
-        setTimeout(loadAndDecryptWorkspaceInfo, 100);
+        setTimeout(loadWorkspaceInfo, 100);
         
         return true;
     } catch (error) {
@@ -301,65 +361,118 @@ async function encryptAndSaveWorkspaceInfo(button) {
     }
 }
 
-// Load and decrypt workspace info
-async function loadAndDecryptWorkspaceInfo() {
-    const cookieValue = getCookie('workspace_info');
-    if (!cookieValue) {
-        return; // No workspace info cookie
+// Toggle collapsible workspace info
+function toggleWorkspaceInfo() {
+    const card = document.getElementById('workspace-info-card');
+    const content = document.getElementById('workspace-info-content');
+    const toggle = card.querySelector('.collapsible-toggle');
+    const chevron = card.querySelector('.chevron-icon');
+    
+    if (!card || !content) return;
+    
+    const isCollapsed = card.classList.contains('collapsed');
+    
+    if (isCollapsed) {
+        card.classList.remove('collapsed');
+        content.style.maxHeight = content.scrollHeight + 'px';
+        if (chevron) chevron.style.transform = 'rotate(180deg)';
+        localStorage.setItem('workspaceInfoExpanded', 'true');
+    } else {
+        card.classList.add('collapsed');
+        content.style.maxHeight = '0';
+        if (chevron) chevron.style.transform = 'rotate(0deg)';
+        localStorage.setItem('workspaceInfoExpanded', 'false');
     }
+}
 
-    try {
-        const workspaceInfo = JSON.parse(decodeURIComponent(cookieValue));
-        
-        // Check if password is encrypted
-        if (workspaceInfo.encrypted_password && !workspaceInfo.password) {
-            // Need to decrypt
-            const studentPassword = await promptStudentPassword('Enter your student password to view workspace information:');
-            workspaceInfo.password = await decryptPassword(workspaceInfo.encrypted_password, workspaceInfo.email, studentPassword);
-        }
-        
-        displayWorkspaceInfo(workspaceInfo);
-    } catch (error) {
-        console.error('Failed to decrypt workspace info:', error);
-        if (error.message.includes('cancelled')) {
-            return; // User cancelled
-        }
-        alert('Failed to decrypt workspace information. Please check your password and try again.');
+// Initialize collapsible state from localStorage
+function initializeCollapsibleState() {
+    const card = document.getElementById('workspace-info-card');
+    const content = document.getElementById('workspace-info-content');
+    const chevron = card?.querySelector('.chevron-icon');
+    
+    if (!card || !content) return;
+    
+    // Default to collapsed
+    const isExpanded = localStorage.getItem('workspaceInfoExpanded') === 'true';
+    
+    if (isExpanded) {
+        card.classList.remove('collapsed');
+        // Set max-height after a brief delay to allow content to render
+        setTimeout(() => {
+            content.style.maxHeight = content.scrollHeight + 'px';
+        }, 10);
+        if (chevron) chevron.style.transform = 'rotate(180deg)';
+    } else {
+        card.classList.add('collapsed');
+        content.style.maxHeight = '0';
+        if (chevron) chevron.style.transform = 'rotate(0deg)';
     }
+}
+
+// Copy to clipboard functionality
+async function copyToClipboard(text, button) {
+    try {
+        await navigator.clipboard.writeText(text);
+        
+        // Visual feedback
+        const originalHTML = button.innerHTML;
+        button.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="copy-icon">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+            </svg>
+        `;
+        button.classList.add('copied');
+        
+        setTimeout(() => {
+            button.innerHTML = originalHTML;
+            button.classList.remove('copied');
+        }, 2000);
+    } catch (error) {
+        console.error('Failed to copy:', error);
+        // Fallback for older browsers
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.opacity = '0';
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+            document.execCommand('copy');
+            button.classList.add('copied');
+            setTimeout(() => button.classList.remove('copied'), 2000);
+        } catch (err) {
+            alert('Failed to copy to clipboard');
+        }
+        document.body.removeChild(textArea);
+    }
+}
+
+// Attach copy button event listeners after content is rendered
+function attachCopyButtonListeners() {
+    document.querySelectorAll('.copy-btn[data-copy-text]').forEach(button => {
+        if (!button.hasAttribute('data-listener-attached')) {
+            button.setAttribute('data-listener-attached', 'true');
+            button.addEventListener('click', function() {
+                const text = this.getAttribute('data-copy-text');
+                copyToClipboard(text, this);
+            });
+        }
+    });
 }
 
 function loadLabs() {
     fetch('/api/student/labs')
         .then(response => response.json())
         .then(data => {
-            const container = document.getElementById('labs-container');
             const select = document.getElementById('lab_id');
             
             if (data.length === 0) {
-                container.innerHTML = '<p>No labs available. Please contact your instructor.</p>';
                 select.innerHTML = '<option value="">No labs available</option>';
                 return;
             }
 
-            // Populate labs list
-            const labsList = document.createElement('ul');
-            labsList.className = 'labs-list';
-            data.forEach(lab => {
-                const item = document.createElement('li');
-                item.className = 'lab-item';
-                const date = new Date(lab.created_at).toLocaleString();
-                item.innerHTML = `
-                    <strong>${lab.config.stack_name || lab.id}</strong>
-                    <div class="lab-meta">
-                        Created: ${date} | Status: ${lab.status}
-                    </div>
-                `;
-                labsList.appendChild(item);
-            });
-            container.innerHTML = '';
-            container.appendChild(labsList);
-
-            // Populate select dropdown
+            // Populate select dropdown only
             select.innerHTML = '<option value="">Select a lab...</option>';
             data.forEach(lab => {
                 const option = document.createElement('option');
@@ -370,8 +483,10 @@ function loadLabs() {
         })
         .catch(error => {
             console.error('Error loading labs:', error);
-            document.getElementById('labs-container').innerHTML = 
-                '<p class="error-message">Error loading labs. Please refresh the page.</p>';
+            const select = document.getElementById('lab_id');
+            if (select) {
+                select.innerHTML = '<option value="">Error loading labs</option>';
+            }
         });
 }
 

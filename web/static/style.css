@@ -1548,6 +1548,137 @@ body.student-dashboard-page {
     font-size: 0.875rem;
 }
 
+/* Collapsible card styles */
+.collapsible-card {
+    overflow: hidden;
+}
+
+.collapsible-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+    padding: 0;
+    margin-bottom: 0;
+    transition: background-color 0.2s;
+    border-radius: var(--radius);
+    padding: 0.5rem;
+    margin: -0.5rem -0.5rem 0 -0.5rem;
+}
+
+.collapsible-header:hover {
+    background: var(--surface);
+}
+
+.collapsible-header h2 {
+    margin: 0;
+    flex: 1;
+    padding: 0;
+}
+
+.collapsible-toggle {
+    background: none;
+    border: none;
+    padding: 0.5rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-light);
+    transition: color 0.2s, transform 0.2s;
+    border-radius: var(--radius);
+}
+
+.collapsible-toggle:hover {
+    color: var(--text);
+    background: var(--surface);
+}
+
+.chevron-icon {
+    width: 1.25rem;
+    height: 1.25rem;
+    transition: transform 0.3s ease;
+    transform: rotate(0deg);
+}
+
+.collapsible-content {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease-out, margin-top 0.3s ease-out;
+    margin-top: 1.5rem;
+}
+
+.collapsible-card.collapsed .collapsible-content {
+    margin-top: 0;
+}
+
+/* Copy button styles */
+.credential-with-copy {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    position: relative;
+}
+
+.credential-with-copy > a,
+.credential-with-copy > span {
+    flex: 1;
+    min-width: 0;
+}
+
+.copy-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.25rem;
+    padding: 0.375rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    flex-shrink: 0;
+    color: var(--text-light);
+}
+
+.copy-btn:hover {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: white;
+}
+
+.copy-btn.copied {
+    background: var(--success);
+    border-color: var(--success);
+    color: white;
+}
+
+.copy-icon {
+    width: 1rem;
+    height: 1rem;
+    stroke-width: 2;
+}
+
+.password-value {
+    font-family: monospace;
+}
+
+.encrypted-state {
+    opacity: 0.8;
+}
+
+.encrypted-indicator {
+    font-style: italic;
+    color: var(--text-light);
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.decrypt-btn {
+    margin-top: 0.5rem;
+}
+
 /* ============================================
    JOBS LIST PAGE STYLES
    ============================================ */
@@ -1823,6 +1954,20 @@ body.student-dashboard-page {
     white-space: nowrap;
 }
 
+.workspaces-actions-bar .btn-icon-only {
+    width: 2.5rem;
+    height: 2.5rem;
+    padding: 0;
+    flex-shrink: 0;
+    position: relative;
+}
+
+.workspaces-actions-bar .btn-icon-only .icon {
+    width: 1.25rem;
+    height: 1.25rem;
+    stroke-width: 2;
+}
+
 .message-container {
     margin-top: 1.5rem;
     padding: 0 1.5rem;
@@ -1943,11 +2088,168 @@ body.student-dashboard-page {
     accent-color: var(--primary-color);
 }
 
+/* Workspace Grid and Cards */
+.workspaces-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 1.5rem;
+    margin-top: 1.5rem;
+}
+
+.workspace-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.2s, box-shadow 0.2s;
+    overflow: hidden;
+}
+
+.workspace-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.workspace-card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem 1.25rem;
+    background: var(--background);
+    border-bottom: 1px solid var(--border);
+}
+
+.workspace-card-checkbox {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.workspace-card-checkbox input[type="checkbox"] {
+    width: 1.25rem;
+    height: 1.25rem;
+    cursor: pointer;
+    accent-color: var(--primary-color);
+    margin: 0;
+}
+
+.workspace-card-checkbox label {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+}
+
+.workspace-status-badge {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.25rem;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1;
+}
+
+.workspace-status-badge.status-running {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.workspace-status-badge.status-stopped {
+    background: #e5e7eb;
+    color: #374151;
+}
+
+.workspace-status-badge.status-starting,
+.workspace-status-badge.status-stopping {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.workspace-status-badge.status-failed {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.workspace-name-header {
+    flex: 1;
+    min-width: 0;
+}
+
 .workspace-name {
-    font-weight: 500;
+    font-weight: 600;
     color: var(--text);
     font-family: monospace;
+    font-size: 0.9375rem;
+    word-break: break-word;
+    line-height: 1.4;
+}
+
+.workspace-card-body {
+    padding: 1.25rem;
+    flex: 1;
+}
+
+.workspace-info-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
     font-size: 0.875rem;
+}
+
+.workspace-info-item:last-child {
+    margin-bottom: 0;
+}
+
+.workspace-info-item .info-icon {
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    color: var(--text-light);
+    stroke-width: 2;
+}
+
+.workspace-info-item .info-label {
+    color: var(--text-light);
+    font-weight: 500;
+    min-width: 4rem;
+}
+
+.workspace-info-item .info-value {
+    color: var(--text);
+    flex: 1;
+    word-break: break-word;
+}
+
+.workspace-card-footer {
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    padding: 1rem 1.25rem;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    gap: 0.5rem;
+}
+
+.workspace-card-footer .btn-icon-only {
+    width: 2.5rem;
+    height: 2.5rem;
+    padding: 0;
+    flex-shrink: 0;
+    position: relative;
+}
+
+.workspace-card-footer .btn-icon-only .icon {
+    width: 1.25rem;
+    height: 1.25rem;
+    stroke-width: 2;
 }
 
 .workspace-owner {
@@ -2024,6 +2326,13 @@ body.student-dashboard-page {
     }
 }
 
+@media (max-width: 1024px) {
+    .workspaces-grid {
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 1.25rem;
+    }
+}
+
 @media (max-width: 768px) {
     .workspaces-actions-bar {
         flex-direction: column;
@@ -2031,13 +2340,31 @@ body.student-dashboard-page {
     }
 
     .actions-group {
-        flex-direction: column;
+        flex-direction: row;
         width: 100%;
+        justify-content: flex-start;
     }
 
-    .workspaces-actions-bar .btn {
-        width: 100%;
-        justify-content: center;
+    .workspaces-actions-bar .btn-icon-only {
+        width: 2.5rem;
+        height: 2.5rem;
+    }
+
+    .workspaces-grid {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+
+    .workspace-card-header {
+        padding: 0.875rem 1rem;
+    }
+
+    .workspace-card-body {
+        padding: 1rem;
+    }
+
+    .workspace-card-footer {
+        padding: 0.875rem 1rem;
     }
 
     .labs-table {
