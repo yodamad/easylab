@@ -1990,9 +1990,9 @@ func (h *Handler) RetryJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract job ID from path like /api/jobs/{id}/retry
+	// Extract job ID from path like /api/jobs/{id}/retry or /api/labs/{id}/retry
 	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(pathParts) < 4 || pathParts[0] != "api" || pathParts[1] != "jobs" || pathParts[3] != "retry" {
+	if len(pathParts) < 4 || pathParts[0] != "api" || (pathParts[1] != "jobs" && pathParts[1] != "labs") || pathParts[3] != "retry" {
 		log.Printf("Invalid path for job retry: %s", r.URL.Path)
 		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
