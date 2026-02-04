@@ -45,7 +45,8 @@ type coderConfigValues struct {
 	OrganizationID string
 }
 
-func SetupDB(ctx *pulumi.Context, k8sProvider *k8s.Provider, ns *k8score.Namespace) internalK8s.HelmChartInfo {
+// SetupDB installs PostgreSQL via Helm and returns the release for dependency tracking
+func SetupDB(ctx *pulumi.Context, k8sProvider *k8s.Provider, ns *k8score.Namespace) (*helmv3.Release, error) {
 
 	dbUser := utils.CoderConfig(ctx, utils.CoderDbUser)
 	dbPassword := utils.CoderConfig(ctx, utils.CoderDbPassword)
@@ -70,21 +71,31 @@ func SetupDB(ctx *pulumi.Context, k8sProvider *k8s.Provider, ns *k8score.Namespa
 		},
 	}
 
-	_, err := internalK8s.InitHelm(ctx, k8sProvider, helmValues, ns)
+	dbRelease, err := internalK8s.InitHelm(ctx, k8sProvider, helmValues, ns)
 	if err != nil {
-		return internalK8s.HelmChartInfo{}
+		return nil, fmt.Errorf("failed to setup PostgreSQL: %w", err)
 	}
 
-	return helmValues
+	return dbRelease, nil
 
 }
 
-func SetupDBSecret(ctx *pulumi.Context, provider pulumi.ProviderResource, ns *k8score.Namespace) {
+// SetupDBSecret creates the database URL secret for Coder
+// It depends on the namespace and optionally on the DB release for proper ordering
+func SetupDBSecret(ctx *pulumi.Context, provider pulumi.ProviderResource, ns *k8score.Namespace, dbRelease ...*helmv3.Release) error {
 
 	dbUser := utils.CoderConfig(ctx, utils.CoderDbUser)
 	dbPassword := utils.CoderConfig(ctx, utils.CoderDbPassword)
 	dbName := utils.CoderConfig(ctx, utils.CoderDbName)
 	dbUrl := fmt.Sprintf("postgres://%s:%s@postgresql.coder.svc.cluster.local:5432/%s?sslmode=disable", dbUser, dbPassword, dbName)
+
+	// Build dependencies list
+	deps := []pulumi.Resource{ns}
+	for _, rel := range dbRelease {
+		if rel != nil {
+			deps = append(deps, rel)
+		}
+	}
 
 	_, err := k8score.NewSecret(ctx, "coder-db-url", &k8score.SecretArgs{
 		Type: pulumi.String("Opaque"),
@@ -94,10 +105,48 @@ func SetupDBSecret(ctx *pulumi.Context, provider pulumi.ProviderResource, ns *k8
 		StringData: pulumi.StringMap{
 			"url": pulumi.String(dbUrl),
 		},
-	}, pulumi.Provider(provider), pulumi.DependsOn([]pulumi.Resource{ns}))
+	}, pulumi.Provider(provider), pulumi.DependsOn(deps))
 	if err != nil {
-		_ = ctx.Log.Error("failed to create coder-db-url secret: "+err.Error(), nil)
+		return fmt.Errorf("failed to create coder-db-url secret: %w", err)
 	}
+	return nil
+}
+
+// InfrastructureResult holds the results of parallel infrastructure setup
+type InfrastructureResult struct {
+	DBRelease    *helmv3.Release
+	CoderRelease *helmv3.Release
+}
+
+// SetupInfrastructureParallel sets up PostgreSQL and Coder Helm charts in parallel
+// Both only depend on the namespace, so they can be installed concurrently
+// This significantly reduces deployment time compared to sequential installation
+func SetupInfrastructureParallel(ctx *pulumi.Context, k8sProvider *k8s.Provider, ns *k8score.Namespace) (*InfrastructureResult, error) {
+	utils.LogInfo(ctx, "Setting up PostgreSQL and Coder in parallel...")
+
+	// Setup PostgreSQL (doesn't block on Coder)
+	dbRelease, dbErr := SetupDB(ctx, k8sProvider, ns)
+	if dbErr != nil {
+		return nil, fmt.Errorf("failed to setup PostgreSQL: %w", dbErr)
+	}
+
+	// Setup DB Secret (depends on namespace, will wait for DB at runtime)
+	if err := SetupDBSecret(ctx, k8sProvider, ns, dbRelease); err != nil {
+		return nil, fmt.Errorf("failed to setup DB secret: %w", err)
+	}
+
+	// Setup Coder (doesn't block on PostgreSQL installation, but will wait at runtime for DB)
+	coderRelease, coderErr := SetupCoder(ctx, k8sProvider, ns)
+	if coderErr != nil {
+		return nil, fmt.Errorf("failed to setup Coder: %w", coderErr)
+	}
+
+	utils.LogInfo(ctx, "PostgreSQL and Coder Helm charts configured for parallel installation")
+
+	return &InfrastructureResult{
+		DBRelease:    dbRelease,
+		CoderRelease: coderRelease,
+	}, nil
 }
 
 func SetupCoder(ctx *pulumi.Context, k8sProvider *k8s.Provider, ns *k8score.Namespace) (*helmv3.Release, error) {
@@ -581,4 +630,139 @@ func CreateWorkspaceWithRetry(config CoderClientConfig, adminEmail, adminPasswor
 		return workspace, refreshedConfig, nil
 	}
 	return workspace, config, nil
+}
+
+// AsyncTemplateConfig holds configuration for async template creation
+type AsyncTemplateConfig struct {
+	ServerURL      string
+	SessionToken   string
+	OrganizationID string
+	TemplateName   string
+	ZipFilePath    string
+	LogCallback    func(message string)
+}
+
+// CreateTemplateAsync creates a Coder template asynchronously (non-blocking for Pulumi)
+// This function is designed to be called after Pulumi completes infrastructure setup
+// Returns immediately with a channel that will receive the result
+func CreateTemplateAsync(config AsyncTemplateConfig) <-chan error {
+	resultChan := make(chan error, 1)
+
+	go func() {
+		defer close(resultChan)
+
+		logFunc := config.LogCallback
+		if logFunc == nil {
+			logFunc = func(msg string) { log.Println(msg) }
+		}
+
+		logFunc("[ASYNC_TEMPLATE] Starting async template creation...")
+
+		// Parse server URL
+		serverURL, err := url.Parse(config.ServerURL)
+		if err != nil {
+			logFunc(fmt.Sprintf("[ASYNC_TEMPLATE] Failed to parse server URL: %v", err))
+			resultChan <- fmt.Errorf("failed to parse server URL: %w", err)
+			return
+		}
+
+		// Parse organization ID
+		organizationID, err := uuid.Parse(config.OrganizationID)
+		if err != nil {
+			logFunc(fmt.Sprintf("[ASYNC_TEMPLATE] Failed to parse organization ID: %v", err))
+			resultChan <- fmt.Errorf("failed to parse organization ID: %w", err)
+			return
+		}
+
+		// Create Coder client
+		client := codersdk.New(serverURL)
+		client.SetSessionToken(config.SessionToken)
+
+		// Read the zip file
+		logFunc(fmt.Sprintf("[ASYNC_TEMPLATE] Reading template zip from: %s", config.ZipFilePath))
+		zipContent, err := os.ReadFile(config.ZipFilePath)
+		if err != nil {
+			logFunc(fmt.Sprintf("[ASYNC_TEMPLATE] Failed to read zip file: %v", err))
+			resultChan <- fmt.Errorf("failed to read zip file: %w", err)
+			return
+		}
+
+		// Upload the zip file to Coder
+		logFunc("[ASYNC_TEMPLATE] Uploading template archive to Coder...")
+		uploadResp, err := client.Upload(context.Background(), codersdk.ContentTypeZip, bytes.NewReader(zipContent))
+		if err != nil {
+			logFunc(fmt.Sprintf("[ASYNC_TEMPLATE] Failed to upload template archive: %v", err))
+			resultChan <- fmt.Errorf("failed to upload template archive: %w", err)
+			return
+		}
+		logFunc(fmt.Sprintf("[ASYNC_TEMPLATE] Template archive uploaded with hash: %s", uploadResp.ID.String()))
+
+		// Create template version
+		logFunc("[ASYNC_TEMPLATE] Creating template version...")
+		templateVersion, err := client.CreateTemplateVersion(context.Background(), organizationID, codersdk.CreateTemplateVersionRequest{
+			Name:          config.TemplateName,
+			FileID:        uploadResp.ID,
+			StorageMethod: codersdk.ProvisionerStorageMethodFile,
+			Provisioner:   codersdk.ProvisionerTypeTerraform,
+		})
+		if err != nil {
+			logFunc(fmt.Sprintf("[ASYNC_TEMPLATE] Failed to create template version: %v", err))
+			resultChan <- fmt.Errorf("failed to create template version: %w", err)
+			return
+		}
+		logFunc(fmt.Sprintf("[ASYNC_TEMPLATE] Template version created: %s", templateVersion.ID.String()))
+
+		// Wait for template version to be ready
+		logFunc("[ASYNC_TEMPLATE] Waiting for template version to be processed...")
+		err = waitForTemplateVersionAsync(client, templateVersion.ID, logFunc)
+		if err != nil {
+			logFunc(fmt.Sprintf("[ASYNC_TEMPLATE] Template version failed: %v", err))
+			resultChan <- fmt.Errorf("template version failed: %w", err)
+			return
+		}
+
+		// Create the template
+		logFunc(fmt.Sprintf("[ASYNC_TEMPLATE] Creating template: %s", config.TemplateName))
+		template, err := client.CreateTemplate(context.Background(), organizationID, codersdk.CreateTemplateRequest{
+			Name:      config.TemplateName,
+			VersionID: templateVersion.ID,
+		})
+		if err != nil {
+			logFunc(fmt.Sprintf("[ASYNC_TEMPLATE] Failed to create template: %v", err))
+			resultChan <- fmt.Errorf("failed to create template: %w", err)
+			return
+		}
+
+		logFunc(fmt.Sprintf("[ASYNC_TEMPLATE] Template created successfully: %s (ID: %s)", template.Name, template.ID.String()))
+		resultChan <- nil
+	}()
+
+	return resultChan
+}
+
+// waitForTemplateVersionAsync polls the template version status with logging
+func waitForTemplateVersionAsync(client *codersdk.Client, versionID uuid.UUID, logFunc func(string)) error {
+	pollCount := 0
+	for {
+		version, err := client.TemplateVersion(context.Background(), versionID)
+		if err != nil {
+			return fmt.Errorf("failed to get template version status: %w", err)
+		}
+
+		switch version.Job.Status {
+		case codersdk.ProvisionerJobSucceeded:
+			return nil
+		case codersdk.ProvisionerJobFailed:
+			return fmt.Errorf("template version job failed: %s", version.Job.Error)
+		case codersdk.ProvisionerJobCanceled:
+			return fmt.Errorf("template version job was canceled")
+		}
+
+		// Log progress every 5 polls (10 seconds)
+		pollCount++
+		if pollCount%5 == 0 {
+			logFunc(fmt.Sprintf("[ASYNC_TEMPLATE] Still processing template version (status: %s)...", version.Job.Status))
+		}
+		time.Sleep(2 * time.Second)
+	}
 }

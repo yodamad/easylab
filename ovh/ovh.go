@@ -1,14 +1,77 @@
 package ovh
 
 import (
-	"fmt"
 	"easylab/utils"
+	"fmt"
 	"strconv"
 
 	"github.com/ovh/pulumi-ovh/sdk/v2/go/ovh/cloudproject"
 	local "github.com/pulumi/pulumi-command/sdk/go/command/local"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
+
+// NetworkInfrastructure holds network infrastructure that can be either created or reused
+type NetworkInfrastructure struct {
+	PrivateNetwork   *cloudproject.NetworkPrivate
+	Subnet           *cloudproject.NetworkPrivateSubnet
+	Gateway          *cloudproject.Gateway
+	IsExisting       bool   // True if using existing infrastructure
+	ExistingNetID    string // Existing network ID (if reusing)
+	ExistingSubnetID string // Existing subnet ID (if reusing)
+}
+
+// InitNetworkInfrastructure creates or reuses network infrastructure based on configuration
+func InitNetworkInfrastructure(ctx *pulumi.Context, serviceName string) (*NetworkInfrastructure, error) {
+	// Check for existing infrastructure configuration
+	existingNetworkId := utils.OvhConfigOptional(ctx, utils.OvhExistingNetworkId)
+	existingSubnetId := utils.OvhConfigOptional(ctx, utils.OvhExistingSubnetId)
+
+	// If both existing IDs are provided, reuse existing infrastructure
+	if existingNetworkId != "" && existingSubnetId != "" {
+		ctx.Log.Info(fmt.Sprintf("Reusing existing network infrastructure: network=%s, subnet=%s",
+			existingNetworkId, existingSubnetId), nil)
+
+		ctx.Export("privateNetworkId", pulumi.String(existingNetworkId))
+		ctx.Export("subnetId", pulumi.String(existingSubnetId))
+		ctx.Export("usingExistingNetwork", pulumi.Bool(true))
+
+		return &NetworkInfrastructure{
+			PrivateNetwork:   nil,
+			Subnet:           nil,
+			Gateway:          nil,
+			IsExisting:       true,
+			ExistingNetID:    existingNetworkId,
+			ExistingSubnetID: existingSubnetId,
+		}, nil
+	}
+
+	// Create new infrastructure
+	ctx.Log.Info("Creating new network infrastructure", nil)
+
+	privateNetwork, err := InitPrivateNetwork(ctx, serviceName)
+	if err != nil {
+		return nil, err
+	}
+
+	subnet, err := InitSubnet(ctx, serviceName, privateNetwork)
+	if err != nil {
+		return nil, err
+	}
+
+	gateway, err := InitGateway(ctx, serviceName, privateNetwork, subnet)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx.Export("usingExistingNetwork", pulumi.Bool(false))
+
+	return &NetworkInfrastructure{
+		PrivateNetwork: privateNetwork,
+		Subnet:         subnet,
+		Gateway:        gateway,
+		IsExisting:     false,
+	}, nil
+}
 
 func InitSubnet(ctx *pulumi.Context, serviceName string, privateNetwork *cloudproject.NetworkPrivate) (*cloudproject.NetworkPrivateSubnet, error) {
 	subnet, _ := cloudproject.NewNetworkPrivateSubnet(ctx, "subnet", &cloudproject.NetworkPrivateSubnetArgs{
@@ -63,6 +126,51 @@ func InitGateway(ctx *pulumi.Context, serviceName string, privateNetwork *cloudp
 	return gateway, nil
 }
 
+// InitManagedKubernetesClusterWithNetwork creates a K8s cluster using the network infrastructure
+func InitManagedKubernetesClusterWithNetwork(ctx *pulumi.Context, serviceName string, netInfra *NetworkInfrastructure) (*cloudproject.Kube, error) {
+	var kubeCluster *cloudproject.Kube
+	var err error
+
+	if netInfra.IsExisting {
+		// Using existing network - use the pre-configured network ID
+		kubeCluster, err = cloudproject.NewKube(ctx, "kubeCluster", &cloudproject.KubeArgs{
+			ServiceName:      pulumi.String(serviceName),
+			Name:             pulumi.String(utils.K8sConfig(ctx, utils.K8sClusterName)),
+			Region:           pulumi.String(utils.OvhConfig(ctx, utils.OvhRegion)),
+			PrivateNetworkId: pulumi.String(netInfra.ExistingNetID),
+		})
+	} else {
+		// Using newly created network
+		kubeCluster, err = cloudproject.NewKube(ctx, "kubeCluster", &cloudproject.KubeArgs{
+			ServiceName:      pulumi.String(serviceName),
+			Name:             pulumi.String(utils.K8sConfig(ctx, utils.K8sClusterName)),
+			Region:           pulumi.String(utils.OvhConfig(ctx, utils.OvhRegion)),
+			PrivateNetworkId: getNetworkId(ctx, netInfra.PrivateNetwork),
+		}, pulumi.DependsOn([]pulumi.Resource{netInfra.Gateway}))
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Kubernetes cluster: %w", err)
+	}
+
+	ctx.Export("kubeClusterId", kubeCluster.ID())
+	ctx.Export("kubeClusterName", kubeCluster.Name)
+	ctx.Export("kubeconfig", pulumi.ToSecret(kubeCluster.Kubeconfig))
+	// Export kubeconfig to file
+	_, err = local.NewCommand(ctx, "writeKubeconfig", &local.CommandArgs{
+		Create: pulumi.Sprintf(
+			"echo '%s' > kubeconfig.yaml",
+			kubeCluster.Kubeconfig,
+		),
+	})
+	if err != nil {
+		ctx.Log.Warn(fmt.Sprintf("failed to write kubeconfig to file: %v", err), nil)
+	}
+
+	return kubeCluster, nil
+}
+
+// InitManagedKubernetesCluster creates a K8s cluster (legacy function for backward compatibility)
 func InitManagedKubernetesCluster(ctx *pulumi.Context, serviceName string, privateNetwork *cloudproject.NetworkPrivate, subnet *cloudproject.NetworkPrivateSubnet, gateway *cloudproject.Gateway) (*cloudproject.Kube, error) {
 	// Create managed Kubernetes cluster
 	kubeCluster, err := cloudproject.NewKube(ctx, "kubeCluster", &cloudproject.KubeArgs{
@@ -86,7 +194,7 @@ func InitManagedKubernetesCluster(ctx *pulumi.Context, serviceName string, priva
 		),
 	})
 	if err != nil {
-		fmt.Errorf("failed to write kubeconfig to file: %w", err)
+		ctx.Log.Warn(fmt.Sprintf("failed to write kubeconfig to file: %v", err), nil)
 	}
 
 	return kubeCluster, nil

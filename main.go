@@ -98,8 +98,8 @@ func main() {
 			}
 			zipFile = absTemplatePath
 		} else {
-			// Use default Git-based template
-			utils.LogInfo(ctx, "No template file uploaded, using Git-based template")
+			// Use default Git-based template (this is expected behavior when no file is uploaded)
+			utils.LogInfo(ctx, "No template file uploaded, using Git-based template (this is expected)")
 			var gitErr error
 			zipFile, gitErr = utils.CloneFolderFromGitAndZipIt("https://gitlab.com/yodamad-workshops/coder-templates#", "docker", "main")
 			if gitErr != nil {

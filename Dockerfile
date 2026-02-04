@@ -49,7 +49,8 @@ RUN mkdir -p /app/.pulumi/plugins && \
     pulumi plugin install resource kubernetes v4.24.1 && \
     pulumi plugin install resource command v1.1.3 && \
     pulumi plugin install resource ovh v2.10.0 --server github://api.github.com/ovh/pulumi-ovh && \
-    chown -R appuser:appgroup /app/.pulumi
+    chown -R appuser:appgroup /app/.pulumi && \
+    pulumi plugin ls --json | grep -q "ovh" || (echo "ERROR: pulumi-resource-ovh plugin not found after installation" && exit 1)
 
 # Change ownership of all files to appuser (including web directory and Go cache)
 RUN chown -R appuser:appgroup /app

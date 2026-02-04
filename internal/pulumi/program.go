@@ -23,22 +23,14 @@ func CreateLabProgram() pulumi.RunFunc {
 		// Initialize infrastructure
 		utils.LogInfo(ctx, "Starting infrastructure setup...")
 
-		privateNetwork, err := ovh.InitPrivateNetwork(ctx, serviceName)
+		// Initialize network infrastructure (creates new or reuses existing based on config)
+		netInfra, err := ovh.InitNetworkInfrastructure(ctx, serviceName)
 		if err != nil {
-			return fmt.Errorf("failed to create private network: %w", err)
+			return fmt.Errorf("failed to initialize network infrastructure: %w", err)
 		}
 
-		subnet, err := ovh.InitSubnet(ctx, serviceName, privateNetwork)
-		if err != nil {
-			return fmt.Errorf("failed to create subnet: %w", err)
-		}
-
-		gateway, err := ovh.InitGateway(ctx, serviceName, privateNetwork, subnet)
-		if err != nil {
-			return fmt.Errorf("failed to create gateway: %w", err)
-		}
-
-		kubeCluster, err := ovh.InitManagedKubernetesCluster(ctx, serviceName, privateNetwork, subnet, gateway)
+		// Create Kubernetes cluster using the network infrastructure
+		kubeCluster, err := ovh.InitManagedKubernetesClusterWithNetwork(ctx, serviceName, netInfra)
 		if err != nil {
 			return fmt.Errorf("failed to create Kubernetes cluster: %w", err)
 		}
@@ -53,21 +45,20 @@ func CreateLabProgram() pulumi.RunFunc {
 			return fmt.Errorf("failed to create Kubernetes provider: %w", err)
 		}
 
-		// Initialize Coder elements
-		utils.LogInfo(ctx, "Starting Coder setup...")
+		// Initialize Coder elements with parallel Helm installations
+		utils.LogInfo(ctx, "Starting Coder setup (parallel mode)...")
 		ns, err := k8s.InitNamespace(ctx, k8sProvider)
 		if err != nil {
 			return fmt.Errorf("failed to create namespace: %w", err)
 		}
 
-		coder.SetupDB(ctx, k8sProvider, ns)
-		coder.SetupDBSecret(ctx, k8sProvider, ns)
-		coderRelease, err := coder.SetupCoder(ctx, k8sProvider, ns)
+		// Setup PostgreSQL and Coder in parallel for faster deployment
+		infraResult, err := coder.SetupInfrastructureParallel(ctx, k8sProvider, ns)
 		if err != nil {
-			return fmt.Errorf("failed to setup coder: %w", err)
+			return fmt.Errorf("failed to setup infrastructure: %w", err)
 		}
 
-		extIp, err := k8s.GetExternalIP(ctx, k8sProvider, coderRelease)
+		extIp, err := k8s.GetExternalIP(ctx, k8sProvider, infraResult.CoderRelease)
 		if err != nil {
 			return fmt.Errorf("failed to get external IP: %w", err)
 		}
@@ -79,6 +70,13 @@ func CreateLabProgram() pulumi.RunFunc {
 		ctx.Export("coderSessionToken", coderConfig.SessionToken)
 		ctx.Export("coderOrganizationID", coderConfig.OrganizationID)
 		utils.LogInfo(ctx, "Setup completed successfully!")
+
+		// Check if template creation should be skipped (for async/non-blocking mode)
+		skipTemplateCreation := os.Getenv("SKIP_TEMPLATE_CREATION") == "true"
+		if skipTemplateCreation {
+			utils.LogInfo(ctx, "Template creation skipped (SKIP_TEMPLATE_CREATION=true) - will be handled asynchronously")
+			return nil
+		}
 
 		// Determine template source and get template zip file
 		templateSource := utils.CoderConfigOptional(ctx, utils.CoderTemplateSource)

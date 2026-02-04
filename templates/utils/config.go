@@ -32,8 +32,23 @@ const OvhNetworkMask = "networkMask"
 const OvhNetworkStartIP = "networkStartIp"
 const OvhNetworkEndIP = "networkEndIp"
 
+// OVH existing infrastructure config keys (for reusing shared infrastructure)
+const OvhExistingNetworkId = "existingNetworkId"
+const OvhExistingSubnetId = "existingSubnetId"
+const OvhExistingGatewayId = "existingGatewayId"
+
 func OvhConfig(ctx *pulumi.Context, key string) string {
 	return getConfig(ctx, OvhGroup, key)
+}
+
+// OvhConfigOptional returns an optional config value (empty string if not set)
+func OvhConfigOptional(ctx *pulumi.Context, key string) string {
+	cfg := config.New(ctx, OvhGroup)
+	val := cfg.Get(key)
+	if val == "" {
+		return ""
+	}
+	return val
 }
 
 // Node pool config group

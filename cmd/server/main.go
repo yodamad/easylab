@@ -95,7 +95,7 @@ func main() {
 	startTime := time.Now()
 
 	var (
-		port    = flag.String("port", "8080", "Port to listen on")
+		port    = flag.String("port", "8081", "Port to listen on")
 		workDir = flag.String("work-dir", utils.DEFAULT_WORK_DIR, "Directory for job workspaces")
 		dataDir = flag.String("data-dir", utils.DEFAULT_DATA_DIR, "Directory for persisting job data")
 		envFile = flag.String("env-file", "", "Path to environment file to load at startup")
@@ -175,6 +175,16 @@ func main() {
 	pulumiStart := time.Now()
 	pulumiExec = server.NewPulumiExecutor(jobManager, *workDir)
 	log.Printf("[STARTUP] PulumiExecutor initialization took %v", time.Since(pulumiStart))
+
+	// Pre-warm Go module cache asynchronously to speed up job execution
+	go func() {
+		prewarmStart := time.Now()
+		if err := pulumiExec.PrewarmModuleCache(); err != nil {
+			log.Printf("[STARTUP] Warning: Go module cache pre-warming failed: %v", err)
+		} else {
+			log.Printf("[STARTUP] Go module cache pre-warming completed in %v", time.Since(prewarmStart))
+		}
+	}()
 
 	// Initialize handler (depends on all components)
 	handlerStart := time.Now()
