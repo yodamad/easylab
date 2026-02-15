@@ -181,7 +181,6 @@ pages:
   stage: deploy
   image: ghcr.io/astral-sh/uv:0.10.2-python3.12-alpine
   script:
-    - uv init
     - uv add --dev zensical
     - uv run zensical build
   needs: []
