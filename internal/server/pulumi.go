@@ -20,6 +20,14 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
 
+// getEnvOrDefault returns the environment variable value or a default if not set
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
 // PulumiExecutor handles Pulumi command execution
 type PulumiExecutor struct {
 	jobManager       *JobManager
@@ -126,7 +134,7 @@ func NewPulumiExecutor(jobManager *JobManager, workDir string) *PulumiExecutor {
 	// Check if inline Pulumi program mode is enabled
 	// This mode uses pre-compiled code instead of copying templates
 	// Set USE_INLINE_PULUMI=true to enable (experimental)
-	useInline := os.Getenv("USE_INLINE_PULUMI") == "true"
+	useInline := getEnvOrDefault("USE_INLINE_PULUMI", "false") == "true"
 	if useInline {
 		log.Printf("[PULUMI] Inline program mode ENABLED - using pre-compiled Pulumi program")
 	} else {
@@ -248,44 +256,21 @@ func (pe *PulumiExecutor) GetWorkDir() string {
 func getLocalBackendEnvVars(workDir ...string) map[string]string {
 	envVars := map[string]string{
 		"PULUMI_BACKEND_URL":                          "file://",
-		"PULUMI_SKIP_UPDATE_CHECK":                    "true",
-		"PULUMI_DISABLE_AUTOMATIC_PLUGIN_ACQUISITION": "true",
-		"PULUMI_SKIP_CONFIRMATIONS":                   "true",
+		"PULUMI_SKIP_UPDATE_CHECK":                    getEnvOrDefault("PULUMI_SKIP_UPDATE_CHECK", "true"),
+		"PULUMI_DISABLE_AUTOMATIC_PLUGIN_ACQUISITION": getEnvOrDefault("PULUMI_DISABLE_AUTOMATIC_PLUGIN_ACQUISITION", "false"),
+		"PULUMI_SKIP_CONFIRMATIONS":                   getEnvOrDefault("PULUMI_SKIP_CONFIRMATIONS", "true"),
 	}
 
 	// Set PULUMI_CONFIG_PASSPHRASE if not already set (required for file backend encryption)
-	if passphrase := os.Getenv("PULUMI_CONFIG_PASSPHRASE"); passphrase == "" {
-		envVars["PULUMI_CONFIG_PASSPHRASE"] = "passphrase"
-	} else {
-		envVars["PULUMI_CONFIG_PASSPHRASE"] = passphrase
-	}
+	envVars["PULUMI_CONFIG_PASSPHRASE"] = getEnvOrDefault("PULUMI_CONFIG_PASSPHRASE", "passphrase")
 
 	// Set PULUMI_HOME if not already set (required for plugin discovery)
-	// Use existing environment variable or derive from base directory
-	if pulumiHome := os.Getenv("PULUMI_HOME"); pulumiHome == "" {
-		envVars["PULUMI_HOME"] = filepath.Join(getAppBaseDir(), ".pulumi")
-	} else {
-		envVars["PULUMI_HOME"] = pulumiHome
-	}
+	envVars["PULUMI_HOME"] = getEnvOrDefault("PULUMI_HOME", filepath.Join(getAppBaseDir(), ".pulumi"))
 
 	// Set Go cache directories if not already set (use writable locations)
-	// Use existing environment variables or derive from base directory
-	if gomodcache := os.Getenv("GOMODCACHE"); gomodcache == "" {
-		envVars["GOMODCACHE"] = filepath.Join(getAppBaseDir(), ".go", "pkg", "mod")
-	} else {
-		envVars["GOMODCACHE"] = gomodcache
-	}
-	if gocache := os.Getenv("GOCACHE"); gocache == "" {
-		envVars["GOCACHE"] = filepath.Join(getAppBaseDir(), ".go", "cache")
-	} else {
-		envVars["GOCACHE"] = gocache
-	}
-	// Set GOPATH to ensure sumdb and other Go directories use writable location
-	if gopath := os.Getenv("GOPATH"); gopath == "" {
-		envVars["GOPATH"] = filepath.Join(getAppBaseDir(), ".go")
-	} else {
-		envVars["GOPATH"] = gopath
-	}
+	envVars["GOMODCACHE"] = getEnvOrDefault("GOMODCACHE", filepath.Join(getAppBaseDir(), ".go", "pkg", "mod"))
+	envVars["GOCACHE"] = getEnvOrDefault("GOCACHE", filepath.Join(getAppBaseDir(), ".go", "cache"))
+	envVars["GOPATH"] = getEnvOrDefault("GOPATH", filepath.Join(getAppBaseDir(), ".go"))
 
 	// Disable Go workspace mode to prevent interference with module resolution
 	envVars["GOWORK"] = "off"
@@ -1764,7 +1749,7 @@ func (pe *PulumiExecutor) downloadGoModules(jobDir string, jobID string) error {
 	}
 
 	// Check if go mod verify should be skipped (via environment variable)
-	skipVerify := os.Getenv("SKIP_GO_MOD_VERIFY") == "true"
+	skipVerify := getEnvOrDefault("SKIP_GO_MOD_VERIFY", "false") == "true"
 	if skipVerify {
 		pe.jobManager.AppendOutput(jobID, "SKIP_GO_MOD_VERIFY is set, skipping go mod verify...")
 	}

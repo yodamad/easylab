@@ -69,7 +69,7 @@ func main() {
 		utils.LogInfo(ctx, "Setup completed successfully!")
 
 		// Check if template creation should be skipped (for async/non-blocking mode)
-		skipTemplateCreation := os.Getenv("SKIP_TEMPLATE_CREATION") == "true"
+		skipTemplateCreation := utils.GetEnvOrDefault("SKIP_TEMPLATE_CREATION", "false") == "true"
 		if skipTemplateCreation {
 			utils.LogInfo(ctx, "Template creation skipped (SKIP_TEMPLATE_CREATION=true) - will be handled asynchronously")
 			return nil

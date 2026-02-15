@@ -2,10 +2,19 @@ package utils
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
 )
+
+// GetEnvOrDefault returns the environment variable value or a default if not set
+func GetEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
 
 func getConfig(ctx *pulumi.Context, group string, key string) string {
 	return config.Require(ctx, fmt.Sprintf("%s:%s", group, key))
