@@ -16,9 +16,6 @@ variables:
   DOCKER_TLS_CERTDIR: "/certs"
   IMAGE_NAME: "docker.io/${DOCKER_REGISTRY_USER}/easylab"
   # for zensical
-  UV_VERSION: "0.10.2"
-  PYTHON_VERSION: "3.12"
-  BASE_LAYER: bookworm-slim
   # GitLab CI creates a separate mountpoint for the build directory,
   # so we need to copy instead of using hard links.
   UV_LINK_MODE: copy  
@@ -182,7 +179,7 @@ docker-push:
 
 pages:
   stage: deploy
-  image: ghcr.io/astral-sh/uv:$UV_VERSION-python$PYTHON_VERSION-$BASE_LAYER
+  image: ghcr.io/astral-sh/uv:0.10.2-python3.12-alpine
   script:
     - uv init
     - uv add --dev zensical
