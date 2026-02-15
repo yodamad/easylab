@@ -656,7 +656,7 @@ func TestProtectedAdminEndpoints_Unauthenticated(t *testing.T) {
 			name:     "/jobs",
 			method:   "GET",
 			path:     "/jobs",
-			handler:  ah.RequireAuth(h.ServeJobsList),
+			handler:  ah.RequireAuth(h.ServeLabsList),
 			wantCode: http.StatusSeeOther,
 			wantLoc:  "/login",
 		},
@@ -794,7 +794,7 @@ func TestProtectedAdminEndpoints_Authenticated(t *testing.T) {
 			name:     "/jobs",
 			method:   "GET",
 			path:     "/jobs",
-			handler:  ah.RequireAuth(h.ServeJobsList),
+			handler:  ah.RequireAuth(h.ServeLabsList),
 			wantCode: http.StatusOK,
 		},
 		{
