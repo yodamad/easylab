@@ -1,3 +1,8 @@
+---
+icon: lucide/ship-wheel
+title: Kubernetes
+---
+
 # EasyLab Kubernetes Deployment
 
 This directory contains Kubernetes manifests for deploying the EasyLab application with persistent volume support.

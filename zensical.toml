@@ -20,7 +20,20 @@ Copyright &copy; 2026 @yodamad
 # can be defined using TOML syntax.
 #
 # Read more: https://zensical.org/docs/setup/navigation/
-# nav = []
+nav = [
+    "index.md",
+    { "Spaces" = [
+        "admin.md",
+        "student.md"
+    ]},
+    { "Configuration" = [
+        "ovhcloud.md"
+    ]},
+    { "Deployment" = [
+        "docker.md",
+        "k8s.md"
+    ]}
+]
 
 # ----------------------------------------------------------------------------
 # Section for configuring theme options

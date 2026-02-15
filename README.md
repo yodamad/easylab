@@ -31,6 +31,8 @@ EasyLab is a comprehensive platform that streamlines cloud infrastructure lab ma
 
 With an intuitive web interface for both administrators and students, EasyLab transforms complex infrastructure-as-code workflows into simple, one-click deployments.
 
+📑 **Complete documentation is available [here](https://docs.easylab.yodamad.fr){target="_blank"}**.
+
 ![EasyLab Homepage](./assets/homepage.png)
 
 For now, EasyLab is only supported on OVHcloud, but we are working on adding support for other cloud providers.
@@ -168,8 +170,6 @@ go run cmd/server/main.go -env-file=.env -port=8080
 
 | Document | Description |
 |----------|-------------|
-| [DOCKER_README.md](DOCKER_README.md) | Docker deployment guide |
-| [K8S_README.md](K8S_README.md) | Kubernetes deployment details |
 | [TESTING.md](TESTING.md) | Testing documentation |
 | [COVERAGE_SETUP.md](COVERAGE_SETUP.md) | Code coverage setup |
 | `.gitlab-ci.yml` | GitLab CI/CD pipeline configuration |

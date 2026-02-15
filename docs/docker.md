@@ -1,3 +1,8 @@
+---
+icon: lucide/container
+title: Docker
+---
+
 # Docker Deployment Guide
 
 This guide explains how to deploy the EasyLab application using Docker and Docker Compose.
