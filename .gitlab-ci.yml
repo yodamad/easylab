@@ -175,7 +175,7 @@ docker-push:
 
 pages:
   stage: deploy
-  image: python:latest
+  image: astral/uv
   script: |
     echo "Building documentation..."
     cd docs
@@ -183,6 +183,7 @@ pages:
     uv add --dev zensical
     zensical build
     echo "Documentation built successfully"
+  needs: []
   artifacts:
     paths:
       - docs/site

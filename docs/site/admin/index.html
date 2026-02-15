@@ -310,21 +310,49 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#labs-list" class="md-nav__link">
+  <a href="#create-a-new-lab" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Labs List
+        Create a new lab
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Create a new lab">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#on-ovhcloud" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        On OVHcloud
       
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#lab-details" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#setup-coder-instance" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Lab Details
+        Setup Coder instance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manage-your-labs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manage your labs
       
     </span>
   </a>
@@ -396,21 +424,49 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#labs-list" class="md-nav__link">
+  <a href="#create-a-new-lab" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Labs List
+        Create a new lab
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Create a new lab">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#on-ovhcloud" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        On OVHcloud
       
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#lab-details" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#setup-coder-instance" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Lab Details
+        Setup Coder instance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manage-your-labs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manage your labs
       
     </span>
   </a>
@@ -440,11 +496,147 @@
                 
                   
 
-<h1 id="admin-space">Admin Space<a class="headerlink" href="#admin-space" title="Permanent link">&para;</a></h1>
-<p>As an admin (trainer, speaker, ...), you have access to the admin space to manager your labs.</p>
-<h2 id="labs-list">Labs List<a class="headerlink" href="#labs-list" title="Permanent link">&para;</a></h2>
-<p>The labs list is the main page of the admin space. It displays the list of labs you have created.</p>
-<h2 id="lab-details">Lab Details<a class="headerlink" href="#lab-details" title="Permanent link">&para;</a></h2>
+<h1 id="admin-space">Admin Space</h1>
+<p>As an admin (trainer, speaker, ...), you have access to the admin space to manager your labs:</p>
+<ul class="task-list">
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Create a new lab</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Set/update credentials for the cloud providers</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Manage your labs<ul class="task-list">
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> See logs</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Delete a lab</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> List workspaces</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Delete workspaces</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Retry a failing lab installation</li>
+</ul>
+</li>
+</ul>
+<h2 id="create-a-new-lab">Create a new lab</h2>
+<p>First you need to chose the cloud provider you want to use.</p>
+<ul class="task-list">
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> <a href="#on-ovhcloud">OVHcloud</a></li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Clever Cloud (<em>soon</em>)</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> AWS (<em>soon</em>)</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Azure (<em>soon</em>)</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Google Cloud (<em>soon</em>)</li>
+</ul>
+<h3 id="on-ovhcloud">On OVHcloud</h3>
+<p>Most of the configuration is preconfired, you only need to select the ID for the private network.</p>
+<details class="info">
+<summary>Others parameters can be overridden if needed</summary>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Parameter</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Network</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td></td>
+<td>Gateway Name</td>
+<td>The name of the network gateway</td>
+</tr>
+<tr>
+<td></td>
+<td>Gateway Model</td>
+<td>The model of the network gateway</td>
+</tr>
+<tr>
+<td></td>
+<td>Private Network Name</td>
+<td>The name of the network private network</td>
+</tr>
+<tr>
+<td></td>
+<td>Region</td>
+<td>The region of the network</td>
+</tr>
+<tr>
+<td></td>
+<td>Mask</td>
+<td>The mask of the network</td>
+</tr>
+<tr>
+<td>Node Pool</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td></td>
+<td>Name</td>
+<td>The name of the node pool</td>
+</tr>
+<tr>
+<td></td>
+<td>Flavor</td>
+<td>The flavor of the node pool</td>
+</tr>
+<tr>
+<td></td>
+<td>Desired Node Count</td>
+<td>The desired number of nodes in the node pool</td>
+</tr>
+<tr>
+<td></td>
+<td>Min Node Count</td>
+<td>The minimum number of nodes in the node pool</td>
+</tr>
+<tr>
+<td></td>
+<td>Max Node Count</td>
+<td>The maximum number of nodes in the node pool</td>
+</tr>
+</tbody>
+</table>
+</details>
+<h3 id="setup-coder-instance">Setup Coder instance</h3>
+<p>You need to setup the secrets for the Coder instance:</p>
+<ul class="task-list">
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Coder Admin Password</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Coder Db Password</li>
+</ul>
+<details class="info">
+<summary>Others parameters can be overridden if needed</summary>
+<ul>
+<li><code>Coder Admin Email</code>: The email of the coder admin</li>
+<li><code>Coder Version</code>: The version of the coder</li>
+<li><code>Coder Db User</code>: The user of the coder database</li>
+<li><code>Coder Db Password</code>: The password of the coder database</li>
+<li><code>Coder Db Name</code>: The name of the coder database</li>
+<li><code>Coder Template Name</code>: The name of the coder template</li>
+</ul>
+</details>
+<p>Then, you need to select the <a href="https://coder.com/docs/admin/templates" target="_blank">Coder template</a> you want to use.</p>
+<p><img alt="Coder template selection" src="../screens/template.png" /></p>
+<p>Either you can upload a file:</p>
+<ul class="task-list">
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> a zip file containing the template and documentation</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> a single <code>.tf</code> file containing the template information</li>
+</ul>
+<p>Or you can use a remote Git repository by providing:</p>
+<ul>
+<li>the repository URL</li>
+<li>the folder path (optional)</li>
+<li>the branch (optional)</li>
+</ul>
+<h2 id="manage-your-labs">Manage your labs</h2>
+<p>Clicking on the <code>Labs</code> button in the header will redirect you to the labs list page.</p>
+<p>You can see all the labs you have created with following information:</p>
+<ul>
+<li>status (created, running, completed, failed, destroyed)</li>
+<li>creation date</li>
+<li>access to the creation logs</li>
+<li>list all workspaces created for this lab</li>
+<li>access to the kubeconfig file</li>
+<li>actions to destroy or recreate the lab (based on the status)</li>
+</ul>
+<p><img alt="Lab Info" src="../screens/lab-info.png" width="350" /></p>
 
 
 
@@ -580,7 +772,7 @@
       
       
       
-      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["announce.dismiss","content.code.annotate","content.code.copy","content.code.select","content.footnote.tooltips","content.tabs.link","content.tooltips","navigation.footer","navigation.indexes","navigation.instant","navigation.instant.prefetch","navigation.path","navigation.sections","navigation.top","navigation.tracking","search.highlight"],"search":"../assets/javascripts/workers/search.e2d2d235.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":null}</script>
+      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["announce.dismiss","content.code.annotate","content.code.copy","content.code.select","content.footnote.tooltips","content.tabs.link","content.tooltips","navigation.footer","navigation.indexes","navigation.instant","navigation.instant.prefetch","navigation.path","navigation.sections","navigation.top","navigation.tracking","search.highlight","toc.follow"],"search":"../assets/javascripts/workers/search.e2d2d235.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":null}</script>
     
     
       <script src="../assets/javascripts/bundle.5fcf0de6.min.js"></script>

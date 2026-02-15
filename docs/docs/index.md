@@ -16,3 +16,4 @@ For your students, they can access the student space to request a new developmen
 
 > Go to [Student documentation](student.md)
 
+![EasyLab Homepage](screens/homepage.png)
