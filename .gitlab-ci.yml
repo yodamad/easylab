@@ -172,3 +172,18 @@ docker-push:
   only:
     - branches
     - tags
+
+pages:
+  stage: deploy
+  image: python:latest
+  script: |
+    echo "Building documentation..."
+    cd docs
+    uv init
+    uv add --dev zensical
+    zensical build
+    echo "Documentation built successfully"
+  artifacts:
+    paths:
+      - docs/site
+
