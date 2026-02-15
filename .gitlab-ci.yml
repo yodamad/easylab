@@ -186,4 +186,5 @@ pages:
   needs: []
   artifacts:
     paths:
-      - site/
+      - site
+  publish: site
