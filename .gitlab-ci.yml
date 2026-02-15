@@ -176,15 +176,11 @@ docker-push:
 pages:
   stage: deploy
   image: astral/uv
-  script: |
-    echo "Building documentation..."
-    cd docs
-    uv init
-    uv add --dev zensical
-    zensical build
-    echo "Documentation built successfully"
+  script:
+    - uv init
+    - uv add --dev zensical
+    - uv run zensical build
   needs: []
   artifacts:
     paths:
-      - docs/site
-
+      - site/

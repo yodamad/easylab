@@ -40,3 +40,6 @@ test-results/
 
 # Sensitive data
 k8s-deployment/secret.yaml
+
+# Zensical
+site/

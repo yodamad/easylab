@@ -1,4 +1,5 @@
 [project]
+docs_dir = "docs"
 # Read more: https://zensical.org/docs/setup/basics/#site_name
 site_name = "EasyLab"
 # Read more: https://zensical.org/docs/setup/basics/#site_description

@@ -33,7 +33,7 @@ wheels = [
 ]
 
 [[package]]
-name = "docs"
+name = "easylab"
 version = "0.1.0"
 source = { virtual = "." }
 
