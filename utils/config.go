@@ -41,11 +41,6 @@ const OvhNetworkMask = "networkMask"
 const OvhNetworkStartIP = "networkStartIp"
 const OvhNetworkEndIP = "networkEndIp"
 
-// OVH existing infrastructure config keys (for reusing shared infrastructure)
-const OvhExistingNetworkId = "existingNetworkId"
-const OvhExistingSubnetId = "existingSubnetId"
-const OvhExistingGatewayId = "existingGatewayId"
-
 func OvhConfig(ctx *pulumi.Context, key string) string {
 	return getConfig(ctx, OvhGroup, key)
 }
