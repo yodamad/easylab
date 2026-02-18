@@ -275,6 +275,10 @@ func getLocalBackendEnvVars(workDir ...string) map[string]string {
 	// Disable Go workspace mode to prevent interference with module resolution
 	envVars["GOWORK"] = "off"
 
+	// Disable VCS stamping - job dirs are template copies without .git, causing
+	// "error obtaining VCS status: exit status 128" when go build runs
+	envVars["GOFLAGS"] = getEnvOrDefault("GOFLAGS", "-buildvcs=false")
+
 	return envVars
 }
 
