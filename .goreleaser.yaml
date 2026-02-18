@@ -15,9 +15,6 @@ release:
   github:
     owner: yodamad
     name: easylab
-  gitlab:
-    owner: yodamad-workshops
-    name: easylab
   draft: false
   prerelease: auto
   make_latest: true
