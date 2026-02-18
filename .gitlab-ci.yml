@@ -98,7 +98,6 @@ docker-build:
       echo "Building Docker image: ${IMAGE_NAME}:${IMAGE_TAG}"
   script:
     - docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
-    - docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
     - echo "Saving image for Trivy scanning..."
     - docker save ${IMAGE_NAME}:${IMAGE_TAG} -o image.tar
     - echo "Docker image built successfully"
@@ -165,11 +164,6 @@ docker-push:
     echo "Pushing Docker image: ${IMAGE_NAME}:${IMAGE_TAG}"
   script:
     - docker push ${IMAGE_NAME}:${IMAGE_TAG}
-    - |
-      if [ -n "$CI_COMMIT_TAG" ]; then
-        echo "Pushing latest tag for release..."
-        docker push ${IMAGE_NAME}:latest
-      fi
     - echo "Docker image pushed successfully"
   after_script:
     - docker logout
