@@ -11,7 +11,7 @@
 #   - Tagged with Git tag name for Git tag commits (e.g., v1.0.0)
 
 variables:
-  GO_VERSION: "1.25"
+  GO_VERSION: "1.26"
   DOCKER_DRIVER: overlay2
   DOCKER_TLS_CERTDIR: "/certs"
   IMAGE_NAME: "docker.io/${DOCKER_REGISTRY_USER}/easylab"
