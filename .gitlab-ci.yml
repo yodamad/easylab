@@ -177,6 +177,23 @@ docker-push:
     - branches
     - tags
 
+# Update Docker Hub repository overview (README) from README.md
+dockerhub-readme:
+  stage: deploy
+  image: peterevans/dockerhub-description:5
+  variables:
+    DOCKERHUB_USERNAME: $DOCKER_REGISTRY_USER
+    DOCKERHUB_PASSWORD: $DOCKER_REGISTRY_PASSWORD
+    DOCKERHUB_REPOSITORY: "${DOCKER_REGISTRY_USER}/easylab"
+    README_FILEPATH: "README.md"
+  script:
+    - node /index.js
+  needs:
+    - docker-push
+  only:
+    - main
+    - tags
+
 pages:
   stage: deploy
   image: ghcr.io/astral-sh/uv:0.10.2-python3.12-alpine

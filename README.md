@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="EasyLab Logo" width="200"/>
+  <img src="https://raw.githubusercontent.com/yodamad/easylab/main/assets/logo.png" alt="EasyLab Logo" width="200"/>
 </p>
 
 <h1 align="center">EasyLab</h1>
@@ -26,7 +26,7 @@ EasyLab streamlines cloud infrastructure lab management for **educators**, **wor
 
 📑 **[Full documentation](https://docs.easylab.yodamad.fr)** • Currently supports **OVHcloud** (more providers coming soon)
 
-![EasyLab Homepage](./assets/homepage.png)
+![EasyLab Homepage](https://raw.githubusercontent.com/yodamad/easylab/main/assets/homepage.png)
 
 ## ✨ Features
 
