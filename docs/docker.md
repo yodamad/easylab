@@ -14,10 +14,13 @@ This guide explains how to deploy the EasyLab application using Docker and Docke
 
 ## Quick Start
 
-1. **Clone the repository and navigate to the project directory:**
+1. **Download docker-compose.yml:**
    ```bash
-   git clone <repository-url>
-   cd easylab
+   curl -fsSL https://raw.githubusercontent.com/yodamad/easylab/main/docker-compose.yml -o docker-compose.yml
+   ```
+   Or from GitLab:
+   ```bash
+   curl -fsSL https://gitlab.com/yodamad-workshops/easylab/-/raw/main/docker-compose.yml -o docker-compose.yml
    ```
 
 2. **Set the admin password (optional but recommended):**

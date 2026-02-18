@@ -11,9 +11,6 @@
 <p align="center">
   <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go&logoColor=white" alt="Go Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License"></a>
-  <a href="#"><img src="https://img.shields.io/badge/build-passing-brightgreen" alt="Build Status"></a>
-  <a href="#"><img src="https://img.shields.io/badge/coverage-90%25-green" alt="Coverage"></a>
-  <a href="https://goreportcard.com/"><img src="https://img.shields.io/badge/go%20report-A+-brightgreen" alt="Go Report Card"></a>
 </p>
 
 <p align="center">
@@ -25,243 +22,53 @@
 
 ---
 
-## Introduction
+EasyLab streamlines cloud infrastructure lab management for **educators**, **workshop organizers**, and **DevOps teams**. It automates provisioning of Kubernetes clusters and development workspaces based on [Coder](https://coder.com/) on any cloud with [Pulumi](https://www.pulumi.com/).
 
-EasyLab is a comprehensive platform that streamlines cloud infrastructure lab management for **educators**, **workshop organizers**, and **DevOps teams**. It automates the provisioning of Kubernetes clusters and development workspaces based on [Coder](https://coder.com/) on potentially any cloud providers with [Pulumi](https://www.pulumi.com/), enabling you to focus on teaching and learning rather than infrastructure setup.
-
-With an intuitive web interface for both administrators and students, EasyLab transforms complex infrastructure-as-code workflows into simple, one-click deployments.
-
-📑 **Complete documentation is available [here](https://docs.easylab.yodamad.fr){target="_blank"}**.
+📑 **[Full documentation](https://docs.easylab.yodamad.fr)** • Currently supports **OVHcloud** (more providers coming soon)
 
 ![EasyLab Homepage](./assets/homepage.png)
 
-For now, EasyLab is only supported on OVHcloud, but we are working on adding support for other cloud providers.
-
 ## ✨ Features
 
-<table>
-<tr>
-<td width="50%" valign="top">
-
-### 👤 Admin Interface
-
-- **Lab Creation** - Design and deploy infrastructure labs
-- **OVHcloud Integration** - Direct integration with OVHcloud APIs
-- **Job Management** - Monitor deployment status and logs
-- **Kubeconfig Access** - Download cluster configurations
-
-</td>
-<td width="50%" valign="top">
-
-### 👨‍🎓 Student Interface
-
-- **Workspace Requests** - Request access to development environments
-- **Lab Catalog** - Browse available infrastructure labs
-- **Session Management** - Secure access to provisioned resources
-- **Self-Service** - Easy onboarding process
-
-</td>
-</tr>
-</table>
-
----
+| Admin | Student |
+|-------|---------|
+| Lab creation & deployment | Workspace requests |
+| OVHcloud integration | Lab catalog |
+| Job management & logs | Session management |
+| Kubeconfig access | Self-service onboarding |
 
 ## 🚀 Quick Start
 
-Choose your preferred deployment method:
-
-<details>
-<summary><strong>🖥️ Local Development</strong></summary>
-
 ```bash
-# 1. Clone repository
-git clone <repository-url>
-cd easylab
-
-# 2. Install dependencies
-go mod tidy
-
-# 3. Set environment variables
-export LAB_ADMIN_PASSWORD="your-password"
-
-# 4. Run the application
-go run cmd/server/main.go
-
-# 5. Access at http://localhost:8080
-```
-
-</details>
-
-<details>
-<summary><strong>🐳 Docker</strong></summary>
-
-```bash
-# 1. Set required passwords
+curl -fsSL https://raw.githubusercontent.com/yodamad/easylab/main/docker-compose.yml -o docker-compose.yml
 export LAB_ADMIN_PASSWORD="your-secure-password"
-export LAB_STUDENT_PASSWORD="your-student-password"
-
-# 2. Start the application
 docker-compose up -d
-
-# 3. Access at http://localhost:8080
+# Access at http://localhost:8080
 ```
 
-</details>
-
-<details open>
-<summary><strong>☸️ Kubernetes</strong></summary>
-
-```bash
-# 1. Deploy to Kubernetes
-cd k8s-deployment && ./deploy.sh
-
-# 2. Configure secrets
-kubectl edit secret easylab-secrets -n easylab
-```
-
-</details>
-
----
-
-## ⚙️ Configuration
-
-### Essential Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `LAB_ADMIN_PASSWORD` | Password for admin interface | `admin123` |
-| `LAB_STUDENT_PASSWORD` | Password for student interface | `student123` |
-| `WORK_DIR` | Directory for job workspaces | `/tmp/easylab-jobs` |
-| `DATA_DIR` | Directory for application data | `/tmp/easylab-data` |
-
-### OVHcloud Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `OVH_ENDPOINT` | OVHcloud API endpoint | `ovh-eu` |
-| `OVH_APPLICATION_KEY` | OVHcloud application key | - |
-| `OVH_APPLICATION_SECRET` | OVHcloud application secret | - |
-| `OVH_CONSUMER_KEY` | OVHcloud consumer key | - |
-| `OVH_SERVICE_NAME` | OVHcloud project/service name | - |
-
-### Example `.env` File
-
-```bash
-# OVHcloud credentials
-OVH_APPLICATION_KEY=your-key
-OVH_APPLICATION_SECRET=your-secret
-OVH_CONSUMER_KEY=your-consumer-key
-OVH_SERVICE_NAME=your-service-name
-OVH_ENDPOINT=ovh-eu
-
-# Application settings
-LAB_ADMIN_PASSWORD=your-secure-password
-LAB_STUDENT_PASSWORD=student-password
-```
-
-**Usage:**
-```bash
-go run cmd/server/main.go -env-file=.env -port=8080
-```
-
----
+See the [documentation](https://docs.easylab.yodamad.fr) for [Docker](https://docs.easylab.yodamad.fr/docker/), [Kubernetes](https://docs.easylab.yodamad.fr/k8s/), and local development setup.
 
 ## 📚 Documentation
 
-| Document | Description |
+| Resource | Description |
 |----------|-------------|
+| [docs.easylab.yodamad.fr](https://docs.easylab.yodamad.fr) | Admin, student, deployment & OVHcloud guides |
 | [TESTING.md](TESTING.md) | Testing documentation |
 | [COVERAGE_SETUP.md](COVERAGE_SETUP.md) | Code coverage setup |
-| `.gitlab-ci.yml` | GitLab CI/CD pipeline configuration |
-
----
-
-## 🛠️ Development
-
-### Prerequisites
-
-- **Go 1.25+** - [Download](https://go.dev/dl/)
-- **Docker** - For containerized deployment
-- **kubectl** - For Kubernetes deployment
-- **OVHcloud account** - For infrastructure provisioning (optional)
-
-### Building
-
-```bash
-# Build web application
-go build -o easylab cmd/server/main.go
-
-# Build Docker image
-docker build -t easylab .
-```
-
-### Testing
-
-```bash
-# Run unit tests
-make test
-
-# Run with race detection
-go test -race ./...
-
-# Run E2E tests (Playwright)
-npm test
-```
-
-### Hot Reload Development
-
-Using [Air](https://github.com/air-verse/air) for live reloading:
-
-```bash
-# Install Air
-go install github.com/air-verse/air@latest
-
-# Run with hot reload
-air
-```
-
----
 
 ## 🤝 Contributing
 
-We welcome contributions! Here's how you can help:
-
-1. **Fork** the repository on [🦊 GitLab](https://gitlab.com/yodamad-workshops/easylab)
+1. **Fork** the repository
 2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
 3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
-4. **Push** to the branch (`git push origin feature/amazing-feature`)
-5. **Open** a Merge Request
-
-### Code Style
-
-- Follow standard Go conventions and `gofmt`
-- Write tests for new functionality
-- Update documentation as needed
-
-### Reporting Issues
-
-Found a bug or have a feature request? [Open an issue](../../issues) with a clear description.
-
----
+4. **Push** and open a Merge Request
 
 ## 📄 License
 
-This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 🙏 Acknowledgements
-
-EasyLab is built on the shoulders of giants:
-
-- [**OVHcloud**](https://www.ovhcloud.com/) - Cloud infrastructure provider
-- [**Pulumi**](https://www.pulumi.com/) - Infrastructure as Code platform
-- [**Coder**](https://coder.com/) - Development workspace platform
-- [**Go**](https://go.dev/) - Programming language
-- [**Kubernetes**](https://kubernetes.io/) - Container orchestration
+MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
 <p align="center">
-  Made with ❤️ for the DevOps community
+  Built with <a href="https://www.ovhcloud.com/">OVHcloud</a>, <a href="https://www.pulumi.com/">Pulumi</a>, <a href="https://coder.com/">Coder</a>, <a href="https://go.dev/">Go</a>, <a href="https://kubernetes.io/">Kubernetes</a>
 </p>
