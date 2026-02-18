@@ -23,10 +23,10 @@ variables:
 stages:
   - build
   - test
-  - lint
   - package
   - security
   - deploy
+  - publish
 
 # Base job for Go jobs
 .go-base:
@@ -69,7 +69,7 @@ test:
 
 # Lint Dockerfile with Hadolint
 hadolint:
-  stage: lint
+  stage: test
   image: hadolint/hadolint:latest-alpine
   script:
     - echo "Linting Dockerfile with Hadolint..."
@@ -171,9 +171,23 @@ docker-push:
     - branches
     - tags
 
+release:
+  stage: publish
+  image:
+    name: goreleaser/goreleaser
+    entrypoint: [""]
+  only:
+    - tags
+  variables:
+    # Disable shallow cloning so that goreleaser can diff between tags to
+    # generate a changelog.
+    GIT_DEPTH: 0
+  script:
+    - goreleaser release --clean
+
 # Update Docker Hub repository overview (README) from README.md
 dockerhub-readme:
-  stage: deploy
+  stage: publish
   image: peterevans/dockerhub-description:3
   variables:
     DOCKERHUB_USERNAME: $DOCKER_REGISTRY_USER
@@ -189,7 +203,7 @@ dockerhub-readme:
     - tags
 
 pages:
-  stage: deploy
+  stage: publish
   image: ghcr.io/astral-sh/uv:0.10.2-python3.12-alpine
   script:
     - uv add --dev zensical
