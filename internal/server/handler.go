@@ -1660,17 +1660,27 @@ func (h *Handler) ListLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(workspaces)
 }
 
+// writeJSONError writes a JSON error response for DeleteWorkspace
+func writeJSONError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": false,
+		"message": message,
+	})
+}
+
 // DeleteWorkspace handles workspace deletion requests
 func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
 	// Parse form data
 	if err := r.ParseForm(); err != nil {
 		log.Printf("Failed to parse form: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to parse form: %v", err))
 		return
 	}
 
@@ -1680,20 +1690,20 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		// Bulk delete
 		var workspaceIDs []string
 		if err := json.Unmarshal([]byte(workspaceIDsStr), &workspaceIDs); err != nil {
-			http.Error(w, "Invalid workspace_ids format", http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "Invalid workspace_ids format")
 			return
 		}
 
 		labID := r.FormValue("lab_id")
 		if labID == "" {
-			http.Error(w, "lab_id is required", http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "lab_id is required")
 			return
 		}
 
 		// Get the lab (job)
 		job, exists := h.jobManager.GetJob(labID)
 		if !exists {
-			http.Error(w, "Lab not found", http.StatusNotFound)
+			writeJSONError(w, http.StatusNotFound, "Lab not found")
 			return
 		}
 
@@ -1753,19 +1763,19 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Single workspace delete
 	workspaceIDStr := r.FormValue("workspace_id")
 	if workspaceIDStr == "" {
-		// Try to extract from URL path
+		// Try to extract from URL path: /api/labs/{lab_id}/workspaces/{workspace_id}/delete
 		pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-		if len(pathParts) >= 5 && pathParts[4] == "delete" {
-			workspaceIDStr = pathParts[3]
+		if len(pathParts) >= 6 && pathParts[5] == "delete" {
+			workspaceIDStr = pathParts[4]
 		} else {
-			http.Error(w, "workspace_id is required", http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "workspace_id is required")
 			return
 		}
 	}
 
 	workspaceID, err := uuid.Parse(workspaceIDStr)
 	if err != nil {
-		http.Error(w, "Invalid workspace ID", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Invalid workspace ID")
 		return
 	}
 
@@ -1776,7 +1786,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		if len(pathParts) >= 3 {
 			labID = pathParts[2]
 		} else {
-			http.Error(w, "lab_id is required", http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "lab_id is required")
 			return
 		}
 	}
@@ -1784,7 +1794,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Get the lab (job)
 	job, exists := h.jobManager.GetJob(labID)
 	if !exists {
-		http.Error(w, "Lab not found", http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "Lab not found")
 		return
 	}
 
@@ -1812,7 +1822,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	_, err = coder.DeleteWorkspaceWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, workspaceID)
 	if err != nil {
 		log.Printf("Failed to delete workspace: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to delete workspace: %s", err.Error()), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to delete workspace: %s", err.Error()))
 		return
 	}
 

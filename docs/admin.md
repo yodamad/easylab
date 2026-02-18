@@ -12,7 +12,7 @@ As an admin (trainer, speaker, ...), you have access to the admin space to manag
     * [x] See logs
     * [x] Delete a lab
     * [x] List workspaces
-    * [ ] Delete workspaces
+    * [x] Delete workspaces
     * [x] Retry a failing lab installation
 
 ## Create a new lab

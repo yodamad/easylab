@@ -682,7 +682,9 @@ func ListWorkspacesWithRetry(config CoderClientConfig, adminEmail, adminPassword
 	return workspaces, config, nil
 }
 
-// DeleteWorkspace deletes a workspace by ID
+// DeleteWorkspace deletes a workspace by ID.
+// Coder deletes workspaces by creating a build with transition "delete" (POST /api/v2/workspaces/{id}/builds),
+// not via a DELETE endpoint.
 func DeleteWorkspace(config CoderClientConfig, workspaceID uuid.UUID) error {
 	serverURL, err := url.Parse(config.ServerURL)
 	if err != nil {
@@ -692,41 +694,11 @@ func DeleteWorkspace(config CoderClientConfig, workspaceID uuid.UUID) error {
 	client := codersdk.New(serverURL)
 	client.SetSessionToken(config.SessionToken)
 
-	// Get workspace details first to find owner
-	workspace, err := client.Workspace(context.Background(), workspaceID)
-	if err != nil {
-		return fmt.Errorf("failed to get workspace: %w", err)
-	}
-
-	// Delete workspace using owner and name
-	// The SDK method signature may vary, so we use the workspace owner and name
-	organizationID, err := uuid.Parse(config.OrganizationID)
-	if err != nil {
-		return fmt.Errorf("failed to parse organization ID: %w", err)
-	}
-
-	// Use HTTP client directly to delete workspace
-	// Coder API: DELETE /api/v2/organizations/{organization}/members/{user}/workspaces/{workspace}
-	deleteURL := fmt.Sprintf("%s/api/v2/organizations/%s/members/%s/workspaces/%s",
-		config.ServerURL, organizationID.String(), workspace.OwnerID.String(), workspace.Name)
-
-	req, err := http.NewRequestWithContext(context.Background(), "DELETE", deleteURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create delete request: %w", err)
-	}
-
-	req.Header.Set("Coder-Session-Token", config.SessionToken)
-
-	httpClient := &http.Client{}
-	resp, err := httpClient.Do(req)
+	_, err = client.CreateWorkspaceBuild(context.Background(), workspaceID, codersdk.CreateWorkspaceBuildRequest{
+		Transition: codersdk.WorkspaceTransitionDelete,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to delete workspace: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("failed to delete workspace: HTTP %d - %s", resp.StatusCode, string(body))
 	}
 
 	return nil
