@@ -23,9 +23,10 @@ This guide explains how to deploy the EasyLab application using Docker and Docke
    curl -fsSL https://gitlab.com/yodamad-workshops/easylab/-/raw/main/docker-compose.yml -o docker-compose.yml
    ```
 
-2. **Set the admin password (optional but recommended):**
+2. **Set passwords (optional but recommended):**
    ```bash
    export LAB_ADMIN_PASSWORD="your-secure-password"
+   export LAB_STUDENT_PASSWORD="your-student-password"
    ```
 
 3. **Start the application:**
@@ -49,6 +50,7 @@ This guide explains how to deploy the EasyLab application using Docker and Docke
 The application can be configured using the following environment variables:
 
 - `LAB_ADMIN_PASSWORD`: Admin password for the web interface (default: "admin123")
+- `LAB_STUDENT_PASSWORD`: Student password for the web interface (default: "student123")
 - `PORT`: Port to run the application on (default: 8080)
 - `WORK_DIR`: Directory for job workspaces (default: /app/jobs)
 - `DATA_DIR`: Directory for persisting job data (default: /app/data)
@@ -97,6 +99,7 @@ docker run -d \
   -v lab_jobs:/app/jobs \
   -v lab_data:/app/data \
   -e LAB_ADMIN_PASSWORD="your-password" \
+  -e LAB_STUDENT_PASSWORD="your-student-password" \
   easylab
 ```
 

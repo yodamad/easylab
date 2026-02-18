@@ -42,6 +42,7 @@ EasyLab streamlines cloud infrastructure lab management for **educators**, **wor
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yodamad/easylab/main/docker-compose.yml -o docker-compose.yml
 export LAB_ADMIN_PASSWORD="your-secure-password"
+export LAB_STUDENT_PASSWORD="your-student-password"
 docker-compose up -d
 # Access at http://localhost:8080
 ```
