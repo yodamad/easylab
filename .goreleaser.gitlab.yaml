@@ -1,0 +1,30 @@
+version: 2
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+builds:
+  - id: "no-build"
+    skip: true
+
+release:
+  github:
+    owner: yodamad
+    name: easylab
+  gitlab:
+    owner: yodamad-workshops
+    name: easylab
+  draft: false
+  prerelease: auto
+  make_latest: true
+  replace_existing_draft: true
+  name_template: '{{ .Tag }}'
+  header: |
+
+  footer: |
+    ## Enjoy 👨🏻‍🔬 👩🏼‍🔬
+    📆 {{ .Now.Format "2006-01-02" }} - Copyright @yodamad

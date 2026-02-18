@@ -171,7 +171,7 @@ docker-push:
     - branches
     - tags
 
-release:
+goreleaser:
   stage: publish
   image:
     name: goreleaser/goreleaser
@@ -183,7 +183,7 @@ release:
     # generate a changelog.
     GIT_DEPTH: 0
   script:
-    - goreleaser release --clean
+    - goreleaser release --clean -f .goreleaser.gitlab.yaml
 
 # Update Docker Hub repository overview (README) from README.md
 dockerhub-readme:
