@@ -180,7 +180,7 @@ docker-push:
 # Update Docker Hub repository overview (README) from README.md
 dockerhub-readme:
   stage: deploy
-  image: peterevans/dockerhub-description:5
+  image: peterevans/dockerhub-description:3
   variables:
     DOCKERHUB_USERNAME: $DOCKER_REGISTRY_USER
     DOCKERHUB_PASSWORD: $DOCKER_REGISTRY_PASSWORD
