@@ -81,13 +81,16 @@ Or you can use a remote Git repository by providing:
 
 Clicking on the `Labs` button in the header will redirect you to the labs list page.
 
+![Lab Info](screens/lab-info.png){width=350}
+
 You can see all the labs you have created with following information:
 
 * status (created, running, completed, failed, destroyed)
 * creation date
 * access to the creation logs
-* list all workspaces created for this lab
 * access to the kubeconfig file
 * actions to destroy or recreate the lab (based on the status)
+* list all workspaces created for this lab
+    * you can delete workspaces one by one or in bulk
 
-![Lab Info](screens/lab-info.png){width=350}
+![Lab Workspaces](screens/list-workspaces.png){width=350}
