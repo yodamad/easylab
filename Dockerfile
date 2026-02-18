@@ -16,6 +16,9 @@ RUN go mod download
 # Copy source code
 COPY . .
 
+# Disable VCS stamping for go build (avoids "error obtaining VCS status: exit status 128")
+ENV GOFLAGS=-buildvcs=false
+
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main ./cmd/server
 
