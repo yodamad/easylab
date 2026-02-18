@@ -7,6 +7,9 @@ changelog:
       - "^docs:"
       - "^test:"
 
+build:
+  skip: true
+
 release:
   github:
     owner: yodamad
