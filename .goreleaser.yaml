@@ -7,8 +7,9 @@ changelog:
       - "^docs:"
       - "^test:"
 
-build:
-  skip: true
+builds:
+  - id: "no-build"
+    skip: true
 
 release:
   github:
