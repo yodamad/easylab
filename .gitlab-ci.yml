@@ -12,8 +12,6 @@
 
 variables:
   GO_VERSION: "1.26"
-  DOCKER_DRIVER: overlay2
-  DOCKER_TLS_CERTDIR: "/certs"
   IMAGE_NAME: "docker.io/${DOCKER_REGISTRY_USER}/easylab"
   # for zensical
   # GitLab CI creates a separate mountpoint for the build directory,
@@ -81,8 +79,6 @@ hadolint:
 docker-build:
   stage: package
   image: docker:24
-  services:
-    - docker:24-dind
   dependencies:
     - build
     - test
@@ -145,8 +141,6 @@ trivy-scan:
 docker-push:
   stage: deploy
   image: docker:24
-  services:
-    - docker:24-dind
   dependencies:
     - docker-build
     - trivy-scan
