@@ -108,7 +108,9 @@ docker-build:
   only:
     - branches
     - tags
-
+  tags:
+    - docker
+    
 # Security scan with Trivy
 trivy-scan:
   stage: security
