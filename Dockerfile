@@ -1,26 +1,24 @@
-# Build stage
-FROM pulumi/pulumi-go:latest AS builder
+# Set to "true" in CI to skip the Go build (pre-built binary provided as artifact)
+ARG SKIP_BUILD=false
 
-# Set working directory
+# Build stage (skipped in CI when SKIP_BUILD=true)
+FROM pulumi/pulumi-go:latest AS builder
+ARG SKIP_BUILD
+
 WORKDIR /app
 
-# Install git (needed for go mod download)
-RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
-
-# Copy go mod and sum files
 COPY go.mod go.sum ./
+RUN if [ "$SKIP_BUILD" = "false" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/* && \
+      go mod download; \
+    fi
 
-# Download dependencies
-RUN go mod download
-
-# Copy source code
 COPY . .
 
-# Disable VCS stamping for go build (avoids "error obtaining VCS status: exit status 128")
 ENV GOFLAGS=-buildvcs=false
-
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main ./cmd/server
+RUN if [ "$SKIP_BUILD" = "false" ]; then \
+      CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main ./cmd/server; \
+    fi
 
 # Runtime stage
 FROM pulumi/pulumi-go:latest
