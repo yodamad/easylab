@@ -12,9 +12,6 @@ builds:
     skip: true
 
 release:
-  github:
-    owner: yodamad
-    name: easylab
   gitlab:
     owner: yodamad-workshops
     name: easylab
