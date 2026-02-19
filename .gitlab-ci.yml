@@ -80,6 +80,9 @@ hadolint:
 # Build Docker image
 docker-build:
   stage: package
+  image: docker:24
+  services:
+    - docker:24-dind
   dependencies:
     - build
     - test
@@ -106,7 +109,7 @@ docker-build:
     - branches
     - tags
   tags:
-    - shell
+    - docker
 
 # Security scan with Trivy
 trivy-scan:
@@ -141,6 +144,9 @@ trivy-scan:
 # Push Docker image to Docker Hub
 docker-push:
   stage: deploy
+  image: docker:24
+  services:
+    - docker:24-dind
   dependencies:
     - docker-build
     - trivy-scan
@@ -167,7 +173,7 @@ docker-push:
     - branches
     - tags
   tags:
-    - shell
+    - docker
 
 goreleaser:
   stage: publish
