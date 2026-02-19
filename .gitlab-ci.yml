@@ -80,7 +80,7 @@ hadolint:
 # Build Docker image
 docker-build:
   stage: package
-  image: docker:24-dind
+  image: docker:24
   services:
     - docker:24-dind
   dependencies:
@@ -110,7 +110,7 @@ docker-build:
     - tags
   tags:
     - docker
-    
+
 # Security scan with Trivy
 trivy-scan:
   stage: security
@@ -144,7 +144,7 @@ trivy-scan:
 # Push Docker image to Docker Hub
 docker-push:
   stage: deploy
-  image: docker:24-dind
+  image: docker:24
   services:
     - docker:24-dind
   dependencies:
