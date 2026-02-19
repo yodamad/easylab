@@ -170,6 +170,8 @@ docker-push:
   only:
     - branches
     - tags
+  tags:
+    - docker
 
 goreleaser:
   stage: publish
