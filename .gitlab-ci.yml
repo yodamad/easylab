@@ -171,6 +171,23 @@ docker-push:
   tags:
     - docker
 
+docker-hub-readme:
+  stage: publish
+  image:
+    name: chko/docker-pushrm
+    entrypoint: ["/bin/sh", "-c"]
+  variables:
+    DOCKER_USER: ${DOCKER_REGISTRY_USER}
+    DOCKER_PASS: ${DOCKER_REGISTRY_PASSWORD}
+    PUSHRM_PROVIDER: dockerhub
+  needs:
+    - job: docker-push
+      artifacts: false
+  script:
+    - docker-pushrm "${IMAGE_NAME}"
+  only:
+    - tags
+
 goreleaser:
   stage: publish
   image:
@@ -182,23 +199,6 @@ goreleaser:
     GIT_DEPTH: 0
   script:
     - goreleaser release --clean -f .goreleaser.gitlab.yaml
-
-# Update Docker Hub repository overview (README) from README.md
-dockerhub-readme:
-  stage: publish
-  image: peterevans/dockerhub-description:3
-  variables:
-    DOCKERHUB_USERNAME: $DOCKER_REGISTRY_USER
-    DOCKERHUB_PASSWORD: $DOCKER_REGISTRY_PASSWORD
-    DOCKERHUB_REPOSITORY: "${DOCKER_REGISTRY_USER}/easylab"
-    README_FILEPATH: "README.md"
-  script:
-    - node /index.js
-  needs:
-    - docker-push
-  only:
-    - main
-    - tags
 
 pages:
   stage: publish
