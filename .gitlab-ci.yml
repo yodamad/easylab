@@ -180,18 +180,24 @@ docker-push:
 
 docker-hub-readme:
   stage: publish
-  image:
-    name: chko/docker-pushrm
-    entrypoint: ["/bin/sh", "-c"]
-  variables:
-    DOCKER_USER: ${DOCKER_REGISTRY_USER}
-    DOCKER_PASS: ${DOCKER_REGISTRY_PASSWORD}
-    PUSHRM_PROVIDER: dockerhub
+  image: alpine:3
   needs:
     - job: docker-push
       artifacts: false
+  before_script:
+    - apk add --no-cache curl jq
   script:
-    - docker-pushrm "${IMAGE_NAME}"
+    - |
+      TOKEN=$(curl -s -X POST https://hub.docker.com/v2/users/login \
+        -H "Content-Type: application/json" \
+        -d "{\"username\":\"${DOCKER_REGISTRY_USER}\",\"password\":\"${DOCKER_REGISTRY_PASSWORD}\"}" \
+        | jq -r .token)
+    - |
+      jq -n --arg desc "$(cat README.md)" '{"full_description": $desc}' \
+        | curl -s -X PATCH "https://hub.docker.com/v2/repositories/${DOCKER_REGISTRY_USER}/easylab/" \
+          -H "Authorization: Bearer ${TOKEN}" \
+          -H "Content-Type: application/json" \
+          -d @-
   only:
     - tags
 
@@ -204,6 +210,7 @@ goreleaser:
     - tags
   variables:
     GIT_DEPTH: 0
+    GITLAB_TOKEN: ${CI_JOB_TOKEN}
   script:
     - goreleaser release --clean -f .goreleaser.gitlab.yaml
 
@@ -220,3 +227,4 @@ pages:
   publish: site
   tags:
     - docker
+  retry: 3 # In case of ulimit errors
