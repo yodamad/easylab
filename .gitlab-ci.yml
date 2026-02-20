@@ -218,3 +218,5 @@ pages:
     paths:
       - site
   publish: site
+  tags:
+    - docker
