@@ -227,4 +227,5 @@ pages:
   publish: site
   tags:
     - docker
-  retry: 3 # In case of ulimit errors
+  retry: 2 # In case of ulimit errors
+
