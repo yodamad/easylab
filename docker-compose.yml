@@ -3,7 +3,7 @@ version: '3.8'
 services:
   easylab:
     # Change the image to the latest tag for non-development environments
-    image: docker.io/easylab/easylab:v0.2.0
+    image: docker.io/yodamad/easylab:v0.2.0
     ports:
       - "8080:8080"
     volumes:
