@@ -25,7 +25,7 @@ spec:
         fsGroup: 1000
       containers:
       - name: easylab
-        image: docker.io/easylab/easylab:dev  # Change the image to the latest tag for non-development environments
+        image: docker.io/easylab/easylab:v0.2.0  # Change the image to the latest tag for non-development environments
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
