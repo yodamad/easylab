@@ -100,19 +100,10 @@ docker run -d \
   -v lab_data:/app/data \
   -e LAB_ADMIN_PASSWORD="your-password" \
   -e LAB_STUDENT_PASSWORD="your-student-password" \
-  easylab
+  yodamad/easylab:v0.2.0
 ```
 
 ## Data Management
-
-### Backup volumes:
-```bash
-# Create backup of job data
-docker run --rm -v lab_data:/data -v $(pwd):/backup alpine tar czf /backup/lab_data_backup.tar.gz -C /data .
-
-# Create backup of job workspaces
-docker run --rm -v lab_jobs:/jobs -v $(pwd):/backup alpine tar czf /backup/lab_jobs_backup.tar.gz -C /jobs .
-```
 
 ### Inspect volumes:
 ```bash
@@ -132,7 +123,7 @@ docker-compose down
 docker volume rm lab_jobs lab_data
 
 # Remove images
-docker rmi easylab
+docker rmi yodamad/easylab:v0.2.0
 ```
 
 ## Health Monitoring
