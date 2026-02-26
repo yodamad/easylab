@@ -53,10 +53,11 @@ func SetupDB(ctx *pulumi.Context, k8sProvider *k8s.Provider, ns *k8score.Namespa
 	dbName := utils.CoderConfig(ctx, utils.CoderDbName)
 
 	helmValues := internalK8s.HelmChartInfo{
-		Name:      "postgresql",
-		ChartName: "postgresql",
-		Version:   "",
-		Url:       "https://charts.bitnami.com/bitnami",
+		Name:        "postgresql",
+		ChartName:   "postgresql",
+		Version:     "",
+		Url:         "https://charts.bitnami.com/bitnami",
+		ReleaseName: "postgresql",
 		Values: pulumi.Map{
 			"auth": pulumi.Map{
 				"username": pulumi.String(dbUser),
@@ -151,10 +152,11 @@ func SetupInfrastructureParallel(ctx *pulumi.Context, k8sProvider *k8s.Provider,
 
 func SetupCoder(ctx *pulumi.Context, k8sProvider *k8s.Provider, ns *k8score.Namespace) (*helmv3.Release, error) {
 	helmValues := internalK8s.HelmChartInfo{
-		Name:      "coder",
-		ChartName: "coder",
-		Version:   utils.CoderConfig(ctx, utils.CoderVersion),
-		Url:       "https://helm.coder.com/v2",
+		Name:        "coder",
+		ChartName:   "coder",
+		Version:     utils.CoderConfig(ctx, utils.CoderVersion),
+		Url:         "https://helm.coder.com/v2",
+		ReleaseName: "coder", // Explicit name to avoid Pulumi-generated suffixes and Helm ownership conflicts
 	}
 
 	helmRelease, err := internalK8s.InitHelm(ctx, k8sProvider, helmValues, ns)

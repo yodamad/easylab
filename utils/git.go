@@ -81,7 +81,7 @@ func CloneFolderFromGitAndZipIt(repoUrl string, folder string, branch string) (s
 	cloneOptions := &git.CloneOptions{
 		URL: repoUrl,
 	}
-	
+
 	// Set branch reference if specified
 	if branch != "" {
 		cloneOptions.ReferenceName = plumbing.NewBranchReferenceName(branch)

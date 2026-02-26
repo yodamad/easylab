@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/ovh/pulumi-ovh/sdk/v2/go/ovh/cloudproject"
 	k8s "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes"
@@ -22,6 +23,21 @@ func InitK8sProvider(ctx *pulumi.Context, kubeCluster *cloudproject.Kube, nodePo
 	}, pulumi.DependsOn(dependencies))
 	if err != nil {
 		return nil, err
+	}
+	return provider, nil
+}
+
+func InitK8sProviderFromKubeconfig(ctx *pulumi.Context, kubeconfigPath string) (*k8s.Provider, error) {
+	content, err := os.ReadFile(kubeconfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read kubeconfig from %s: %w", kubeconfigPath, err)
+	}
+
+	provider, err := k8s.NewProvider(ctx, "k8sProvider", &k8s.ProviderArgs{
+		Kubeconfig: pulumi.String(string(content)),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Kubernetes provider from kubeconfig: %w", err)
 	}
 	return provider, nil
 }

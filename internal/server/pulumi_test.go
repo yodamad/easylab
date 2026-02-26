@@ -142,4 +142,3 @@ func Test_extractStringFromConfigValue(t *testing.T) {
 		})
 	}
 }
-

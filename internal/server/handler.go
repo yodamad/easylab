@@ -248,43 +248,17 @@ func (h *Handler) saveUploadedTemplateFile(r *http.Request, jobDir string) (stri
 
 // createLabConfigFromForm creates a LabConfig from form data and provider credentials
 func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds ProviderCredentials, templateFilePath string) *LabConfig {
-	// Parse integer fields
-	desiredNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_desired_node_count"))
-	minNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_min_node_count"))
-	maxNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_max_node_count"))
-
-	// Get provider from form (default to "ovh" for backward compatibility)
-	provider := r.FormValue("provider")
-	if provider == "" {
-		provider = "ovh"
-	}
-
 	// Get stack name with default
 	stackName := r.FormValue("stack_name")
 	if stackName == "" {
 		stackName = "dev"
 	}
 
+	useExistingCluster := r.FormValue("use_existing_cluster") == "true"
+
 	config := &LabConfig{
-		StackName: stackName,
-		Provider:  provider,
-
-		NetworkGatewayName:        r.FormValue("network_gateway_name"),
-		NetworkGatewayModel:       r.FormValue("network_gateway_model"),
-		NetworkPrivateNetworkName: r.FormValue("network_private_network_name"),
-		NetworkRegion:             r.FormValue("network_region"),
-		NetworkMask:               r.FormValue("network_mask"),
-		NetworkStartIP:            r.FormValue("network_start_ip"),
-		NetworkEndIP:              r.FormValue("network_end_ip"),
-		NetworkID:                 r.FormValue("network_id"),
-
-		K8sClusterName: r.FormValue("k8s_cluster_name"),
-
-		NodePoolName:             r.FormValue("nodepool_name"),
-		NodePoolFlavor:           r.FormValue("nodepool_flavor"),
-		NodePoolDesiredNodeCount: desiredNodeCount,
-		NodePoolMinNodeCount:     minNodeCount,
-		NodePoolMaxNodeCount:     maxNodeCount,
+		StackName:          stackName,
+		UseExistingCluster: useExistingCluster,
 
 		CoderAdminEmail:    r.FormValue("coder_admin_email"),
 		CoderAdminPassword: r.FormValue("coder_admin_password"),
@@ -302,9 +276,51 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 		TemplateGitBranch: r.FormValue("template_git_branch"),
 	}
 
+	if !useExistingCluster {
+		// Parse integer fields only for new infrastructure
+		desiredNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_desired_node_count"))
+		minNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_min_node_count"))
+		maxNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_max_node_count"))
+
+		// Get provider from form (default to "ovh" for backward compatibility)
+		provider := r.FormValue("provider")
+		if provider == "" {
+			provider = "ovh"
+		}
+
+		config.Provider = provider
+		config.NetworkGatewayName = r.FormValue("network_gateway_name")
+		config.NetworkGatewayModel = r.FormValue("network_gateway_model")
+		config.NetworkPrivateNetworkName = r.FormValue("network_private_network_name")
+		config.NetworkRegion = r.FormValue("network_region")
+		config.NetworkMask = r.FormValue("network_mask")
+		config.NetworkStartIP = r.FormValue("network_start_ip")
+		config.NetworkEndIP = r.FormValue("network_end_ip")
+		config.NetworkID = r.FormValue("network_id")
+		config.K8sClusterName = r.FormValue("k8s_cluster_name")
+		config.NodePoolName = r.FormValue("nodepool_name")
+		config.NodePoolFlavor = r.FormValue("nodepool_flavor")
+		config.NodePoolDesiredNodeCount = desiredNodeCount
+		config.NodePoolMinNodeCount = minNodeCount
+		config.NodePoolMaxNodeCount = maxNodeCount
+
+		// Add provider-specific credentials
+		if ovhCreds, ok := providerCreds.(*OVHCredentials); ok {
+			config.OvhApplicationKey = ovhCreds.ApplicationKey
+			config.OvhApplicationSecret = ovhCreds.ApplicationSecret
+			config.OvhConsumerKey = ovhCreds.ConsumerKey
+			config.OvhServiceName = ovhCreds.ServiceName
+			config.OvhEndpoint = ovhCreds.Endpoint
+		}
+		// Future providers can be added here:
+		// if awsCreds, ok := providerCreds.(*AWSCredentials); ok {
+		//     config.AwsAccessKeyId = awsCreds.AccessKeyId
+		//     ...
+		// }
+	}
+
 	// Validate email if provided
 	if config.CoderAdminEmail != "" && !validateEmail(config.CoderAdminEmail) {
-		// Will be validated when used, but log warning
 		log.Printf("Warning: Invalid email format in CoderAdminEmail: %s", config.CoderAdminEmail)
 	}
 
@@ -314,20 +330,6 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 			log.Printf("Warning: Invalid Git repository URL format: %s", config.TemplateGitRepo)
 		}
 	}
-
-	// Add provider-specific credentials
-	if ovhCreds, ok := providerCreds.(*OVHCredentials); ok {
-		config.OvhApplicationKey = ovhCreds.ApplicationKey
-		config.OvhApplicationSecret = ovhCreds.ApplicationSecret
-		config.OvhConsumerKey = ovhCreds.ConsumerKey
-		config.OvhServiceName = ovhCreds.ServiceName
-		config.OvhEndpoint = ovhCreds.Endpoint
-	}
-	// Future providers can be added here:
-	// if awsCreds, ok := providerCreds.(*AWSCredentials); ok {
-	//     config.AwsAccessKeyId = awsCreds.AccessKeyId
-	//     ...
-	// }
 
 	return config
 }
@@ -497,16 +499,22 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 		return
 	}
 
-	// Get provider from form (default to "ovh" for backward compatibility)
-	provider := r.FormValue("provider")
-	if provider == "" {
-		provider = "ovh"
-	}
+	useExistingCluster := r.FormValue("use_existing_cluster") == "true"
 
-	// Get provider credentials from in-memory storage
-	providerCreds, err := h.getProviderCredentials(w, provider)
-	if err != nil {
-		return
+	var providerCreds ProviderCredentials
+	if !useExistingCluster {
+		// Get provider from form (default to "ovh" for backward compatibility)
+		provider := r.FormValue("provider")
+		if provider == "" {
+			provider = "ovh"
+		}
+
+		// Get provider credentials from in-memory storage
+		var err error
+		providerCreds, err = h.getProviderCredentials(w, provider)
+		if err != nil {
+			return
+		}
 	}
 
 	// Create initial config without template file path
@@ -525,9 +533,6 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 			h.renderHTMLError(w, "Template Configuration Error", "Repository URL is required when using Git template source")
 			return
 		}
-	} else if templateSource == "upload" {
-		// Validate file upload is provided
-		// This will be checked when saving the file
 	}
 
 	// Create job first to get jobID
@@ -539,6 +544,30 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 		log.Printf("Failed to create job directory: %v", err)
 		h.renderHTMLError(w, "Job Creation Error", fmt.Sprintf("Failed to create job directory: %v", err))
 		return
+	}
+
+	// Handle kubeconfig for BYOK mode
+	if useExistingCluster {
+		kubeconfigContent, err := h.readKubeconfigFromForm(r)
+		if err != nil {
+			log.Printf("Failed to read kubeconfig: %v", err)
+			h.renderHTMLError(w, "Kubeconfig Error", fmt.Sprintf("Failed to read kubeconfig: %v", err))
+			return
+		}
+		if kubeconfigContent == "" {
+			h.renderHTMLError(w, "Kubeconfig Required", "Please provide a kubeconfig file or paste its content")
+			return
+		}
+		kubeconfigPath := filepath.Join(jobDir, "external-kubeconfig.yaml")
+		if err := os.WriteFile(kubeconfigPath, []byte(kubeconfigContent), 0600); err != nil {
+			log.Printf("Failed to write kubeconfig: %v", err)
+			h.renderHTMLError(w, "Kubeconfig Error", fmt.Sprintf("Failed to save kubeconfig: %v", err))
+			return
+		}
+		initialConfig.ExternalKubeconfig = kubeconfigContent
+		h.updateJobConfig(jobID, func(config *LabConfig) {
+			config.ExternalKubeconfig = kubeconfigContent
+		})
 	}
 
 	// Handle template file upload only if source is "upload"
@@ -577,6 +606,25 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 	// Return job status div for HTMX to display with proper polling
 	w.Header().Set("Content-Type", "text/html")
 	fmt.Fprint(w, html)
+}
+
+// readKubeconfigFromForm reads kubeconfig content from either a file upload or textarea
+func (h *Handler) readKubeconfigFromForm(r *http.Request) (string, error) {
+	// Try file upload first
+	file, _, err := r.FormFile("kubeconfig_file")
+	if err == nil {
+		defer file.Close()
+		content, err := io.ReadAll(file)
+		if err != nil {
+			return "", fmt.Errorf("failed to read kubeconfig file: %w", err)
+		}
+		if len(content) > 0 {
+			return string(content), nil
+		}
+	}
+
+	// Fall back to textarea content
+	return r.FormValue("kubeconfig_content"), nil
 }
 
 // updateJobConfig updates a job's configuration using a callback function
@@ -1962,18 +2010,19 @@ func (h *Handler) RecreateLab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get OVH credentials from in-memory storage (they might have changed)
-	ovhCreds, err := h.getOVHCredentials(w)
-	if err != nil {
-		return
+	// Get OVH credentials only when not using existing cluster (BYOK doesn't need them)
+	if !config.UseExistingCluster {
+		ovhCreds, err := h.getOVHCredentials(w)
+		if err != nil {
+			return
+		}
+		// Update config with current credentials (in case they changed)
+		config.OvhApplicationKey = ovhCreds.ApplicationKey
+		config.OvhApplicationSecret = ovhCreds.ApplicationSecret
+		config.OvhConsumerKey = ovhCreds.ConsumerKey
+		config.OvhServiceName = ovhCreds.ServiceName
+		config.OvhEndpoint = ovhCreds.Endpoint
 	}
-
-	// Update config with current credentials (in case they changed)
-	config.OvhApplicationKey = ovhCreds.ApplicationKey
-	config.OvhApplicationSecret = ovhCreds.ApplicationSecret
-	config.OvhConsumerKey = ovhCreds.ConsumerKey
-	config.OvhServiceName = ovhCreds.ServiceName
-	config.OvhEndpoint = ovhCreds.Endpoint
 
 	// Create new job with the same configuration
 	newJobID := h.jobManager.CreateJob(config)
@@ -2045,18 +2094,19 @@ func (h *Handler) RetryJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get OVH credentials from in-memory storage (they might have changed)
-	ovhCreds, err := h.getOVHCredentials(w)
-	if err != nil {
-		return
+	// Get OVH credentials only when not using existing cluster (BYOK doesn't need them)
+	if !config.UseExistingCluster {
+		ovhCreds, err := h.getOVHCredentials(w)
+		if err != nil {
+			return
+		}
+		// Update config with current credentials (in case they changed)
+		config.OvhApplicationKey = ovhCreds.ApplicationKey
+		config.OvhApplicationSecret = ovhCreds.ApplicationSecret
+		config.OvhConsumerKey = ovhCreds.ConsumerKey
+		config.OvhServiceName = ovhCreds.ServiceName
+		config.OvhEndpoint = ovhCreds.Endpoint
 	}
-
-	// Update config with current credentials (in case they changed)
-	config.OvhApplicationKey = ovhCreds.ApplicationKey
-	config.OvhApplicationSecret = ovhCreds.ApplicationSecret
-	config.OvhConsumerKey = ovhCreds.ConsumerKey
-	config.OvhServiceName = ovhCreds.ServiceName
-	config.OvhEndpoint = ovhCreds.Endpoint
 
 	// Reset job for retry
 	if err := h.jobManager.ResetJobForRetry(jobID); err != nil {

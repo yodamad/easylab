@@ -251,8 +251,8 @@ func (pe *PulumiExecutor) GetWorkDir() string {
 }
 
 // getLocalBackendEnvVars returns environment variables for local file backend and Go cache
-// workDir parameter is kept for API compatibility but not used for backend URL
-// The backend URL should be "file://" which creates .pulumi directory in the workspace (WorkDir)
+// When jobDir is provided, use job-local GOMODCACHE/GOCACHE to avoid embed "no matching files found"
+// errors that occur when building from job directory with shared module cache
 func getLocalBackendEnvVars(workDir ...string) map[string]string {
 	envVars := map[string]string{
 		"PULUMI_BACKEND_URL":                          "file://",
@@ -267,10 +267,19 @@ func getLocalBackendEnvVars(workDir ...string) map[string]string {
 	// Set PULUMI_HOME if not already set (required for plugin discovery)
 	envVars["PULUMI_HOME"] = getEnvOrDefault("PULUMI_HOME", filepath.Join(getAppBaseDir(), ".pulumi"))
 
-	// Set Go cache directories if not already set (use writable locations)
-	envVars["GOMODCACHE"] = getEnvOrDefault("GOMODCACHE", filepath.Join(getAppBaseDir(), ".go", "pkg", "mod"))
-	envVars["GOCACHE"] = getEnvOrDefault("GOCACHE", filepath.Join(getAppBaseDir(), ".go", "cache"))
-	envVars["GOPATH"] = getEnvOrDefault("GOPATH", filepath.Join(getAppBaseDir(), ".go"))
+	// Set Go cache directories: use job-local cache when workDir provided to fix embed resolution
+	// (must override Docker/env GOMODCACHE to avoid "no matching files found" in dependencies)
+	baseDir := getAppBaseDir()
+	if len(workDir) > 0 && workDir[0] != "" {
+		jobDir := workDir[0]
+		envVars["GOMODCACHE"] = filepath.Join(jobDir, ".gomodcache")
+		envVars["GOCACHE"] = filepath.Join(jobDir, ".gocache")
+		envVars["GOPATH"] = filepath.Join(jobDir, ".go")
+	} else {
+		envVars["GOMODCACHE"] = getEnvOrDefault("GOMODCACHE", filepath.Join(baseDir, ".go", "pkg", "mod"))
+		envVars["GOCACHE"] = getEnvOrDefault("GOCACHE", filepath.Join(baseDir, ".go", "cache"))
+		envVars["GOPATH"] = getEnvOrDefault("GOPATH", filepath.Join(baseDir, ".go"))
+	}
 
 	// Disable Go workspace mode to prevent interference with module resolution
 	envVars["GOWORK"] = "off"
@@ -498,26 +507,31 @@ func (pe *PulumiExecutor) setStackConfig(ctx context.Context, stack auto.Stack, 
 		}
 	}
 
-	// Set provider-specific config
-	provider := config.Provider
-	if provider == "" {
-		provider = "ovh" // Default to OVH for backward compatibility
-	}
-
-	switch provider {
-	case "ovh":
-		// Set ovh:endpoint config
-		err := stack.SetConfig(ctx, "ovh:endpoint", auto.ConfigValue{
-			Value:  config.OvhEndpoint,
-			Secret: false,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to set config ovh:endpoint: %w", err)
+	// Set provider-specific config only when not using an existing cluster
+	if !config.UseExistingCluster {
+		provider := config.Provider
+		if provider == "" {
+			provider = "ovh" // Default to OVH for backward compatibility
 		}
-		// Future providers can be added here:
-		// case "aws":
-		//     err := stack.SetConfig(ctx, "aws:region", auto.ConfigValue{...})
-		//     ...
+
+		switch provider {
+		case "ovh":
+			endpoint := config.OvhEndpoint
+			if endpoint == "" {
+				endpoint = "ovh-eu" // Default per docs/ovhcloud.md
+			}
+			err := stack.SetConfig(ctx, "ovh:endpoint", auto.ConfigValue{
+				Value:  endpoint,
+				Secret: false,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to set config ovh:endpoint: %w", err)
+			}
+			// Future providers can be added here:
+			// case "aws":
+			//     err := stack.SetConfig(ctx, "aws:region", auto.ConfigValue{...})
+			//     ...
+		}
 	}
 
 	return nil
@@ -569,6 +583,16 @@ func (pe *PulumiExecutor) prepareJob(jobID string, allowMissingDir bool) (*JobPr
 		}
 	}
 
+	// BYOK mode: ensure external-kubeconfig.yaml exists (covers retry fallback when directory was regenerated)
+	if config != nil && config.UseExistingCluster && config.ExternalKubeconfig != "" {
+		kubeconfigPath := filepath.Join(jobDir, "external-kubeconfig.yaml")
+		if err := os.WriteFile(kubeconfigPath, []byte(config.ExternalKubeconfig), 0600); err != nil {
+			pe.jobManager.SetError(jobID, fmt.Errorf("failed to write external-kubeconfig.yaml: %w", err))
+			return nil, err
+		}
+		pe.jobManager.AppendOutput(jobID, "External kubeconfig written for existing cluster mode")
+	}
+
 	// When using inline program mode, skip template file generation and Go module download
 	// The program is pre-compiled into the binary, so we only need the job directory for state
 	if pe.useInlineProgram {
@@ -607,12 +631,14 @@ func (pe *PulumiExecutor) prepareJob(jobID string, allowMissingDir bool) (*JobPr
 	// Get Pulumi backend environment variables first (scoped to job directory)
 	pulumiBackendEnvVars := getLocalBackendEnvVars(jobDir)
 
-	// Combine OVH credentials and Pulumi backend env vars
-	envVars := map[string]string{
-		"OVH_APPLICATION_KEY":    config.OvhApplicationKey,
-		"OVH_APPLICATION_SECRET": config.OvhApplicationSecret,
-		"OVH_CONSUMER_KEY":       config.OvhConsumerKey,
-		"OVH_SERVICE_NAME":       config.OvhServiceName,
+	envVars := make(map[string]string)
+
+	// Only set OVH credentials when not using an existing cluster
+	if !config.UseExistingCluster {
+		envVars["OVH_APPLICATION_KEY"] = config.OvhApplicationKey
+		envVars["OVH_APPLICATION_SECRET"] = config.OvhApplicationSecret
+		envVars["OVH_CONSUMER_KEY"] = config.OvhConsumerKey
+		envVars["OVH_SERVICE_NAME"] = config.OvhServiceName
 	}
 
 	// Add Pulumi backend environment variables to OS environment
@@ -746,12 +772,14 @@ func (pe *PulumiExecutor) prepareJobForRetry(jobID string) (*JobPreparation, err
 	// Get Pulumi backend environment variables first (scoped to job directory)
 	pulumiBackendEnvVars := getLocalBackendEnvVars(jobDir)
 
-	// Combine OVH credentials and Pulumi backend env vars
-	envVars := map[string]string{
-		"OVH_APPLICATION_KEY":    config.OvhApplicationKey,
-		"OVH_APPLICATION_SECRET": config.OvhApplicationSecret,
-		"OVH_CONSUMER_KEY":       config.OvhConsumerKey,
-		"OVH_SERVICE_NAME":       config.OvhServiceName,
+	envVars := make(map[string]string)
+
+	// Only set OVH credentials when not using an existing cluster
+	if !config.UseExistingCluster {
+		envVars["OVH_APPLICATION_KEY"] = config.OvhApplicationKey
+		envVars["OVH_APPLICATION_SECRET"] = config.OvhApplicationSecret
+		envVars["OVH_CONSUMER_KEY"] = config.OvhConsumerKey
+		envVars["OVH_SERVICE_NAME"] = config.OvhServiceName
 	}
 
 	// Add Pulumi backend environment variables to OS environment
@@ -927,12 +955,14 @@ func (pe *PulumiExecutor) prepareDestroyJob(jobID string) (*JobPreparation, erro
 	// Get Pulumi backend environment variables first
 	pulumiBackendEnvVars := getLocalBackendEnvVars()
 
-	// Combine OVH credentials and Pulumi backend env vars
-	osEnvVars := map[string]string{
-		"OVH_APPLICATION_KEY":    config.OvhApplicationKey,
-		"OVH_APPLICATION_SECRET": config.OvhApplicationSecret,
-		"OVH_CONSUMER_KEY":       config.OvhConsumerKey,
-		"OVH_SERVICE_NAME":       config.OvhServiceName,
+	osEnvVars := make(map[string]string)
+
+	// Only set OVH credentials when not using an existing cluster
+	if !config.UseExistingCluster {
+		osEnvVars["OVH_APPLICATION_KEY"] = config.OvhApplicationKey
+		osEnvVars["OVH_APPLICATION_SECRET"] = config.OvhApplicationSecret
+		osEnvVars["OVH_CONSUMER_KEY"] = config.OvhConsumerKey
+		osEnvVars["OVH_SERVICE_NAME"] = config.OvhServiceName
 	}
 
 	// Add Pulumi backend environment variables to OS environment
@@ -944,7 +974,7 @@ func (pe *PulumiExecutor) prepareDestroyJob(jobID string) (*JobPreparation, erro
 		osEnvVars[key] = value // Track for cleanup
 	}
 
-	// Set OVH credentials as OS environment variables
+	// Set credentials as OS environment variables
 	for key, value := range osEnvVars {
 		if original, exists := os.LookupEnv(key); exists {
 			if _, alreadyTracked := originalEnv[key]; !alreadyTracked {
@@ -1107,8 +1137,26 @@ func (pe *PulumiExecutor) prepareDestroyJob(jobID string) (*JobPreparation, erro
 	}, nil
 }
 
-// extractKubeconfigFromOutputs extracts kubeconfig from outputs if cluster exists
+// extractKubeconfigFromOutputs extracts kubeconfig from outputs if cluster exists, or from config/file for BYOK mode
 func (pe *PulumiExecutor) extractKubeconfigFromOutputs(jobID string, outputs auto.OutputMap) {
+	job, exists := pe.jobManager.GetJob(jobID)
+	if !exists || job.Config == nil {
+		pe.checkLocalKubeconfigFile(jobID)
+		return
+	}
+	config := job.Config
+
+	// BYOK mode: use the user-provided kubeconfig from config
+	if config.UseExistingCluster && config.ExternalKubeconfig != "" {
+		pe.jobManager.AppendOutput(jobID, "Using provided kubeconfig (existing cluster mode)")
+		if err := pe.jobManager.SetKubeconfig(jobID, config.ExternalKubeconfig); err != nil {
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to set kubeconfig: %v", err))
+			return
+		}
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Kubeconfig set successfully (length: %d chars)", len(config.ExternalKubeconfig)))
+		return
+	}
+
 	// Verify that Kubernetes cluster was created before extracting kubeconfig
 	if _, ok := outputs["kubeClusterId"]; ok {
 		pe.jobManager.AppendOutput(jobID, "Kubernetes cluster found, extracting kubeconfig...")
@@ -1131,43 +1179,47 @@ func (pe *PulumiExecutor) extractKubeconfigFromOutputs(jobID string, outputs aut
 			pe.checkLocalKubeconfigFile(jobID)
 		}
 	} else {
-		pe.jobManager.AppendOutput(jobID, "Kubernetes cluster not found in outputs, checking for local kubeconfig.yaml file...")
-		// Check if kubeconfig.yaml exists locally as fallback
+		pe.jobManager.AppendOutput(jobID, "Kubernetes cluster not found in outputs, checking for local kubeconfig file...")
+		// Check for kubeconfig.yaml or external-kubeconfig.yaml
 		pe.checkLocalKubeconfigFile(jobID)
 	}
 }
 
-// checkLocalKubeconfigFile checks if kubeconfig.yaml exists in the job directory and reads it
+// checkLocalKubeconfigFile checks for kubeconfig in the job directory (external-kubeconfig.yaml or kubeconfig.yaml)
 func (pe *PulumiExecutor) checkLocalKubeconfigFile(jobID string) {
 	jobDir := filepath.Join(pe.workDir, jobID)
-	kubeconfigPath := filepath.Join(jobDir, "kubeconfig.yaml")
+	// Try external-kubeconfig.yaml first (BYOK), then kubeconfig.yaml (OVH-created)
+	candidates := []string{"external-kubeconfig.yaml", "kubeconfig.yaml"}
 
-	// Check if file exists
-	if _, err := os.Stat(kubeconfigPath); os.IsNotExist(err) {
-		pe.jobManager.AppendOutput(jobID, "Local kubeconfig.yaml file not found")
+	for _, candidate := range candidates {
+		kubeconfigPath := filepath.Join(jobDir, candidate)
+		if _, err := os.Stat(kubeconfigPath); os.IsNotExist(err) {
+			continue
+		}
+
+		kubeconfigBytes, err := os.ReadFile(kubeconfigPath)
+		if err != nil {
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Failed to read %s: %v", candidate, err))
+			continue
+		}
+
+		kubeconfig := strings.TrimSpace(string(kubeconfigBytes))
+		if kubeconfig == "" {
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Local %s is empty", candidate))
+			continue
+		}
+
+		// Validate that kubeconfig looks like valid YAML
+		if !strings.Contains(kubeconfig, "apiVersion") && !strings.Contains(kubeconfig, "kind:") {
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: local kubeconfig may be invalid (length: %d chars)", len(kubeconfig)))
+		}
+
+		pe.jobManager.SetKubeconfig(jobID, kubeconfig)
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Kubeconfig loaded from %s (length: %d chars)", candidate, len(kubeconfig)))
 		return
 	}
 
-	// Read the file
-	kubeconfigBytes, err := os.ReadFile(kubeconfigPath)
-	if err != nil {
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Failed to read local kubeconfig.yaml: %v", err))
-		return
-	}
-
-	kubeconfig := strings.TrimSpace(string(kubeconfigBytes))
-	if kubeconfig == "" {
-		pe.jobManager.AppendOutput(jobID, "Local kubeconfig.yaml file is empty")
-		return
-	}
-
-	// Validate that kubeconfig looks like valid YAML
-	if !strings.Contains(kubeconfig, "apiVersion") && !strings.Contains(kubeconfig, "kind:") {
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: local kubeconfig may be invalid (length: %d chars)", len(kubeconfig)))
-	}
-
-	pe.jobManager.SetKubeconfig(jobID, kubeconfig)
-	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Kubeconfig loaded from local file (length: %d chars)", len(kubeconfig)))
+	pe.jobManager.AppendOutput(jobID, "Local kubeconfig file not found (checked external-kubeconfig.yaml, kubeconfig.yaml)")
 }
 
 // Execute runs pulumi up for a given job
@@ -1553,64 +1605,97 @@ type configCommand struct {
 
 // generatePulumiYaml generates the Pulumi.yaml content based on the provider
 func (pe *PulumiExecutor) generatePulumiYaml(config *LabConfig) string {
-	provider := config.Provider
-	if provider == "" {
-		provider = "ovh" // Default to OVH for backward compatibility
-	}
-
 	description := "Multi-cloud Gateway and Managed Kubernetes infrastructure"
 	configSection := ""
 
-	switch provider {
-	case "ovh":
-		description = "OVHcloud Gateway and Managed Kubernetes infrastructure"
-		configSection = fmt.Sprintf("  ovh:endpoint: %s\n", config.OvhEndpoint)
-		// Future providers can be added here:
-		// case "aws":
-		//     description = "AWS Gateway and Managed Kubernetes infrastructure"
-		//     configSection = fmt.Sprintf("  aws:region: %s\n", config.AwsRegion)
+	// BYOK mode: no cloud provider (OVH, etc.) is used — only k8s + Coder
+	// We still add ovh:endpoint for schema validation when OVH provider is a dependency
+	if config.UseExistingCluster {
+		description = "Kubernetes and Coder infrastructure (existing cluster)"
+		// OVH provider is still a dependency in go.mod; add placeholder to satisfy schema validation
+		configSection = "  ovh:endpoint: ovh-eu\n"
+	} else {
+		provider := config.Provider
+		if provider == "" {
+			provider = "ovh" // Default to OVH for backward compatibility
+		}
+
+		switch provider {
+		case "ovh":
+			description = "OVHcloud Gateway and Managed Kubernetes infrastructure"
+			endpoint := config.OvhEndpoint
+			if endpoint == "" {
+				endpoint = "ovh-eu" // Default per docs/ovhcloud.md
+			}
+			configSection = fmt.Sprintf("  ovh:endpoint: %s\n", endpoint)
+			// Future providers can be added here:
+			// case "aws":
+			//     description = "AWS Gateway and Managed Kubernetes infrastructure"
+			//     configSection = fmt.Sprintf("  aws:region: %s\n", config.AwsRegion)
+		}
 	}
 
+	configBlock := ""
+	if configSection != "" {
+		configBlock = fmt.Sprintf("\nconfig:\n%s", configSection)
+	}
 	return fmt.Sprintf(`name: easylab
 runtime: go
-description: %s
-
-config:
-%s`, description, configSection)
+description: %s%s
+`, description, configBlock)
 }
 
 func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
-	// Prefix resource names with stack name
-	prefixedGatewayName := fmt.Sprintf("%s-%s", config.StackName, config.NetworkGatewayName)
-	prefixedPrivateNetworkName := fmt.Sprintf("%s-%s", config.StackName, config.NetworkPrivateNetworkName)
-	prefixedK8sClusterName := fmt.Sprintf("%s-%s", config.StackName, config.K8sClusterName)
-	prefixedNodePoolName := fmt.Sprintf("%s-%s", config.StackName, config.NodePoolName)
+	var commands []configCommand
 
-	commands := []configCommand{
-		{"network:gatewayName", prefixedGatewayName, false},
-		{"network:gatewayModel", config.NetworkGatewayModel, false},
-		{"network:privateNetworkName", prefixedPrivateNetworkName, false},
-		{"network:region", config.NetworkRegion, false},
-		{"network:networkMask", config.NetworkMask, false},
-		{"network:networkStartIp", config.NetworkStartIP, false},
-		{"network:networkEndIp", config.NetworkEndIP, false},
-		{"nodepool:name", prefixedNodePoolName, false},
-		{"nodepool:flavor", config.NodePoolFlavor, false},
-		{"nodepool:desiredNodeCount", fmt.Sprintf("%d", config.NodePoolDesiredNodeCount), false},
-		{"nodepool:minNodeCount", fmt.Sprintf("%d", config.NodePoolMinNodeCount), false},
-		{"nodepool:maxNodeCount", fmt.Sprintf("%d", config.NodePoolMaxNodeCount), false},
-		{"k8s:clusterName", prefixedK8sClusterName, false},
-		{"coder:adminEmail", config.CoderAdminEmail, false},
-		{"coder:adminPassword", config.CoderAdminPassword, true}, // secret
-		{"coder:version", config.CoderVersion, false},
-		{"coder:dbUser", config.CoderDbUser, false},
-		{"coder:dbPassword", config.CoderDbPassword, true}, // secret
-		{"coder:dbName", config.CoderDbName, false},
-		{"coder:templateName", config.CoderTemplateName, false},
-	}
+	if config.UseExistingCluster {
+		// BYOK mode: only Coder config + kubeconfig path
+		commands = []configCommand{
+			{"k8s:useExistingCluster", "true", false},
+			{"coder:adminEmail", config.CoderAdminEmail, false},
+			{"coder:adminPassword", config.CoderAdminPassword, true},
+			{"coder:version", config.CoderVersion, false},
+			{"coder:dbUser", config.CoderDbUser, false},
+			{"coder:dbPassword", config.CoderDbPassword, true},
+			{"coder:dbName", config.CoderDbName, false},
+			{"coder:templateName", config.CoderTemplateName, false},
+		}
 
-	if config.NetworkID != "" {
-		commands = append(commands, configCommand{"network:networkId", config.NetworkID, false})
+		// The kubeconfig file path is relative to the job directory
+		commands = append(commands, configCommand{"k8s:externalKubeconfigPath", "external-kubeconfig.yaml", false})
+	} else {
+		// Standard mode: full infrastructure config
+		prefixedGatewayName := fmt.Sprintf("%s-%s", config.StackName, config.NetworkGatewayName)
+		prefixedPrivateNetworkName := fmt.Sprintf("%s-%s", config.StackName, config.NetworkPrivateNetworkName)
+		prefixedK8sClusterName := fmt.Sprintf("%s-%s", config.StackName, config.K8sClusterName)
+		prefixedNodePoolName := fmt.Sprintf("%s-%s", config.StackName, config.NodePoolName)
+
+		commands = []configCommand{
+			{"network:gatewayName", prefixedGatewayName, false},
+			{"network:gatewayModel", config.NetworkGatewayModel, false},
+			{"network:privateNetworkName", prefixedPrivateNetworkName, false},
+			{"network:region", config.NetworkRegion, false},
+			{"network:networkMask", config.NetworkMask, false},
+			{"network:networkStartIp", config.NetworkStartIP, false},
+			{"network:networkEndIp", config.NetworkEndIP, false},
+			{"nodepool:name", prefixedNodePoolName, false},
+			{"nodepool:flavor", config.NodePoolFlavor, false},
+			{"nodepool:desiredNodeCount", fmt.Sprintf("%d", config.NodePoolDesiredNodeCount), false},
+			{"nodepool:minNodeCount", fmt.Sprintf("%d", config.NodePoolMinNodeCount), false},
+			{"nodepool:maxNodeCount", fmt.Sprintf("%d", config.NodePoolMaxNodeCount), false},
+			{"k8s:clusterName", prefixedK8sClusterName, false},
+			{"coder:adminEmail", config.CoderAdminEmail, false},
+			{"coder:adminPassword", config.CoderAdminPassword, true},
+			{"coder:version", config.CoderVersion, false},
+			{"coder:dbUser", config.CoderDbUser, false},
+			{"coder:dbPassword", config.CoderDbPassword, true},
+			{"coder:dbName", config.CoderDbName, false},
+			{"coder:templateName", config.CoderTemplateName, false},
+		}
+
+		if config.NetworkID != "" {
+			commands = append(commands, configCommand{"network:networkId", config.NetworkID, false})
+		}
 	}
 
 	// Add template source configuration
@@ -1828,14 +1913,14 @@ func (pe *PulumiExecutor) downloadGoModules(jobDir string, jobID string) error {
 	if tidyErr != nil {
 		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("go mod tidy output: %s", tidyOutputStr))
 		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("go mod tidy failed: %v", tidyErr))
-		
+
 		// Check if the error indicates package resolution issues - these are fatal
 		if strings.Contains(tidyOutputStr, "no required module provides package") ||
 			strings.Contains(tidyOutputStr, "cannot find package") ||
 			strings.Contains(tidyOutputStr, "package") && strings.Contains(tidyOutputStr, "is not in") {
 			return fmt.Errorf("go mod tidy failed with package resolution error: %w\nOutput: %s", tidyErr, tidyOutputStr)
 		}
-		
+
 		// For other errors, log as warning but continue
 		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: go mod tidy failed with non-fatal error: %v. Continuing with download.", tidyErr))
 	} else {

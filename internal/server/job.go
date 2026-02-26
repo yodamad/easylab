@@ -50,6 +50,10 @@ type LabConfig struct {
 	// Cloud Provider
 	Provider string `json:"provider"` // "ovh", "aws", "azure", etc.
 
+	// Bring Your Own Kubernetes cluster
+	UseExistingCluster bool   `json:"use_existing_cluster"`
+	ExternalKubeconfig string `json:"external_kubeconfig,omitempty"`
+
 	// OVH Environment Variables (kept for backward compatibility)
 	OvhApplicationKey    string `json:"ovh_application_key"`
 	OvhApplicationSecret string `json:"ovh_application_secret"`

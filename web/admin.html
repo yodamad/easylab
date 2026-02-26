@@ -78,24 +78,96 @@
                     <p>Submitting...</p>
                 </div>
 
-                <!-- Step 1: Cloud Provider Selection -->
+                <!-- Step 1: Infrastructure Mode -->
                 <section class="wizard-step active" data-step="1">
                     <div class="step-header">
-                        <h2>Cloud Provider</h2>
-                        <p class="section-description">Select your cloud provider</p>
+                        <h2>Infrastructure</h2>
+                        <p class="section-description">Choose how to provide the Kubernetes cluster</p>
                     </div>
                     <div class="step-content">
+                        <input type="hidden" id="use_existing_cluster" name="use_existing_cluster" value="false">
+
                         <div class="form-group">
-                            <label for="provider">Cloud Provider *</label>
-                            <select id="provider" name="provider" required>
-                                <option value="ovh" selected>OVHcloud</option>
-                                <!-- Future providers can be added here:
-                                <option value="aws">Amazon Web Services (AWS)</option>
-                                <option value="azure">Microsoft Azure</option>
-                                <option value="gcp">Google Cloud Platform (GCP)</option>
-                                -->
-                            </select>
-                            <small>Choose the cloud provider for your infrastructure deployment</small>
+                            <label>Cluster Mode *</label>
+                            <div class="button-group">
+                                <button type="button" class="source-button" data-cluster-mode="new" id="cluster-mode-new">
+                                    <span class="source-icon">&#9729;</span>
+                                    <div class="source-content">
+                                        <span class="source-title">Create New Infrastructure</span>
+                                        <span class="source-description">Provision a new Kubernetes cluster on a cloud provider</span>
+                                    </div>
+                                </button>
+                                <button type="button" class="source-button" data-cluster-mode="existing" id="cluster-mode-existing">
+                                    <span class="source-icon">&#9881;</span>
+                                    <div class="source-content">
+                                        <span class="source-title">Use Existing Cluster</span>
+                                        <span class="source-description">Provide a kubeconfig for an existing Kubernetes cluster</span>
+                                    </div>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Provider selection (shown for new infrastructure) -->
+                        <div id="provider-section" style="display: none;">
+                            <div class="form-group">
+                                <label for="provider">Cloud Provider *</label>
+                                <select id="provider" name="provider">
+                                    <option value="ovh" selected>OVHcloud</option>
+                                    <!-- Future providers can be added here:
+                                    <option value="aws">Amazon Web Services (AWS)</option>
+                                    <option value="azure">Microsoft Azure</option>
+                                    <option value="gcp">Google Cloud Platform (GCP)</option>
+                                    -->
+                                </select>
+                                <small>Choose the cloud provider for your infrastructure deployment</small>
+                            </div>
+                        </div>
+
+                        <!-- Kubeconfig input (shown for existing cluster) -->
+                        <div id="kubeconfig-section" style="display: none;">
+                            <div class="form-group">
+                                <label>Provide Kubeconfig *</label>
+                                <div class="button-group">
+                                    <button type="button" class="source-button" data-kubeconfig-mode="upload" id="kubeconfig-mode-upload">
+                                        <span class="source-icon">&#128196;</span>
+                                        <div class="source-content">
+                                            <span class="source-title">Upload File</span>
+                                            <span class="source-description">Upload a .yaml or .yml kubeconfig file</span>
+                                        </div>
+                                    </button>
+                                    <button type="button" class="source-button" data-kubeconfig-mode="paste" id="kubeconfig-mode-paste">
+                                        <span class="source-icon">&#128203;</span>
+                                        <div class="source-content">
+                                            <span class="source-title">Paste Content</span>
+                                            <span class="source-description">Paste your kubeconfig YAML directly</span>
+                                        </div>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div id="kubeconfig-upload-section" style="display: none;">
+                                <div class="form-group">
+                                    <label for="kubeconfig_file">Kubeconfig File</label>
+                                    <div class="file-upload-wrapper">
+                                        <input type="file" id="kubeconfig_file" name="kubeconfig_file" accept=".yaml,.yml,.conf,.config" class="file-input">
+                                        <label for="kubeconfig_file" class="file-upload-label">
+                                            <span class="file-upload-icon">&#128196;</span>
+                                            <span class="file-upload-text">Choose file or drag it here</span>
+                                            <span class="file-upload-button">Browse</span>
+                                        </label>
+                                        <div class="file-name-display" id="kubeconfig-file-name-display"></div>
+                                    </div>
+                                    <small>Upload a .yaml or .yml kubeconfig file</small>
+                                </div>
+                            </div>
+
+                            <div id="kubeconfig-paste-section" style="display: none;">
+                                <div class="form-group">
+                                    <label for="kubeconfig_content">Kubeconfig Content</label>
+                                    <textarea id="kubeconfig_content" name="kubeconfig_content" rows="10" class="monospace" placeholder="apiVersion: v1&#10;kind: Config&#10;clusters:&#10;- cluster:&#10;    server: https://...&#10;  name: my-cluster&#10;..."></textarea>
+                                    <small>Paste your kubeconfig YAML content directly</small>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </section>

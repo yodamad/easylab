@@ -1,0 +1,50 @@
+---
+alwaysApply: true
+description: EasyLab coding conventions — architecture patterns, error handling, testing, and security practices.
+globs: 
+---
+# Coding Conventions
+
+## Architecture
+
+- HTML templates use a base/child pattern: web/base.html defines layout, page
+  templates define blocks (title, content, scripts). Serve via handler.serveTemplate().
+- HTTP handlers live in internal/server/ — use net/http.HandlerFunc and http.ServeMux.
+  Do NOT introduce external routers (no gorilla/mux, no chi).
+- HTMX drives all dynamic UI — prefer hx-get, hx-post, hx-target, hx-swap over
+  writing custom JavaScript. JS files in web/static/ are only for page-specific logic
+  that HTMX cannot handle (e.g. encryption, cookie management).
+- Pulumi programs are pure Go — infrastructure changes go in ovh/, k8s/, or coder/.
+  The templates/ directory is a self-contained Pulumi project copied into job workspaces.
+
+## Error handling
+
+- Always wrap errors with context: fmt.Errorf("failed to X: %w", err)
+- Return errors up the call stack; let the HTTP handler decide the response format
+- For HTML responses (HTMX), use handler.renderHTMLError() for consistent styling
+- For JSON API responses, use writeJSONError() or json.NewEncoder(w).Encode()
+- Log errors with log.Printf at the handler level, not deep in business logic
+
+## Testing
+
+- Go unit tests go next to the code they test (*_test.go in the same package)
+- Playwright E2E tests go in tests/*.spec.ts
+- Chaos tests go in tests/chaos/
+- Use "make test-backend" for Go tests, "make test-frontend" for Playwright
+- Use "make test-race" before committing concurrent code changes
+- Coverage threshold is 50% — check with "make coverage-check"
+
+## Security
+
+- Provider credentials (OVH keys, etc.) are stored in-memory only via CredentialsManager
+- Admin auth uses bcrypt-hashed passwords with cookie-based sessions
+- Student passwords are generated server-side with crypto/rand
+- Always sanitize user input in templates with template.HTMLEscapeString()
+- Prevent directory traversal in static file serving (strings.Contains(path, ".."))
+
+## Conventions
+
+- Keep backward compatibility for OVH-specific API routes alongside generic provider routes
+- Job/lab state transitions: pending -> running -> completed/failed; failed -> retry; completed -> destroyed -> recreated
+- Use the existing LabConfig struct for all lab configuration — extend it, don't replace it
+- Run "make dev" for hot-reload development (requires air)

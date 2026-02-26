@@ -456,4 +456,3 @@ func TestLoadEnvFile_OnlyCommentsAndEmptyLines(t *testing.T) {
 	// This is a sanity check - we can't easily verify no vars were set
 	// but we can verify the function doesn't error
 }
-

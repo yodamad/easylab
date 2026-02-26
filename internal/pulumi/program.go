@@ -1,15 +1,16 @@
 package pulumi
 
 import (
-	"fmt"
 	"easylab/coder"
 	"easylab/k8s"
 	"easylab/ovh"
 	"easylab/utils"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 
+	k8sPkg "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
 
@@ -18,31 +19,49 @@ import (
 // Note: This is currently not used - templates are copied directly instead
 func CreateLabProgram() pulumi.RunFunc {
 	return func(ctx *pulumi.Context) error {
-		serviceName := checkRequirements(ctx)
+		useExisting := utils.K8sConfigOptional(ctx, utils.K8sUseExistingCluster)
 
-		// Initialize infrastructure
-		utils.LogInfo(ctx, "Starting infrastructure setup...")
+		var k8sProvider *k8sPkg.Provider
 
-		// Initialize network infrastructure (creates new or reuses existing based on config)
-		netInfra, err := ovh.InitNetworkInfrastructure(ctx, serviceName)
-		if err != nil {
-			return fmt.Errorf("failed to initialize network infrastructure: %w", err)
-		}
+		if useExisting == "true" {
+			utils.LogInfo(ctx, "Using existing Kubernetes cluster...")
+			kubeconfigPath := utils.K8sConfig(ctx, utils.K8sExternalKubeconfigPath)
 
-		// Create Kubernetes cluster using the network infrastructure
-		kubeCluster, err := ovh.InitManagedKubernetesClusterWithNetwork(ctx, serviceName, netInfra)
-		if err != nil {
-			return fmt.Errorf("failed to create Kubernetes cluster: %w", err)
-		}
+			cwd, cwdErr := os.Getwd()
+			if cwdErr != nil {
+				return fmt.Errorf("failed to get current working directory: %w", cwdErr)
+			}
+			absKubeconfigPath := filepath.Join(cwd, kubeconfigPath)
 
-		nodepool, err := ovh.InitNodePools(ctx, serviceName, kubeCluster)
-		if err != nil {
-			return fmt.Errorf("failed to create node pools: %w", err)
-		}
+			var err error
+			k8sProvider, err = k8s.InitK8sProviderFromKubeconfig(ctx, absKubeconfigPath)
+			if err != nil {
+				return fmt.Errorf("failed to create Kubernetes provider from kubeconfig: %w", err)
+			}
+		} else {
+			serviceName := checkRequirements(ctx)
 
-		k8sProvider, err := k8s.InitK8sProvider(ctx, kubeCluster, nodepool)
-		if err != nil {
-			return fmt.Errorf("failed to create Kubernetes provider: %w", err)
+			utils.LogInfo(ctx, "Starting infrastructure setup...")
+
+			netInfra, err := ovh.InitNetworkInfrastructure(ctx, serviceName)
+			if err != nil {
+				return fmt.Errorf("failed to initialize network infrastructure: %w", err)
+			}
+
+			kubeCluster, err := ovh.InitManagedKubernetesClusterWithNetwork(ctx, serviceName, netInfra)
+			if err != nil {
+				return fmt.Errorf("failed to create Kubernetes cluster: %w", err)
+			}
+
+			nodepool, err := ovh.InitNodePools(ctx, serviceName, kubeCluster)
+			if err != nil {
+				return fmt.Errorf("failed to create node pools: %w", err)
+			}
+
+			k8sProvider, err = k8s.InitK8sProvider(ctx, kubeCluster, nodepool)
+			if err != nil {
+				return fmt.Errorf("failed to create Kubernetes provider: %w", err)
+			}
 		}
 
 		// Initialize Coder elements with parallel Helm installations
