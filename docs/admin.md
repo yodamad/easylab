@@ -4,7 +4,7 @@ icon: lucide/shield-check
 
 # Admin Space
 
-As an admin (trainer, speaker, ...), you have access to the admin space to manager your labs:
+As an admin (trainer, speaker, ...), you have access to the admin space to manage your labs:
 
 * [x] Create a new lab
 * [x] Set/update credentials for the cloud providers
@@ -17,17 +17,32 @@ As an admin (trainer, speaker, ...), you have access to the admin space to manag
 
 ## Create a new lab
 
-First you need to chose the cloud provider you want to use.
+First you need to choose how to provide the Kubernetes cluster:
 
-* [x] [OVHcloud](#on-ovhcloud)
-* [ ] Clever Cloud (*soon*)
-* [ ] AWS (*soon*)
-* [ ] Azure (*soon*)
-* [ ] Google Cloud (*soon*)
+* [x] [Create New Infrastructure](#on-ovhcloud) — Provision a new cluster on a cloud provider (OVHcloud)
+* [x] [Use Existing Cluster](#use-existing-cluster) — Provide a kubeconfig for an existing Kubernetes cluster
 
-### On OVHcloud
+### Use Existing Cluster
 
-Most of the configuration is preconfired, you only need to select the ID for the private network.
+When you choose **Use Existing Cluster**, EasyLab skips cloud provider provisioning and uses your own Kubernetes cluster. This is useful when you already have a cluster (e.g. from your organization, a local dev environment, or another cloud provider).
+
+**What you need to provide:**
+
+* **Kubeconfig** — Either:
+    * Upload a `.yaml` or `.yml` kubeconfig file, or
+    * Paste the kubeconfig YAML content directly
+
+**What is skipped:**
+
+* No cloud provider credentials required
+* No network, cluster, or node pool configuration
+* The wizard goes directly to Coder setup and template selection
+
+The kubeconfig must have sufficient permissions to create namespaces and deploy Helm releases (Coder, PostgreSQL) in the cluster.
+
+### On OVHcloud (Create New Infrastructure)
+
+When creating new infrastructure, you choose OVHcloud as the cloud provider. Most of the configuration is preconfigured; you only need to select the ID for the private network.
 
 ??? info "Others parameters can be overridden if needed"
 

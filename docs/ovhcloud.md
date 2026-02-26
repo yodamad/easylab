@@ -4,7 +4,7 @@ title: OVHcloud
 ---
 # OVHcloud configuration
 
-This section is dedicated to the OVHcloud configuration.
+This section is dedicated to the OVHcloud configuration. It applies only when you choose **Create New Infrastructure** in the lab wizard. When using **Use Existing Cluster**, OVHcloud credentials and configuration are not required.
 
 ## Configuration keys reference
 
