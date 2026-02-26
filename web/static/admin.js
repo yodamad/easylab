@@ -399,6 +399,44 @@ function calculateNetworkIPs() {
     endIpHidden.value = endIP;
 }
 
+// Generate secure password using crypto.getRandomValues (mirrors backend GenerateSecurePassword)
+function generateSecurePassword(length) {
+    const lowercase = 'abcdefghijklmnopqrstuvwxyz';
+    const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const numbers = '0123456789';
+    const symbols = '!@#$%^&*';
+    const allChars = lowercase + uppercase + numbers + symbols;
+    const minLength = 16;
+
+    if (!length || length < minLength) {
+        length = minLength;
+    }
+
+    const getRandomInt = (max) => {
+        const arr = new Uint32Array(1);
+        crypto.getRandomValues(arr);
+        return arr[0] % max;
+    };
+
+    const password = new Array(length);
+
+    password[0] = lowercase[getRandomInt(lowercase.length)];
+    password[1] = uppercase[getRandomInt(uppercase.length)];
+    password[2] = numbers[getRandomInt(numbers.length)];
+    password[3] = symbols[getRandomInt(symbols.length)];
+
+    for (let i = 4; i < length; i++) {
+        password[i] = allChars[getRandomInt(allChars.length)];
+    }
+
+    for (let i = length - 1; i > 0; i--) {
+        const j = getRandomInt(i + 1);
+        [password[i], password[j]] = [password[j], password[i]];
+    }
+
+    return password.join('');
+}
+
 // Check credentials status and show/hide disclaimer
 function checkCredentialsStatus() {
     // Skip credentials check in BYOK mode
@@ -550,7 +588,28 @@ function startPolling() {
 // Initialize wizard
 document.addEventListener('DOMContentLoaded', function() {
     wizard.init();
-    
+
+    // Bind Generate password buttons
+    document.querySelectorAll('.btn-generate-password-db').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const targetId = this.getAttribute('data-target');
+            const input = document.getElementById(targetId);
+            if (input) {
+                input.value = generateSecurePassword(12);
+            }
+        });
+    });
+
+    document.querySelectorAll('.btn-generate-password-coder').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const targetId = this.getAttribute('data-target');
+            const input = document.getElementById(targetId);
+            if (input) {
+                input.value = generateSecurePassword(20);
+            }
+        });
+    });
+
     // Set up network mask calculation
     const maskInput = document.getElementById('network_mask');
     if (maskInput) {

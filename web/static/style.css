@@ -372,6 +372,22 @@ main {
     font-family: monospace;
 }
 
+.input-with-action {
+    display: flex;
+    gap: 0.5rem;
+    align-items: stretch;
+}
+
+.input-with-action input {
+    flex: 1;
+    min-width: 0;
+}
+
+.input-with-action .btn-generate-password {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
 /* File Upload Styling */
 .file-upload-wrapper {
     position: relative;
