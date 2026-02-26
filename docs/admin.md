@@ -22,6 +22,8 @@ First you need to choose how to provide the Kubernetes cluster:
 * [x] [Create New Infrastructure](#on-ovhcloud) — Provision a new cluster on a cloud provider (OVHcloud)
 * [x] [Use Existing Cluster](#use-existing-cluster) — Provide a kubeconfig for an existing Kubernetes cluster
 
+![Infrastructure selection](screens/infra-choice.png){width=350}
+
 ### Use Existing Cluster
 
 When you choose **Use Existing Cluster**, EasyLab skips cloud provider provisioning and uses your own Kubernetes cluster. This is useful when you already have a cluster (e.g. from your organization, a local dev environment, or another cloud provider).
