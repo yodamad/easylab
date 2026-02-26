@@ -1,0 +1,13 @@
+---
+alwaysApply: true
+description: Go coding conventions for the EasyLab server — handler patterns, error handling, and Pulumi integration.
+globs: **/*.go
+---
+- Use html/template with the base/child template pattern (web/base.html + page-specific templates)
+- Implement http.HandlerFunc for handlers — register on http.ServeMux, do NOT add external routers
+- Wrap errors with context: fmt.Errorf("failed to X: %w", err)
+- Use encoding/json for JSON API responses, handler.renderHTMLError() for HTMX error responses
+- Log at handler level with log.Printf, not deep in business logic
+- Use context for request cancellation and timeouts (especially in Pulumi execution)
+- Protect concurrent state with sync.RWMutex (see Job.mu pattern in job.go)
+- Do NOT modify existing files unless explicitly asked by the user

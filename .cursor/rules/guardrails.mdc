@@ -1,0 +1,32 @@
+---
+alwaysApply: true
+description: Agent guardrails — strict rules to prevent unintended modifications to the EasyLab codebase.
+globs: 
+---
+# Agent Guardrails
+
+CRITICAL: Do NOT modify, refactor, rename, or restructure existing files unless
+the user EXPLICITLY asks for it. This applies to all code, tests, configs, and
+documentation. When in doubt, ASK before changing.
+
+## Agents MUST NOT
+
+- Modify files that are not directly related to the user's request
+- Refactor or "improve" existing working code on their own initiative
+- Rename functions, variables, types, packages, or files without being asked
+- Change API routes, request/response contracts, or HTTP status codes
+- Alter Pulumi infrastructure code (main.go, ovh/, k8s/, coder/, templates/)
+- Edit CI/CD pipelines (.gitlab-ci.yml, .github/), Dockerfile, or docker-compose.yml
+- Add, remove, or upgrade Go or npm dependencies without explicit approval
+- Change authentication or security logic (internal/server/auth.go)
+- Modify the Makefile targets or build configuration
+- Move files between directories or reorganize the project structure
+- Remove backward-compatibility routes or aliases
+
+## Agents SHOULD
+
+- Limit changes to the minimum scope needed to fulfill the request
+- Explain what they intend to change BEFORE making edits to multiple files
+- Preserve existing code style, naming conventions, and patterns
+- Add new code in the appropriate existing package rather than creating new ones
+- Run "make test" or "make lint" after changes when relevant

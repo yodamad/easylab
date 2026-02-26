@@ -74,9 +74,20 @@ func NodePoolConfigInt(ctx *pulumi.Context, key string) int {
 // K8s config group
 const K8sGroup = "k8s"
 const K8sClusterName = "clusterName"
+const K8sUseExistingCluster = "useExistingCluster"
+const K8sExternalKubeconfigPath = "externalKubeconfigPath"
 
 func K8sConfig(ctx *pulumi.Context, key string) string {
 	return getConfig(ctx, K8sGroup, key)
+}
+
+func K8sConfigOptional(ctx *pulumi.Context, key string) string {
+	cfg := config.New(ctx, K8sGroup)
+	val := cfg.Get(key)
+	if val == "" {
+		return ""
+	}
+	return val
 }
 
 // Coder config group

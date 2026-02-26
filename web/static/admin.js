@@ -1,18 +1,38 @@
 // Wizard functionality
 const wizard = {
     currentStep: 1,
-    totalSteps: 6,
-    
+    useExistingCluster: false,
+    clusterModeSelected: false,
+    allSteps: [1, 2, 3, 4, 5, 6],
+    byokSteps: [1, 2, 6],
+
+    getActiveSteps() {
+        return this.useExistingCluster ? this.byokSteps : this.allSteps;
+    },
+
+    getActiveStepIndex() {
+        return this.getActiveSteps().indexOf(this.currentStep);
+    },
+
+    isLastStep() {
+        const steps = this.getActiveSteps();
+        return this.currentStep === steps[steps.length - 1];
+    },
+
+    isFirstStep() {
+        return this.currentStep === this.getActiveSteps()[0];
+    },
+
     init() {
         this.bindEvents();
+        this.bindClusterModeEvents();
         this.updateUI();
     },
-    
+
     bindEvents() {
         document.getElementById('btn-next').addEventListener('click', () => this.nextStep());
         document.getElementById('btn-prev').addEventListener('click', () => this.prevStep());
-        
-        // Dry run button handler
+
         const dryRunBtn = document.getElementById('btn-dry-run');
         if (dryRunBtn) {
             dryRunBtn.addEventListener('click', () => {
@@ -21,104 +41,218 @@ const wizard = {
                 }
             });
         }
-        
-        // Keyboard navigation
+
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
                 e.preventDefault();
-                if (this.currentStep < this.totalSteps) {
+                if (!this.isLastStep()) {
                     this.nextStep();
                 }
             }
         });
-        
-        // Progress step click
+
         document.querySelectorAll('.progress-step').forEach(step => {
             step.addEventListener('click', () => {
                 const stepNum = parseInt(step.dataset.step);
-                if (this.canGoToStep(stepNum)) {
+                if (this.getActiveSteps().includes(stepNum) && this.canGoToStep(stepNum)) {
                     this.goToStep(stepNum);
                 }
             });
         });
     },
-    
+
+    bindClusterModeEvents() {
+        const newBtn = document.getElementById('cluster-mode-new');
+        const existingBtn = document.getElementById('cluster-mode-existing');
+        if (!newBtn || !existingBtn) return;
+
+        newBtn.addEventListener('click', () => this.setClusterMode(false));
+        existingBtn.addEventListener('click', () => this.setClusterMode(true));
+    },
+
+    setClusterMode(useExisting) {
+        this.useExistingCluster = useExisting;
+        this.clusterModeSelected = true;
+
+        document.getElementById('use_existing_cluster').value = useExisting ? 'true' : 'false';
+
+        const newBtn = document.getElementById('cluster-mode-new');
+        const existingBtn = document.getElementById('cluster-mode-existing');
+        newBtn.classList.toggle('selected', !useExisting);
+        existingBtn.classList.toggle('selected', useExisting);
+
+        document.getElementById('provider-section').style.display = useExisting ? 'none' : '';
+        document.getElementById('kubeconfig-section').style.display = useExisting ? '' : 'none';
+
+        // Toggle required on infrastructure-only fields (steps 3, 4, 5)
+        // These steps are skipped in BYOK mode, so validation would block submission
+        const infraFieldIds = [
+            'network_gateway_name', 'network_gateway_model', 'network_private_network_name',
+            'network_id', 'network_region', 'network_mask',
+            'k8s_cluster_name',
+            'nodepool_name', 'nodepool_flavor',
+            'nodepool_desired_node_count', 'nodepool_min_node_count', 'nodepool_max_node_count'
+        ];
+        infraFieldIds.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                if (useExisting) {
+                    el.removeAttribute('required');
+                } else {
+                    el.setAttribute('required', 'required');
+                }
+            }
+        });
+
+        // Reset to step 1 when switching modes
+        this.currentStep = 1;
+        this.updateProgressBar();
+        this.updateUI();
+
+        // Update credentials notice visibility
+        if (useExisting) {
+            const notice = document.getElementById('provider-credentials-notice');
+            if (notice) notice.style.display = 'none';
+        } else {
+            checkCredentialsStatus();
+        }
+    },
+
+    updateProgressBar() {
+        const activeSteps = this.getActiveSteps();
+        const progressSteps = document.querySelectorAll('.progress-step');
+        progressSteps.forEach(step => {
+            const stepNum = parseInt(step.dataset.step);
+            step.style.display = activeSteps.includes(stepNum) ? '' : 'none';
+            // Relabel step numbers for BYOK mode
+            const stepNumberEl = step.querySelector('.step-number');
+            if (stepNumberEl) {
+                const idx = activeSteps.indexOf(stepNum);
+                stepNumberEl.textContent = idx >= 0 ? idx + 1 : stepNum;
+            }
+        });
+        document.getElementById('total-steps').textContent = activeSteps.length;
+    },
+
     validateCurrentStep() {
         const currentStepEl = document.querySelector(`.wizard-step[data-step="${this.currentStep}"]`);
+        if (!currentStepEl) return true;
+
+        // On step 1, require a cluster mode selection
+        if (this.currentStep === 1 && !this.clusterModeSelected) {
+            alert('Please select a cluster mode: Create New Infrastructure or Use Existing Cluster.');
+            return false;
+        }
+
+        // In BYOK mode on step 1, validate kubeconfig is provided
+        if (this.useExistingCluster && this.currentStep === 1) {
+            const uploadBtn = document.getElementById('kubeconfig-mode-upload');
+            const pasteBtn = document.getElementById('kubeconfig-mode-paste');
+            const modeSelected = (uploadBtn && uploadBtn.classList.contains('selected')) ||
+                                 (pasteBtn && pasteBtn.classList.contains('selected'));
+            if (!modeSelected) {
+                alert('Please choose how to provide your kubeconfig: Upload File or Paste Content.');
+                return false;
+            }
+            const kubeconfigFile = document.getElementById('kubeconfig_file');
+            const kubeconfigContent = document.getElementById('kubeconfig_content');
+            const hasFile = kubeconfigFile && kubeconfigFile.files && kubeconfigFile.files.length > 0;
+            const hasContent = kubeconfigContent && kubeconfigContent.value.trim() !== '';
+            if (!hasFile && !hasContent) {
+                alert('Please provide your kubeconfig content.');
+                return false;
+            }
+            return true;
+        }
+
         const inputs = currentStepEl.querySelectorAll('input[required], select[required]');
         let valid = true;
-        
         inputs.forEach(input => {
+            // Skip hidden/invisible required fields from the inactive section
+            if (input.offsetParent === null) return;
             if (!input.checkValidity()) {
                 input.reportValidity();
                 valid = false;
             }
         });
-        
         return valid;
     },
-    
+
     canGoToStep(stepNum) {
-        // Can always go back
-        if (stepNum < this.currentStep) return true;
-        // Can only go forward one step at a time after validation
-        if (stepNum === this.currentStep + 1) return this.validateCurrentStep();
-        // Can go to current step
-        if (stepNum === this.currentStep) return true;
+        if (!this.getActiveSteps().includes(stepNum)) return false;
+        const currentIdx = this.getActiveStepIndex();
+        const targetIdx = this.getActiveSteps().indexOf(stepNum);
+        if (targetIdx < currentIdx) return true;
+        if (targetIdx === currentIdx + 1) return this.validateCurrentStep();
+        if (targetIdx === currentIdx) return true;
         return false;
     },
-    
+
     nextStep() {
-        if (this.currentStep < this.totalSteps && this.validateCurrentStep()) {
-            this.currentStep++;
+        const steps = this.getActiveSteps();
+        const idx = this.getActiveStepIndex();
+        if (idx < steps.length - 1 && this.validateCurrentStep()) {
+            this.currentStep = steps[idx + 1];
             this.updateUI();
         }
     },
-    
+
     prevStep() {
-        if (this.currentStep > 1) {
-            this.currentStep--;
+        const steps = this.getActiveSteps();
+        const idx = this.getActiveStepIndex();
+        if (idx > 0) {
+            this.currentStep = steps[idx - 1];
             this.updateUI();
         }
     },
-    
+
     goToStep(stepNum) {
-        if (stepNum >= 1 && stepNum <= this.totalSteps) {
+        if (this.getActiveSteps().includes(stepNum)) {
             this.currentStep = stepNum;
             this.updateUI();
         }
     },
-    
+
     updateUI() {
+        const activeSteps = this.getActiveSteps();
+        const currentIdx = this.getActiveStepIndex();
+
         // Update step visibility
         document.querySelectorAll('.wizard-step').forEach(step => {
             const stepNum = parseInt(step.dataset.step);
             step.classList.toggle('active', stepNum === this.currentStep);
         });
-        
+
         // Update progress indicator
         document.querySelectorAll('.progress-step').forEach(step => {
             const stepNum = parseInt(step.dataset.step);
+            if (!activeSteps.includes(stepNum)) {
+                step.style.display = 'none';
+                return;
+            }
+            step.style.display = '';
+            const stepIdx = activeSteps.indexOf(stepNum);
             step.classList.remove('active', 'completed');
             if (stepNum === this.currentStep) {
                 step.classList.add('active');
-            } else if (stepNum < this.currentStep) {
+            } else if (stepIdx < currentIdx) {
                 step.classList.add('completed');
             }
         });
-        
+
         // Update step counter
-        document.getElementById('current-step-num').textContent = this.currentStep;
-        
+        document.getElementById('current-step-num').textContent = currentIdx + 1;
+        document.getElementById('total-steps').textContent = activeSteps.length;
+
         // Update buttons
         const prevBtn = document.getElementById('btn-prev');
         const nextBtn = document.getElementById('btn-next');
         const submitBtn = document.getElementById('btn-submit');
         const dryRunBtn = document.getElementById('btn-dry-run');
-        
-        prevBtn.disabled = this.currentStep === 1;
-        
-        if (this.currentStep === this.totalSteps) {
+
+        prevBtn.disabled = this.isFirstStep();
+
+        if (this.isLastStep()) {
             nextBtn.style.display = 'none';
             submitBtn.style.display = 'inline-flex';
             dryRunBtn.style.display = 'inline-flex';
@@ -127,8 +261,7 @@ const wizard = {
             submitBtn.style.display = 'none';
             dryRunBtn.style.display = 'none';
         }
-        
-        // Scroll to top of form
+
         document.querySelector('.wizard-progress').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 };
@@ -268,7 +401,13 @@ function calculateNetworkIPs() {
 
 // Check credentials status and show/hide disclaimer
 function checkCredentialsStatus() {
-    // Get the selected provider from the form
+    // Skip credentials check in BYOK mode
+    if (wizard.useExistingCluster) {
+        const notice = document.getElementById('provider-credentials-notice');
+        if (notice) notice.style.display = 'none';
+        return;
+    }
+
     const providerSelect = document.getElementById('provider');
     const provider = providerSelect ? providerSelect.value : 'ovh';
     
@@ -289,7 +428,6 @@ function checkCredentialsStatus() {
         })
         .catch(error => {
             console.error('Error checking credentials:', error);
-            // Show notice on error to be safe
             const notice = document.getElementById('provider-credentials-notice');
             if (notice) {
                 notice.style.display = 'block';
@@ -412,7 +550,6 @@ function startPolling() {
 // Initialize wizard
 document.addEventListener('DOMContentLoaded', function() {
     wizard.init();
-    checkCredentialsStatus();
     
     // Set up network mask calculation
     const maskInput = document.getElementById('network_mask');
@@ -496,11 +633,61 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
+    // Kubeconfig mode toggle (upload vs paste)
+    const kubeconfigUploadBtn = document.getElementById('kubeconfig-mode-upload');
+    const kubeconfigPasteBtn = document.getElementById('kubeconfig-mode-paste');
+    const kubeconfigUploadSection = document.getElementById('kubeconfig-upload-section');
+    const kubeconfigPasteSection = document.getElementById('kubeconfig-paste-section');
+
+    function setKubeconfigMode(mode) {
+        if (kubeconfigUploadBtn && kubeconfigPasteBtn) {
+            kubeconfigUploadBtn.classList.toggle('selected', mode === 'upload');
+            kubeconfigPasteBtn.classList.toggle('selected', mode === 'paste');
+        }
+        if (kubeconfigUploadSection) {
+            kubeconfigUploadSection.style.display = mode === 'upload' ? '' : 'none';
+        }
+        if (kubeconfigPasteSection) {
+            kubeconfigPasteSection.style.display = mode === 'paste' ? '' : 'none';
+        }
+    }
+
+    if (kubeconfigUploadBtn) {
+        kubeconfigUploadBtn.addEventListener('click', () => setKubeconfigMode('upload'));
+    }
+    if (kubeconfigPasteBtn) {
+        kubeconfigPasteBtn.addEventListener('click', () => setKubeconfigMode('paste'));
+    }
+
+    // Kubeconfig file upload: read contents into textarea
+    const kubeconfigFileInput = document.getElementById('kubeconfig_file');
+    const kubeconfigFileNameDisplay = document.getElementById('kubeconfig-file-name-display');
+    if (kubeconfigFileInput) {
+        kubeconfigFileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                if (kubeconfigFileNameDisplay) {
+                    kubeconfigFileNameDisplay.textContent = `Selected: ${file.name}`;
+                    kubeconfigFileNameDisplay.style.display = 'block';
+                }
+                const reader = new FileReader();
+                reader.onload = function(evt) {
+                    const textarea = document.getElementById('kubeconfig_content');
+                    if (textarea) {
+                        textarea.value = evt.target.result;
+                    }
+                };
+                reader.readAsText(file);
+            } else if (kubeconfigFileNameDisplay) {
+                kubeconfigFileNameDisplay.style.display = 'none';
+            }
+        });
+    }
+
     // Handle job status display on page load if job ID is in URL
     const urlParams = new URLSearchParams(window.location.search);
     const jobId = urlParams.get('job');
     if (jobId) {
-        // Hide wizard and show only status
         hideWizardShowStatus();
         
         const container = document.getElementById('job-status-container');
@@ -542,7 +729,7 @@ document.body.addEventListener('htmx:afterSettle', function(event) {
 
 // Template source selection handler with button group
 const templateSourceRadios = document.querySelectorAll('input[name="template_source"]');
-const sourceButtons = document.querySelectorAll('.source-button');
+const sourceButtons = document.querySelectorAll('.source-button[data-source]');
 const templateUploadSection = document.getElementById('template_upload_section');
 const templateGitSection = document.getElementById('template_git_section');
 const templateFileInput = document.getElementById('template_file');

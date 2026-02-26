@@ -12,15 +12,15 @@ type HelmChartInfo struct {
 	ChartName       string
 	Version         string
 	Url             string
-	crds            bool `default:"false"`
-	createNamespace bool `default:"false"`
+	ReleaseName     string // Explicit Helm release name; if empty, Pulumi may generate a unique suffix
+	crds            bool   `default:"false"`
+	createNamespace bool   `default:"false"`
 	Values          pulumi.Map
 }
 
 func InitHelm(ctx *pulumi.Context, provider *k8s.Provider, chart HelmChartInfo, namespace *v1.Namespace) (*helmv3.Release, error) {
 
-	// Use Helm to install
-	helmRelease, err := helmv3.NewRelease(ctx, chart.Name, &helmv3.ReleaseArgs{
+	releaseArgs := &helmv3.ReleaseArgs{
 		Chart:           pulumi.String(chart.ChartName),
 		Namespace:       namespace.Metadata.Name(),
 		CreateNamespace: pulumi.Bool(chart.createNamespace),
@@ -31,7 +31,11 @@ func InitHelm(ctx *pulumi.Context, provider *k8s.Provider, chart HelmChartInfo, 
 		Version:  pulumi.String(chart.Version),
 		Values:   chart.Values,
 		Timeout:  pulumi.Int(900), // 15 minutes timeout
-	}, pulumi.Provider(provider), pulumi.DependsOn([]pulumi.Resource{namespace}))
+	}
+	if chart.ReleaseName != "" {
+		releaseArgs.Name = pulumi.String(chart.ReleaseName)
+	}
+	helmRelease, err := helmv3.NewRelease(ctx, chart.Name, releaseArgs, pulumi.Provider(provider), pulumi.DependsOn([]pulumi.Resource{namespace}))
 	if err != nil {
 		return nil, err
 	}

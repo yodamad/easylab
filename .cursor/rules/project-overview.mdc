@@ -1,0 +1,90 @@
+---
+alwaysApply: true
+description: EasyLab project overview — tech stack, architecture, and folder structure reference.
+globs: 
+---
+# EasyLab — Lab-as-Code Platform
+
+EasyLab is a Go web application that provisions cloud-based lab environments
+using Pulumi IaC on OVHcloud. It deploys Kubernetes clusters with Coder workspaces
+for workshop participants.
+
+Two main entry points:
+1. A Pulumi program (main.go) for infrastructure provisioning
+2. A web server (cmd/server/main.go) with an HTMX-powered admin/student UI
+
+## Tech stack
+
+- Go 1.26 with html/template for server-side rendering
+- HTMX for dynamic UI interactions (no frontend framework)
+- Pulumi SDK v3 for infrastructure as code (Go-based programs)
+- OVHcloud provider for cloud resources (network, k8s, node pools)
+- Coder SDK for workspace and template management
+- net/http with http.ServeMux for routing (no external router)
+- Playwright for E2E frontend testing
+- Makefile for build, test, and CI tasks
+- Docker + docker-compose for containerized deployment
+- Kustomize manifests for Kubernetes deployment (k8s-deployment/)
+- MkDocs for documentation (docs/)
+
+## Folder structure
+
+```
+main.go                  # Pulumi IaC entry point (OVH infra + k8s + Coder setup)
+cmd/
+  server/
+    main.go              # Web server entry point (HTTP server with graceful shutdown)
+internal/
+  server/
+    handler.go           # HTTP handlers (admin UI, student portal, credentials, labs)
+    auth.go              # Authentication (admin password, student login, JWT cookies)
+    credentials.go       # Provider credentials management (OVH, extensible)
+    job.go               # Job/lab lifecycle management (create, status, persist)
+    pulumi.go            # Pulumi executor (preview, execute, destroy, retry)
+  providers/
+    provider.go          # Cloud provider interface
+    registry.go          # Provider registry
+    ovh/                 # OVH-specific provider implementation
+  pulumi/
+    program.go           # Pulumi program builder
+coder/
+  coder.go               # Coder API client (users, workspaces, templates)
+k8s/
+  k8s.go                 # Kubernetes provider, namespace, external IP
+  helm.go                # Helm release management
+ovh/
+  ovh.go                 # OVH resource provisioning (network, k8s cluster, node pools)
+utils/
+  config.go              # Pulumi config helpers and constants
+  git.go                 # Git clone, zip utilities
+  log.go                 # Logging helpers
+templates/               # Pulumi template code (copied into job workspaces)
+  main.go
+  go.mod / go.sum
+  coder/ k8s/ ovh/ utils/
+web/
+  base.html              # Shared HTML base template
+  index.html             # Homepage
+  admin.html             # Admin wizard (lab creation)
+  credentials.html       # Provider credentials form
+  labs-list.html         # Labs listing page
+  lab-workspaces.html    # Workspace management page
+  student-dashboard.html # Student portal
+  login.html             # Admin login
+  student-login.html     # Student login
+  static/
+    style.css            # Global styles
+    *.js                 # Page-specific JS (HTMX interactions)
+tests/
+  *.spec.ts              # Playwright E2E tests
+  chaos/                 # Chaos testing specs
+  fixtures.ts            # Test fixtures and helpers
+k8s-deployment/          # Kubernetes manifests (kustomize)
+docs/                    # MkDocs documentation source
+scripts/                 # Helper scripts (coverage, etc.)
+Makefile                 # Build, test, coverage, CI targets
+Dockerfile               # Container build
+docker-compose.yml       # Local development with Docker
+.gitlab-ci.yml           # GitLab CI pipeline
+.goreleaser.yaml         # GoReleaser config
+```

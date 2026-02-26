@@ -1,0 +1,26 @@
+---
+description: Enforce CSS classes over inline styles in HTML templates — all visual styling must live in web/static/style.css.
+globs: "**/*.html"
+alwaysApply: false
+---
+
+# No Inline Styles
+
+NEVER use inline `style="..."` attributes in HTML templates. All styling must be defined as CSS classes in `web/static/style.css`.
+
+```html
+<!-- BAD -->
+<textarea style="width: 100%; font-family: monospace; font-size: 0.85rem;"></textarea>
+<div style="display: none; text-align: center;">...</div>
+
+<!-- GOOD -->
+<textarea class="monospace"></textarea>
+<div class="hidden text-center">...</div>
+```
+
+When you need new visual styles:
+1. Add a CSS class in `web/static/style.css`
+2. Reuse existing classes when possible (check the file first)
+3. Apply the class in HTML via the `class` attribute
+
+The only acceptable inline style is `style="display: none;"` for elements whose visibility is toggled by JavaScript at runtime.
