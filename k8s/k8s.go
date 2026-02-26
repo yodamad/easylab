@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"easylab/utils"
+
 	"github.com/ovh/pulumi-ovh/sdk/v2/go/ovh/cloudproject"
 	k8s "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes"
 	k8score "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/core/v1"
@@ -43,9 +45,13 @@ func InitK8sProviderFromKubeconfig(ctx *pulumi.Context, kubeconfigPath string) (
 }
 
 func InitNamespace(ctx *pulumi.Context, provider *k8s.Provider) (*k8score.Namespace, error) {
+	nsName := utils.CoderConfigOptional(ctx, utils.CoderNamespace)
+	if nsName == "" {
+		nsName = "coder"
+	}
 	namespace, err := k8score.NewNamespace(ctx, "coder", &k8score.NamespaceArgs{
 		Metadata: &k8smeta.ObjectMetaArgs{
-			Name: pulumi.String("coder"),
+			Name: pulumi.String(nsName),
 		},
 	}, pulumi.Provider(provider))
 	if err != nil {
@@ -55,7 +61,12 @@ func InitNamespace(ctx *pulumi.Context, provider *k8s.Provider) (*k8score.Namesp
 }
 
 func GetExternalIP(ctx *pulumi.Context, provider *k8s.Provider, coderRelease *helm.Release) (pulumi.StringOutput, error) {
-	service, err := k8score.GetService(ctx, "coder", pulumi.ID("coder/coder"), nil, pulumi.Provider(provider), pulumi.DependsOn([]pulumi.Resource{coderRelease}))
+	nsName := utils.CoderConfigOptional(ctx, utils.CoderNamespace)
+	if nsName == "" {
+		nsName = "coder"
+	}
+	serviceID := nsName + "/coder"
+	service, err := k8score.GetService(ctx, "coder", pulumi.ID(serviceID), nil, pulumi.Provider(provider), pulumi.DependsOn([]pulumi.Resource{coderRelease}))
 	if err != nil {
 		return pulumi.StringOutput{}, fmt.Errorf("failed to get coder service: %w", err)
 	}

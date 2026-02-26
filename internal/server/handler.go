@@ -260,6 +260,7 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 		StackName:          stackName,
 		UseExistingCluster: useExistingCluster,
 
+		CoderNamespace:     r.FormValue("coder_namespace"),
 		CoderAdminEmail:    r.FormValue("coder_admin_email"),
 		CoderAdminPassword: r.FormValue("coder_admin_password"),
 		CoderVersion:       r.FormValue("coder_version"),

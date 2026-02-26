@@ -99,6 +99,7 @@ const CoderDbUser = "dbUser"
 const CoderDbPassword = "dbPassword"
 const CoderDbName = "dbName"
 const CoderTemplateName = "templateName"
+const CoderNamespace = "namespace"
 const CoderTemplateFilePath = "templateFilePath"
 
 func CoderConfig(ctx *pulumi.Context, key string) string {

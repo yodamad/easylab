@@ -502,6 +502,7 @@ func TestLabConfig_Fields(t *testing.T) {
 		NodePoolDesiredNodeCount:  3,
 		NodePoolMinNodeCount:      1,
 		NodePoolMaxNodeCount:      5,
+		CoderNamespace:             "coder",
 		CoderAdminEmail:           "admin@test.com",
 		CoderAdminPassword:        "password",
 		CoderVersion:              "1.0.0",

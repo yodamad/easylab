@@ -1648,10 +1648,16 @@ description: %s%s
 func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 	var commands []configCommand
 
+	coderNamespace := config.CoderNamespace
+	if coderNamespace == "" {
+		coderNamespace = "coder"
+	}
+
 	if config.UseExistingCluster {
 		// BYOK mode: only Coder config + kubeconfig path
 		commands = []configCommand{
 			{"k8s:useExistingCluster", "true", false},
+			{"coder:namespace", coderNamespace, false},
 			{"coder:adminEmail", config.CoderAdminEmail, false},
 			{"coder:adminPassword", config.CoderAdminPassword, true},
 			{"coder:version", config.CoderVersion, false},
@@ -1684,6 +1690,7 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 			{"nodepool:minNodeCount", fmt.Sprintf("%d", config.NodePoolMinNodeCount), false},
 			{"nodepool:maxNodeCount", fmt.Sprintf("%d", config.NodePoolMaxNodeCount), false},
 			{"k8s:clusterName", prefixedK8sClusterName, false},
+			{"coder:namespace", coderNamespace, false},
 			{"coder:adminEmail", config.CoderAdminEmail, false},
 			{"coder:adminPassword", config.CoderAdminPassword, true},
 			{"coder:version", config.CoderVersion, false},

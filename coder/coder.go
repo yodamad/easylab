@@ -88,7 +88,11 @@ func SetupDBSecret(ctx *pulumi.Context, provider pulumi.ProviderResource, ns *k8
 	dbUser := utils.CoderConfig(ctx, utils.CoderDbUser)
 	dbPassword := utils.CoderConfig(ctx, utils.CoderDbPassword)
 	dbName := utils.CoderConfig(ctx, utils.CoderDbName)
-	dbUrl := fmt.Sprintf("postgres://%s:%s@postgresql.coder.svc.cluster.local:5432/%s?sslmode=disable", dbUser, dbPassword, dbName)
+	nsName := utils.CoderConfigOptional(ctx, utils.CoderNamespace)
+	if nsName == "" {
+		nsName = "coder"
+	}
+	dbUrl := fmt.Sprintf("postgres://%s:%s@postgresql.%s.svc.cluster.local:5432/%s?sslmode=disable", dbUser, dbPassword, nsName, dbName)
 
 	// Build dependencies list
 	deps := []pulumi.Resource{ns}

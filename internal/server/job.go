@@ -81,6 +81,7 @@ type LabConfig struct {
 	NodePoolMaxNodeCount     int    `json:"nodepool_max_node_count"`
 
 	// Coder Configuration
+	CoderNamespace     string `json:"coder_namespace,omitempty"`
 	CoderAdminEmail    string `json:"coder_admin_email"`
 	CoderAdminPassword string `json:"coder_admin_password"`
 	CoderVersion       string `json:"coder_version"`
