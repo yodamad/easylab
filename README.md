@@ -60,6 +60,7 @@ See the [documentation](https://docs.easylab.yodamad.fr) for [Docker](https://do
 | Resource | Description |
 |----------|-------------|
 | [docs.easylab.yodamad.fr](https://docs.easylab.yodamad.fr) | Admin, student, deployment & OVHcloud guides |
+| [Coder templates samples](https://gitlab.com/yodamad-workshops/coder-templates) | Sample Coder templates for workshops |
 | [TESTING.md](TESTING.md) | Testing documentation |
 | [COVERAGE_SETUP.md](COVERAGE_SETUP.md) | Code coverage setup |
 

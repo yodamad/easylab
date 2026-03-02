@@ -14,6 +14,8 @@ As an admin (trainer, speaker, ...), you have access to the admin space to manag
 
 For your students, they can access the student space to request a new development environment or to retrieve information about their environments.
 
+> Sample Coder templates: [yodamad-workshops/coder-templates](https://gitlab.com/yodamad-workshops/coder-templates)
+
 > Go to [Student documentation](student.md)
 
 ![EasyLab Homepage](screens/homepage.png)
