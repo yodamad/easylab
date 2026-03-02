@@ -19,6 +19,9 @@ main
 # Docker
 image.tar
 
+# Helm
+easylab-*.tgz
+
 # IDE
 .idea/
 .vscode/

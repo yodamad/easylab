@@ -47,7 +47,13 @@ docker-compose up -d
 # Access at http://localhost:8080
 ```
 
-See the [documentation](https://docs.easylab.yodamad.fr) for [Docker](https://docs.easylab.yodamad.fr/docker/), [Kubernetes](https://docs.easylab.yodamad.fr/k8s/), and local development setup.
+### Helm
+
+```bash
+helm install easylab oci://registry-1.docker.io/yodamad/easylab
+```
+
+See the [documentation](https://docs.easylab.yodamad.fr) for [Docker](https://docs.easylab.yodamad.fr/docker/), [Helm](https://docs.easylab.yodamad.fr/helm/), and local development setup.
 
 ## 📚 Documentation
 

@@ -30,7 +30,7 @@ COVERAGE_THRESHOLD=50
 # See .coverignore for details on what's excluded and why
 COVERAGE_PKGS=./internal/... ./utils/... ./coder/...
 
-.PHONY: all build clean test test-all test-backend test-frontend test-verbose test-race coverage coverage-html coverage-check coverage-frontend coverage-all coverage-report coverage-pkg deps deps-all deps-update npm-install npm-update lint help server run-server dev npm-test-ui npm-test-headed npm-test-debug npm-test-chaos npm-test-chaos-headed npm-test-chaos-network npm-test-chaos-server npm-test-chaos-ui npm-test-chaos-api ci ci-coverage
+.PHONY: all build clean test test-all test-backend test-frontend test-verbose test-race coverage coverage-html coverage-check coverage-frontend coverage-all coverage-report coverage-pkg deps deps-all deps-update npm-install npm-update lint help server run-server dev npm-test-ui npm-test-headed npm-test-debug npm-test-chaos npm-test-chaos-headed npm-test-chaos-network npm-test-chaos-server npm-test-chaos-ui npm-test-chaos-api ci ci-coverage helm-lint helm-template
 
 # Default target
 all: deps-all test-all build
@@ -242,6 +242,16 @@ npm-test-chaos-ui: npm-install
 npm-test-chaos-api: npm-install
 	$(NPMCMD) run test:chaos:api
 
+## Helm targets
+
+# Lint the Helm chart
+helm-lint:
+	helm lint helm/easylab
+
+# Render Helm templates locally for debugging
+helm-template:
+	helm template easylab helm/easylab
+
 ## CI targets
 
 # Run all CI checks (lint, test, coverage check)
@@ -305,6 +315,10 @@ help:
 	@echo "  deps-all       - Install all dependencies (Go + npm)"
 	@echo "  deps-update    - Update all Go dependencies"
 	@echo "  npm-update     - Update npm dependencies"
+	@echo ""
+	@echo "Helm targets:"
+	@echo "  helm-lint      - Lint the Helm chart"
+	@echo "  helm-template  - Render Helm templates locally for debugging"
 	@echo ""
 	@echo "Other targets:"
 	@echo "  fmt            - Format code with go fmt"

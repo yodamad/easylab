@@ -31,7 +31,7 @@ nav = [
     ]},
     { "Deployment" = [
         "docker.md",
-        "k8s.md"
+        "helm.md"
     ]}
 ]
 
