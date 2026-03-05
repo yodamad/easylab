@@ -1,0 +1,43 @@
+name: Announce Release
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  bluesky:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Post to Bluesky
+        uses: cbrgm/bluesky-github-action@v1
+        with:
+          handle: ${{ secrets.BLUESKY_HANDLE }}
+          password: ${{ secrets.BLUESKY_APP_PASSWORD }}
+          text: |
+            EasyLab ${{ github.ref_name }} is out! 🚀
+
+            Kubernetes lab management with Coder + Pulumi on OVHcloud.
+
+            📦 docker.io/yodamad/easylab:${{ github.ref_name }}
+            📖 https://gitlab.com/yodamad-workshops/easylab/-/releases/${{ github.ref_name }}
+
+  x:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Post to X
+        uses: captradeoff/x-post-action@v1
+        with:
+          appKey: ${{ secrets.X_APP_KEY }}
+          appSecret: ${{ secrets.X_APP_SECRET }}
+          accessToken: ${{ secrets.X_ACCESS_TOKEN }}
+          accessSecret: ${{ secrets.X_ACCESS_SECRET }}
+          message: |
+            EasyLab ${{ github.ref_name }} is out! 🚀
+
+            Kubernetes lab management with Coder + Pulumi on OVHcloud.
+
+            📦 docker.io/yodamad/easylab:${{ github.ref_name }}
+            📖 https://gitlab.com/yodamad-workshops/easylab/-/releases/${{ github.ref_name }}
