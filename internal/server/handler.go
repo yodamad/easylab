@@ -984,6 +984,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	coderOrganizationID := job.CoderOrganizationID
 	coderAdminEmail := job.CoderAdminEmail
 	coderAdminPassword := job.CoderAdminPassword
+	stackName := job.Config.StackName
 	job.mu.RUnlock()
 
 	if status != JobStatusCompleted {
@@ -1046,19 +1047,25 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Use first available template
 	templateID := templates[0].ID
 
-	// Create user in Coder with automatic token refresh
+	// Create user in Coder (or retrieve existing one if already created for another lab)
 	user, updatedConfig, err := coder.CreateUserWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, email, username, password)
 	if err != nil {
-		log.Printf("Failed to create user: %v", err)
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, `<div class="error-message">Failed to create user: %s</div>`, template.HTMLEscapeString(err.Error()))
-		return
+		// User may already exist from a previous workspace request — look them up
+		log.Printf("User creation failed (may already exist): %v — attempting lookup", err)
+		existingUser, lookupConfig, lookupErr := coder.GetUserByUsernameWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, username)
+		if lookupErr != nil {
+			log.Printf("Failed to create or find user: create=%v, lookup=%v", err, lookupErr)
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprintf(w, `<div class="error-message">Failed to create user: %s</div>`, template.HTMLEscapeString(err.Error()))
+			return
+		}
+		user = existingUser
+		updatedConfig = lookupConfig
 	}
-	// Update config in case token was refreshed
 	coderConfig = updatedConfig
 
 	// Create workspace for user with automatic token refresh
-	workspaceName := fmt.Sprintf("%s-workspace", username)
+	workspaceName := buildWorkspaceName(username, stackName, labID)
 	workspace, updatedConfig, err := coder.CreateWorkspaceWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, user.ID, templateID, workspaceName)
 	if err != nil {
 		log.Printf("Failed to create workspace: %v", err)
@@ -1094,9 +1101,10 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		// URL-encode the JSON string for cookie value (cookies need URL encoding for special characters)
 		cookieValue := url.QueryEscape(string(workspaceInfoJSON))
 
-		// Set cookie with workspace info
+		// Set per-lab cookie with workspace info
+		cookieName := fmt.Sprintf("workspace_info_%s", labID)
 		cookie := &http.Cookie{
-			Name:     "workspace_info",
+			Name:     cookieName,
 			Value:    cookieValue,
 			Path:     "/",
 			MaxAge:   86400, // 1 day in seconds
@@ -1105,7 +1113,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 			SameSite: http.SameSiteLaxMode,
 		}
 		http.SetCookie(w, cookie)
-		log.Printf("Set workspace_info cookie for email: %s", email)
+		log.Printf("Set %s cookie for email: %s", cookieName, email)
 	}
 
 	// Return success response with credentials
@@ -2148,4 +2156,74 @@ func (h *Handler) RetryJob(w http.ResponseWriter, r *http.Request) {
 				<p>Loading status...</p>
 			</div>
 		</div>`, jobID, jobID)
+}
+
+// buildWorkspaceName creates a valid Coder workspace name from a username, lab name,
+// and labID. Coder enforces a maximum of 32 characters and the pattern
+// ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,30}[a-zA-Z0-9])?$.
+//
+// The resulting format is: {username}-{labName}-{shortLabID}
+// where shortLabID is the last 10 characters of labID for uniqueness.
+// If the full name exceeds 32 chars the username is truncated first, then the
+// lab name, so the unique suffix is always preserved.
+func buildWorkspaceName(username, labName, labID string) string {
+	const maxLen = 32
+
+	// Sanitize labName: lowercase, replace any non-alphanumeric char with a hyphen,
+	// collapse consecutive hyphens, strip leading/trailing hyphens.
+	sanitized := strings.ToLower(labName)
+	var sb strings.Builder
+	prevHyphen := false
+	for _, r := range sanitized {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			sb.WriteRune(r)
+			prevHyphen = false
+		} else if !prevHyphen && sb.Len() > 0 {
+			sb.WriteRune('-')
+			prevHyphen = true
+		}
+	}
+	labName = strings.TrimRight(sb.String(), "-")
+	if labName == "" {
+		labName = "lab"
+	}
+
+	// Preserve the last 10 chars of labID for uniqueness (nanosecond timestamp suffix).
+	shortLabID := labID
+	if len(shortLabID) > 10 {
+		shortLabID = shortLabID[len(shortLabID)-10:]
+	}
+
+	// Fixed overhead: two hyphens + shortLabID
+	// Budget split: fill username first, then labName with what remains.
+	overhead := 2 + len(shortLabID) // "-{labName}-{shortLabID}" minus labName itself
+	budgetForUserAndLab := maxLen - overhead
+	if budgetForUserAndLab < 2 {
+		budgetForUserAndLab = 2
+	}
+
+	// Allocate up to half the budget to each, giving the remainder to the other.
+	halfBudget := budgetForUserAndLab / 2
+
+	trimmedUsername := username
+	trimmedLabName := labName
+
+	if len(trimmedUsername) > halfBudget {
+		trimmedUsername = strings.TrimRight(trimmedUsername[:halfBudget], "-")
+	}
+	remainingForLab := budgetForUserAndLab - len(trimmedUsername)
+	if len(trimmedLabName) > remainingForLab {
+		trimmedLabName = strings.TrimRight(trimmedLabName[:remainingForLab], "-")
+	}
+	remainingForUser := budgetForUserAndLab - len(trimmedLabName)
+	if len(trimmedUsername) > remainingForUser {
+		trimmedUsername = strings.TrimRight(trimmedUsername[:remainingForUser], "-")
+	}
+
+	name := trimmedUsername + "-" + trimmedLabName + "-" + shortLabID
+	if len(name) > maxLen {
+		name = name[:maxLen]
+		name = strings.TrimRight(name, "-")
+	}
+	return name
 }

@@ -1575,6 +1575,68 @@ body.student-dashboard-page {
     font-size: 0.875rem;
 }
 
+/* Workspace list styles (student multi-workspace) */
+.workspaces-list-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.workspaces-list-header h2 {
+    margin: 0;
+}
+
+#workspaces-list-container .workspace-card {
+    background: #f0f9ff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+#workspaces-list-container .workspace-card:last-child {
+    margin-bottom: 0;
+}
+
+#workspaces-list-container .workspace-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+}
+
+#workspaces-list-container .workspace-card.collapsed .workspace-card-header {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+}
+
+#workspaces-list-container .workspace-card-header h3 {
+    margin: 0;
+    font-size: 1rem;
+    color: var(--text);
+}
+
+#workspaces-list-container .workspace-card-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+#workspaces-list-container .workspace-card-actions .student-btn-small {
+    margin-top: 0;
+}
+
+#workspaces-list-container .workspace-card-body.collapsible-content {
+    margin-top: 0;
+    transition: max-height 0.3s ease-out;
+}
+
 /* Collapsible card styles */
 .collapsible-card {
     overflow: hidden;
@@ -1638,6 +1700,10 @@ body.student-dashboard-page {
 
 .collapsible-card.collapsed .collapsible-content {
     margin-top: 0;
+}
+
+.collapsible-card.collapsed .chevron-icon {
+    transform: rotate(-90deg);
 }
 
 /* Copy button styles */

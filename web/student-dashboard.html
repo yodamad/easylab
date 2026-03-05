@@ -25,18 +25,23 @@
         </header>
 
         <main>
-            <!-- Saved Workspace Info -->
-            <div class="student-card collapsible-card" id="workspace-info-card" style="display: none;">
-                <div class="collapsible-header" onclick="toggleWorkspaceInfo()">
-                    <h2>My Workspace Information</h2>
-                    <button class="collapsible-toggle" aria-label="Toggle workspace information">
-                        <svg class="chevron-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                        </svg>
-                    </button>
-                </div>
-                <div class="collapsible-content" id="workspace-info-content">
-                    <div id="workspace-info-container"></div>
+            <!-- Saved Workspaces List -->
+            <div id="workspaces-list-section" style="display: none;">
+                <div class="student-card collapsible-card">
+                    <div class="collapsible-header" onclick="toggleWorkspacesPanel()">
+                        <h2>My Workspaces</h2>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <button onclick="event.stopPropagation(); clearAllWorkspaceInfos()" class="student-btn student-btn-danger student-btn-small">Clear All</button>
+                            <button class="collapsible-toggle" type="button" aria-label="Toggle workspaces panel">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="chevron-icon">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="collapsible-content" id="workspaces-list-content">
+                        <div id="workspaces-list-container"></div>
+                    </div>
                 </div>
             </div>
 

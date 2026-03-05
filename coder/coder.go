@@ -513,6 +513,45 @@ func CreateUser(config CoderClientConfig, email, username, password string) (cod
 	return user, nil
 }
 
+// GetUserByUsername looks up an existing Coder user by username
+func GetUserByUsername(config CoderClientConfig, username string) (codersdk.User, error) {
+	serverURL, err := url.Parse(config.ServerURL)
+	if err != nil {
+		return codersdk.User{}, fmt.Errorf("failed to parse server URL: %w", err)
+	}
+
+	client := codersdk.New(serverURL)
+	client.SetSessionToken(config.SessionToken)
+
+	user, err := client.User(context.Background(), username)
+	if err != nil {
+		return codersdk.User{}, fmt.Errorf("failed to get user by username: %w", err)
+	}
+
+	return user, nil
+}
+
+// GetUserByUsernameWithRetry looks up a user with automatic token refresh on failure
+func GetUserByUsernameWithRetry(config CoderClientConfig, adminEmail, adminPassword, username string) (codersdk.User, CoderClientConfig, error) {
+	user, err := GetUserByUsername(config, username)
+	if err != nil {
+		log.Printf("User lookup failed, attempting token refresh...")
+		refreshedConfig, refreshErr := RefreshToken(config, adminEmail, adminPassword)
+		if refreshErr != nil {
+			return codersdk.User{}, config, fmt.Errorf("failed to refresh token: %w", refreshErr)
+		}
+
+		user, err = GetUserByUsername(refreshedConfig, username)
+		if err != nil {
+			return codersdk.User{}, refreshedConfig, fmt.Errorf("failed to get user even after token refresh: %w", err)
+		}
+
+		log.Printf("Token refreshed successfully")
+		return user, refreshedConfig, nil
+	}
+	return user, config, nil
+}
+
 // CreateWorkspace creates a workspace for a user based on a template
 func CreateWorkspace(config CoderClientConfig, userID uuid.UUID, templateID uuid.UUID, workspaceName string) (codersdk.Workspace, error) {
 	serverURL, err := url.Parse(config.ServerURL)
