@@ -634,7 +634,7 @@ func TestProtectedAdminEndpoints_Unauthenticated(t *testing.T) {
 	jm := NewJobManager("")
 	pe := &PulumiExecutor{}
 	cm := NewCredentialsManager()
-	h := NewHandler(jm, pe, cm)
+	h := NewHandler(jm, pe, cm, nil)
 
 	tests := []struct {
 		name     string
@@ -774,7 +774,7 @@ func TestProtectedAdminEndpoints_Authenticated(t *testing.T) {
 	jm := NewJobManager("")
 	pe := &PulumiExecutor{}
 	cm := NewCredentialsManager()
-	h := NewHandler(jm, pe, cm)
+	h := NewHandler(jm, pe, cm, nil)
 
 	tests := []struct {
 		name     string
@@ -848,7 +848,7 @@ func TestProtectedStudentEndpoints_Unauthenticated(t *testing.T) {
 	jm := NewJobManager("")
 	pe := &PulumiExecutor{}
 	cm := NewCredentialsManager()
-	h := NewHandler(jm, pe, cm)
+	h := NewHandler(jm, pe, cm, nil)
 
 	tests := []struct {
 		name     string
@@ -908,7 +908,7 @@ func TestProtectedStudentEndpoints_Authenticated(t *testing.T) {
 	jm := NewJobManager("")
 	pe := &PulumiExecutor{}
 	cm := NewCredentialsManager()
-	h := NewHandler(jm, pe, cm)
+	h := NewHandler(jm, pe, cm, nil)
 
 	tests := []struct {
 		name     string
@@ -961,7 +961,7 @@ func TestPublicEndpoints_NoAuthRequired(t *testing.T) {
 	jm := NewJobManager("")
 	pe := &PulumiExecutor{}
 	cm := NewCredentialsManager()
-	h := NewHandler(jm, pe, cm)
+	h := NewHandler(jm, pe, cm, nil)
 
 	tests := []struct {
 		name     string

@@ -137,6 +137,7 @@ func main() {
 		jobManager         *server.JobManager
 		credentialsManager *server.CredentialsManager
 		authHandler        *server.AuthHandler
+		ovhOptionsManager  *server.OVHOptionsManager
 		pulumiExec         *server.PulumiExecutor
 		handler            *server.Handler
 	)
@@ -171,6 +172,11 @@ func main() {
 	wg.Wait()
 	log.Printf("[STARTUP] Parallel component initialization took %v", time.Since(parallelStart))
 
+	// Initialize OVH options manager (depends on credentialsManager)
+	ovhOptionsStart := time.Now()
+	ovhOptionsManager = server.NewOVHOptionsManager(*dataDir, credentialsManager)
+	log.Printf("[STARTUP] OVHOptionsManager initialization took %v", time.Since(ovhOptionsStart))
+
 	// Initialize pulumiExec (depends on jobManager)
 	pulumiStart := time.Now()
 	pulumiExec = server.NewPulumiExecutor(jobManager, *workDir)
@@ -188,7 +194,7 @@ func main() {
 
 	// Initialize handler (depends on all components)
 	handlerStart := time.Now()
-	handler = server.NewHandler(jobManager, pulumiExec, credentialsManager)
+	handler = server.NewHandler(jobManager, pulumiExec, credentialsManager, ovhOptionsManager)
 	log.Printf("[STARTUP] Handler initialization took %v", time.Since(handlerStart))
 
 	// Setup routes
@@ -257,6 +263,9 @@ func main() {
 	}))
 	mux.HandleFunc("/api/ovh/regions", authHandler.RequireAuth(handler.GetOVHRegions))
 	mux.HandleFunc("/api/ovh/flavors", authHandler.RequireAuth(handler.GetOVHFlavors))
+	mux.HandleFunc("/admin/ovh-options", authHandler.RequireAuth(handler.ServeOVHOptions))
+	mux.HandleFunc("/api/ovh-options", authHandler.RequireAuth(handler.SaveOVHOptions))
+	mux.HandleFunc("/api/ovh-options/refresh", authHandler.RequireAuth(handler.RefreshOVHOptions))
 	mux.HandleFunc("/api/labs", authHandler.RequireAuth(handler.CreateLab))
 	mux.HandleFunc("/api/labs/dry-run", authHandler.RequireAuth(handler.DryRunLab))
 	mux.HandleFunc("/api/labs/launch", authHandler.RequireAuth(handler.LaunchLab))
@@ -356,6 +365,18 @@ func main() {
 			log.Printf("Loading persisted jobs from %s...", *dataDir)
 			if err := jobManager.LoadJobs(); err != nil {
 				log.Printf("Warning: failed to load persisted jobs: %v", err)
+			}
+		}()
+	}
+
+	// Pre-populate OVH options cache asynchronously if credentials are available
+	if credentialsManager.HasCredentials("ovh") {
+		go func() {
+			refreshStart := time.Now()
+			if err := ovhOptionsManager.RefreshFromAPI(); err != nil {
+				log.Printf("[STARTUP] Warning: OVH options cache refresh failed: %v", err)
+			} else {
+				log.Printf("[STARTUP] OVH options cache refresh completed in %v", time.Since(refreshStart))
 			}
 		}()
 	}

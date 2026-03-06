@@ -437,7 +437,7 @@ func TestChaos_GenerateSecurePassword_Stress(t *testing.T) {
 
 func TestChaos_Handler_MalformedRequests(t *testing.T) {
 	jm := NewJobManager("")
-	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager())
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil)
 
 	tests := []struct {
 		name        string
@@ -485,7 +485,7 @@ func TestChaos_Handler_MalformedRequests(t *testing.T) {
 
 func TestChaos_Handler_ConcurrentRequests(t *testing.T) {
 	jm := NewJobManager("")
-	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager())
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil)
 
 	var wg sync.WaitGroup
 	requestCount := 100
@@ -510,7 +510,7 @@ func TestChaos_Handler_ConcurrentRequests(t *testing.T) {
 func TestChaos_Handler_RapidFormSubmissions(t *testing.T) {
 	cm := NewCredentialsManager()
 	jm := NewJobManager("")
-	h := NewHandler(jm, &PulumiExecutor{}, cm)
+	h := NewHandler(jm, &PulumiExecutor{}, cm, nil)
 
 	var wg sync.WaitGroup
 
@@ -541,7 +541,7 @@ func TestChaos_Handler_RapidFormSubmissions(t *testing.T) {
 func TestChaos_Handler_MixedConcurrentOperations(t *testing.T) {
 	jm := NewJobManager("")
 	cm := NewCredentialsManager()
-	h := NewHandler(jm, &PulumiExecutor{}, cm)
+	h := NewHandler(jm, &PulumiExecutor{}, cm, nil)
 
 	// Set up credentials
 	cm.SetCredentials(&OVHCredentials{
@@ -832,7 +832,7 @@ func TestChaos_Password_GenerationTimeout(t *testing.T) {
 
 func TestChaos_Handler_ContextCancellation(t *testing.T) {
 	jm := NewJobManager("")
-	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager())
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil)
 
 	// Create a request with cancelled context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -908,7 +908,7 @@ func TestChaos_JobManager_LargeOutput(t *testing.T) {
 
 func TestChaos_Handler_DirectoryTraversalAttempts(t *testing.T) {
 	jm := NewJobManager("")
-	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager())
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil)
 
 	traversalPaths := []string{
 		"/static/../../../etc/passwd",
@@ -931,7 +931,7 @@ func TestChaos_Handler_DirectoryTraversalAttempts(t *testing.T) {
 
 func TestChaos_Handler_HTTPMethodMismatch(t *testing.T) {
 	jm := NewJobManager("")
-	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager())
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil)
 
 	// Try wrong methods on various endpoints
 	methodTests := []struct {

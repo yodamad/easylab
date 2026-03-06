@@ -33,6 +33,7 @@ type Handler struct {
 	templates          map[string]*template.Template
 	templatesMu        sync.RWMutex
 	credentialsManager *CredentialsManager
+	ovhOptionsManager  *OVHOptionsManager
 }
 
 // emailRegex is a simple email validation regex
@@ -65,12 +66,13 @@ func getFormValue(r *http.Request, key string) string {
 }
 
 // NewHandler creates a new HTTP handler
-func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsManager *CredentialsManager) *Handler {
+func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsManager *CredentialsManager, ovhOptionsManager *OVHOptionsManager) *Handler {
 	return &Handler{
 		jobManager:         jobManager,
 		pulumiExec:         pulumiExec,
 		templates:          make(map[string]*template.Template),
 		credentialsManager: credentialsManager,
+		ovhOptionsManager:  ovhOptionsManager,
 	}
 }
 
@@ -448,6 +450,7 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 		"student-dashboard.html": "web/student-dashboard.html",
 		"credentials.html":       "web/credentials.html",
 		"ovh-credentials.html":   "web/ovh-credentials.html", // Keep for backward compatibility
+		"ovh-options.html":       "web/ovh-options.html",
 		"labs-list.html":         "web/labs-list.html",
 		"lab-workspaces.html":    "web/lab-workspaces.html",
 	}
@@ -1378,6 +1381,142 @@ func (h *Handler) GetCredentials(w http.ResponseWriter, r *http.Request) {
 			"error":      "Provider not supported",
 		})
 	}
+}
+
+// ServeOVHOptions serves the OVH options admin page
+func (h *Handler) ServeOVHOptions(w http.ResponseWriter, r *http.Request) {
+	cfg := h.ovhOptionsManager.GetConfig()
+	regions := h.ovhOptionsManager.GetCachedRegions()
+	hasCache := h.ovhOptionsManager.HasCache()
+
+	type flavorData struct {
+		Name  string
+		VCPUs int
+		RAM   int
+	}
+	type regionData struct {
+		Name    string
+		Enabled bool
+		Default bool
+		Flavors []struct {
+			Name    string
+			VCPUs   int
+			RAM     int
+			Enabled bool
+			Default bool
+		}
+	}
+
+	enabledRegionSet := toSet(cfg.Regions.Enabled)
+	showAll := len(enabledRegionSet) == 0
+
+	var regionsData []regionData
+	for _, r := range regions {
+		rd := regionData{
+			Name:    r,
+			Enabled: showAll || enabledRegionSet[r],
+			Default: r == cfg.Regions.Default,
+		}
+		cachedFlavors := h.ovhOptionsManager.GetCachedFlavors(r)
+		flavorCfg := cfg.Flavors[r]
+		enabledFlavorSet := toSet(flavorCfg.Enabled)
+		showAllFlavors := len(enabledFlavorSet) == 0
+		for _, f := range cachedFlavors {
+			rd.Flavors = append(rd.Flavors, struct {
+				Name    string
+				VCPUs   int
+				RAM     int
+				Enabled bool
+				Default bool
+			}{
+				Name:    f.Name,
+				VCPUs:   f.VCPUs,
+				RAM:     f.RAM,
+				Enabled: showAllFlavors || enabledFlavorSet[f.Name],
+				Default: f.Name == flavorCfg.Default,
+			})
+		}
+		regionsData = append(regionsData, rd)
+	}
+
+	data := map[string]interface{}{
+		"HasCache": hasCache,
+		"Regions":  regionsData,
+		"Config":   cfg,
+	}
+	h.serveTemplate(w, "ovh-options.html", data)
+}
+
+// SaveOVHOptions handles saving the OVH options admin preferences
+func (h *Handler) SaveOVHOptions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		log.Printf("SaveOVHOptions: failed to parse form: %v", err)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<div class="error-message"><p>Failed to parse form</p></div>`)
+		return
+	}
+
+	cfg := OVHOptionsConfig{
+		Regions: OVHItemConfig{
+			Enabled: r.Form["region_enabled"],
+			Default: r.FormValue("region_default"),
+		},
+		Flavors: make(map[string]OVHItemConfig),
+	}
+
+	regions := h.ovhOptionsManager.GetCachedRegions()
+	for _, region := range regions {
+		enabledKey := fmt.Sprintf("flavor_enabled_%s", region)
+		defaultKey := fmt.Sprintf("flavor_default_%s", region)
+		enabled := r.Form[enabledKey]
+		defaultVal := r.FormValue(defaultKey)
+		if len(enabled) > 0 || defaultVal != "" {
+			cfg.Flavors[region] = OVHItemConfig{
+				Enabled: enabled,
+				Default: defaultVal,
+			}
+		}
+	}
+
+	h.ovhOptionsManager.SetConfig(cfg)
+	if err := h.ovhOptionsManager.SaveConfig(); err != nil {
+		log.Printf("SaveOVHOptions: failed to save config: %v", err)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, `<div class="error-message"><p>Failed to save: %s</p></div>`, escapeHTML(err.Error()))
+		return
+	}
+
+	if r.Header.Get("HX-Request") == "true" {
+		w.Header().Set("HX-Redirect", "/admin/ovh-options")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<div class="success-message"><p>OVH options saved successfully</p></div>`)
+	} else {
+		http.Redirect(w, r, "/admin/ovh-options", http.StatusSeeOther)
+	}
+}
+
+// RefreshOVHOptions triggers a cache refresh from the OVH API
+func (h *Handler) RefreshOVHOptions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := h.ovhOptionsManager.RefreshFromAPI(); err != nil {
+		log.Printf("RefreshOVHOptions: %v", err)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, `<div class="error-message"><p>Failed to refresh: %s</p></div>`, escapeHTML(err.Error()))
+		return
+	}
+
+	w.Header().Set("HX-Redirect", "/admin/ovh-options")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprint(w, `<div class="success-message"><p>Cache refreshed successfully. Reloading...</p></div>`)
 }
 
 // GetOVHCredentials handles getting OVH credentials status (backward compatibility)

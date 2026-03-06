@@ -31,9 +31,23 @@ func (h *Handler) newOVHClient() (*ovh.Client, string, error) {
 }
 
 // GetOVHRegions returns HTML <option> elements for regions where Managed Kubernetes is available.
+// Uses the OVHOptionsManager cache when available; falls back to a live OVH API call.
 func (h *Handler) GetOVHRegions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if h.ovhOptionsManager != nil && h.ovhOptionsManager.HasCache() {
+		regions, defaultRegion := h.ovhOptionsManager.GetRegionsForForm()
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		for _, region := range regions {
+			selected := ""
+			if region == defaultRegion || (defaultRegion == "" && region == regions[0]) {
+				selected = " selected"
+			}
+			fmt.Fprintf(w, `<option value="%s"%s>%s</option>`, escapeHTML(region), selected, escapeHTML(region))
+		}
 		return
 	}
 
@@ -67,7 +81,8 @@ func (h *Handler) GetOVHRegions(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetOVHFlavors returns HTML <option> elements for flavors available in a given region.
-// Query param: network_region (required).
+// Query param: region (required).
+// Uses the OVHOptionsManager cache when available; falls back to a live OVH API call.
 func (h *Handler) GetOVHFlavors(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -77,6 +92,20 @@ func (h *Handler) GetOVHFlavors(w http.ResponseWriter, r *http.Request) {
 	region := r.URL.Query().Get("region")
 	if region == "" {
 		http.Error(w, "Region is required", http.StatusBadRequest)
+		return
+	}
+
+	if h.ovhOptionsManager != nil && h.ovhOptionsManager.HasCache() {
+		flavors, defaultFlavor := h.ovhOptionsManager.GetFlavorsForForm(region)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		for _, f := range flavors {
+			label := fmt.Sprintf("%s (%d vCPU, %d GB RAM)", f.Name, f.VCPUs, f.RAM)
+			selected := ""
+			if f.Name == defaultFlavor || (defaultFlavor == "" && f.Name == flavors[0].Name) {
+				selected = " selected"
+			}
+			fmt.Fprintf(w, `<option value="%s"%s>%s</option>`, escapeHTML(f.Name), selected, escapeHTML(label))
+		}
 		return
 	}
 
@@ -103,11 +132,11 @@ func (h *Handler) GetOVHFlavors(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	for i, f := range flavors {
-		label := fmt.Sprintf("<b>%s</b> (%d vCPU, %d GB RAM)", f.Name, f.VCPUs, f.RAM)
+		label := fmt.Sprintf("%s (%d vCPU, %d GB RAM)", f.Name, f.VCPUs, f.RAM)
 		if i == 0 {
-			fmt.Fprintf(w, `<option value="%s" selected>%s</option>`, escapeHTML(f.Name), label)
+			fmt.Fprintf(w, `<option value="%s" selected>%s</option>`, escapeHTML(f.Name), escapeHTML(label))
 		} else {
-			fmt.Fprintf(w, `<option value="%s">%s</option>`, escapeHTML(f.Name), label)
+			fmt.Fprintf(w, `<option value="%s">%s</option>`, escapeHTML(f.Name), escapeHTML(label))
 		}
 	}
 }
