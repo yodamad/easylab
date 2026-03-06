@@ -116,15 +116,96 @@ header h1 {
     white-space: nowrap;
 }
 
+/* Header Dropdown Menu */
+.header-dropdown {
+    position: relative;
+}
+
+.header-dropdown-toggle {
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: var(--radius);
+    color: white;
+    font-size: 0.875rem;
+    font-weight: 500;
+    padding: 0.5rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: all 0.2s;
+}
+
+.header-dropdown-toggle:hover {
+    background: rgba(255, 255, 255, 0.25);
+    border-color: rgba(255, 255, 255, 0.5);
+}
+
+.dropdown-arrow {
+    font-size: 0.7rem;
+    transition: transform 0.2s;
+}
+
+.header-dropdown:hover .dropdown-arrow {
+    transform: rotate(180deg);
+}
+
+.header-dropdown-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 0.35rem;
+    background: var(--background);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    min-width: 180px;
+    z-index: 100;
+    overflow: hidden;
+}
+
+.header-dropdown:hover .header-dropdown-menu {
+    display: block;
+}
+
+.header-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1rem;
+    color: var(--text);
+    text-decoration: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: background 0.15s;
+    white-space: nowrap;
+}
+
+.header-dropdown-item:hover {
+    background: var(--surface);
+    color: var(--primary-color);
+}
+
+.header-dropdown-item .btn-icon {
+    font-size: 1rem;
+}
+
 @media (max-width: 480px) {
     .logout-text,
-    .header-btn .btn-text {
+    .header-btn .btn-text,
+    .header-dropdown-toggle .btn-text {
         display: none;
     }
     
     .logout-btn,
-    .header-btn {
+    .header-btn,
+    .header-dropdown-toggle {
         padding: 0.5rem;
+    }
+
+    .dropdown-arrow {
+        display: none;
     }
 }
 

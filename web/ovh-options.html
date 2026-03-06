@@ -24,10 +24,21 @@
                         <span class="btn-icon">📋</span>
                         <span class="btn-text">Labs</span>
                     </a>
-                    <a href="/credentials" class="header-btn" title="Provider Credentials">
-                        <span class="btn-icon">🔐</span>
-                        <span class="btn-text">Credentials</span>
-                    </a>
+                    <div class="header-dropdown">
+                        <button type="button" class="header-dropdown-toggle" title="OVH Configuration" style="background: rgba(255,255,255,0.3);">
+                            <span class="btn-icon">☁️</span>
+                            <span class="btn-text">OVH</span>
+                            <span class="dropdown-arrow">▾</span>
+                        </button>
+                        <div class="header-dropdown-menu">
+                            <a href="/credentials" class="header-dropdown-item">
+                                <span class="btn-icon">🔐</span> Credentials
+                            </a>
+                            <a href="/admin/ovh-options" class="header-dropdown-item" style="background: var(--surface); color: var(--primary-color); font-weight: 600;">
+                                <span class="btn-icon">⚙️</span> Options
+                            </a>
+                        </div>
+                    </div>
                     <a href="/logout" class="logout-btn" title="Logout">
                         <span class="logout-icon">🚪</span>
                         <span class="logout-text">Logout</span>
