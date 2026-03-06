@@ -263,6 +263,16 @@ const wizard = {
         }
 
         document.querySelector('.wizard-progress').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+        // Fetch OVH regions when entering step 3 for the first time
+        if (this.currentStep === 3 && !this._regionsLoaded) {
+            this._regionsLoaded = true;
+            loadOVHRegions();
+        }
+        // Fetch OVH flavors when entering step 5
+        if (this.currentStep === 5) {
+            loadOVHFlavors();
+        }
     }
 };
 
@@ -437,6 +447,57 @@ function generateSecurePassword(length) {
     return password.join('');
 }
 
+// Fetch available OVH regions and populate the region select
+function loadOVHRegions() {
+    const regionSelect = document.getElementById('network_region');
+    if (!regionSelect) return;
+
+    regionSelect.innerHTML = '<option value="">Loading regions…</option>';
+
+    fetch('/api/ovh/regions')
+        .then(response => {
+            if (!response.ok) throw new Error('Failed to load regions');
+            return response.text();
+        })
+        .then(html => {
+            regionSelect.innerHTML = html;
+            // Trigger flavor load for the initially selected region
+            loadOVHFlavors();
+        })
+        .catch(err => {
+            console.error('Error loading OVH regions:', err);
+            regionSelect.innerHTML = '<option value="" disabled selected>Failed to load regions</option>';
+        });
+}
+
+// Fetch available OVH flavors for the selected region and populate the flavor select
+function loadOVHFlavors() {
+    const regionSelect = document.getElementById('network_region');
+    const flavorSelect = document.getElementById('nodepool_flavor');
+    if (!regionSelect || !flavorSelect) return;
+
+    const region = regionSelect.value;
+    if (!region) {
+        flavorSelect.innerHTML = '<option value="" disabled selected>Select a region first</option>';
+        return;
+    }
+
+    flavorSelect.innerHTML = '<option value="">Loading flavors…</option>';
+
+    fetch('/api/ovh/flavors?region=' + encodeURIComponent(region))
+        .then(response => {
+            if (!response.ok) throw new Error('Failed to load flavors');
+            return response.text();
+        })
+        .then(html => {
+            flavorSelect.innerHTML = html;
+        })
+        .catch(err => {
+            console.error('Error loading OVH flavors:', err);
+            flavorSelect.innerHTML = '<option value="" disabled selected>Failed to load flavors</option>';
+        });
+}
+
 // Check credentials status and show/hide disclaimer
 function checkCredentialsStatus() {
     // Skip credentials check in BYOK mode
@@ -609,6 +670,12 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     });
+
+    // Reload flavors when region selection changes
+    const regionSelect = document.getElementById('network_region');
+    if (regionSelect) {
+        regionSelect.addEventListener('change', loadOVHFlavors);
+    }
 
     // Set up network mask calculation
     const maskInput = document.getElementById('network_mask');

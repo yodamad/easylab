@@ -131,6 +131,7 @@ require (
 	github.com/opentracing/basictracer-go v1.1.0 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/outcaste-io/ristretto v0.2.3 // indirect
+	github.com/ovh/go-ovh v1.9.0 // indirect
 	github.com/pgavlin/fx v0.1.6 // indirect
 	github.com/philhofer/fwd v1.1.3-0.20240916144458-20a13a1f6b7c // indirect
 	github.com/pion/transport/v2 v2.2.10 // indirect

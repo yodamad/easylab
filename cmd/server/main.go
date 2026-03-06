@@ -255,6 +255,8 @@ func main() {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	}))
+	mux.HandleFunc("/api/ovh/regions", authHandler.RequireAuth(handler.GetOVHRegions))
+	mux.HandleFunc("/api/ovh/flavors", authHandler.RequireAuth(handler.GetOVHFlavors))
 	mux.HandleFunc("/api/labs", authHandler.RequireAuth(handler.CreateLab))
 	mux.HandleFunc("/api/labs/dry-run", authHandler.RequireAuth(handler.DryRunLab))
 	mux.HandleFunc("/api/labs/launch", authHandler.RequireAuth(handler.LaunchLab))
