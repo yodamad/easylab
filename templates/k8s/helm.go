@@ -30,7 +30,7 @@ func InitHelm(ctx *pulumi.Context, provider *k8s.Provider, chart HelmChartInfo, 
 		SkipCrds: pulumi.Bool(chart.crds),
 		Version:  pulumi.String(chart.Version),
 		Values:   chart.Values,
-		Timeout:  pulumi.Int(900), // 15 minutes timeout
+		Timeout:  pulumi.Int(1800), // 30 minutes timeout (Coder + PostgreSQL can take 15-20+ min)
 	}
 	if chart.ReleaseName != "" {
 		releaseArgs.Name = pulumi.String(chart.ReleaseName)

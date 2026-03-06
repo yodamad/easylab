@@ -22,6 +22,9 @@ func InitK8sProvider(ctx *pulumi.Context, kubeCluster *cloudproject.Kube, nodePo
 
 	provider, err := k8s.NewProvider(ctx, "k8sProvider", &k8s.ProviderArgs{
 		Kubeconfig: kubeCluster.Kubeconfig,
+		KubeClientSettings: &k8s.KubeClientSettingsArgs{
+			Timeout: pulumi.Int(900), // 15 min - avoid "context deadline exceeded" during Helm installs
+		},
 	}, pulumi.DependsOn(dependencies))
 	if err != nil {
 		return nil, err
@@ -37,6 +40,9 @@ func InitK8sProviderFromKubeconfig(ctx *pulumi.Context, kubeconfigPath string) (
 
 	provider, err := k8s.NewProvider(ctx, "k8sProvider", &k8s.ProviderArgs{
 		Kubeconfig: pulumi.String(string(content)),
+		KubeClientSettings: &k8s.KubeClientSettingsArgs{
+			Timeout: pulumi.Int(900), // 15 min - avoid "context deadline exceeded" during Helm installs
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Kubernetes provider from kubeconfig: %w", err)
