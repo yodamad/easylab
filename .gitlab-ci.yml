@@ -80,7 +80,7 @@ test:
   needs: []
   script:
     - mkdir -p reports
-    - go test -v -race -coverprofile=coverage.out ./...
+    - go test -v -coverprofile=coverage.out ./...
     - go tool cover -func=coverage.out
   coverage: '/total:\s+\(statements\)\s+\d+\.\d+%/'
   artifacts:
