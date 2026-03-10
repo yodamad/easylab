@@ -13,7 +13,8 @@
 go.work
 build/
 tmp/
-easylab
+/easylab
+/templates/easylab
 main
 
 # Docker
