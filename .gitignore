@@ -21,6 +21,7 @@ image.tar
 
 # Helm
 easylab-*.tgz
+!helm
 
 # IDE
 .idea/
