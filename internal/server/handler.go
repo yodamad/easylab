@@ -174,82 +174,104 @@ func (h *Handler) getProviderCredentials(w http.ResponseWriter, providerName str
 	return creds, nil
 }
 
-// saveUploadedTemplateFile handles template file upload and saves it to the job directory
-// Returns the file path relative to job directory, or empty string if no file was uploaded
-func (h *Handler) saveUploadedTemplateFile(r *http.Request, jobDir string) (string, error) {
-	// Check if template file was uploaded
-	file, header, err := r.FormFile("template_file")
-	if err != nil {
-		if err == http.ErrMissingFile {
-			// No file uploaded, this is optional
-			return "", nil
-		}
-		return "", fmt.Errorf("failed to get uploaded file: %w", err)
-	}
-	defer file.Close()
-
-	// Validate file extension
-	filename := header.Filename
-	if !strings.HasSuffix(strings.ToLower(filename), ".zip") && !strings.HasSuffix(strings.ToLower(filename), ".tf") {
-		return "", fmt.Errorf("invalid file type: only .zip and .tf files are allowed")
-	}
-
-	// Create job directory if it doesn't exist
+// saveUploadedTemplateFiles handles multiple template file uploads and saves them to the job directory.
+// For each index i from 0 to count-1, tries to get template_file_i. Returns a slice of relative paths
+// (empty string for indices with no file uploaded).
+func (h *Handler) saveUploadedTemplateFiles(r *http.Request, jobDir string, count int) ([]string, error) {
+	paths := make([]string, count)
 	if err := os.MkdirAll(jobDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create job directory: %w", err)
+		return nil, fmt.Errorf("failed to create job directory: %w", err)
 	}
 
-	// Determine destination file path
-	var destPath string
-	var finalPath string
-	if strings.HasSuffix(strings.ToLower(filename), ".tf") {
-		// Save .tf file first, will be zipped later
-		destPath = filepath.Join(jobDir, "template.tf")
-		finalPath = "template.zip" // Will be created from .tf file
-	} else {
-		// Save .zip file directly
-		destPath = filepath.Join(jobDir, "template.zip")
-		finalPath = "template.zip"
-	}
-
-	// Create destination file
-	destFile, err := os.Create(destPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to create destination file: %w", err)
-	}
-	defer destFile.Close()
-
-	// Copy uploaded file to destination
-	_, err = io.Copy(destFile, file)
-	if err != nil {
-		return "", fmt.Errorf("failed to save uploaded file: %w", err)
-	}
-	destFile.Close()
-
-	// If it's a .tf file, zip it
-	if strings.HasSuffix(strings.ToLower(filename), ".tf") {
-		zipPath, err := utils.ZipTerraformFile(destPath)
+	for i := 0; i < count; i++ {
+		fieldName := fmt.Sprintf("template_file_%d", i)
+		file, header, err := r.FormFile(fieldName)
 		if err != nil {
-			return "", fmt.Errorf("failed to zip terraform file: %w", err)
+			if err == http.ErrMissingFile {
+				continue
+			}
+			return nil, fmt.Errorf("failed to get uploaded file %s: %w", fieldName, err)
 		}
-		// Remove the original .tf file
-		os.Remove(destPath)
-		// Verify zip file was created in job directory
-		if !strings.HasPrefix(zipPath, jobDir) {
-			// Zip was created elsewhere, move it to job directory
-			finalZipPath := filepath.Join(jobDir, "template.zip")
-			if err := os.Rename(zipPath, finalZipPath); err != nil {
-				return "", fmt.Errorf("failed to move zip file to job directory: %w", err)
+
+		filename := header.Filename
+		if !strings.HasSuffix(strings.ToLower(filename), ".zip") && !strings.HasSuffix(strings.ToLower(filename), ".tf") {
+			file.Close()
+			return nil, fmt.Errorf("invalid file type for template %d: only .zip and .tf files are allowed", i)
+		}
+
+		var destPath, finalPath string
+		if strings.HasSuffix(strings.ToLower(filename), ".tf") {
+			destPath = filepath.Join(jobDir, fmt.Sprintf("template_%d.tf", i))
+			finalPath = fmt.Sprintf("template_%d.zip", i)
+		} else {
+			destPath = filepath.Join(jobDir, fmt.Sprintf("template_%d.zip", i))
+			finalPath = fmt.Sprintf("template_%d.zip", i)
+		}
+
+		destFile, err := os.Create(destPath)
+		if err != nil {
+			file.Close()
+			return nil, fmt.Errorf("failed to create destination file: %w", err)
+		}
+		_, err = io.Copy(destFile, file)
+		destFile.Close()
+		file.Close()
+		if err != nil {
+			return nil, fmt.Errorf("failed to save uploaded file: %w", err)
+		}
+
+		if strings.HasSuffix(strings.ToLower(filename), ".tf") {
+			zipPath, err := utils.ZipTerraformFile(destPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to zip terraform file: %w", err)
+			}
+			os.Remove(destPath)
+			if !strings.HasPrefix(zipPath, jobDir) {
+				finalZipPath := filepath.Join(jobDir, finalPath)
+				if err := os.Rename(zipPath, finalZipPath); err != nil {
+					return nil, fmt.Errorf("failed to move zip file to job directory: %w", err)
+				}
 			}
 		}
-		return finalPath, nil
+		paths[i] = finalPath
 	}
-
-	return finalPath, nil
+	return paths, nil
 }
 
-// createLabConfigFromForm creates a LabConfig from form data and provider credentials
-func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds ProviderCredentials, templateFilePath string) *LabConfig {
+// parseCoderTemplatesFromForm extracts Coder template entries from the form.
+// Expects template_N_name, template_N_source, template_file_N (for upload), template_N_git_repo, etc.
+func parseCoderTemplatesFromForm(r *http.Request, templateFilePaths []string) []CoderTemplate {
+	var templates []CoderTemplate
+	for i := 0; ; i++ {
+		name := getFormValue(r, fmt.Sprintf("template_%d_name", i))
+		if name == "" {
+			break
+		}
+		source := getFormValue(r, fmt.Sprintf("template_%d_source", i))
+		if source == "" {
+			source = "git" // default when nothing selected
+		}
+		t := CoderTemplate{
+			Name:      name,
+			Source:    source,
+			GitRepo:   getFormValue(r, fmt.Sprintf("template_%d_git_repo", i)),
+			GitFolder: getFormValue(r, fmt.Sprintf("template_%d_git_folder", i)),
+			GitBranch: getFormValue(r, fmt.Sprintf("template_%d_git_branch", i)),
+		}
+		if t.GitBranch == "" {
+			t.GitBranch = "main"
+		}
+		if source == "upload" && i < len(templateFilePaths) && templateFilePaths[i] != "" {
+			t.FilePath = templateFilePaths[i]
+		}
+		templates = append(templates, t)
+	}
+	return templates
+}
+
+// createLabConfigFromForm creates a LabConfig from form data and provider credentials.
+// templateFilePaths contains saved file paths for upload-source templates (indexed by template order).
+func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds ProviderCredentials, templateFilePaths []string) *LabConfig {
 	// Get stack name with default
 	stackName := r.FormValue("stack_name")
 	if stackName == "" {
@@ -257,6 +279,8 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 	}
 
 	useExistingCluster := r.FormValue("use_existing_cluster") == "true"
+
+	templates := parseCoderTemplatesFromForm(r, templateFilePaths)
 
 	config := &LabConfig{
 		StackName:          stackName,
@@ -269,14 +293,7 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 		CoderDbUser:        r.FormValue("coder_db_user"),
 		CoderDbPassword:    r.FormValue("coder_db_password"),
 		CoderDbName:        r.FormValue("coder_db_name"),
-		CoderTemplateName:  r.FormValue("coder_template_name"),
-		TemplateFilePath:   templateFilePath,
-
-		// Template Source Configuration
-		TemplateSource:    r.FormValue("template_source"),
-		TemplateGitRepo:   r.FormValue("template_git_repo"),
-		TemplateGitFolder: r.FormValue("template_git_folder"),
-		TemplateGitBranch: r.FormValue("template_git_branch"),
+		CoderTemplates:     templates,
 	}
 
 	if !useExistingCluster {
@@ -327,10 +344,10 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 		log.Printf("Warning: Invalid email format in CoderAdminEmail: %s", config.CoderAdminEmail)
 	}
 
-	// Validate Git repository URL if provided
-	if config.TemplateSource == "git" && config.TemplateGitRepo != "" {
-		if !validateURL(config.TemplateGitRepo) {
-			log.Printf("Warning: Invalid Git repository URL format: %s", config.TemplateGitRepo)
+	// Validate Git repository URLs for git-source templates
+	for i, t := range config.CoderTemplates {
+		if t.Source == "git" && t.GitRepo != "" && !validateURL(t.GitRepo) {
+			log.Printf("Warning: Invalid Git repository URL for template %d: %s", i, t.GitRepo)
 		}
 	}
 
@@ -521,34 +538,53 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 		}
 	}
 
-	// Create initial config without template file path
-	initialConfig := h.createLabConfigFromForm(r, providerCreds, "")
-
-	// Validate template source configuration
-	templateSource := initialConfig.TemplateSource
-	if templateSource == "" {
-		// Backward compatibility: if no source specified, check for uploaded file
-		templateSource = "upload"
+	// Create initial config (without template file paths yet)
+	initialConfig := h.createLabConfigFromForm(r, providerCreds, nil)
+	templates := initialConfig.GetCoderTemplates()
+	if len(templates) == 0 {
+		h.renderHTMLError(w, "Template Configuration Error", "At least one Coder template is required")
+		return
 	}
 
-	if templateSource == "git" {
-		// Validate Git repository URL is provided
-		if initialConfig.TemplateGitRepo == "" {
-			h.renderHTMLError(w, "Template Configuration Error", "Repository URL is required when using Git template source")
-			return
-		}
-	}
-
-	// Create job first to get jobID
+	// Create job and job directory
 	jobID := h.jobManager.CreateJob(initialConfig)
-
-	// Create job directory
 	jobDir := filepath.Join(h.pulumiExec.GetWorkDir(), jobID)
 	if err := os.MkdirAll(jobDir, 0755); err != nil {
 		log.Printf("Failed to create job directory: %v", err)
 		h.renderHTMLError(w, "Job Creation Error", fmt.Sprintf("Failed to create job directory: %v", err))
 		return
 	}
+
+	// Save uploaded template files
+	templateFilePaths, err := h.saveUploadedTemplateFiles(r, jobDir, len(templates))
+	if err != nil {
+		log.Printf("Failed to save template files: %v", err)
+		h.renderHTMLError(w, "Template Upload Error", fmt.Sprintf("Failed to save template files: %v", err))
+		return
+	}
+
+	// Update config with saved file paths
+	initialConfig = h.createLabConfigFromForm(r, providerCreds, templateFilePaths)
+	templates = initialConfig.GetCoderTemplates()
+
+	// Validate each template: upload needs file, git needs repo URL
+	for i, t := range templates {
+		if t.Source == "upload" {
+			if t.FilePath == "" {
+				h.renderHTMLError(w, "Template Configuration Error", fmt.Sprintf("Template %d (%s): file upload is required when using upload source", i+1, t.Name))
+				return
+			}
+		} else if t.Source == "git" {
+			if t.GitRepo == "" {
+				h.renderHTMLError(w, "Template Configuration Error", fmt.Sprintf("Template %d (%s): repository URL is required when using Git source", i+1, t.Name))
+				return
+			}
+		}
+	}
+
+	h.updateJobConfig(jobID, func(config *LabConfig) {
+		config.CoderTemplates = initialConfig.CoderTemplates
+	})
 
 	// Handle kubeconfig for BYOK mode
 	if useExistingCluster {
@@ -568,40 +604,8 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 			h.renderHTMLError(w, "Kubeconfig Error", fmt.Sprintf("Failed to save kubeconfig: %v", err))
 			return
 		}
-		initialConfig.ExternalKubeconfig = kubeconfigContent
 		h.updateJobConfig(jobID, func(config *LabConfig) {
 			config.ExternalKubeconfig = kubeconfigContent
-		})
-	}
-
-	// Handle template file upload only if source is "upload"
-	var templateFilePath string
-	if templateSource == "upload" {
-		var err error
-		templateFilePath, err = h.saveUploadedTemplateFile(r, jobDir)
-		if err != nil {
-			log.Printf("Failed to save template file: %v", err)
-			h.renderHTMLError(w, "Template Upload Error", fmt.Sprintf("Failed to save template file: %v", err))
-			return
-		}
-		if templateFilePath == "" {
-			h.renderHTMLError(w, "Template Configuration Error", "Template file is required when using upload source")
-			return
-		}
-		// Update config with template file path (relative to job directory)
-		initialConfig.TemplateFilePath = templateFilePath
-		// Update job config
-		h.updateJobConfig(jobID, func(config *LabConfig) {
-			config.TemplateFilePath = templateFilePath
-			config.TemplateSource = templateSource
-		})
-	} else {
-		// Update job config with Git template info
-		h.updateJobConfig(jobID, func(config *LabConfig) {
-			config.TemplateSource = templateSource
-			config.TemplateGitRepo = initialConfig.TemplateGitRepo
-			config.TemplateGitFolder = initialConfig.TemplateGitFolder
-			config.TemplateGitBranch = initialConfig.TemplateGitBranch
 		})
 	}
 

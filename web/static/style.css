@@ -608,6 +608,27 @@ main {
     gap: 1rem;
 }
 
+.template-row {
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.template-row-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.template-row-title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0;
+}
+
 .form-actions {
     display: flex;
     gap: 1rem;

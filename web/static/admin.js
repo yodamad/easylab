@@ -853,141 +853,153 @@ document.body.addEventListener('htmx:afterSettle', function(event) {
     scrollOutputToBottom();
 });
 
-// Template source selection handler with button group
-const templateSourceRadios = document.querySelectorAll('input[name="template_source"]');
-const sourceButtons = document.querySelectorAll('.source-button[data-source]');
-const templateUploadSection = document.getElementById('template_upload_section');
-const templateGitSection = document.getElementById('template_git_section');
-const templateFileInput = document.getElementById('template_file');
-const templateGitRepoInput = document.getElementById('template_git_repo');
+// Multi-template: Add/Remove rows and per-row source selection
+const templatesContainer = document.getElementById('coder-templates-container');
+const templateRowTmpl = document.getElementById('template-row-tmpl');
+const btnAddTemplate = document.getElementById('btn-add-template');
+const templateCountInput = document.getElementById('template_count');
 
-function updateButtonStates(selectedSource) {
-    // Update button visual states
-    sourceButtons.forEach(button => {
-        const buttonSource = button.getAttribute('data-source');
-        if (buttonSource === selectedSource) {
-            button.classList.add('selected');
-        } else {
-            button.classList.remove('selected');
-        }
+function reindexTemplateRows() {
+    const rows = templatesContainer.querySelectorAll('.template-row');
+    templateCountInput.value = rows.length;
+    rows.forEach((row, idx) => {
+        row.setAttribute('data-template-index', idx);
+        row.querySelector('.template-index').textContent = idx + 1;
+        row.querySelectorAll('[name^="template_"]').forEach(el => {
+            const name = el.getAttribute('name');
+            if (!name) return;
+            const match = name.match(/^template_(\d+)_(.+)$/);
+            if (match) {
+                el.setAttribute('name', 'template_' + idx + '_' + match[2]);
+            }
+        });
+        row.querySelectorAll('input[data-field="file"]').forEach(el => {
+            el.setAttribute('name', 'template_file_' + idx);
+            el.setAttribute('id', 'template_file_' + idx);
+        });
+        row.querySelectorAll('label[for^="template_file_"]').forEach(el => {
+            el.setAttribute('for', 'template_file_' + idx);
+        });
     });
+    initTemplateRowHandlers();
 }
 
-function updateTemplateSourceVisibility() {
-    const selectedSource = document.querySelector('input[name="template_source"]:checked')?.value;
-    
-    // Update button visual states
-    updateButtonStates(selectedSource);
-    
-    if (selectedSource === 'git') {
-        // Show Git section, hide upload section
-        templateUploadSection.style.display = 'none';
-        templateGitSection.style.display = 'block';
-        // Update required attributes
-        if (templateFileInput) {
-            templateFileInput.removeAttribute('required');
+function updateRowSourceVisibility(row) {
+    const sourceRadios = row.querySelectorAll('input[data-field="source"]');
+    const selectedSource = Array.from(sourceRadios).find(r => r.checked)?.value;
+    const uploadSection = row.querySelector('.template-upload-section');
+    const gitSection = row.querySelector('.template-git-section');
+    const fileInput = row.querySelector('input[data-field="file"]');
+    const gitRepoInput = row.querySelector('input[data-field="git_repo"]');
+    const sourceButtons = row.querySelectorAll('.source-button[data-source]');
+
+    sourceButtons.forEach(btn => {
+        if (btn.getAttribute('data-source') === selectedSource) {
+            btn.classList.add('selected');
+        } else {
+            btn.classList.remove('selected');
         }
-        if (templateGitRepoInput) {
-            templateGitRepoInput.setAttribute('required', 'required');
-        }
-    } else if (selectedSource === 'upload') {
-        // Show upload section, hide Git section
-        templateUploadSection.style.display = 'block';
-        templateGitSection.style.display = 'none';
-        // Update required attributes
-        if (templateFileInput) {
-            templateFileInput.setAttribute('required', 'required');
-        }
-        if (templateGitRepoInput) {
-            templateGitRepoInput.removeAttribute('required');
-        }
+    });
+
+    if (selectedSource === 'upload') {
+        if (uploadSection) uploadSection.style.display = 'block';
+        if (gitSection) gitSection.style.display = 'none';
+        if (fileInput) fileInput.setAttribute('required', 'required');
+        if (gitRepoInput) gitRepoInput.removeAttribute('required');
+    } else if (selectedSource === 'git') {
+        if (uploadSection) uploadSection.style.display = 'none';
+        if (gitSection) gitSection.style.display = 'block';
+        if (fileInput) fileInput.removeAttribute('required');
+        if (gitRepoInput) gitRepoInput.setAttribute('required', 'required');
     } else {
-        // No selection - hide both sections
-        templateUploadSection.style.display = 'none';
-        templateGitSection.style.display = 'none';
-        // Remove required attributes
-        if (templateFileInput) {
-            templateFileInput.removeAttribute('required');
-        }
-        if (templateGitRepoInput) {
-            templateGitRepoInput.removeAttribute('required');
-        }
+        if (uploadSection) uploadSection.style.display = 'none';
+        if (gitSection) gitSection.style.display = 'none';
+        if (fileInput) fileInput.removeAttribute('required');
+        if (gitRepoInput) gitRepoInput.removeAttribute('required');
     }
 }
 
-// Add event listeners to source buttons
-sourceButtons.forEach(button => {
-    button.addEventListener('click', function() {
-        const source = this.getAttribute('data-source');
-        const radio = document.getElementById('template_source_' + source);
-        
-        if (radio) {
-            // Check the corresponding radio button
-            radio.checked = true;
-            // Trigger change event for any listeners
-            radio.dispatchEvent(new Event('change', { bubbles: true }));
-            // Update visibility
-            updateTemplateSourceVisibility();
+function initTemplateRowHandlers() {
+    templatesContainer.querySelectorAll('.template-row').forEach(row => {
+        const sourceButtons = row.querySelectorAll('.source-button[data-source]');
+        sourceButtons.forEach(btn => {
+            btn.replaceWith(btn.cloneNode(true));
+        });
+        row.querySelectorAll('.source-button[data-source]').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const source = this.getAttribute('data-source');
+                const radio = row.querySelector('input[data-field="source"][value="' + source + '"]');
+                if (radio) {
+                    radio.checked = true;
+                    updateRowSourceVisibility(row);
+                }
+            });
+        });
+
+        const removeBtn = row.querySelector('.btn-remove-template');
+        if (removeBtn) {
+            removeBtn.replaceWith(removeBtn.cloneNode(true));
+            row.querySelector('.btn-remove-template').addEventListener('click', function() {
+                const rows = templatesContainer.querySelectorAll('.template-row');
+                if (rows.length <= 1) return;
+                row.remove();
+                reindexTemplateRows();
+            });
+        }
+
+        const fileInput = row.querySelector('input[data-field="file"]');
+        const fileDisplay = row.querySelector('.file-name-display');
+        const fileLabel = row.querySelector('.file-upload-label');
+        if (fileInput && fileDisplay) {
+            fileInput.addEventListener('change', function() {
+                const file = this.files[0];
+                fileDisplay.textContent = file ? 'Selected: ' + file.name : '';
+                fileDisplay.style.display = file ? 'block' : 'none';
+            });
+        }
+        if (fileLabel && fileInput) {
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(ev => {
+                fileLabel.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); }, false);
+            });
+            fileLabel.addEventListener('drop', function(e) {
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    fileInput.files = files;
+                    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }, false);
         }
     });
-});
-
-// Also listen to radio changes (for form reset or programmatic changes)
-templateSourceRadios.forEach(radio => {
-    radio.addEventListener('change', updateTemplateSourceVisibility);
-});
-
-// Initialize visibility on page load (both sections hidden by default)
-updateTemplateSourceVisibility();
-
-// File upload display handler with drag and drop support
-const fileInput = document.getElementById('template_file');
-const fileNameDisplay = document.getElementById('file-name-display');
-const fileUploadLabel = document.querySelector('.file-upload-label');
-
-if (fileInput && fileNameDisplay && fileUploadLabel) {
-    // Handle file selection
-    fileInput.addEventListener('change', function(e) {
-        const file = e.target.files[0];
-        if (file) {
-            fileNameDisplay.textContent = `Selected: ${file.name}`;
-            fileNameDisplay.style.display = 'block';
-        } else {
-            fileNameDisplay.style.display = 'none';
-        }
-    });
-
-    // Drag and drop support
-    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-        fileUploadLabel.addEventListener(eventName, preventDefaults, false);
-    });
-
-    function preventDefaults(e) {
-        e.preventDefault();
-        e.stopPropagation();
-    }
-
-    ['dragenter', 'dragover'].forEach(eventName => {
-        fileUploadLabel.addEventListener(eventName, function() {
-            fileUploadLabel.style.borderColor = 'var(--primary-color)';
-            fileUploadLabel.style.background = 'rgba(37, 99, 235, 0.1)';
-        }, false);
-    });
-
-    ['dragleave', 'drop'].forEach(eventName => {
-        fileUploadLabel.addEventListener(eventName, function() {
-            fileUploadLabel.style.borderColor = 'var(--border)';
-            fileUploadLabel.style.background = 'var(--surface)';
-        }, false);
-    });
-
-    fileUploadLabel.addEventListener('drop', function(e) {
-        const dt = e.dataTransfer;
-        const files = dt.files;
-        if (files.length > 0) {
-            fileInput.files = files;
-            const event = new Event('change', { bubbles: true });
-            fileInput.dispatchEvent(event);
-        }
-    }, false);
 }
+
+if (btnAddTemplate && templateRowTmpl) {
+    btnAddTemplate.addEventListener('click', function() {
+        const clone = templateRowTmpl.content.cloneNode(true);
+        const newRow = clone.querySelector('.template-row');
+        const nextIdx = templatesContainer.querySelectorAll('.template-row').length;
+        newRow.querySelectorAll('[name]').forEach(el => {
+            let n = el.getAttribute('name');
+            if (n) {
+                n = n.replace('template_file_0', 'template_file_' + nextIdx).replace('template_0_', 'template_' + nextIdx + '_');
+                el.setAttribute('name', n);
+            }
+        });
+        newRow.querySelectorAll('input[data-field="file"]').forEach(el => {
+            el.setAttribute('id', 'template_file_' + nextIdx);
+        });
+        newRow.querySelectorAll('label[for="template_file_0"]').forEach(el => {
+            el.setAttribute('for', 'template_file_' + nextIdx);
+        });
+        newRow.querySelector('input[data-field="name"]').value = '';
+        newRow.querySelector('input[data-field="git_branch"]').value = 'main';
+        newRow.querySelector('input[data-field="source"][value="git"]').checked = true;
+        templatesContainer.appendChild(newRow);
+        reindexTemplateRows();
+        updateRowSourceVisibility(newRow);
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    initTemplateRowHandlers();
+    templatesContainer.querySelectorAll('.template-row').forEach(row => updateRowSourceVisibility(row));
+});

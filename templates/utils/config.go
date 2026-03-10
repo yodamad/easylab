@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -101,6 +102,17 @@ const CoderDbName = "dbName"
 const CoderTemplateName = "templateName"
 const CoderNamespace = "namespace"
 const CoderTemplateFilePath = "templateFilePath"
+const CoderTemplatesKey = "templates"
+
+// CoderTemplateConfig matches the server's CoderTemplate struct for JSON unmarshaling
+type CoderTemplateConfig struct {
+	Name      string `json:"name"`
+	Source    string `json:"source"`
+	FilePath  string `json:"file_path,omitempty"`
+	GitRepo   string `json:"git_repo,omitempty"`
+	GitFolder string `json:"git_folder,omitempty"`
+	GitBranch string `json:"git_branch,omitempty"`
+}
 
 func CoderConfig(ctx *pulumi.Context, key string) string {
 	return getConfig(ctx, CoderGroup, key)
@@ -115,4 +127,45 @@ func CoderConfigOptional(ctx *pulumi.Context, key string) string {
 		return ""
 	}
 	return val
+}
+
+// GetCoderTemplatesFromConfig reads the coder:templates JSON config and returns the template list.
+// Returns nil if not set or empty. For backward compatibility, returns a single-template slice
+// when legacy single-template config is present.
+func GetCoderTemplatesFromConfig(ctx *pulumi.Context) []CoderTemplateConfig {
+	cfg := config.New(ctx, CoderGroup)
+	val := cfg.Get(CoderTemplatesKey)
+	if val == "" {
+		// Backward compatibility: check legacy single-template config
+		name := CoderConfigOptional(ctx, CoderTemplateName)
+		if name == "" {
+			return nil
+		}
+		source := CoderConfigOptional(ctx, "templateSource")
+		filePath := CoderConfigOptional(ctx, CoderTemplateFilePath)
+		gitRepo := CoderConfigOptional(ctx, "templateGitRepo")
+		gitFolder := CoderConfigOptional(ctx, "templateGitFolder")
+		gitBranch := CoderConfigOptional(ctx, "templateGitBranch")
+		if gitBranch == "" {
+			gitBranch = "main"
+		}
+		if source == "" && filePath != "" {
+			source = "upload"
+		} else if source == "" && gitRepo != "" {
+			source = "git"
+		}
+		return []CoderTemplateConfig{{
+			Name:      name,
+			Source:    source,
+			FilePath:  filePath,
+			GitRepo:   gitRepo,
+			GitFolder: gitFolder,
+			GitBranch: gitBranch,
+		}}
+	}
+	var templates []CoderTemplateConfig
+	if err := json.Unmarshal([]byte(val), &templates); err != nil {
+		return nil
+	}
+	return templates
 }

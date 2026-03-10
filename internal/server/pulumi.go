@@ -1664,7 +1664,6 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 			{"coder:dbUser", config.CoderDbUser, false},
 			{"coder:dbPassword", config.CoderDbPassword, true},
 			{"coder:dbName", config.CoderDbName, false},
-			{"coder:templateName", config.CoderTemplateName, false},
 		}
 
 		// The kubeconfig file path is relative to the job directory
@@ -1697,7 +1696,6 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 			{"coder:dbUser", config.CoderDbUser, false},
 			{"coder:dbPassword", config.CoderDbPassword, true},
 			{"coder:dbName", config.CoderDbName, false},
-			{"coder:templateName", config.CoderTemplateName, false},
 		}
 
 		if config.NetworkID != "" {
@@ -1705,26 +1703,14 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 		}
 	}
 
-	// Add template source configuration
-	if config.TemplateSource != "" {
-		commands = append(commands, configCommand{"coder:templateSource", config.TemplateSource, false})
-	}
-
-	// Add template file path if provided (for upload source)
-	if config.TemplateFilePath != "" {
-		commands = append(commands, configCommand{"coder:templateFilePath", config.TemplateFilePath, false})
-	}
-
-	// Add Git template configuration if source is git
-	if config.TemplateSource == "git" {
-		if config.TemplateGitRepo != "" {
-			commands = append(commands, configCommand{"coder:templateGitRepo", config.TemplateGitRepo, false})
-		}
-		if config.TemplateGitFolder != "" {
-			commands = append(commands, configCommand{"coder:templateGitFolder", config.TemplateGitFolder, false})
-		}
-		if config.TemplateGitBranch != "" {
-			commands = append(commands, configCommand{"coder:templateGitBranch", config.TemplateGitBranch, false})
+	// Add Coder templates as JSON (multiple templates per lab)
+	templates := config.GetCoderTemplates()
+	if len(templates) > 0 {
+		templatesJSON, err := json.Marshal(templates)
+		if err != nil {
+			log.Printf("Failed to marshal Coder templates: %v", err)
+		} else {
+			commands = append(commands, configCommand{"coder:templates", string(templatesJSON), false})
 		}
 	}
 
