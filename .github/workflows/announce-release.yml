@@ -16,7 +16,8 @@ jobs:
           handle: ${{ secrets.BLUESKY_HANDLE }}
           password: ${{ secrets.BLUESKY_APP_PASSWORD }}
           text: |
-            EasyLab ${{ github.ref_name }} is out! 🚀
-
+            🧪 EasyLab ${{ github.ref_name }} is out! 🚀
+            
+            🔗 https://github.com/yodamad/easylab/releases/tag/${{ github.ref_name }}
             📦 docker.io/yodamad/easylab:${{ github.ref_name }}
-            📖 https://gitlab.com/yodamad-workshops/easylab/-/releases/${{ github.ref_name }}
+            
