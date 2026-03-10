@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "easylab.fullname" . }}-config
+  namespace: {{ include "easylab.namespace" . }}
+  labels:
+    {{- include "easylab.labels" . | nindent 4 }}
+data:
+  PORT: {{ .Values.config.port | quote }}
+  WORK_DIR: {{ .Values.config.workDir | quote }}
+  DATA_DIR: {{ .Values.config.dataDir | quote }}

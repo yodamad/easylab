@@ -1,0 +1,17 @@
+apiVersion: v2
+name: easylab
+description: A Helm chart for deploying EasyLab — a lab-as-code platform that provisions cloud-based lab environments
+type: application
+version: 0.0.0-dev
+appVersion: "0.0.0-dev"
+maintainers:
+  - name: yodamad
+keywords:
+  - easylab
+  - lab
+  - workshop
+  - kubernetes
+  - coder
+home: https://gitlab.com/yodamad-workshops/easylab
+sources:
+  - https://gitlab.com/yodamad-workshops/easylab

@@ -1,0 +1,117 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "easylab.fullname" . }}
+  namespace: {{ include "easylab.namespace" . }}
+  labels:
+    {{- include "easylab.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "easylab.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "easylab.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.securityContext.fsGroup }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ include "easylab.imageTag" . }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ int .Values.config.port }}
+              name: http
+              protocol: TCP
+          env:
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "easylab.fullname" . }}-config
+                  key: PORT
+            - name: WORK_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "easylab.fullname" . }}-config
+                  key: WORK_DIR
+            - name: DATA_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "easylab.fullname" . }}-config
+                  key: DATA_DIR
+            {{- if .Values.secrets.create }}
+            - name: LAB_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "easylab.fullname" . }}-secrets
+                  key: LAB_ADMIN_PASSWORD
+            {{- if .Values.secrets.studentPassword }}
+            - name: LAB_STUDENT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "easylab.fullname" . }}-secrets
+                  key: LAB_STUDENT_PASSWORD
+            {{- end }}
+            {{- if .Values.secrets.ovh.applicationKey }}
+            - name: OVH_APPLICATION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "easylab.fullname" . }}-secrets
+                  key: OVH_APPLICATION_KEY
+            - name: OVH_APPLICATION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "easylab.fullname" . }}-secrets
+                  key: OVH_APPLICATION_SECRET
+            - name: OVH_CONSUMER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "easylab.fullname" . }}-secrets
+                  key: OVH_CONSUMER_KEY
+            - name: OVH_SERVICE_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "easylab.fullname" . }}-secrets
+                  key: OVH_SERVICE_NAME
+            - name: OVH_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "easylab.fullname" . }}-secrets
+                  key: OVH_ENDPOINT
+            {{- end }}
+            {{- end }}
+          volumeMounts:
+            - name: jobs-storage
+              mountPath: {{ .Values.config.workDir }}
+            - name: data-storage
+              mountPath: {{ .Values.config.dataDir }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: jobs-storage
+          persistentVolumeClaim:
+            claimName: {{ include "easylab.fullname" . }}-jobs-pvc
+        - name: data-storage
+          persistentVolumeClaim:
+            claimName: {{ include "easylab.fullname" . }}-data-pvc

@@ -1,0 +1,15 @@
+EasyLab has been deployed!
+
+Namespace: {{ include "easylab.namespace" . }}
+Image:     {{ .Values.image.repository }}:{{ include "easylab.imageTag" . }}
+
+{{- if .Values.ingress.enabled }}
+
+Access EasyLab at: http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}
+{{- else }}
+
+To access EasyLab, run:
+  kubectl port-forward -n {{ include "easylab.namespace" . }} svc/{{ include "easylab.fullname" . }}-service {{ .Values.service.port }}:{{ .Values.service.port }}
+
+Then open http://localhost:{{ .Values.service.port }} in your browser.
+{{- end }}

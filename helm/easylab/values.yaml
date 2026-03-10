@@ -1,0 +1,62 @@
+namespace:
+  create: true
+  name: easylab
+
+image:
+  repository: docker.io/yodamad/easylab
+  tag: ""  # defaults to chart appVersion
+  pullPolicy: Always
+
+replicaCount: 1
+
+config:
+  port: "8080"
+  workDir: "/app/jobs"
+  dataDir: "/app/data"
+
+secrets:
+  create: true
+  adminPassword: ""
+  studentPassword: ""
+  ovh:
+    applicationKey: ""
+    applicationSecret: ""
+    consumerKey: ""
+    serviceName: ""
+    endpoint: "ovh-eu"
+
+persistence:
+  jobs:
+    size: 1Gi
+    storageClass: ""
+  data:
+    size: 200Mi
+    storageClass: ""
+
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: traefik
+  annotations: {}
+  host: easylab.example.com
+  tls:
+    enabled: false
+    secretName: easylab-tls
+
+resources:
+  requests:
+    memory: "1024Mi"
+    cpu: "500m"
+  limits:
+    memory: "4096Mi"
+    cpu: "3000m"
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
