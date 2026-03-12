@@ -1,6 +1,7 @@
 document.addEventListener('DOMContentLoaded', function() {
     loadLabs();
     loadAllWorkspaceInfos();
+    setupLabTemplateHandlers();
 });
 
 // Cookie utility functions
@@ -457,6 +458,65 @@ function attachCopyButtonListeners() {
                 copyToClipboard(text, this);
             });
         }
+    });
+}
+
+function setupLabTemplateHandlers() {
+    const labSelect = document.getElementById('lab_id');
+    const templateSelect = document.getElementById('template_id');
+    const templateGroup = document.getElementById('template-select-group');
+
+    if (!labSelect || !templateSelect || !templateGroup) return;
+
+    labSelect.addEventListener('change', function() {
+        const labId = this.value;
+        templateSelect.innerHTML = '<option value="">Loading templates...</option>';
+        templateGroup.style.display = 'none';
+        templateSelect.removeAttribute('required');
+
+        if (!labId) {
+            templateSelect.innerHTML = '<option value="">Select a lab first...</option>';
+            return;
+        }
+
+        fetch('/api/student/labs/templates?lab_id=' + encodeURIComponent(labId))
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(response.statusText || 'Failed to load templates');
+                }
+                return response.json();
+            })
+            .then(templates => {
+                templateSelect.innerHTML = '';
+
+                if (templates.length === 0) {
+                    templateSelect.innerHTML = '<option value="">No templates available</option>';
+                    return;
+                }
+
+                if (templates.length === 1) {
+                    const opt = document.createElement('option');
+                    opt.value = templates[0].id;
+                    opt.textContent = templates[0].name;
+                    opt.selected = true;
+                    templateSelect.appendChild(opt);
+                } else {
+                    templateSelect.innerHTML = '<option value="">Choose a template...</option>';
+                    templates.forEach(t => {
+                        const opt = document.createElement('option');
+                        opt.value = t.id;
+                        opt.textContent = t.name;
+                        templateSelect.appendChild(opt);
+                    });
+                }
+
+                templateGroup.style.display = 'block';
+                templateSelect.setAttribute('required', 'required');
+            })
+            .catch(error => {
+                console.error('Error loading templates:', error);
+                templateSelect.innerHTML = '<option value="">Error loading templates</option>';
+            });
     });
 }
 

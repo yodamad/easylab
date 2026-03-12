@@ -396,7 +396,7 @@ func CreateTemplateFromZip(ctx *pulumi.Context, coderInfos *CoderConfigOutput, t
 		// Create a template version from the uploaded file
 		utils.LogInfo(ctx, "Creating template version...")
 		templateVersion, err := client.CreateTemplateVersion(context.Background(), organizationID, codersdk.CreateTemplateVersionRequest{
-			Name:          utils.CoderConfig(ctx, utils.CoderTemplateName),
+			Name:          templateName,
 			FileID:        uploadResp.ID,
 			StorageMethod: codersdk.ProvisionerStorageMethodFile,
 			Provisioner:   codersdk.ProvisionerTypeTerraform,

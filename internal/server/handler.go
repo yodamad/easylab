@@ -9,6 +9,7 @@ import (
 	"easylab/utils"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -23,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coder/coder/v2/codersdk"
 	"github.com/google/uuid"
 )
 
@@ -926,6 +928,75 @@ func (h *Handler) ServeStudentDashboard(w http.ResponseWriter, r *http.Request) 
 	h.serveTemplate(w, "student-dashboard.html", nil)
 }
 
+// ListLabTemplates returns the list of Coder templates available for a lab
+func (h *Handler) ListLabTemplates(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	labID := r.URL.Query().Get("lab_id")
+	if labID == "" {
+		http.Error(w, "lab_id is required", http.StatusBadRequest)
+		return
+	}
+
+	job, exists := h.jobManager.GetJob(labID)
+	if !exists {
+		http.Error(w, "Lab not found", http.StatusNotFound)
+		return
+	}
+
+	job.mu.RLock()
+	status := job.Status
+	coderURL := job.CoderURL
+	coderSessionToken := job.CoderSessionToken
+	coderOrganizationID := job.CoderOrganizationID
+	coderAdminEmail := job.CoderAdminEmail
+	coderAdminPassword := job.CoderAdminPassword
+	job.mu.RUnlock()
+
+	if status != JobStatusCompleted {
+		http.Error(w, "Lab is not ready yet", http.StatusBadRequest)
+		return
+	}
+
+	coderURL = extractStringFromConfigValue(coderURL)
+	coderSessionToken = extractStringFromConfigValue(coderSessionToken)
+	coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
+	coderAdminEmail = extractStringFromConfigValue(coderAdminEmail)
+	coderAdminPassword = extractStringFromConfigValue(coderAdminPassword)
+
+	if coderURL == "" || coderSessionToken == "" || coderOrganizationID == "" || coderAdminEmail == "" || coderAdminPassword == "" {
+		http.Error(w, "Coder configuration not available for this lab", http.StatusInternalServerError)
+		return
+	}
+
+	coderConfig := coder.CoderClientConfig{
+		ServerURL:      coderURL,
+		SessionToken:   coderSessionToken,
+		OrganizationID: coderOrganizationID,
+	}
+
+	templates, err := coder.GetTemplatesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword)
+	if err != nil {
+		log.Printf("Failed to get templates for lab %s: %v", labID, err)
+		http.Error(w, fmt.Sprintf("Failed to get templates: %s", err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	type templateOption struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	options := make([]templateOption, 0, len(templates))
+	for _, t := range templates {
+		options = append(options, templateOption{ID: t.ID.String(), Name: t.Name})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(options)
+}
+
 // ListLabs returns a list of completed jobs (labs) available for workspace requests
 func (h *Handler) ListLabs(w http.ResponseWriter, r *http.Request) {
 	h.jobManager.mu.RLock()
@@ -960,6 +1031,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Get form values using helper
 	email := getFormValue(r, "email")
 	labID := getFormValue(r, "lab_id")
+	templateIDStr := getFormValue(r, "template_id")
 
 	// Validate email
 	if email == "" {
@@ -1051,29 +1123,92 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Use first available template
-	templateID := templates[0].ID
-
-	// Create user in Coder (or retrieve existing one if already created for another lab)
-	user, updatedConfig, err := coder.CreateUserWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, email, username, password)
-	if err != nil {
-		// User may already exist from a previous workspace request — look them up
-		log.Printf("User creation failed (may already exist): %v — attempting lookup", err)
-		existingUser, lookupConfig, lookupErr := coder.GetUserByUsernameWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, username)
-		if lookupErr != nil {
-			log.Printf("Failed to create or find user: create=%v, lookup=%v", err, lookupErr)
+	// Resolve template ID: use form value if provided and valid, otherwise first template
+	var templateID uuid.UUID
+	if templateIDStr != "" {
+		parsed, err := uuid.Parse(templateIDStr)
+		if err != nil {
 			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprintf(w, `<div class="error-message">Failed to create user: %s</div>`, template.HTMLEscapeString(err.Error()))
+			fmt.Fprintf(w, `<div class="error-message">Invalid template selection</div>`)
 			return
 		}
-		user = existingUser
-		updatedConfig = lookupConfig
+		found := false
+		for _, t := range templates {
+			if t.ID == parsed {
+				templateID = parsed
+				found = true
+				break
+			}
+		}
+		if !found {
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprintf(w, `<div class="error-message">Selected template is not available in this lab</div>`)
+			return
+		}
+	} else {
+		templateID = templates[0].ID
 	}
-	coderConfig = updatedConfig
+
+	// Resolve template name for workspace naming
+	var templateName string
+	for _, t := range templates {
+		if t.ID == templateID {
+			templateName = t.Name
+			break
+		}
+	}
+	if templateName == "" {
+		templateName = "default"
+	}
+
+	// Check if user already exists; reuse if so, create only if not found
+	var user codersdk.User
+	existingUser, lookupConfig, lookupErr := coder.GetUserByEmailWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, email)
+	if lookupErr == nil {
+		// User exists — reuse and update password so displayed credentials work
+		user = existingUser
+		coderConfig = lookupConfig
+		updatedConfig, pwdErr := coder.UpdateUserPasswordWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, user.ID.String(), password)
+		if pwdErr != nil {
+			log.Printf("Failed to update password for existing user: %v", pwdErr)
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprintf(w, `<div class="error-message">Failed to update credentials for existing account: %s</div>`, template.HTMLEscapeString(pwdErr.Error()))
+			return
+		}
+		coderConfig = updatedConfig
+	} else if errors.Is(lookupErr, coder.ErrUserNotFound) {
+		// User does not exist — create new user
+		var createErr error
+		user, coderConfig, createErr = coder.CreateUserWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, email, username, password)
+		if createErr != nil {
+			// Create failed — may be duplicate (race) or auth issue; try lookup by username
+			fallbackUser, fallbackConfig, fallbackErr := coder.GetUserByUsernameWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, username)
+			if fallbackErr != nil {
+				log.Printf("Failed to create or find user: create=%v, fallback=%v", createErr, fallbackErr)
+				w.Header().Set("Content-Type", "text/html")
+				fmt.Fprintf(w, `<div class="error-message">An account with this email already exists. Unable to create a workspace. Please contact the lab administrator.</div>`)
+				return
+			}
+			user = fallbackUser
+			coderConfig = fallbackConfig
+			// Update password so displayed credentials work
+			if updatedCfg, pwdErr := coder.UpdateUserPasswordWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, user.ID.String(), password); pwdErr != nil {
+				log.Printf("Failed to update password for fallback user: %v", pwdErr)
+			} else {
+				coderConfig = updatedCfg
+			}
+		}
+	} else {
+		// Lookup failed due to auth or other error — cannot verify or create
+		log.Printf("User lookup failed: %v", lookupErr)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `<div class="error-message">Unable to create workspace. Please try again or contact the lab administrator.</div>`)
+		return
+	}
 
 	// Create workspace for user with automatic token refresh
-	workspaceName := buildWorkspaceName(username, stackName, labID)
-	workspace, updatedConfig, err := coder.CreateWorkspaceWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, user.ID, templateID, workspaceName)
+	workspaceName := buildWorkspaceName(stackName, labID, templateName)
+	workspace, _, err := coder.CreateWorkspaceWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, user.ID, templateID, workspaceName)
 	if err != nil {
 		log.Printf("Failed to create workspace: %v", err)
 		w.Header().Set("Content-Type", "text/html")
@@ -1665,7 +1800,13 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 	coderAdminPassword := job.CoderAdminPassword
 	templateName := ""
 	if job.Config != nil {
-		templateName = job.Config.CoderTemplateName
+		templates := job.Config.GetCoderTemplates()
+		if len(templates) > 0 {
+			templateName = templates[0].Name
+		}
+		if templateName == "" {
+			templateName = job.Config.CoderTemplateName
+		}
 	}
 	stackName := ""
 	if job.Config != nil {
@@ -1798,7 +1939,13 @@ func (h *Handler) ListLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 	coderAdminPassword := job.CoderAdminPassword
 	templateName := ""
 	if job.Config != nil {
-		templateName = job.Config.CoderTemplateName
+		templates := job.Config.GetCoderTemplates()
+		if len(templates) > 0 {
+			templateName = templates[0].Name
+		}
+		if templateName == "" {
+			templateName = job.Config.CoderTemplateName
+		}
 	}
 	job.mu.RUnlock()
 
@@ -2301,34 +2448,43 @@ func (h *Handler) RetryJob(w http.ResponseWriter, r *http.Request) {
 		</div>`, jobID, jobID)
 }
 
-// buildWorkspaceName creates a valid Coder workspace name from a username, lab name,
-// and labID. Coder enforces a maximum of 32 characters and the pattern
+// buildWorkspaceName creates a valid Coder workspace name from lab name, labID,
+// and template name. Coder enforces a maximum of 32 characters and the pattern
 // ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,30}[a-zA-Z0-9])?$.
 //
-// The resulting format is: {username}-{labName}-{shortLabID}
+// Workspace names are unique per user in Coder, so username is not needed.
+// The resulting format is: {labName}-{templateName}-{shortLabID}
 // where shortLabID is the last 10 characters of labID for uniqueness.
-// If the full name exceeds 32 chars the username is truncated first, then the
-// lab name, so the unique suffix is always preserved.
-func buildWorkspaceName(username, labName, labID string) string {
+// If the full name exceeds 32 chars the lab name is truncated first, then the
+// template name, so the unique suffix is always preserved.
+func buildWorkspaceName(labName, labID string, templateName string) string {
 	const maxLen = 32
 
-	// Sanitize labName: lowercase, replace any non-alphanumeric char with a hyphen,
-	// collapse consecutive hyphens, strip leading/trailing hyphens.
-	sanitized := strings.ToLower(labName)
-	var sb strings.Builder
-	prevHyphen := false
-	for _, r := range sanitized {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			sb.WriteRune(r)
-			prevHyphen = false
-		} else if !prevHyphen && sb.Len() > 0 {
-			sb.WriteRune('-')
-			prevHyphen = true
+	// sanitizeForName lowercases and replaces non-alphanumeric chars with hyphens.
+	sanitize := func(s string) string {
+		sanitized := strings.ToLower(s)
+		var sb strings.Builder
+		prevHyphen := false
+		for _, r := range sanitized {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+				sb.WriteRune(r)
+				prevHyphen = false
+			} else if !prevHyphen && sb.Len() > 0 {
+				sb.WriteRune('-')
+				prevHyphen = true
+			}
 		}
+		return strings.TrimRight(sb.String(), "-")
 	}
-	labName = strings.TrimRight(sb.String(), "-")
+
+	labName = sanitize(labName)
 	if labName == "" {
 		labName = "lab"
+	}
+
+	templatePart := sanitize(templateName)
+	if templatePart == "" {
+		templatePart = "default"
 	}
 
 	// Preserve the last 10 chars of labID for uniqueness (nanosecond timestamp suffix).
@@ -2338,32 +2494,29 @@ func buildWorkspaceName(username, labName, labID string) string {
 	}
 
 	// Fixed overhead: two hyphens + shortLabID
-	// Budget split: fill username first, then labName with what remains.
-	overhead := 2 + len(shortLabID) // "-{labName}-{shortLabID}" minus labName itself
-	budgetForUserAndLab := maxLen - overhead
-	if budgetForUserAndLab < 2 {
-		budgetForUserAndLab = 2
+	overhead := 2 + len(shortLabID)
+	budget := maxLen - overhead
+	if budget < 2 {
+		budget = 2
 	}
 
-	// Allocate up to half the budget to each, giving the remainder to the other.
-	halfBudget := budgetForUserAndLab / 2
-
-	trimmedUsername := username
+	// Split budget between lab name and template name
+	half := budget / 2
 	trimmedLabName := labName
+	trimmedTemplate := templatePart
 
-	if len(trimmedUsername) > halfBudget {
-		trimmedUsername = strings.TrimRight(trimmedUsername[:halfBudget], "-")
+	if len(trimmedLabName) > half {
+		trimmedLabName = strings.TrimRight(trimmedLabName[:half], "-")
 	}
-	remainingForLab := budgetForUserAndLab - len(trimmedUsername)
-	if len(trimmedLabName) > remainingForLab {
-		trimmedLabName = strings.TrimRight(trimmedLabName[:remainingForLab], "-")
+	remaining := budget - len(trimmedLabName)
+	if len(trimmedTemplate) > remaining {
+		trimmedTemplate = strings.TrimRight(trimmedTemplate[:remaining], "-")
 	}
-	remainingForUser := budgetForUserAndLab - len(trimmedLabName)
-	if len(trimmedUsername) > remainingForUser {
-		trimmedUsername = strings.TrimRight(trimmedUsername[:remainingForUser], "-")
+	if trimmedTemplate == "" {
+		trimmedTemplate = "t"
 	}
 
-	name := trimmedUsername + "-" + trimmedLabName + "-" + shortLabID
+	name := trimmedLabName + "-" + trimmedTemplate + "-" + shortLabID
 	if len(name) > maxLen {
 		name = name[:maxLen]
 		name = strings.TrimRight(name, "-")

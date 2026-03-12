@@ -56,10 +56,19 @@
                     </div>
 
                     <div class="student-form-group">
-                        <label for="lab_id">Select Lab *</label>
+                        <label for="lab_id">Select Environment *</label>
                         <select id="lab_id" name="lab_id" required>
                             <option value="">Loading labs...</option>
                         </select>
+                        <small>Choose the lab environment for your workspace</small>
+                    </div>
+
+                    <div class="student-form-group" id="template-select-group" style="display: none;">
+                        <label for="template_id">Select Template *</label>
+                        <select id="template_id" name="template_id" required>
+                            <option value="">Select a lab first...</option>
+                        </select>
+                        <small>Choose the workspace template (environment type)</small>
                     </div>
 
                     <button type="submit" class="student-btn" id="submit-btn">Request Workspace</button>
