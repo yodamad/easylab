@@ -170,10 +170,51 @@ func SetupCoder(ctx *pulumi.Context, k8sProvider *k8s.Provider, ns *k8score.Name
 	return helmRelease, nil
 }
 
+// waitForCoderReachable polls the Coder API until it responds (e.g. after pod startup).
+// Uses the unauthenticated /api/v2/buildinfo endpoint. Retries for up to 10 minutes.
+func waitForCoderReachable(ctx *pulumi.Context, baseURL string) error {
+	checkURL := baseURL + "/api/v2/buildinfo"
+	interval := 15 * time.Second
+	maxAttempts := 40 // 10 minutes total
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, checkURL, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+		httpClient := &http.Client{Timeout: 10 * time.Second}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			utils.LogInfo(ctx, fmt.Sprintf("Coder not ready yet (attempt %d/%d): %v", attempt, maxAttempts, err))
+			if attempt < maxAttempts {
+				time.Sleep(interval)
+			} else {
+				return fmt.Errorf("Coder did not become reachable after %d attempts: %w", maxAttempts, err)
+			}
+			continue
+		}
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			utils.LogInfo(ctx, fmt.Sprintf("Coder is ready (attempt %d)", attempt))
+			return nil
+		}
+		// Any response means the server is up
+		utils.LogInfo(ctx, fmt.Sprintf("Coder is ready (attempt %d, status %d)", attempt, resp.StatusCode))
+		return nil
+	}
+	return fmt.Errorf("Coder did not become reachable after %d attempts", maxAttempts)
+}
+
 func InitCoder(ctx *pulumi.Context, externalIp string) (CoderConfig, error) {
 	serverURL := &url.URL{
 		Scheme: "http",
 		Host:   externalIp,
+	}
+	baseURL := serverURL.String()
+
+	// Wait for Coder to be reachable before attempting API calls (pod may still be starting)
+	if err := waitForCoderReachable(ctx, baseURL); err != nil {
+		return CoderConfig{}, err
 	}
 
 	client := codersdk.New(serverURL)
@@ -396,7 +437,7 @@ func CreateTemplateFromZip(ctx *pulumi.Context, coderInfos *CoderConfigOutput, t
 		// Create a template version from the uploaded file
 		utils.LogInfo(ctx, "Creating template version...")
 		templateVersion, err := client.CreateTemplateVersion(context.Background(), organizationID, codersdk.CreateTemplateVersionRequest{
-			Name:          utils.CoderConfig(ctx, utils.CoderTemplateName),
+			Name:          templateName,
 			FileID:        uploadResp.ID,
 			StorageMethod: codersdk.ProvisionerStorageMethodFile,
 			Provisioner:   codersdk.ProvisionerTypeTerraform,

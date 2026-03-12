@@ -9,6 +9,7 @@ import (
 	"easylab/utils"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -23,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coder/coder/v2/codersdk"
 	"github.com/google/uuid"
 )
 
@@ -174,82 +176,104 @@ func (h *Handler) getProviderCredentials(w http.ResponseWriter, providerName str
 	return creds, nil
 }
 
-// saveUploadedTemplateFile handles template file upload and saves it to the job directory
-// Returns the file path relative to job directory, or empty string if no file was uploaded
-func (h *Handler) saveUploadedTemplateFile(r *http.Request, jobDir string) (string, error) {
-	// Check if template file was uploaded
-	file, header, err := r.FormFile("template_file")
-	if err != nil {
-		if err == http.ErrMissingFile {
-			// No file uploaded, this is optional
-			return "", nil
-		}
-		return "", fmt.Errorf("failed to get uploaded file: %w", err)
-	}
-	defer file.Close()
-
-	// Validate file extension
-	filename := header.Filename
-	if !strings.HasSuffix(strings.ToLower(filename), ".zip") && !strings.HasSuffix(strings.ToLower(filename), ".tf") {
-		return "", fmt.Errorf("invalid file type: only .zip and .tf files are allowed")
-	}
-
-	// Create job directory if it doesn't exist
+// saveUploadedTemplateFiles handles multiple template file uploads and saves them to the job directory.
+// For each index i from 0 to count-1, tries to get template_file_i. Returns a slice of relative paths
+// (empty string for indices with no file uploaded).
+func (h *Handler) saveUploadedTemplateFiles(r *http.Request, jobDir string, count int) ([]string, error) {
+	paths := make([]string, count)
 	if err := os.MkdirAll(jobDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create job directory: %w", err)
+		return nil, fmt.Errorf("failed to create job directory: %w", err)
 	}
 
-	// Determine destination file path
-	var destPath string
-	var finalPath string
-	if strings.HasSuffix(strings.ToLower(filename), ".tf") {
-		// Save .tf file first, will be zipped later
-		destPath = filepath.Join(jobDir, "template.tf")
-		finalPath = "template.zip" // Will be created from .tf file
-	} else {
-		// Save .zip file directly
-		destPath = filepath.Join(jobDir, "template.zip")
-		finalPath = "template.zip"
-	}
-
-	// Create destination file
-	destFile, err := os.Create(destPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to create destination file: %w", err)
-	}
-	defer destFile.Close()
-
-	// Copy uploaded file to destination
-	_, err = io.Copy(destFile, file)
-	if err != nil {
-		return "", fmt.Errorf("failed to save uploaded file: %w", err)
-	}
-	destFile.Close()
-
-	// If it's a .tf file, zip it
-	if strings.HasSuffix(strings.ToLower(filename), ".tf") {
-		zipPath, err := utils.ZipTerraformFile(destPath)
+	for i := 0; i < count; i++ {
+		fieldName := fmt.Sprintf("template_file_%d", i)
+		file, header, err := r.FormFile(fieldName)
 		if err != nil {
-			return "", fmt.Errorf("failed to zip terraform file: %w", err)
+			if err == http.ErrMissingFile {
+				continue
+			}
+			return nil, fmt.Errorf("failed to get uploaded file %s: %w", fieldName, err)
 		}
-		// Remove the original .tf file
-		os.Remove(destPath)
-		// Verify zip file was created in job directory
-		if !strings.HasPrefix(zipPath, jobDir) {
-			// Zip was created elsewhere, move it to job directory
-			finalZipPath := filepath.Join(jobDir, "template.zip")
-			if err := os.Rename(zipPath, finalZipPath); err != nil {
-				return "", fmt.Errorf("failed to move zip file to job directory: %w", err)
+
+		filename := header.Filename
+		if !strings.HasSuffix(strings.ToLower(filename), ".zip") && !strings.HasSuffix(strings.ToLower(filename), ".tf") {
+			file.Close()
+			return nil, fmt.Errorf("invalid file type for template %d: only .zip and .tf files are allowed", i)
+		}
+
+		var destPath, finalPath string
+		if strings.HasSuffix(strings.ToLower(filename), ".tf") {
+			destPath = filepath.Join(jobDir, fmt.Sprintf("template_%d.tf", i))
+			finalPath = fmt.Sprintf("template_%d.zip", i)
+		} else {
+			destPath = filepath.Join(jobDir, fmt.Sprintf("template_%d.zip", i))
+			finalPath = fmt.Sprintf("template_%d.zip", i)
+		}
+
+		destFile, err := os.Create(destPath)
+		if err != nil {
+			file.Close()
+			return nil, fmt.Errorf("failed to create destination file: %w", err)
+		}
+		_, err = io.Copy(destFile, file)
+		destFile.Close()
+		file.Close()
+		if err != nil {
+			return nil, fmt.Errorf("failed to save uploaded file: %w", err)
+		}
+
+		if strings.HasSuffix(strings.ToLower(filename), ".tf") {
+			zipPath, err := utils.ZipTerraformFile(destPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to zip terraform file: %w", err)
+			}
+			os.Remove(destPath)
+			if !strings.HasPrefix(zipPath, jobDir) {
+				finalZipPath := filepath.Join(jobDir, finalPath)
+				if err := os.Rename(zipPath, finalZipPath); err != nil {
+					return nil, fmt.Errorf("failed to move zip file to job directory: %w", err)
+				}
 			}
 		}
-		return finalPath, nil
+		paths[i] = finalPath
 	}
-
-	return finalPath, nil
+	return paths, nil
 }
 
-// createLabConfigFromForm creates a LabConfig from form data and provider credentials
-func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds ProviderCredentials, templateFilePath string) *LabConfig {
+// parseCoderTemplatesFromForm extracts Coder template entries from the form.
+// Expects template_N_name, template_N_source, template_file_N (for upload), template_N_git_repo, etc.
+func parseCoderTemplatesFromForm(r *http.Request, templateFilePaths []string) []CoderTemplate {
+	var templates []CoderTemplate
+	for i := 0; ; i++ {
+		name := getFormValue(r, fmt.Sprintf("template_%d_name", i))
+		if name == "" {
+			break
+		}
+		source := getFormValue(r, fmt.Sprintf("template_%d_source", i))
+		if source == "" {
+			source = "git" // default when nothing selected
+		}
+		t := CoderTemplate{
+			Name:      name,
+			Source:    source,
+			GitRepo:   getFormValue(r, fmt.Sprintf("template_%d_git_repo", i)),
+			GitFolder: getFormValue(r, fmt.Sprintf("template_%d_git_folder", i)),
+			GitBranch: getFormValue(r, fmt.Sprintf("template_%d_git_branch", i)),
+		}
+		if t.GitBranch == "" {
+			t.GitBranch = "main"
+		}
+		if source == "upload" && i < len(templateFilePaths) && templateFilePaths[i] != "" {
+			t.FilePath = templateFilePaths[i]
+		}
+		templates = append(templates, t)
+	}
+	return templates
+}
+
+// createLabConfigFromForm creates a LabConfig from form data and provider credentials.
+// templateFilePaths contains saved file paths for upload-source templates (indexed by template order).
+func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds ProviderCredentials, templateFilePaths []string) *LabConfig {
 	// Get stack name with default
 	stackName := r.FormValue("stack_name")
 	if stackName == "" {
@@ -257,6 +281,8 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 	}
 
 	useExistingCluster := r.FormValue("use_existing_cluster") == "true"
+
+	templates := parseCoderTemplatesFromForm(r, templateFilePaths)
 
 	config := &LabConfig{
 		StackName:          stackName,
@@ -269,14 +295,7 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 		CoderDbUser:        r.FormValue("coder_db_user"),
 		CoderDbPassword:    r.FormValue("coder_db_password"),
 		CoderDbName:        r.FormValue("coder_db_name"),
-		CoderTemplateName:  r.FormValue("coder_template_name"),
-		TemplateFilePath:   templateFilePath,
-
-		// Template Source Configuration
-		TemplateSource:    r.FormValue("template_source"),
-		TemplateGitRepo:   r.FormValue("template_git_repo"),
-		TemplateGitFolder: r.FormValue("template_git_folder"),
-		TemplateGitBranch: r.FormValue("template_git_branch"),
+		CoderTemplates:     templates,
 	}
 
 	if !useExistingCluster {
@@ -327,10 +346,10 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 		log.Printf("Warning: Invalid email format in CoderAdminEmail: %s", config.CoderAdminEmail)
 	}
 
-	// Validate Git repository URL if provided
-	if config.TemplateSource == "git" && config.TemplateGitRepo != "" {
-		if !validateURL(config.TemplateGitRepo) {
-			log.Printf("Warning: Invalid Git repository URL format: %s", config.TemplateGitRepo)
+	// Validate Git repository URLs for git-source templates
+	for i, t := range config.CoderTemplates {
+		if t.Source == "git" && t.GitRepo != "" && !validateURL(t.GitRepo) {
+			log.Printf("Warning: Invalid Git repository URL for template %d: %s", i, t.GitRepo)
 		}
 	}
 
@@ -521,34 +540,53 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 		}
 	}
 
-	// Create initial config without template file path
-	initialConfig := h.createLabConfigFromForm(r, providerCreds, "")
-
-	// Validate template source configuration
-	templateSource := initialConfig.TemplateSource
-	if templateSource == "" {
-		// Backward compatibility: if no source specified, check for uploaded file
-		templateSource = "upload"
+	// Create initial config (without template file paths yet)
+	initialConfig := h.createLabConfigFromForm(r, providerCreds, nil)
+	templates := initialConfig.GetCoderTemplates()
+	if len(templates) == 0 {
+		h.renderHTMLError(w, "Template Configuration Error", "At least one Coder template is required")
+		return
 	}
 
-	if templateSource == "git" {
-		// Validate Git repository URL is provided
-		if initialConfig.TemplateGitRepo == "" {
-			h.renderHTMLError(w, "Template Configuration Error", "Repository URL is required when using Git template source")
-			return
-		}
-	}
-
-	// Create job first to get jobID
+	// Create job and job directory
 	jobID := h.jobManager.CreateJob(initialConfig)
-
-	// Create job directory
 	jobDir := filepath.Join(h.pulumiExec.GetWorkDir(), jobID)
 	if err := os.MkdirAll(jobDir, 0755); err != nil {
 		log.Printf("Failed to create job directory: %v", err)
 		h.renderHTMLError(w, "Job Creation Error", fmt.Sprintf("Failed to create job directory: %v", err))
 		return
 	}
+
+	// Save uploaded template files
+	templateFilePaths, err := h.saveUploadedTemplateFiles(r, jobDir, len(templates))
+	if err != nil {
+		log.Printf("Failed to save template files: %v", err)
+		h.renderHTMLError(w, "Template Upload Error", fmt.Sprintf("Failed to save template files: %v", err))
+		return
+	}
+
+	// Update config with saved file paths
+	initialConfig = h.createLabConfigFromForm(r, providerCreds, templateFilePaths)
+	templates = initialConfig.GetCoderTemplates()
+
+	// Validate each template: upload needs file, git needs repo URL
+	for i, t := range templates {
+		if t.Source == "upload" {
+			if t.FilePath == "" {
+				h.renderHTMLError(w, "Template Configuration Error", fmt.Sprintf("Template %d (%s): file upload is required when using upload source", i+1, t.Name))
+				return
+			}
+		} else if t.Source == "git" {
+			if t.GitRepo == "" {
+				h.renderHTMLError(w, "Template Configuration Error", fmt.Sprintf("Template %d (%s): repository URL is required when using Git source", i+1, t.Name))
+				return
+			}
+		}
+	}
+
+	h.updateJobConfig(jobID, func(config *LabConfig) {
+		config.CoderTemplates = initialConfig.CoderTemplates
+	})
 
 	// Handle kubeconfig for BYOK mode
 	if useExistingCluster {
@@ -568,40 +606,8 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 			h.renderHTMLError(w, "Kubeconfig Error", fmt.Sprintf("Failed to save kubeconfig: %v", err))
 			return
 		}
-		initialConfig.ExternalKubeconfig = kubeconfigContent
 		h.updateJobConfig(jobID, func(config *LabConfig) {
 			config.ExternalKubeconfig = kubeconfigContent
-		})
-	}
-
-	// Handle template file upload only if source is "upload"
-	var templateFilePath string
-	if templateSource == "upload" {
-		var err error
-		templateFilePath, err = h.saveUploadedTemplateFile(r, jobDir)
-		if err != nil {
-			log.Printf("Failed to save template file: %v", err)
-			h.renderHTMLError(w, "Template Upload Error", fmt.Sprintf("Failed to save template file: %v", err))
-			return
-		}
-		if templateFilePath == "" {
-			h.renderHTMLError(w, "Template Configuration Error", "Template file is required when using upload source")
-			return
-		}
-		// Update config with template file path (relative to job directory)
-		initialConfig.TemplateFilePath = templateFilePath
-		// Update job config
-		h.updateJobConfig(jobID, func(config *LabConfig) {
-			config.TemplateFilePath = templateFilePath
-			config.TemplateSource = templateSource
-		})
-	} else {
-		// Update job config with Git template info
-		h.updateJobConfig(jobID, func(config *LabConfig) {
-			config.TemplateSource = templateSource
-			config.TemplateGitRepo = initialConfig.TemplateGitRepo
-			config.TemplateGitFolder = initialConfig.TemplateGitFolder
-			config.TemplateGitBranch = initialConfig.TemplateGitBranch
 		})
 	}
 
@@ -922,6 +928,75 @@ func (h *Handler) ServeStudentDashboard(w http.ResponseWriter, r *http.Request) 
 	h.serveTemplate(w, "student-dashboard.html", nil)
 }
 
+// ListLabTemplates returns the list of Coder templates available for a lab
+func (h *Handler) ListLabTemplates(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	labID := r.URL.Query().Get("lab_id")
+	if labID == "" {
+		http.Error(w, "lab_id is required", http.StatusBadRequest)
+		return
+	}
+
+	job, exists := h.jobManager.GetJob(labID)
+	if !exists {
+		http.Error(w, "Lab not found", http.StatusNotFound)
+		return
+	}
+
+	job.mu.RLock()
+	status := job.Status
+	coderURL := job.CoderURL
+	coderSessionToken := job.CoderSessionToken
+	coderOrganizationID := job.CoderOrganizationID
+	coderAdminEmail := job.CoderAdminEmail
+	coderAdminPassword := job.CoderAdminPassword
+	job.mu.RUnlock()
+
+	if status != JobStatusCompleted {
+		http.Error(w, "Lab is not ready yet", http.StatusBadRequest)
+		return
+	}
+
+	coderURL = extractStringFromConfigValue(coderURL)
+	coderSessionToken = extractStringFromConfigValue(coderSessionToken)
+	coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
+	coderAdminEmail = extractStringFromConfigValue(coderAdminEmail)
+	coderAdminPassword = extractStringFromConfigValue(coderAdminPassword)
+
+	if coderURL == "" || coderSessionToken == "" || coderOrganizationID == "" || coderAdminEmail == "" || coderAdminPassword == "" {
+		http.Error(w, "Coder configuration not available for this lab", http.StatusInternalServerError)
+		return
+	}
+
+	coderConfig := coder.CoderClientConfig{
+		ServerURL:      coderURL,
+		SessionToken:   coderSessionToken,
+		OrganizationID: coderOrganizationID,
+	}
+
+	templates, err := coder.GetTemplatesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword)
+	if err != nil {
+		log.Printf("Failed to get templates for lab %s: %v", labID, err)
+		http.Error(w, fmt.Sprintf("Failed to get templates: %s", err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	type templateOption struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	options := make([]templateOption, 0, len(templates))
+	for _, t := range templates {
+		options = append(options, templateOption{ID: t.ID.String(), Name: t.Name})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(options)
+}
+
 // ListLabs returns a list of completed jobs (labs) available for workspace requests
 func (h *Handler) ListLabs(w http.ResponseWriter, r *http.Request) {
 	h.jobManager.mu.RLock()
@@ -956,6 +1031,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Get form values using helper
 	email := getFormValue(r, "email")
 	labID := getFormValue(r, "lab_id")
+	templateIDStr := getFormValue(r, "template_id")
 
 	// Validate email
 	if email == "" {
@@ -1047,29 +1123,92 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Use first available template
-	templateID := templates[0].ID
-
-	// Create user in Coder (or retrieve existing one if already created for another lab)
-	user, updatedConfig, err := coder.CreateUserWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, email, username, password)
-	if err != nil {
-		// User may already exist from a previous workspace request — look them up
-		log.Printf("User creation failed (may already exist): %v — attempting lookup", err)
-		existingUser, lookupConfig, lookupErr := coder.GetUserByUsernameWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, username)
-		if lookupErr != nil {
-			log.Printf("Failed to create or find user: create=%v, lookup=%v", err, lookupErr)
+	// Resolve template ID: use form value if provided and valid, otherwise first template
+	var templateID uuid.UUID
+	if templateIDStr != "" {
+		parsed, err := uuid.Parse(templateIDStr)
+		if err != nil {
 			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprintf(w, `<div class="error-message">Failed to create user: %s</div>`, template.HTMLEscapeString(err.Error()))
+			fmt.Fprintf(w, `<div class="error-message">Invalid template selection</div>`)
 			return
 		}
-		user = existingUser
-		updatedConfig = lookupConfig
+		found := false
+		for _, t := range templates {
+			if t.ID == parsed {
+				templateID = parsed
+				found = true
+				break
+			}
+		}
+		if !found {
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprintf(w, `<div class="error-message">Selected template is not available in this lab</div>`)
+			return
+		}
+	} else {
+		templateID = templates[0].ID
 	}
-	coderConfig = updatedConfig
+
+	// Resolve template name for workspace naming
+	var templateName string
+	for _, t := range templates {
+		if t.ID == templateID {
+			templateName = t.Name
+			break
+		}
+	}
+	if templateName == "" {
+		templateName = "default"
+	}
+
+	// Check if user already exists; reuse if so, create only if not found
+	var user codersdk.User
+	existingUser, lookupConfig, lookupErr := coder.GetUserByEmailWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, email)
+	if lookupErr == nil {
+		// User exists — reuse and update password so displayed credentials work
+		user = existingUser
+		coderConfig = lookupConfig
+		updatedConfig, pwdErr := coder.UpdateUserPasswordWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, user.ID.String(), password)
+		if pwdErr != nil {
+			log.Printf("Failed to update password for existing user: %v", pwdErr)
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprintf(w, `<div class="error-message">Failed to update credentials for existing account: %s</div>`, template.HTMLEscapeString(pwdErr.Error()))
+			return
+		}
+		coderConfig = updatedConfig
+	} else if errors.Is(lookupErr, coder.ErrUserNotFound) {
+		// User does not exist — create new user
+		var createErr error
+		user, coderConfig, createErr = coder.CreateUserWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, email, username, password)
+		if createErr != nil {
+			// Create failed — may be duplicate (race) or auth issue; try lookup by username
+			fallbackUser, fallbackConfig, fallbackErr := coder.GetUserByUsernameWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, username)
+			if fallbackErr != nil {
+				log.Printf("Failed to create or find user: create=%v, fallback=%v", createErr, fallbackErr)
+				w.Header().Set("Content-Type", "text/html")
+				fmt.Fprintf(w, `<div class="error-message">An account with this email already exists. Unable to create a workspace. Please contact the lab administrator.</div>`)
+				return
+			}
+			user = fallbackUser
+			coderConfig = fallbackConfig
+			// Update password so displayed credentials work
+			if updatedCfg, pwdErr := coder.UpdateUserPasswordWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, user.ID.String(), password); pwdErr != nil {
+				log.Printf("Failed to update password for fallback user: %v", pwdErr)
+			} else {
+				coderConfig = updatedCfg
+			}
+		}
+	} else {
+		// Lookup failed due to auth or other error — cannot verify or create
+		log.Printf("User lookup failed: %v", lookupErr)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `<div class="error-message">Unable to create workspace. Please try again or contact the lab administrator.</div>`)
+		return
+	}
 
 	// Create workspace for user with automatic token refresh
-	workspaceName := buildWorkspaceName(username, stackName, labID)
-	workspace, updatedConfig, err := coder.CreateWorkspaceWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, user.ID, templateID, workspaceName)
+	workspaceName := buildWorkspaceName(stackName, labID, templateName)
+	workspace, _, err := coder.CreateWorkspaceWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, user.ID, templateID, workspaceName)
 	if err != nil {
 		log.Printf("Failed to create workspace: %v", err)
 		w.Header().Set("Content-Type", "text/html")
@@ -1661,7 +1800,13 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 	coderAdminPassword := job.CoderAdminPassword
 	templateName := ""
 	if job.Config != nil {
-		templateName = job.Config.CoderTemplateName
+		templates := job.Config.GetCoderTemplates()
+		if len(templates) > 0 {
+			templateName = templates[0].Name
+		}
+		if templateName == "" {
+			templateName = job.Config.CoderTemplateName
+		}
 	}
 	stackName := ""
 	if job.Config != nil {
@@ -1716,7 +1861,7 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get workspaces for this template
-	workspaces, updatedConfig, err := coder.ListWorkspacesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, templateID)
+	workspaces, updatedConfig, err := coder.ListWorkspacesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, templateID, templateName)
 	if err != nil {
 		log.Printf("Failed to list workspaces: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to list workspaces: %s", err.Error()), http.StatusInternalServerError)
@@ -1794,7 +1939,13 @@ func (h *Handler) ListLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 	coderAdminPassword := job.CoderAdminPassword
 	templateName := ""
 	if job.Config != nil {
-		templateName = job.Config.CoderTemplateName
+		templates := job.Config.GetCoderTemplates()
+		if len(templates) > 0 {
+			templateName = templates[0].Name
+		}
+		if templateName == "" {
+			templateName = job.Config.CoderTemplateName
+		}
 	}
 	job.mu.RUnlock()
 
@@ -1845,7 +1996,7 @@ func (h *Handler) ListLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get workspaces for this template
-	workspaces, _, err := coder.ListWorkspacesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, templateID)
+	workspaces, _, err := coder.ListWorkspacesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, templateID, templateName)
 	if err != nil {
 		log.Printf("Failed to list workspaces: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to list workspaces: %s", err.Error()), http.StatusInternalServerError)
@@ -2297,34 +2448,43 @@ func (h *Handler) RetryJob(w http.ResponseWriter, r *http.Request) {
 		</div>`, jobID, jobID)
 }
 
-// buildWorkspaceName creates a valid Coder workspace name from a username, lab name,
-// and labID. Coder enforces a maximum of 32 characters and the pattern
+// buildWorkspaceName creates a valid Coder workspace name from lab name, labID,
+// and template name. Coder enforces a maximum of 32 characters and the pattern
 // ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,30}[a-zA-Z0-9])?$.
 //
-// The resulting format is: {username}-{labName}-{shortLabID}
+// Workspace names are unique per user in Coder, so username is not needed.
+// The resulting format is: {labName}-{templateName}-{shortLabID}
 // where shortLabID is the last 10 characters of labID for uniqueness.
-// If the full name exceeds 32 chars the username is truncated first, then the
-// lab name, so the unique suffix is always preserved.
-func buildWorkspaceName(username, labName, labID string) string {
+// If the full name exceeds 32 chars the lab name is truncated first, then the
+// template name, so the unique suffix is always preserved.
+func buildWorkspaceName(labName, labID string, templateName string) string {
 	const maxLen = 32
 
-	// Sanitize labName: lowercase, replace any non-alphanumeric char with a hyphen,
-	// collapse consecutive hyphens, strip leading/trailing hyphens.
-	sanitized := strings.ToLower(labName)
-	var sb strings.Builder
-	prevHyphen := false
-	for _, r := range sanitized {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			sb.WriteRune(r)
-			prevHyphen = false
-		} else if !prevHyphen && sb.Len() > 0 {
-			sb.WriteRune('-')
-			prevHyphen = true
+	// sanitizeForName lowercases and replaces non-alphanumeric chars with hyphens.
+	sanitize := func(s string) string {
+		sanitized := strings.ToLower(s)
+		var sb strings.Builder
+		prevHyphen := false
+		for _, r := range sanitized {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+				sb.WriteRune(r)
+				prevHyphen = false
+			} else if !prevHyphen && sb.Len() > 0 {
+				sb.WriteRune('-')
+				prevHyphen = true
+			}
 		}
+		return strings.TrimRight(sb.String(), "-")
 	}
-	labName = strings.TrimRight(sb.String(), "-")
+
+	labName = sanitize(labName)
 	if labName == "" {
 		labName = "lab"
+	}
+
+	templatePart := sanitize(templateName)
+	if templatePart == "" {
+		templatePart = "default"
 	}
 
 	// Preserve the last 10 chars of labID for uniqueness (nanosecond timestamp suffix).
@@ -2334,32 +2494,29 @@ func buildWorkspaceName(username, labName, labID string) string {
 	}
 
 	// Fixed overhead: two hyphens + shortLabID
-	// Budget split: fill username first, then labName with what remains.
-	overhead := 2 + len(shortLabID) // "-{labName}-{shortLabID}" minus labName itself
-	budgetForUserAndLab := maxLen - overhead
-	if budgetForUserAndLab < 2 {
-		budgetForUserAndLab = 2
+	overhead := 2 + len(shortLabID)
+	budget := maxLen - overhead
+	if budget < 2 {
+		budget = 2
 	}
 
-	// Allocate up to half the budget to each, giving the remainder to the other.
-	halfBudget := budgetForUserAndLab / 2
-
-	trimmedUsername := username
+	// Split budget between lab name and template name
+	half := budget / 2
 	trimmedLabName := labName
+	trimmedTemplate := templatePart
 
-	if len(trimmedUsername) > halfBudget {
-		trimmedUsername = strings.TrimRight(trimmedUsername[:halfBudget], "-")
+	if len(trimmedLabName) > half {
+		trimmedLabName = strings.TrimRight(trimmedLabName[:half], "-")
 	}
-	remainingForLab := budgetForUserAndLab - len(trimmedUsername)
-	if len(trimmedLabName) > remainingForLab {
-		trimmedLabName = strings.TrimRight(trimmedLabName[:remainingForLab], "-")
+	remaining := budget - len(trimmedLabName)
+	if len(trimmedTemplate) > remaining {
+		trimmedTemplate = strings.TrimRight(trimmedTemplate[:remaining], "-")
 	}
-	remainingForUser := budgetForUserAndLab - len(trimmedLabName)
-	if len(trimmedUsername) > remainingForUser {
-		trimmedUsername = strings.TrimRight(trimmedUsername[:remainingForUser], "-")
+	if trimmedTemplate == "" {
+		trimmedTemplate = "t"
 	}
 
-	name := trimmedUsername + "-" + trimmedLabName + "-" + shortLabID
+	name := trimmedLabName + "-" + trimmedTemplate + "-" + shortLabID
 	if len(name) > maxLen {
 		name = name[:maxLen]
 		name = strings.TrimRight(name, "-")

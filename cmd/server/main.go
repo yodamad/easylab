@@ -182,8 +182,14 @@ func main() {
 	pulumiExec = server.NewPulumiExecutor(jobManager, *workDir)
 	log.Printf("[STARTUP] PulumiExecutor initialization took %v", time.Since(pulumiStart))
 
-	// Pre-warm Go module cache asynchronously to speed up job execution
+	// Check and install required Pulumi plugins, then pre-warm the Go module cache.
+	// Plugins must be healthy before module pre-warming compiles template code that
+	// references them, so both tasks run sequentially inside one goroutine.
 	go func() {
+		pluginStart := time.Now()
+		pulumiExec.CheckAndInstallPlugins()
+		log.Printf("[STARTUP] Pulumi plugin check completed in %v", time.Since(pluginStart))
+
 		prewarmStart := time.Now()
 		if err := pulumiExec.PrewarmModuleCache(); err != nil {
 			log.Printf("[STARTUP] Warning: Go module cache pre-warming failed: %v", err)
@@ -226,6 +232,7 @@ func main() {
 	mux.HandleFunc("/student/logout", authHandler.HandleStudentLogout)
 	mux.HandleFunc("/student/dashboard", authHandler.RequireStudentAuth(handler.ServeStudentDashboard))
 	mux.HandleFunc("/api/student/labs", authHandler.RequireStudentAuth(handler.ListLabs))
+	mux.HandleFunc("/api/student/labs/templates", authHandler.RequireStudentAuth(handler.ListLabTemplates))
 	mux.HandleFunc("/api/student/workspace/request", authHandler.RequireStudentAuth(handler.RequestWorkspace))
 
 	// Public homepage (no auth required)

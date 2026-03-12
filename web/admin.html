@@ -335,69 +335,150 @@
                         </div>
 
                         <div class="form-group">
-                            <label for="coder_template_name">Template Name *</label>
-                            <input type="text" id="coder_template_name" name="coder_template_name" value="docker-template" required>
-                        </div>
-
-                        <div class="form-group">
-                            <label>Template Source *</label>
-                            <div class="button-group">
-                                <!-- Hidden radio inputs for form submission -->
-                                <input type="radio" name="template_source" value="upload" id="template_source_upload" style="display: none;">
-                                <input type="radio" name="template_source" value="git" id="template_source_git" style="display: none;">
-                                
-                                <button type="button" class="source-button" data-source="upload" id="source-button-upload">
-                                    <span class="source-icon">📁</span>
-                                    <div class="source-content">
-                                        <span class="source-title">Upload File</span>
-                                        <span class="source-description">Upload a template file</span>
+                            <label>Coder Templates *</label>
+                            <p class="section-description">Define one or more Coder templates. Each can use an uploaded file or a Git repository.</p>
+                            <input type="hidden" id="template_count" name="template_count" value="1">
+                            <div id="coder-templates-container">
+                                <!-- First row - additional rows added by JS -->
+                                <div class="template-row" data-template-index="0">
+                                    <div class="template-row-header">
+                                        <h4 class="template-row-title">Template <span class="template-index">1</span></h4>
+                                        <button type="button" class="btn btn-secondary btn-remove-template" title="Remove template">Remove</button>
                                     </div>
-                                </button>
-                                
-                                <button type="button" class="source-button" data-source="git" id="source-button-git">
-                                    <span class="source-icon">🔗</span>
-                                    <div class="source-content">
-                                        <span class="source-title">Git Repository</span>
-                                        <span class="source-description">Use template from Git</span>
+                                    <div class="template-row-content">
+                                        <div class="form-group">
+                                            <label>Template Name *</label>
+                                            <input type="text" name="template_0_name" data-field="name" value="docker-template" required>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Template Source *</label>
+                                            <div class="button-group template-source-buttons">
+                                                <input type="radio" name="template_0_source" value="upload" data-field="source" style="display: none;">
+                                                <input type="radio" name="template_0_source" value="git" data-field="source" style="display: none;" checked>
+                                                <button type="button" class="source-button" data-source="upload">
+                                                    <span class="source-icon">📁</span>
+                                                    <div class="source-content">
+                                                        <span class="source-title">Upload File</span>
+                                                        <span class="source-description">Upload a template file</span>
+                                                    </div>
+                                                </button>
+                                                <button type="button" class="source-button" data-source="git">
+                                                    <span class="source-icon">🔗</span>
+                                                    <div class="source-content">
+                                                        <span class="source-title">Git Repository</span>
+                                                        <span class="source-description">Use template from Git</span>
+                                                    </div>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="template-upload-section template-source-section" style="display: none;">
+                                            <div class="form-group">
+                                                <label>Template File *</label>
+                                                <div class="file-upload-wrapper">
+                                                    <input type="file" id="template_file_0" name="template_file_0" data-field="file" accept=".zip,.tf" class="file-input">
+                                                    <label for="template_file_0" class="file-upload-label">
+                                                        <span class="file-upload-icon">📁</span>
+                                                        <span class="file-upload-text">Choose file or drag it here</span>
+                                                        <span class="file-upload-button">Browse</span>
+                                                    </label>
+                                                    <div class="file-name-display"></div>
+                                                </div>
+                                                <small>Upload a template file (.zip or .tf)</small>
+                                            </div>
+                                        </div>
+                                        <div class="template-git-section template-source-section">
+                                            <div class="form-group">
+                                                <label>Repository URL *</label>
+                                                <input type="text" name="template_0_git_repo" data-field="git_repo" placeholder="https://gitlab.com/user/repo.git" value="https://gitlab.com/yodamad-workshops/coder-templates">
+                                                <small>Git repository URL containing the template files</small>
+                                            </div>
+                                            <div class="form-group">
+                                                <label>Folder Path (Optional)</label>
+                                                <input type="text" name="template_0_git_folder" data-field="git_folder" placeholder="Leave empty for repository root" value="docker">
+                                                <small>Path to folder containing template files. Leave empty to use repository root.</small>
+                                            </div>
+                                            <div class="form-group">
+                                                <label>Branch (Optional)</label>
+                                                <input type="text" name="template_0_git_branch" data-field="git_branch" value="main" placeholder="main">
+                                                <small>Git branch to use. Defaults to "main" if not specified.</small>
+                                            </div>
+                                        </div>
                                     </div>
-                                </button>
-                            </div>
-                            <small>Choose how you want to provide the template</small>
-                        </div>
-
-                        <div id="template_upload_section" class="template-source-section" style="display: none;">
-                            <div class="form-group">
-                                <label for="template_file">Template File *</label>
-                                <div class="file-upload-wrapper">
-                                    <input type="file" id="template_file" name="template_file" accept=".zip,.tf" class="file-input">
-                                    <label for="template_file" class="file-upload-label">
-                                        <span class="file-upload-icon">📁</span>
-                                        <span class="file-upload-text">Choose file or drag it here</span>
-                                        <span class="file-upload-button">Browse</span>
-                                    </label>
-                                    <div class="file-name-display" id="file-name-display"></div>
                                 </div>
-                                <small>Upload a template file (.zip or .tf)</small>
                             </div>
+                            <button type="button" id="btn-add-template" class="btn btn-secondary" style="margin-top: 0.5rem;">
+                                <span class="btn-icon">+</span> Add Template
+                            </button>
                         </div>
 
-                        <div id="template_git_section" class="template-source-section" style="display: none;">
-                            <div class="form-group">
-                                <label for="template_git_repo">Repository URL *</label>
-                                <input type="text" id="template_git_repo" name="template_git_repo" placeholder="https://gitlab.com/user/repo.git">
-                                <small>Git repository URL containing the template files</small>
+                        <!-- Template row template (hidden, cloned by JS for Add Template) -->
+                        <template id="template-row-tmpl">
+                            <div class="template-row" data-template-index="0">
+                                <div class="template-row-header">
+                                    <h4 class="template-row-title">Template <span class="template-index">1</span></h4>
+                                    <button type="button" class="btn btn-secondary btn-remove-template" title="Remove template">Remove</button>
+                                </div>
+                                <div class="template-row-content">
+                                    <div class="form-group">
+                                        <label>Template Name *</label>
+                                        <input type="text" name="template_0_name" data-field="name" value="docker-template" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Template Source *</label>
+                                        <div class="button-group template-source-buttons">
+                                            <input type="radio" name="template_0_source" value="upload" data-field="source" style="display: none;">
+                                            <input type="radio" name="template_0_source" value="git" data-field="source" style="display: none;">
+                                            <button type="button" class="source-button" data-source="upload">
+                                                <span class="source-icon">📁</span>
+                                                <div class="source-content">
+                                                    <span class="source-title">Upload File</span>
+                                                    <span class="source-description">Upload a template file</span>
+                                                </div>
+                                            </button>
+                                            <button type="button" class="source-button" data-source="git">
+                                                <span class="source-icon">🔗</span>
+                                                <div class="source-content">
+                                                    <span class="source-title">Git Repository</span>
+                                                    <span class="source-description">Use template from Git</span>
+                                                </div>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="template-upload-section template-source-section" style="display: none;">
+                                        <div class="form-group">
+                                            <label>Template File *</label>
+                                            <div class="file-upload-wrapper">
+                                                <input type="file" id="template_file_0" name="template_file_0" data-field="file" accept=".zip,.tf" class="file-input">
+                                                <label for="template_file_0" class="file-upload-label">
+                                                    <span class="file-upload-icon">📁</span>
+                                                    <span class="file-upload-text">Choose file or drag it here</span>
+                                                    <span class="file-upload-button">Browse</span>
+                                                </label>
+                                                <div class="file-name-display"></div>
+                                            </div>
+                                            <small>Upload a template file (.zip or .tf)</small>
+                                        </div>
+                                    </div>
+                                    <div class="template-git-section template-source-section" style="display: none;">
+                                        <div class="form-group">
+                                            <label>Repository URL *</label>
+                                            <input type="text" name="template_0_git_repo" data-field="git_repo" placeholder="https://gitlab.com/user/repo.git">
+                                            <small>Git repository URL containing the template files</small>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Folder Path (Optional)</label>
+                                            <input type="text" name="template_0_git_folder" data-field="git_folder" placeholder="Leave empty for repository root">
+                                            <small>Path to folder containing template files. Leave empty to use repository root.</small>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Branch (Optional)</label>
+                                            <input type="text" name="template_0_git_branch" data-field="git_branch" value="main" placeholder="main">
+                                            <small>Git branch to use. Defaults to "main" if not specified.</small>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="form-group">
-                                <label for="template_git_folder">Folder Path (Optional)</label>
-                                <input type="text" id="template_git_folder" name="template_git_folder" placeholder="Leave empty for repository root">
-                                <small>Path to folder containing template files. Leave empty to use repository root.</small>
-                            </div>
-                            <div class="form-group">
-                                <label for="template_git_branch">Branch (Optional)</label>
-                                <input type="text" id="template_git_branch" name="template_git_branch" value="main" placeholder="main">
-                                <small>Git branch to use. Defaults to "main" if not specified.</small>
-                            </div>
-                        </div>
+                        </template>
 
                         <h3 class="subsection-title">Database Configuration</h3>
 

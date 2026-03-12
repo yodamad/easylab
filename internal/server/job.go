@@ -42,6 +42,16 @@ type Job struct {
 	mu                  sync.RWMutex `json:"-"`
 }
 
+// CoderTemplate defines a single Coder template (upload or git source)
+type CoderTemplate struct {
+	Name      string `json:"name"`
+	Source    string `json:"source"` // "upload" or "git"
+	FilePath  string `json:"file_path,omitempty"`
+	GitRepo   string `json:"git_repo,omitempty"`
+	GitFolder string `json:"git_folder,omitempty"`
+	GitBranch string `json:"git_branch,omitempty"`
+}
+
 // LabConfig holds all configuration values for a lab
 type LabConfig struct {
 	// Pulumi Stack Name
@@ -88,17 +98,45 @@ type LabConfig struct {
 	CoderDbUser        string `json:"coder_db_user"`
 	CoderDbPassword    string `json:"coder_db_password"`
 	CoderDbName        string `json:"coder_db_name"`
-	CoderTemplateName  string `json:"coder_template_name"`
-	TemplateFilePath   string `json:"template_file_path,omitempty"` // Path to uploaded template file (zip or tf)
 
-	// Template Source Configuration
-	TemplateSource    string `json:"template_source,omitempty"`     // "upload" or "git"
-	TemplateGitRepo   string `json:"template_git_repo,omitempty"`   // Git repository URL (mandatory for git source)
-	TemplateGitFolder string `json:"template_git_folder,omitempty"` // Folder path in repository (optional, empty = root)
-	TemplateGitBranch string `json:"template_git_branch,omitempty"` // Git branch (optional, default "main")
+	// Coder Templates (multiple templates per lab)
+	CoderTemplates []CoderTemplate `json:"coder_templates,omitempty"`
+
+	// Legacy single-template fields (kept for backward compatibility when loading persisted jobs)
+	CoderTemplateName  string `json:"coder_template_name,omitempty"`
+	TemplateFilePath   string `json:"template_file_path,omitempty"`
+	TemplateSource    string `json:"template_source,omitempty"`
+	TemplateGitRepo   string `json:"template_git_repo,omitempty"`
+	TemplateGitFolder string `json:"template_git_folder,omitempty"`
+	TemplateGitBranch string `json:"template_git_branch,omitempty"`
 
 	// OVH Endpoint
 	OvhEndpoint string `json:"ovh_endpoint"`
+}
+
+// GetCoderTemplates returns the list of Coder templates, migrating from legacy single-template fields if needed
+func (c *LabConfig) GetCoderTemplates() []CoderTemplate {
+	if len(c.CoderTemplates) > 0 {
+		return c.CoderTemplates
+	}
+	// Backward compatibility: migrate from legacy single-template fields
+	if c.CoderTemplateName != "" {
+		t := CoderTemplate{
+			Name:      c.CoderTemplateName,
+			Source:    c.TemplateSource,
+			FilePath:  c.TemplateFilePath,
+			GitRepo:   c.TemplateGitRepo,
+			GitFolder: c.TemplateGitFolder,
+			GitBranch: c.TemplateGitBranch,
+		}
+		if t.Source == "" && t.FilePath != "" {
+			t.Source = "upload"
+		} else if t.Source == "" && t.GitRepo != "" {
+			t.Source = "git"
+		}
+		return []CoderTemplate{t}
+	}
+	return nil
 }
 
 // JobManager manages Pulumi execution jobs

@@ -16,7 +16,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           BODY=$(gh api repos/${{ github.repository }}/releases/tags/${{ github.ref_name }} --jq '.body // ""')
-          SUMMARY=$(echo "$BODY" | head -n 3 | sed 's/\*\*//g' | sed '/^$/d')
+          SUMMARY=$(echo "$BODY" | head -n 5 | sed 's/\*\*//g' | sed 's/ in [a-f0-9]\{7,\}//g' | sed 's/ https:\/\/github.com[^ ]*//g' | sed '/^$/d')
           echo "summary<<EOF" >> "$GITHUB_OUTPUT"
           echo "$SUMMARY" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"

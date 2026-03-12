@@ -5,6 +5,7 @@ import (
 	"context"
 	internalK8s "easylab/k8s"
 	"easylab/utils"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -170,10 +171,51 @@ func SetupCoder(ctx *pulumi.Context, k8sProvider *k8s.Provider, ns *k8score.Name
 	return helmRelease, nil
 }
 
+// waitForCoderReachable polls the Coder API until it responds (e.g. after pod startup).
+// Uses the unauthenticated /api/v2/buildinfo endpoint. Retries for up to 10 minutes.
+func waitForCoderReachable(ctx *pulumi.Context, baseURL string) error {
+	checkURL := baseURL + "/api/v2/buildinfo"
+	interval := 15 * time.Second
+	maxAttempts := 40 // 10 minutes total
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, checkURL, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+		httpClient := &http.Client{Timeout: 10 * time.Second}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			utils.LogInfo(ctx, fmt.Sprintf("Coder not ready yet (attempt %d/%d): %v", attempt, maxAttempts, err))
+			if attempt < maxAttempts {
+				time.Sleep(interval)
+			} else {
+				return fmt.Errorf("Coder did not become reachable after %d attempts: %w", maxAttempts, err)
+			}
+			continue
+		}
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			utils.LogInfo(ctx, fmt.Sprintf("Coder is ready (attempt %d)", attempt))
+			return nil
+		}
+		// Any response means the server is up
+		utils.LogInfo(ctx, fmt.Sprintf("Coder is ready (attempt %d, status %d)", attempt, resp.StatusCode))
+		return nil
+	}
+	return fmt.Errorf("Coder did not become reachable after %d attempts", maxAttempts)
+}
+
 func InitCoder(ctx *pulumi.Context, externalIp string) (CoderConfig, error) {
 	serverURL := &url.URL{
 		Scheme: "http",
 		Host:   externalIp,
+	}
+	baseURL := serverURL.String()
+
+	// Wait for Coder to be reachable before attempting API calls (pod may still be starting)
+	if err := waitForCoderReachable(ctx, baseURL); err != nil {
+		return CoderConfig{}, err
 	}
 
 	client := codersdk.New(serverURL)
@@ -396,7 +438,7 @@ func CreateTemplateFromZip(ctx *pulumi.Context, coderInfos *CoderConfigOutput, t
 		// Create a template version from the uploaded file
 		utils.LogInfo(ctx, "Creating template version...")
 		templateVersion, err := client.CreateTemplateVersion(context.Background(), organizationID, codersdk.CreateTemplateVersionRequest{
-			Name:          utils.CoderConfig(ctx, utils.CoderTemplateName),
+			Name:          templateName,
 			FileID:        uploadResp.ID,
 			StorageMethod: codersdk.ProvisionerStorageMethodFile,
 			Provisioner:   codersdk.ProvisionerTypeTerraform,
@@ -552,6 +594,57 @@ func GetUserByUsernameWithRetry(config CoderClientConfig, adminEmail, adminPassw
 	return user, config, nil
 }
 
+// GetUserByEmail looks up an existing Coder user by email using the Users search API
+func GetUserByEmail(config CoderClientConfig, email string) (codersdk.User, error) {
+	serverURL, err := url.Parse(config.ServerURL)
+	if err != nil {
+		return codersdk.User{}, fmt.Errorf("failed to parse server URL: %w", err)
+	}
+
+	client := codersdk.New(serverURL)
+	client.SetSessionToken(config.SessionToken)
+
+	resp, err := client.Users(context.Background(), codersdk.UsersRequest{SearchQuery: email})
+	if err != nil {
+		return codersdk.User{}, fmt.Errorf("failed to search users by email: %w", err)
+	}
+
+	emailLower := strings.ToLower(email)
+	for _, u := range resp.Users {
+		if strings.ToLower(u.Email) == emailLower {
+			return u, nil
+		}
+	}
+	return codersdk.User{}, fmt.Errorf("%w: %s", ErrUserNotFound, email)
+}
+
+// ErrUserNotFound is returned when a user lookup by email finds no matching user
+var ErrUserNotFound = errors.New("user not found with email")
+
+// GetUserByEmailWithRetry looks up a user by email with automatic token refresh on failure
+func GetUserByEmailWithRetry(config CoderClientConfig, adminEmail, adminPassword, email string) (codersdk.User, CoderClientConfig, error) {
+	user, err := GetUserByEmail(config, email)
+	if err != nil {
+		if errors.Is(err, ErrUserNotFound) {
+			return codersdk.User{}, config, err
+		}
+		log.Printf("User lookup by email failed, attempting token refresh...")
+		refreshedConfig, refreshErr := RefreshToken(config, adminEmail, adminPassword)
+		if refreshErr != nil {
+			return codersdk.User{}, config, fmt.Errorf("failed to refresh token: %w", refreshErr)
+		}
+
+		user, err = GetUserByEmail(refreshedConfig, email)
+		if err != nil {
+			return codersdk.User{}, refreshedConfig, err
+		}
+
+		log.Printf("Token refreshed successfully")
+		return user, refreshedConfig, nil
+	}
+	return user, config, nil
+}
+
 // CreateWorkspace creates a workspace for a user based on a template
 func CreateWorkspace(config CoderClientConfig, userID uuid.UUID, templateID uuid.UUID, workspaceName string) (codersdk.Workspace, error) {
 	serverURL, err := url.Parse(config.ServerURL)
@@ -677,8 +770,51 @@ func CreateWorkspaceWithRetry(config CoderClientConfig, adminEmail, adminPasswor
 	return workspace, config, nil
 }
 
-// ListWorkspaces lists all workspaces for a given template
-func ListWorkspaces(config CoderClientConfig, templateID uuid.UUID) ([]codersdk.Workspace, error) {
+// UpdateUserPassword sets a user's password (admin operation; old password may be empty for admin)
+func UpdateUserPassword(config CoderClientConfig, userIDOrUsername string, newPassword string) error {
+	serverURL, err := url.Parse(config.ServerURL)
+	if err != nil {
+		return fmt.Errorf("failed to parse server URL: %w", err)
+	}
+
+	client := codersdk.New(serverURL)
+	client.SetSessionToken(config.SessionToken)
+
+	err = client.UpdateUserPassword(context.Background(), userIDOrUsername, codersdk.UpdateUserPasswordRequest{
+		OldPassword: "",
+		Password:    newPassword,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to update user password: %w", err)
+	}
+	return nil
+}
+
+// UpdateUserPasswordWithRetry updates a user's password with automatic token refresh on failure
+func UpdateUserPasswordWithRetry(config CoderClientConfig, adminEmail, adminPassword, userIDOrUsername, newPassword string) (CoderClientConfig, error) {
+	err := UpdateUserPassword(config, userIDOrUsername, newPassword)
+	if err != nil {
+		log.Printf("Password update failed, attempting token refresh...")
+		refreshedConfig, refreshErr := RefreshToken(config, adminEmail, adminPassword)
+		if refreshErr != nil {
+			return config, fmt.Errorf("failed to refresh token: %w", refreshErr)
+		}
+
+		err = UpdateUserPassword(refreshedConfig, userIDOrUsername, newPassword)
+		if err != nil {
+			return refreshedConfig, fmt.Errorf("failed to update password even after token refresh: %w", err)
+		}
+
+		log.Printf("Token refreshed successfully")
+		return refreshedConfig, nil
+	}
+	return config, nil
+}
+
+// ListWorkspaces lists all workspaces for the lab's organization.
+// It paginates through the Coder API to fetch all workspaces (users can have multiple).
+// Filters by organization only; no template filter since a lab can have multiple templates.
+func ListWorkspaces(config CoderClientConfig, _ uuid.UUID, _ string) ([]codersdk.Workspace, error) {
 	serverURL, err := url.Parse(config.ServerURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse server URL: %w", err)
@@ -687,26 +823,44 @@ func ListWorkspaces(config CoderClientConfig, templateID uuid.UUID) ([]codersdk.
 	client := codersdk.New(serverURL)
 	client.SetSessionToken(config.SessionToken)
 
-	// List all workspaces in the organization
-	workspaces, err := client.Workspaces(context.Background(), codersdk.WorkspaceFilter{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list workspaces: %w", err)
+	const pageSize = 250
+	var allWorkspaces []codersdk.Workspace
+	offset := 0
+
+	// Filter by organization so we only get workspaces from the lab's org (avoids cross-org template name collisions)
+	orgFilter := ""
+	if config.OrganizationID != "" {
+		orgFilter = fmt.Sprintf("organization:%s", config.OrganizationID)
 	}
 
-	// Filter workspaces by template ID
-	var filteredWorkspaces []codersdk.Workspace
-	for _, ws := range workspaces.Workspaces {
-		if ws.TemplateID == templateID {
-			filteredWorkspaces = append(filteredWorkspaces, ws)
+	for {
+		filter := codersdk.WorkspaceFilter{
+			Limit:       pageSize,
+			Offset:      offset,
+			FilterQuery: orgFilter,
+		}
+		resp, err := client.Workspaces(context.Background(), filter)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list workspaces: %w", err)
+		}
+
+		allWorkspaces = append(allWorkspaces, resp.Workspaces...)
+
+		if len(resp.Workspaces) < pageSize {
+			break
+		}
+		offset += pageSize
+		if resp.Count > 0 && offset >= resp.Count {
+			break
 		}
 	}
 
-	return filteredWorkspaces, nil
+	return allWorkspaces, nil
 }
 
 // ListWorkspacesWithRetry lists workspaces with automatic token refresh on failure
-func ListWorkspacesWithRetry(config CoderClientConfig, adminEmail, adminPassword string, templateID uuid.UUID) ([]codersdk.Workspace, CoderClientConfig, error) {
-	workspaces, err := ListWorkspaces(config, templateID)
+func ListWorkspacesWithRetry(config CoderClientConfig, adminEmail, adminPassword string, templateID uuid.UUID, templateName string) ([]codersdk.Workspace, CoderClientConfig, error) {
+	workspaces, err := ListWorkspaces(config, templateID, templateName)
 	if err != nil {
 		// If it fails, try to refresh token and retry
 		log.Printf("Workspace listing failed, attempting token refresh...")
@@ -716,7 +870,7 @@ func ListWorkspacesWithRetry(config CoderClientConfig, adminEmail, adminPassword
 		}
 
 		// Retry with refreshed token
-		workspaces, err = ListWorkspaces(refreshedConfig, templateID)
+		workspaces, err = ListWorkspaces(refreshedConfig, templateID, templateName)
 		if err != nil {
 			return nil, refreshedConfig, fmt.Errorf("failed to list workspaces even after token refresh: %w", err)
 		}
