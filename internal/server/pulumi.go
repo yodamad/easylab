@@ -250,6 +250,87 @@ func (pe *PulumiExecutor) GetWorkDir() string {
 	return pe.workDir
 }
 
+// requiredPlugin describes a Pulumi resource plugin needed by the templates.
+// Versions must match the entries in templates/go.mod.
+type requiredPlugin struct {
+	Name    string
+	Version string
+}
+
+// requiredPlugins is the list of Pulumi resource plugins the templates depend on.
+var requiredPlugins = []requiredPlugin{
+	{"command", "1.1.3"},
+	{"kubernetes", "4.24.1"},
+	{"ovh", "2.10.0"},
+}
+
+// CheckAndInstallPlugins verifies every required Pulumi resource plugin is healthy
+// inside PULUMI_HOME/plugins. For each plugin it:
+//  1. Checks whether the plugin binary exists; installs it via the Pulumi CLI if not.
+//  2. Creates a minimal PulumiPlugin.yaml when absent — the Pulumi SDK requires
+//     that file to load a plugin even though recent plugin releases no longer ship it.
+func (pe *PulumiExecutor) CheckAndInstallPlugins() {
+	pulumiHome := getEnvOrDefault("PULUMI_HOME", filepath.Join(getAppBaseDir(), ".pulumi"))
+	pluginsDir := filepath.Join(pulumiHome, "plugins")
+
+	log.Printf("[PLUGINS] Checking required Pulumi plugins in %s", pluginsDir)
+
+	for _, p := range requiredPlugins {
+		dirName := fmt.Sprintf("resource-%s-v%s", p.Name, p.Version)
+		pluginDir := filepath.Join(pluginsDir, dirName)
+		binaryPath := filepath.Join(pluginDir, fmt.Sprintf("pulumi-resource-%s", p.Name))
+		yamlPath := filepath.Join(pluginDir, "PulumiPlugin.yaml")
+
+		// Step 1: ensure binary is present.
+		if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
+			log.Printf("[PLUGINS] Plugin %s v%s binary missing — installing...", p.Name, p.Version)
+			if installErr := pe.installPlugin(p.Name, p.Version, pulumiHome); installErr != nil {
+				log.Printf("[PLUGINS] Warning: could not install plugin %s v%s: %v", p.Name, p.Version, installErr)
+			} else {
+				log.Printf("[PLUGINS] Plugin %s v%s installed successfully", p.Name, p.Version)
+			}
+		} else {
+			log.Printf("[PLUGINS] Plugin %s v%s binary OK", p.Name, p.Version)
+		}
+
+		// Step 2: ensure PulumiPlugin.yaml exists.
+		if _, err := os.Stat(yamlPath); os.IsNotExist(err) {
+			log.Printf("[PLUGINS] Plugin %s v%s missing PulumiPlugin.yaml — creating it...", p.Name, p.Version)
+			if mkErr := os.MkdirAll(pluginDir, 0755); mkErr != nil {
+				log.Printf("[PLUGINS] Warning: failed to create plugin dir %s: %v", pluginDir, mkErr)
+				continue
+			}
+			content := fmt.Sprintf("name: %s\nversion: %s\n", p.Name, p.Version)
+			if writeErr := os.WriteFile(yamlPath, []byte(content), 0644); writeErr != nil {
+				log.Printf("[PLUGINS] Warning: failed to write PulumiPlugin.yaml for %s v%s: %v", p.Name, p.Version, writeErr)
+			} else {
+				log.Printf("[PLUGINS] PulumiPlugin.yaml created for %s v%s", p.Name, p.Version)
+			}
+		}
+	}
+
+	log.Printf("[PLUGINS] Plugin check complete")
+}
+
+// installPlugin runs `pulumi plugin install resource <name> <version>` with the
+// given PULUMI_HOME, with a 5-minute timeout.
+func (pe *PulumiExecutor) installPlugin(name, version, pulumiHome string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "pulumi", "plugin", "install", "resource", name, version)
+	cmd.Env = append(os.Environ(), fmt.Sprintf("PULUMI_HOME=%s", pulumiHome))
+
+	output, err := cmd.CombinedOutput()
+	if len(output) > 0 {
+		log.Printf("[PLUGINS] Install output for %s v%s: %s", name, version, strings.TrimSpace(string(output)))
+	}
+	if err != nil {
+		return fmt.Errorf("pulumi plugin install resource %s %s: %w\nOutput: %s", name, version, err, string(output))
+	}
+	return nil
+}
+
 // getLocalBackendEnvVars returns environment variables for local file backend and Go cache
 // When jobDir is provided, use job-local GOMODCACHE/GOCACHE to avoid embed "no matching files found"
 // errors that occur when building from job directory with shared module cache
