@@ -882,9 +882,15 @@ func (h *Handler) ServeStatic(w http.ResponseWriter, r *http.Request) {
 
 // DownloadKubeconfig serves the kubeconfig file for download
 func (h *Handler) DownloadKubeconfig(w http.ResponseWriter, r *http.Request) {
-	// Extract job ID from path like /api/jobs/{id}/kubeconfig
+	// Extract job ID from path like /api/jobs/{id}/kubeconfig or /api/labs/{id}/kubeconfig
 	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(pathParts) < 4 || pathParts[0] != "api" || pathParts[1] != "jobs" || pathParts[3] != "kubeconfig" {
+	if len(pathParts) < 4 || pathParts[0] != "api" || pathParts[3] != "kubeconfig" {
+		log.Printf("Invalid path for kubeconfig download: %s", r.URL.Path)
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	// Accept both "jobs" and "labs" as the second path segment
+	if pathParts[1] != "jobs" && pathParts[1] != "labs" {
 		log.Printf("Invalid path for kubeconfig download: %s", r.URL.Path)
 		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
