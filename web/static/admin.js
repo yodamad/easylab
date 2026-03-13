@@ -482,20 +482,62 @@ function loadOVHFlavors() {
         return;
     }
 
+    let url = '/api/ovh/flavors?region=' + encodeURIComponent(region);
+    const minVcpus = document.getElementById('flavor_filter_min_vcpus');
+    const maxVcpus = document.getElementById('flavor_filter_max_vcpus');
+    const minRam = document.getElementById('flavor_filter_min_ram');
+    const maxRam = document.getElementById('flavor_filter_max_ram');
+    if (minVcpus && minVcpus.value) url += '&min_vcpus=' + encodeURIComponent(minVcpus.value);
+    if (maxVcpus && maxVcpus.value) url += '&max_vcpus=' + encodeURIComponent(maxVcpus.value);
+    if (minRam && minRam.value) url += '&min_ram=' + encodeURIComponent(minRam.value);
+    if (maxRam && maxRam.value) url += '&max_ram=' + encodeURIComponent(maxRam.value);
+
     flavorSelect.innerHTML = '<option value="">Loading flavors…</option>';
 
-    fetch('/api/ovh/flavors?region=' + encodeURIComponent(region))
+    fetch(url)
         .then(response => {
             if (!response.ok) throw new Error('Failed to load flavors');
             return response.text();
         })
         .then(html => {
             flavorSelect.innerHTML = html;
+            const hint = document.getElementById('flavor-filter-hint');
+            if (hint) {
+                const opts = flavorSelect.options;
+                const noMatch = opts.length === 1 && opts[0].disabled && opts[0].textContent.indexOf('No flavors match') !== -1;
+                hint.style.display = noMatch ? 'block' : 'none';
+            }
         })
         .catch(err => {
             console.error('Error loading OVH flavors:', err);
             flavorSelect.innerHTML = '<option value="" disabled selected>Failed to load flavors</option>';
+            const hint = document.getElementById('flavor-filter-hint');
+            if (hint) hint.style.display = 'none';
         });
+}
+
+// Toggle flavor filters section visibility (lab creation form)
+function toggleFlavorFiltersSection() {
+    var body = document.getElementById('flavor-filters-body');
+    var toggle = document.getElementById('flavor-filters-toggle');
+    if (!body || !toggle) return;
+    if (body.style.display === 'none') {
+        body.style.display = 'block';
+        toggle.style.transform = 'rotate(180deg)';
+    } else {
+        body.style.display = 'none';
+        toggle.style.transform = 'rotate(0deg)';
+    }
+}
+
+// Clear flavor filter inputs and reload the flavor list
+function clearFlavorFilters() {
+    const ids = ['flavor_filter_min_vcpus', 'flavor_filter_max_vcpus', 'flavor_filter_min_ram', 'flavor_filter_max_ram'];
+    ids.forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) el.value = '0';
+    });
+    loadOVHFlavors();
 }
 
 // Check credentials status and show/hide disclaimer
@@ -675,6 +717,20 @@ document.addEventListener('DOMContentLoaded', function() {
     const regionSelect = document.getElementById('network_region');
     if (regionSelect) {
         regionSelect.addEventListener('change', loadOVHFlavors);
+    }
+
+    // Reload flavors when flavor filter inputs change
+    ['flavor_filter_min_vcpus', 'flavor_filter_max_vcpus', 'flavor_filter_min_ram', 'flavor_filter_max_ram'].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('change', loadOVHFlavors);
+        }
+    });
+
+    // Clear flavor filters button
+    const flavorFilterClearBtn = document.getElementById('flavor_filter_clear_btn');
+    if (flavorFilterClearBtn) {
+        flavorFilterClearBtn.addEventListener('click', clearFlavorFilters);
     }
 
     // Set up network mask calculation

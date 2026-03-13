@@ -127,6 +127,41 @@
                     </table>
                 </div>
 
+                <!-- Flavor filters (CPU/RAM) - collapsible -->
+                <div class="form-section" style="margin-bottom: 2rem;">
+                    <div style="border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;">
+                        <div class="ovh-flavor-filters-header" style="padding: 0.5rem 0.75rem; background: var(--surface); display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="toggleFlavorFiltersSection()" id="ovh_flavor_filters_toggle_wrap">
+                            <h2 style="margin: 0; font-size: 1rem;">Flavor filters</h2>
+                            <span id="ovh-flavor-filters-toggle" style="transition: transform 0.2s;">&#9660;</span>
+                        </div>
+                        <div id="ovh-flavor-filters-body" style="display: none; padding: 0.75rem 1rem; border-top: 1px solid var(--border);">
+                            <p style="color: var(--text-light); margin: 0 0 0.75rem 0; font-size: 0.875rem;">Only flavors matching these CPU/RAM bounds are shown. Use 0 for no limit.</p>
+                            <div class="form-row" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end;">
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="flavor_filter_min_vcpus" style="font-size: 0.875rem;">Min vCPUs</label>
+                                    <input type="number" id="flavor_filter_min_vcpus" name="flavor_filter_min_vcpus" min="0" value="{{.Config.FlavorMinVCPUs}}" placeholder="0" title="0 = no minimum" style="width: 2.75rem; padding: 0.25rem 0.35rem; font-size: 0.875rem;">
+                                </div>
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="flavor_filter_max_vcpus" style="font-size: 0.875rem;">Max vCPUs</label>
+                                    <input type="number" id="flavor_filter_max_vcpus" name="flavor_filter_max_vcpus" min="0" value="{{.Config.FlavorMaxVCPUs}}" placeholder="0" title="0 = no maximum" style="width: 2.75rem; padding: 0.25rem 0.35rem; font-size: 0.875rem;">
+                                </div>
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="flavor_filter_min_ram" style="font-size: 0.875rem;">Min RAM (GB)</label>
+                                    <input type="number" id="flavor_filter_min_ram" name="flavor_filter_min_ram" min="0" value="{{.Config.FlavorMinRAM}}" placeholder="0" title="0 = no minimum" style="width: 2.75rem; padding: 0.25rem 0.35rem; font-size: 0.875rem;">
+                                </div>
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="flavor_filter_max_ram" style="font-size: 0.875rem;">Max RAM (GB)</label>
+                                    <input type="number" id="flavor_filter_max_ram" name="flavor_filter_max_ram" min="0" value="{{.Config.FlavorMaxRAM}}" placeholder="0" title="0 = no maximum" style="width: 2.75rem; padding: 0.25rem 0.35rem; font-size: 0.875rem;">
+                                </div>
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label style="visibility: hidden; font-size: 0.875rem;">Actions</label>
+                                    <button type="button" id="ovh_flavor_filter_clear_btn" class="btn btn-secondary" style="font-size: 0.8125rem; padding: 0.25rem 0.5rem;">Clear</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Flavors Section -->
                 <div class="form-section" style="margin-bottom: 2rem;">
                     <h2>Flavors</h2>

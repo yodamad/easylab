@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/ovh/go-ovh/ovh"
@@ -94,14 +95,24 @@ func (h *Handler) GetOVHFlavors(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Region is required", http.StatusBadRequest)
 		return
 	}
+	q := r.URL.Query()
+	minVcpus, _ := strconv.Atoi(q.Get("min_vcpus"))
+	maxVcpus, _ := strconv.Atoi(q.Get("max_vcpus"))
+	minRam, _ := strconv.Atoi(q.Get("min_ram"))
+	maxRam, _ := strconv.Atoi(q.Get("max_ram"))
 
 	if h.ovhOptionsManager != nil && h.ovhOptionsManager.HasCache() {
 		flavors, defaultFlavor := h.ovhOptionsManager.GetFlavorsForForm(region)
+		flavors = filterFlavorsByCPURAM(flavors, minVcpus, maxVcpus, minRam, maxRam)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		for _, f := range flavors {
+		if len(flavors) == 0 {
+			fmt.Fprint(w, `<option value="" disabled selected>No flavors match — adjust filters or use 0 for no limit</option>`)
+			return
+		}
+		for i, f := range flavors {
 			label := fmt.Sprintf("%s (%d vCPU, %d GB RAM)", f.Name, f.VCPUs, f.RAM)
 			selected := ""
-			if f.Name == defaultFlavor || (defaultFlavor == "" && f.Name == flavors[0].Name) {
+			if f.Name == defaultFlavor || (defaultFlavor == "" && i == 0) {
 				selected = " selected"
 			}
 			fmt.Fprintf(w, `<option value="%s"%s>%s</option>`, escapeHTML(f.Name), selected, escapeHTML(label))
@@ -129,8 +140,13 @@ func (h *Handler) GetOVHFlavors(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(flavors, func(i, j int) bool {
 		return flavors[i].Name < flavors[j].Name
 	})
+	flavors = filterFlavorsByCPURAM(flavors, minVcpus, maxVcpus, minRam, maxRam)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if len(flavors) == 0 {
+		fmt.Fprint(w, `<option value="" disabled selected>No flavors match — adjust filters or use 0 for no limit</option>`)
+		return
+	}
 	for i, f := range flavors {
 		label := fmt.Sprintf("%s (%d vCPU, %d GB RAM)", f.Name, f.VCPUs, f.RAM)
 		if i == 0 {

@@ -20,8 +20,12 @@ type OVHItemConfig struct {
 
 // OVHOptionsConfig is the persisted admin preferences for regions and flavors.
 type OVHOptionsConfig struct {
-	Regions OVHItemConfig            `json:"regions"`
-	Flavors map[string]OVHItemConfig `json:"flavors"`
+	Regions        OVHItemConfig            `json:"regions"`
+	Flavors        map[string]OVHItemConfig `json:"flavors"`
+	FlavorMinVCPUs int                      `json:"flavor_min_vcpus"`
+	FlavorMaxVCPUs int                      `json:"flavor_max_vcpus"`
+	FlavorMinRAM   int                      `json:"flavor_min_ram"`
+	FlavorMaxRAM   int                      `json:"flavor_max_ram"`
 }
 
 // OVHOptionsManager caches OVH regions/flavors in memory and applies admin filtering preferences.
@@ -117,7 +121,11 @@ func (m *OVHOptionsManager) GetConfig() OVHOptionsConfig {
 			Enabled: append([]string(nil), m.config.Regions.Enabled...),
 			Default: m.config.Regions.Default,
 		},
-		Flavors: make(map[string]OVHItemConfig, len(m.config.Flavors)),
+		Flavors:        make(map[string]OVHItemConfig, len(m.config.Flavors)),
+		FlavorMinVCPUs: m.config.FlavorMinVCPUs,
+		FlavorMaxVCPUs: m.config.FlavorMaxVCPUs,
+		FlavorMinRAM:   m.config.FlavorMinRAM,
+		FlavorMaxRAM:   m.config.FlavorMaxRAM,
 	}
 	for k, v := range m.config.Flavors {
 		cfg.Flavors[k] = OVHItemConfig{
@@ -263,6 +271,8 @@ func (m *OVHOptionsManager) GetFlavorsForForm(region string) (flavors []ovhFlavo
 		}
 	}
 
+	result = filterFlavorsByCPURAM(result, m.config.FlavorMinVCPUs, m.config.FlavorMaxVCPUs, m.config.FlavorMinRAM, m.config.FlavorMaxRAM)
+
 	if cfg, ok := m.config.Flavors[region]; ok {
 		defaultFlavor = cfg.Default
 	}
@@ -277,6 +287,31 @@ func (m *OVHOptionsManager) GetFlavorsForForm(region string) (flavors []ovhFlavo
 	}
 
 	return result, defaultFlavor
+}
+
+// filterFlavorsByCPURAM returns flavors that match the given min/max vCPU and RAM bounds.
+// A value of 0 means no filter for that bound.
+func filterFlavorsByCPURAM(flavors []ovhFlavor, minVCPUs, maxVCPUs, minRAM, maxRAM int) []ovhFlavor {
+	if minVCPUs == 0 && maxVCPUs == 0 && minRAM == 0 && maxRAM == 0 {
+		return flavors
+	}
+	var out []ovhFlavor
+	for _, f := range flavors {
+		if minVCPUs > 0 && f.VCPUs < minVCPUs {
+			continue
+		}
+		if maxVCPUs > 0 && f.VCPUs > maxVCPUs {
+			continue
+		}
+		if minRAM > 0 && f.RAM < minRAM {
+			continue
+		}
+		if maxRAM > 0 && f.RAM > maxRAM {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 func toSet(items []string) map[string]bool {
