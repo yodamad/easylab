@@ -241,23 +241,22 @@ update-docker-compose:
     - apk add --no-cache git sed
     - git config --global user.email "ci@gitlab"
     - git config --global user.name "GitLab CI"
-  script:
-    - |
+  script: |
       if [ -z "${GITLAB_PROJECT_ACCESS_TOKEN}" ]; then
         echo "GITLAB_PROJECT_ACCESS_TOKEN not set; skipping docker-compose update."
         exit 0
       fi
-    - git clone --depth 1 --branch "${CI_DEFAULT_BRANCH}" "https://gitlab-ci-token:${GITLAB_PROJECT_ACCESS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" repo
-    - cd repo
-    - sed -i "s|\(image: docker.io/[^/]*/easylab:\)[^[:space:]]*|\1${CI_COMMIT_TAG}|" docker-compose.yml
-    - |
+      git clone --depth 1 --branch "${CI_DEFAULT_BRANCH}" "https://gitlab-ci-token:${GITLAB_PROJECT_ACCESS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" repo
+      cd repo
+      sed -i "s|\(image: docker.io/[^/]*/easylab:\)[^[:space:]]*|\1${CI_COMMIT_TAG}|" docker-compose.yml
+
       if git diff --quiet docker-compose.yml; then
         echo "docker-compose.yml already has image tag ${CI_COMMIT_TAG}; nothing to commit."
         exit 0
       fi
-    - git add docker-compose.yml
-    - git commit -m "chore: set docker-compose image to ${CI_COMMIT_TAG}"
-    - git push "https://gitlab-ci-token:${GITLAB_PROJECT_ACCESS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" HEAD:${CI_DEFAULT_BRANCH}
+      git add docker-compose.yml
+      git commit -m "🐳 Update docker-compose when releasing"
+      git push "https://gitlab-ci-token:${GITLAB_PROJECT_ACCESS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" HEAD:${CI_DEFAULT_BRANCH}
   only:
     - tags
   tags:
