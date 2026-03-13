@@ -67,6 +67,12 @@ func getFormValue(r *http.Request, key string) string {
 	return value
 }
 
+// atoiForm parses s as an int; returns 0 on empty or invalid input.
+func atoiForm(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
+}
+
 // NewHandler creates a new HTTP handler
 func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsManager *CredentialsManager, ovhOptionsManager *OVHOptionsManager) *Handler {
 	return &Handler{
@@ -509,6 +515,18 @@ func (h *Handler) ServeAdminUI(w http.ResponseWriter, r *http.Request) {
 	data := map[string]interface{}{
 		"HasCredentials": hasCredentials,
 	}
+	if h.ovhOptionsManager != nil {
+		cfg := h.ovhOptionsManager.GetConfig()
+		data["FlavorMinVCPUs"] = cfg.FlavorMinVCPUs
+		data["FlavorMaxVCPUs"] = cfg.FlavorMaxVCPUs
+		data["FlavorMinRAM"] = cfg.FlavorMinRAM
+		data["FlavorMaxRAM"] = cfg.FlavorMaxRAM
+	} else {
+		data["FlavorMinVCPUs"] = 0
+		data["FlavorMaxVCPUs"] = 0
+		data["FlavorMinRAM"] = 0
+		data["FlavorMaxRAM"] = 0
+	}
 
 	h.serveTemplate(w, "admin.html", data)
 }
@@ -882,9 +900,15 @@ func (h *Handler) ServeStatic(w http.ResponseWriter, r *http.Request) {
 
 // DownloadKubeconfig serves the kubeconfig file for download
 func (h *Handler) DownloadKubeconfig(w http.ResponseWriter, r *http.Request) {
-	// Extract job ID from path like /api/jobs/{id}/kubeconfig
+	// Extract job ID from path like /api/jobs/{id}/kubeconfig or /api/labs/{id}/kubeconfig
 	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(pathParts) < 4 || pathParts[0] != "api" || pathParts[1] != "jobs" || pathParts[3] != "kubeconfig" {
+	if len(pathParts) < 4 || pathParts[0] != "api" || pathParts[3] != "kubeconfig" {
+		log.Printf("Invalid path for kubeconfig download: %s", r.URL.Path)
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	// Accept both "jobs" and "labs" as the second path segment
+	if pathParts[1] != "jobs" && pathParts[1] != "labs" {
 		log.Printf("Invalid path for kubeconfig download: %s", r.URL.Path)
 		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
@@ -921,6 +945,57 @@ func (h *Handler) DownloadKubeconfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", strconv.Itoa(len(kubeconfig)))
 
 	w.Write([]byte(kubeconfig))
+}
+
+// GetCoderCredentials returns Coder admin URL, email, and password for a completed lab.
+func (h *Handler) GetCoderCredentials(w http.ResponseWriter, r *http.Request) {
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 4 || pathParts[0] != "api" || pathParts[3] != "coder-credentials" {
+		log.Printf("Invalid path for coder credentials: %s", r.URL.Path)
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	if pathParts[1] != "jobs" && pathParts[1] != "labs" {
+		log.Printf("Invalid path for coder credentials: %s", r.URL.Path)
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	jobID := pathParts[2]
+
+	job, exists := h.jobManager.GetJob(jobID)
+	if !exists {
+		log.Printf("Job not found: %s", jobID)
+		http.Error(w, "Job not found", http.StatusNotFound)
+		return
+	}
+
+	job.mu.RLock()
+	status := job.Status
+	coderURL := job.CoderURL
+	coderAdminEmail := job.CoderAdminEmail
+	coderAdminPassword := job.CoderAdminPassword
+	job.mu.RUnlock()
+
+	if status != JobStatusCompleted {
+		http.Error(w, "Lab is not completed", http.StatusBadRequest)
+		return
+	}
+
+	coderURL = extractStringFromConfigValue(coderURL)
+	coderAdminEmail = extractStringFromConfigValue(coderAdminEmail)
+	coderAdminPassword = extractStringFromConfigValue(coderAdminPassword)
+
+	if coderURL == "" || coderAdminEmail == "" || coderAdminPassword == "" {
+		http.Error(w, "Coder configuration not available for this lab", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"url":      coderURL,
+		"email":    coderAdminEmail,
+		"password": coderAdminPassword,
+	})
 }
 
 // ServeStudentDashboard serves the student dashboard page
@@ -1557,6 +1632,7 @@ func (h *Handler) ServeOVHOptions(w http.ResponseWriter, r *http.Request) {
 			Default: r == cfg.Regions.Default,
 		}
 		cachedFlavors := h.ovhOptionsManager.GetCachedFlavors(r)
+		cachedFlavors = filterFlavorsByCPURAM(cachedFlavors, cfg.FlavorMinVCPUs, cfg.FlavorMaxVCPUs, cfg.FlavorMinRAM, cfg.FlavorMaxRAM)
 		flavorCfg := cfg.Flavors[r]
 		enabledFlavorSet := toSet(flavorCfg.Enabled)
 		showAllFlavors := len(enabledFlavorSet) == 0
@@ -1605,7 +1681,11 @@ func (h *Handler) SaveOVHOptions(w http.ResponseWriter, r *http.Request) {
 			Enabled: r.Form["region_enabled"],
 			Default: r.FormValue("region_default"),
 		},
-		Flavors: make(map[string]OVHItemConfig),
+		Flavors:        make(map[string]OVHItemConfig),
+		FlavorMinVCPUs: atoiForm(r.FormValue("flavor_filter_min_vcpus")),
+		FlavorMaxVCPUs: atoiForm(r.FormValue("flavor_filter_max_vcpus")),
+		FlavorMinRAM:   atoiForm(r.FormValue("flavor_filter_min_ram")),
+		FlavorMaxRAM:   atoiForm(r.FormValue("flavor_filter_max_ram")),
 	}
 
 	regions := h.ovhOptionsManager.GetCachedRegions()

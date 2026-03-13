@@ -280,11 +280,44 @@
                             <input type="text" id="nodepool_name" name="nodepool_name" value="dev-nodepool" required data-base-name="nodepool">
                         </div>
 
+                        <div class="form-group" style="border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;">
+                            <div class="flavor-filters-header" style="padding: 0.5rem 0.75rem; background: var(--surface); display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="toggleFlavorFiltersSection()" id="flavor-filters-toggle-wrap">
+                                <span style="font-weight: 600; font-size: 0.9375rem;">Flavor filters (CPU/RAM)</span>
+                                <span id="flavor-filters-toggle" style="transition: transform 0.2s;">&#9660;</span>
+                            </div>
+                            <div id="flavor-filters-body" style="display: none; padding: 0.75rem; border-top: 1px solid var(--border);">
+                                <p class="section-description" style="margin-top: 0; margin-bottom: 0.5rem; font-size: 0.875rem;">Narrow the flavor list. Use 0 for no limit.</p>
+                                <div class="form-row" style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: flex-end;">
+                                    <div class="form-group" style="margin-bottom: 0;">
+                                        <label for="flavor_filter_min_vcpus" style="font-size: 0.8125rem;">Min vCPUs</label>
+                                        <input type="number" id="flavor_filter_min_vcpus" name="flavor_filter_min_vcpus" min="0" value="{{.FlavorMinVCPUs}}" placeholder="0" title="0 = no minimum" style="width: 2.75rem; padding: 0.25rem 0.35rem; font-size: 0.875rem;">
+                                    </div>
+                                    <div class="form-group" style="margin-bottom: 0;">
+                                        <label for="flavor_filter_max_vcpus" style="font-size: 0.8125rem;">Max vCPUs</label>
+                                        <input type="number" id="flavor_filter_max_vcpus" name="flavor_filter_max_vcpus" min="0" value="{{.FlavorMaxVCPUs}}" placeholder="0" title="0 = no maximum" style="width: 2.75rem; padding: 0.25rem 0.35rem; font-size: 0.875rem;">
+                                    </div>
+                                    <div class="form-group" style="margin-bottom: 0;">
+                                        <label for="flavor_filter_min_ram" style="font-size: 0.8125rem;">Min RAM</label>
+                                        <input type="number" id="flavor_filter_min_ram" name="flavor_filter_min_ram" min="0" value="{{.FlavorMinRAM}}" placeholder="0" title="0 = no minimum (GB)" style="width: 2.75rem; padding: 0.25rem 0.35rem; font-size: 0.875rem;">
+                                    </div>
+                                    <div class="form-group" style="margin-bottom: 0;">
+                                        <label for="flavor_filter_max_ram" style="font-size: 0.8125rem;">Max RAM</label>
+                                        <input type="number" id="flavor_filter_max_ram" name="flavor_filter_max_ram" min="0" value="{{.FlavorMaxRAM}}" placeholder="0" title="0 = no maximum (GB)" style="width: 2.75rem; padding: 0.25rem 0.35rem; font-size: 0.875rem;">
+                                    </div>
+                                    <div class="form-group" style="margin-bottom: 0;">
+                                        <label style="visibility: hidden; font-size: 0.8125rem;">Actions</label>
+                                        <button type="button" id="flavor_filter_clear_btn" class="btn btn-secondary" style="font-size: 0.8125rem; padding: 0.25rem 0.5rem;">Clear</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="form-group">
                             <label for="nodepool_flavor">Flavor *</label>
                             <select id="nodepool_flavor" name="nodepool_flavor" required>
                                 <option value="">Select a region first…</option>
                             </select>
+                            <div id="flavor-filter-hint" style="display: none; margin-top: 0.25rem; font-size: 0.875rem; color: var(--text-light);">No flavors match your filters. Set min/max to 0 for no limit or adjust the values above.</div>
                         </div>
 
                         <div class="form-row">

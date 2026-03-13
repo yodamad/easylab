@@ -405,6 +405,26 @@ func TestHandler_DownloadKubeconfig_FailedJobWithKubeconfig(t *testing.T) {
 	}
 }
 
+func TestHandler_DownloadKubeconfig_SuccessViaLabsPath(t *testing.T) {
+	jm := NewJobManager("")
+	config := &LabConfig{StackName: "test"}
+	jobID := jm.CreateJob(config)
+	jm.UpdateJobStatus(jobID, JobStatusCompleted)
+	jm.SetKubeconfig(jobID, "apiVersion: v1\nkind: Config")
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil)
+
+	// Labs list page uses /api/labs/{id}/kubeconfig
+	req := httptest.NewRequest("GET", "/api/labs/"+jobID+"/kubeconfig", nil)
+	w := httptest.NewRecorder()
+
+	h.DownloadKubeconfig(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("DownloadKubeconfig() via /api/labs/ status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
 func TestHandler_ListLabs(t *testing.T) {
 	jm := NewJobManager("")
 
