@@ -305,6 +305,13 @@ func main() {
 			handler.RetryJob(w, r)
 			return
 		}
+		// Check if this is a coder credentials request
+		if strings.HasSuffix(r.URL.Path, "/coder-credentials") {
+			if r.Method == http.MethodGet {
+				handler.GetCoderCredentials(w, r)
+				return
+			}
+		}
 		// Check if this is a kubeconfig download request
 		if strings.HasSuffix(r.URL.Path, "/kubeconfig") {
 			handler.DownloadKubeconfig(w, r)

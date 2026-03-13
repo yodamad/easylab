@@ -929,6 +929,57 @@ func (h *Handler) DownloadKubeconfig(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(kubeconfig))
 }
 
+// GetCoderCredentials returns Coder admin URL, email, and password for a completed lab.
+func (h *Handler) GetCoderCredentials(w http.ResponseWriter, r *http.Request) {
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 4 || pathParts[0] != "api" || pathParts[3] != "coder-credentials" {
+		log.Printf("Invalid path for coder credentials: %s", r.URL.Path)
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	if pathParts[1] != "jobs" && pathParts[1] != "labs" {
+		log.Printf("Invalid path for coder credentials: %s", r.URL.Path)
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	jobID := pathParts[2]
+
+	job, exists := h.jobManager.GetJob(jobID)
+	if !exists {
+		log.Printf("Job not found: %s", jobID)
+		http.Error(w, "Job not found", http.StatusNotFound)
+		return
+	}
+
+	job.mu.RLock()
+	status := job.Status
+	coderURL := job.CoderURL
+	coderAdminEmail := job.CoderAdminEmail
+	coderAdminPassword := job.CoderAdminPassword
+	job.mu.RUnlock()
+
+	if status != JobStatusCompleted {
+		http.Error(w, "Lab is not completed", http.StatusBadRequest)
+		return
+	}
+
+	coderURL = extractStringFromConfigValue(coderURL)
+	coderAdminEmail = extractStringFromConfigValue(coderAdminEmail)
+	coderAdminPassword = extractStringFromConfigValue(coderAdminPassword)
+
+	if coderURL == "" || coderAdminEmail == "" || coderAdminPassword == "" {
+		http.Error(w, "Coder configuration not available for this lab", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"url":      coderURL,
+		"email":    coderAdminEmail,
+		"password": coderAdminPassword,
+	})
+}
+
 // ServeStudentDashboard serves the student dashboard page
 func (h *Handler) ServeStudentDashboard(w http.ResponseWriter, r *http.Request) {
 	h.serveTemplate(w, "student-dashboard.html", nil)

@@ -2781,3 +2781,110 @@ body.student-dashboard-page {
         justify-content: center;
     }
 }
+
+/* Coder credentials modal */
+.credentials-modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: rgba(0, 0, 0, 0.5);
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+
+.credentials-modal-overlay.visible {
+    display: flex;
+}
+
+.credentials-modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+    max-width: 28rem;
+    width: 100%;
+    max-height: 90vh;
+    overflow: auto;
+}
+
+.credentials-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.credentials-modal-header h3 {
+    margin: 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.credentials-modal-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    line-height: 1;
+    color: var(--text-light);
+    cursor: pointer;
+    padding: 0.25rem;
+}
+
+.credentials-modal-close:hover {
+    color: var(--text);
+}
+
+.credentials-modal-body {
+    padding: 1.25rem;
+}
+
+.credentials-modal-loading,
+.credentials-modal-error {
+    color: var(--text-light);
+}
+
+.credentials-modal-error {
+    color: #b91c1c;
+}
+
+.credentials-modal-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.credentials-modal-row label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 0.375rem;
+}
+
+.credentials-modal-value-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.credentials-modal-input {
+    flex: 1;
+    min-width: 0;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    background: var(--surface);
+    color: var(--text);
+}
+
+.credentials-copy-btn,
+.credentials-toggle-password {
+    flex-shrink: 0;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+}
