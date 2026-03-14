@@ -55,6 +55,20 @@ The application can be configured using the following environment variables:
 - `WORK_DIR`: Directory for job workspaces (default: /app/jobs)
 - `DATA_DIR`: Directory for persisting job data (default: /app/data)
 
+You can also set OVHcloud credentials via environment variables (`OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SERVICE_NAME`, `OVH_ENDPOINT`); see [OVHcloud configuration](ovhcloud.md).
+
+### Environment file {#environment-file}
+
+When running the EasyLab server binary directly (not only in Docker), you can load environment variables from a file at startup:
+
+```bash
+./easylab-server -env-file=./env.sh
+```
+
+The file format is standard `.env` style: one `KEY=VALUE` per line. Lines starting with `#` are comments; lines starting with `export ` are supported for compatibility with shell scripts. This allows you to keep secrets out of the command line and reuse a single file for local development.
+
+**Server flags** (when running the binary): `-port` (default: 8081), `-work-dir`, `-data-dir`, `-env-file`. Environment variables `WORK_DIR` and `DATA_DIR` override the defaults if set.
+
 ### Data Persistence
 
 The Docker Compose setup includes two named volumes for data persistence:

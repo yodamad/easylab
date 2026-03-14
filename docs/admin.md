@@ -7,13 +7,19 @@ icon: lucide/shield-check
 As an admin (trainer, speaker, ...), you have access to the admin space to manage your labs:
 
 * [x] Create a new lab
+* [x] Define multiple Coder templates per lab (students get one workspace per template)
+* [x] Dry run (preview) a lab before creating it
 * [x] Set/update credentials for the cloud providers
 * [x] Manage your labs
     * [x] See logs
+    * [x] Retrieve Coder admin credentials (URL, email, password) for completed labs
     * [x] Delete a lab
+    * [x] Recreate a destroyed lab with the same configuration
     * [x] List workspaces
-    * [x] Delete workspaces
+    * [x] Delete workspaces (one by one or in bulk)
     * [x] Retry a failing lab installation
+
+![Admin header](screens/admin.png)
 
 ## Create a new lab
 
@@ -79,51 +85,37 @@ You need to setup the secrets for the Coder instance:
     * `Coder Db Name`: The name of the coder database
     * `Coder Template Name`: The name of the coder template
 
-Then, you need to select the [Coder template](https://coder.com/docs/admin/templates){target="_blank"} you want to use.
+Then, you need to define **one or more** [Coder templates](https://coder.com/docs/admin/templates){target="_blank"} for the lab. Each template is a different workspace type (e.g. Docker, Go, Node) that students can choose when requesting a workspace.
 
-![Coder template selection](screens/template.png)
+![Coder template selection](screens/templates.png)
 
-Either you can upload a file:
+Use **Add Template** to define additional templates. For each template you can:
 
-* [x] a zip file containing the template and documentation
-* [x] a single `.tf` file containing the template information
+* **Template name** — Name shown in Coder and in the student template selector.
+* **Source** — Either upload a file or use a Git repository.
 
-Or you can use a remote Git repository by providing:
+**Upload:** a zip file containing the template and documentation, or a single `.tf` file.
 
-* the repository URL
-* the folder path (optional)
-* the branch (optional)
+**Git:** provide the repository URL, optional folder path, and optional branch (default `main`).
 
-## OVH Options
+At least one template is required. Students can request **one workspace per template** within a lab, so multiple templates let them get multiple workspaces in the same environment (e.g. one Docker workspace and one Go workspace).
 
-The **OVH Options** page lets you control which OVHcloud regions and flavors are available in the lab creation wizard. Access it from the **OVH** dropdown in the header, then click **Options**.
+## Dry run (preview before create)
 
-### Loading data from OVH
+Before creating a lab, you can run a **dry run** to preview what Pulumi would do without actually provisioning resources. This is useful to validate configuration and catch errors early.
 
-Before configuring options, you need to populate the local cache with regions and flavors from the OVH API:
+1. Complete the lab creation wizard up to the final step.
+2. Click **Dry Run** instead of **Create Lab**. EasyLab runs `pulumi preview` and shows the planned changes.
+3. If the dry run succeeds, the job appears in the labs list with status **dry-run-completed** (🔍).
+4. From the labs list, you can then **Create Lab** on that job to perform the real deployment with the same configuration.
 
-1. Make sure your [OVH credentials](ovhcloud.md) are configured
-2. Click **Refresh from OVH** to fetch the latest regions and flavors
+Dry-run jobs do not create any cloud or Kubernetes resources; only real runs do.
 
-If the cache is empty, the page displays a prompt with links to configure credentials and refresh.
+## Provider credentials
 
-### Configuring regions
+Cloud provider API credentials (e.g. OVHcloud) are configured from the header: **OVH** → **Credentials**. Credentials are stored in memory only and are used for all lab deployments. When using **Use Existing Cluster**, no cloud credentials are required.
 
-Once data is loaded, a table lists all available OVH regions. For each region you can:
-
-* **Enable/Disable** — Check or uncheck the region. Only enabled regions appear in the lab creation wizard (step 3 — network). If none are checked, all regions are shown.
-* **Set as default** — Select one region as the default for new labs.
-* **Invert Selection** — Quickly toggle all region checkboxes.
-
-### Configuring flavors
-
-Below the regions table, flavors are grouped by region in collapsible sections. For each flavor you can see its vCPUs and RAM, and:
-
-* **Enable/Disable** — Only enabled flavors appear in the lab creation wizard (step 5 — node pool) when the corresponding region is selected. If none are checked for a region, all flavors are shown.
-* **Set as default** — Select one flavor as the default for each region.
-* **Invert** — Toggle all flavor checkboxes within a region.
-
-Click **Save Options** to persist your configuration. The settings are stored on the server and apply to all future lab creation sessions.
+For OVHcloud-specific setup (regions, flavors), see [OVH Options](#ovh-options) and [OVHcloud configuration](ovhcloud.md).
 
 ## Manage your labs
 
@@ -133,12 +125,13 @@ Clicking on the `Labs` button in the header will redirect you to the labs list p
 
 You can see all the labs you have created with following information:
 
-* status (created, running, completed, failed, destroyed)
-* creation date
-* access to the creation logs
-* access to the kubeconfig file
-* actions to destroy or recreate the lab (based on the status)
-* list all workspaces created for this lab
-    * you can delete workspaces one by one or in bulk
+* **Status** — created, running, completed, failed, destroyed, or dry-run-completed (preview-only)
+* **Creation date**
+* **Type** — Real run (🚀) or Dry run (🔍)
+* **Access to the creation logs**
+* **Access to the kubeconfig file** (for completed labs)
+* **Retrieve Coder credentials** — For completed labs, a **Coder admin credentials** button opens a modal with the Coder URL, admin email, and admin password. You can copy each value or show/hide the password. Use these to sign in to the Coder instance for that lab.
+* **Actions** — Destroy a lab; **Recreate** a destroyed lab with the same configuration (same Coder template, options, etc.)
+* **List of workspaces** created for this lab — delete workspaces one by one or in bulk
 
 ![Lab Workspaces](screens/list-workspaces.png){width=350}

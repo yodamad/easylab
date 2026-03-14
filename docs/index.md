@@ -6,9 +6,7 @@ icon: lucide/flask-conical
 
 # EasyLab
 
-EasyLab is a platform that helps you manage your lab environments.
-
-As an admin (trainer, speaker, ...), you have access to the admin space to manager your labs.
+EasyLab is a platform that helps you manage your lab environments. Provision labs on OVHcloud or use your own Kubernetes cluster; run a dry run to preview changes before creating a lab; manage workspaces and recreate destroyed labs from the same configuration.
 
 > Go to [Admin documentation](admin.md)
 
