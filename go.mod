@@ -6,7 +6,8 @@ require (
 	github.com/coder/coder/v2 v2.29.1
 	github.com/go-git/go-git/v5 v5.16.4
 	github.com/google/uuid v1.6.0
-	github.com/ovh/pulumi-ovh/sdk/v2 v2.10.0
+	github.com/ovh/go-ovh v1.9.0
+	github.com/ovh/pulumi-ovh/sdk/v2 v2.11.0
 	github.com/pulumi/pulumi-command/sdk v1.1.3
 	github.com/pulumi/pulumi-kubernetes/sdk/v4 v4.24.1
 	github.com/pulumi/pulumi/sdk/v3 v3.210.0
@@ -131,7 +132,6 @@ require (
 	github.com/opentracing/basictracer-go v1.1.0 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/outcaste-io/ristretto v0.2.3 // indirect
-	github.com/ovh/go-ovh v1.9.0 // indirect
 	github.com/pgavlin/fx v0.1.6 // indirect
 	github.com/philhofer/fwd v1.1.3-0.20240916144458-20a13a1f6b7c // indirect
 	github.com/pion/transport/v2 v2.2.10 // indirect
