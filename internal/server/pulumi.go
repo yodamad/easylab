@@ -267,8 +267,8 @@ var requiredPlugins = []requiredPlugin{
 // CheckAndInstallPlugins verifies every required Pulumi resource plugin is healthy
 // inside PULUMI_HOME/plugins. For each plugin it:
 //  1. Checks whether the plugin binary exists; installs it via the Pulumi CLI if not.
-//  2. Creates a minimal PulumiPlugin.yaml when absent — the Pulumi SDK requires
-//     that file to load a plugin even though recent plugin releases no longer ship it.
+//  2. Creates a minimal PulumiPlugin.yaml when absent (name, version, runtime) — the
+//     Pulumi SDK requires that file to load a plugin even though recent releases may not ship it.
 func (pe *PulumiExecutor) CheckAndInstallPlugins() {
 	pulumiHome := getEnvOrDefault("PULUMI_HOME", filepath.Join(getAppBaseDir(), ".pulumi"))
 	pluginsDir := filepath.Join(pulumiHome, "plugins")
@@ -293,18 +293,29 @@ func (pe *PulumiExecutor) CheckAndInstallPlugins() {
 			log.Printf("[PLUGINS] Plugin %s v%s binary OK", p.Name, p.Version)
 		}
 
-		// Step 2: ensure PulumiPlugin.yaml exists.
+		// Step 2: ensure PulumiPlugin.yaml exists and contains a 'runtime' attribute.
+		needsWrite := false
 		if _, err := os.Stat(yamlPath); os.IsNotExist(err) {
 			log.Printf("[PLUGINS] Plugin %s v%s missing PulumiPlugin.yaml — creating it...", p.Name, p.Version)
+			needsWrite = true
+		} else {
+			// File exists — verify it contains the required 'runtime' field.
+			existing, readErr := os.ReadFile(yamlPath)
+			if readErr != nil || !strings.Contains(string(existing), "runtime:") {
+				log.Printf("[PLUGINS] Plugin %s v%s PulumiPlugin.yaml missing 'runtime' — rewriting it...", p.Name, p.Version)
+				needsWrite = true
+			}
+		}
+		if needsWrite {
 			if mkErr := os.MkdirAll(pluginDir, 0755); mkErr != nil {
 				log.Printf("[PLUGINS] Warning: failed to create plugin dir %s: %v", pluginDir, mkErr)
 				continue
 			}
-			content := fmt.Sprintf("name: %s\nversion: %s\n", p.Name, p.Version)
+			content := fmt.Sprintf("name: %s\nversion: %s\nruntime: go\n", p.Name, p.Version)
 			if writeErr := os.WriteFile(yamlPath, []byte(content), 0644); writeErr != nil {
 				log.Printf("[PLUGINS] Warning: failed to write PulumiPlugin.yaml for %s v%s: %v", p.Name, p.Version, writeErr)
 			} else {
-				log.Printf("[PLUGINS] PulumiPlugin.yaml created for %s v%s", p.Name, p.Version)
+				log.Printf("[PLUGINS] PulumiPlugin.yaml written for %s v%s", p.Name, p.Version)
 			}
 		}
 	}
