@@ -156,3 +156,5 @@ The page shows:
     * Submission date and time
 
 If no feedback has been submitted yet, an empty state is displayed.
+
+![Admin feedback](screens/feedbacks.png){width=45%}

@@ -83,3 +83,5 @@ After completing a lab session, you can share your experience via the **Feedback
 * **Comments & Suggestions** — Free-text field (max 2000 characters) for any additional remarks.
 
 Click **Submit Feedback** to send your response. A confirmation message appears on success. The form resets automatically so you can submit feedback for another lab if needed.
+
+![Student feedback form](screens/feedback.png){width=45%}
