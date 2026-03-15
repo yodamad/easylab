@@ -24,7 +24,7 @@ spec:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ include "easylab.imageTag" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["./main"]
+          command: ["/app/main"]
           args:
             - "--port"
             - {{ .Values.config.port | quote }}
