@@ -66,3 +66,20 @@ If you have already saved a workspace, you can retrieve information about your e
 You need to provide the same password you used to encrypt the workspace information to decrypt the workspace password.
 
 ![Retrieve your workspace information](screens/workspace-data.png){width=75%}
+
+## Submit feedback
+
+After completing a lab session, you can share your experience via the **Feedback** page, accessible from the student portal header.
+
+**Required fields:**
+
+* **Lab** — Select the lab you attended from the dropdown.
+* **Overall Rating** — Rate the session from 1 (Very Poor) to 5 (Excellent) using the star selector.
+* **Difficulty Level** — Choose one: 😴 Too Easy / 🙂 A Bit Easy / 👍 Just Right / 🤔 Challenging / 🔥 Too Hard.
+
+**Optional fields:**
+
+* **Would you recommend this lab?** — Yes, definitely / Maybe / Not really.
+* **Comments & Suggestions** — Free-text field (max 2000 characters) for any additional remarks.
+
+Click **Submit Feedback** to send your response. A confirmation message appears on success. The form resets automatically so you can submit feedback for another lab if needed.

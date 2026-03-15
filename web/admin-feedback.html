@@ -1,0 +1,132 @@
+{{define "title"}}Feedback - {{if .LabID}}Lab {{.LabID}}{{else}}Select a Lab{{end}}{{end}}
+{{define "body-class"}}{{end}}
+{{define "head-extra"}}
+<style>
+    .feedback-page-container { max-width: 900px; margin: 0 auto; padding: 2rem 1rem; }
+    .feedback-stats { display: flex; gap: 1.5rem; margin-bottom: 2rem; flex-wrap: wrap; }
+    .feedback-stat-card {
+        background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+        padding: 1.25rem 1.75rem; flex: 1; min-width: 140px; text-align: center;
+    }
+    .feedback-stat-value { font-size: 2rem; font-weight: 700; color: #4f46e5; }
+    .feedback-stat-label { font-size: 0.85rem; color: #6b7280; margin-top: 0.25rem; }
+    .feedback-entry {
+        background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+        padding: 1.25rem 1.5rem; margin-bottom: 1rem;
+    }
+    .feedback-entry-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem; }
+    .feedback-stars { color: #f59e0b; font-size: 1.25rem; letter-spacing: 2px; }
+    .feedback-difficulty { display: inline-block; padding: 0.2rem 0.75rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600; }
+    .diff-too-easy { background: #d1fae5; color: #065f46; }
+    .diff-just-right { background: #dbeafe; color: #1e40af; }
+    .diff-too-hard { background: #fee2e2; color: #991b1b; }
+    .feedback-comment { color: #374151; font-style: italic; margin-top: 0.5rem; white-space: pre-wrap; }
+    .feedback-date { font-size: 0.8rem; color: #9ca3af; }
+    .empty-state { text-align: center; padding: 3rem 1rem; color: #6b7280; }
+    .empty-state-icon { font-size: 3rem; display: block; margin-bottom: 1rem; }
+    .lab-selector-form { display: flex; gap: 0.75rem; align-items: flex-end; margin-bottom: 2rem; flex-wrap: wrap; }
+    .lab-selector-form label { font-weight: 600; font-size: 0.9rem; color: #374151; display: block; margin-bottom: 0.3rem; }
+    .lab-selector-form select { padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.95rem; min-width: 260px; }
+    .lab-selector-form button { padding: 0.5rem 1.25rem; background: #4f46e5; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.95rem; }
+    .lab-selector-form button:hover { background: #4338ca; }
+</style>
+{{end}}
+
+{{define "body"}}
+    <div class="container feedback-page-container">
+        <header>
+            <div class="header-content">
+                <div class="header-title">
+                    <img src="/static/logo.png" alt="EasyLab Logo" class="header-logo">
+                    <div>
+                        <h1>EasyLab</h1>
+                        <p class="subtitle">Student Feedback</p>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <a href="/labs" class="header-btn" title="Labs History">
+                        <span class="btn-icon">📋</span>
+                        <span class="btn-text">Labs</span>
+                    </a>
+                    <a href="/admin" class="header-btn" title="Create Lab">
+                        <span class="btn-icon">➕</span>
+                        <span class="btn-text">New Lab</span>
+                    </a>
+                    <a href="/logout" class="logout-btn" title="Logout">
+                        <span class="logout-icon">🚪</span>
+                        <span class="logout-text">Logout</span>
+                    </a>
+                </div>
+            </div>
+        </header>
+
+        <main>
+            <!-- Lab selector (server-side rendered) -->
+            <form class="lab-selector-form" method="GET" action="/admin/feedback">
+                <div>
+                    <label for="lab_id_input">Select a Lab</label>
+                    <select id="lab_id_input" name="lab_id">
+                        <option value="">— choose a lab —</option>
+                        {{range .Labs}}
+                        <option value="{{.ID}}" {{if .Selected}}selected{{end}}>{{.Name}}</option>
+                        {{end}}
+                    </select>
+                </div>
+                <button type="submit">View Feedback</button>
+            </form>
+
+            {{if .HasLabID}}
+                <!-- Stats -->
+                <div class="feedback-stats">
+                    <div class="feedback-stat-card">
+                        <div class="feedback-stat-value">{{.Count}}</div>
+                        <div class="feedback-stat-label">Responses</div>
+                    </div>
+                    <div class="feedback-stat-card">
+                        <div class="feedback-stat-value">{{.AvgRating}} ★</div>
+                        <div class="feedback-stat-label">Average Rating</div>
+                    </div>
+                </div>
+
+                {{if .Feedbacks}}
+                    <h2 style="margin-bottom: 1rem; font-size: 1.1rem; color: #374151;">
+                        Feedback for <strong>{{.LabName}}</strong>
+                    </h2>
+
+                    {{range .Feedbacks}}
+                    <div class="feedback-entry">
+                        <div class="feedback-entry-header">
+                            <div style="display: flex; align-items: center; gap: 1rem;">
+                                <span class="feedback-stars">{{.Stars}}</span>
+                                <span class="feedback-difficulty
+                                    {{if eq .Difficulty "Too Easy"}}diff-too-easy
+                                    {{else if eq .Difficulty "Just Right"}}diff-just-right
+                                    {{else}}diff-too-hard{{end}}">
+                                    {{.Difficulty}}
+                                </span>
+                            </div>
+                            <span class="feedback-date">{{.SubmittedAt}}</span>
+                        </div>
+                        {{if .Comment}}
+                        <p class="feedback-comment">"{{.Comment}}"</p>
+                        {{else}}
+                        <p class="feedback-comment" style="color: #9ca3af; font-style: normal;">No comment provided.</p>
+                        {{end}}
+                    </div>
+                    {{end}}
+                {{else}}
+                    <div class="empty-state">
+                        <span class="empty-state-icon">💬</span>
+                        <p>No feedback submitted for this lab yet.</p>
+                    </div>
+                {{end}}
+            {{else}}
+                <div class="empty-state">
+                    <span class="empty-state-icon">📊</span>
+                    <p>Select a lab above to view its feedback.</p>
+                </div>
+            {{end}}
+        </main>
+    </div>
+
+{{end}}

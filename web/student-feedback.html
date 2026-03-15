@@ -1,0 +1,208 @@
+{{define "title"}}Student Portal - Feedback{{end}}
+
+{{define "body-class"}}student-dashboard-page{{end}}
+
+{{define "head-extra"}}
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.0/dist/htmx.min.js" integrity="sha384-LAnQFtNXh8s0hn9mOc8bezfn16i4Zo4y3i4dMT8PtV9yip8jGehR3RxCJrmHV11d" crossorigin="anonymous"></script>
+<style>
+    .star-rating { display: flex; flex-direction: row-reverse; justify-content: flex-end; gap: 0.25rem; }
+    .star-rating input { display: none; }
+    .star-rating label { font-size: 2rem; cursor: pointer; color: #ccc; transition: color 0.15s; }
+    .star-rating input:checked ~ label,
+    .star-rating label:hover,
+    .star-rating label:hover ~ label { color: #f59e0b; }
+    .difficulty-group { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .difficulty-option { flex: 1; min-width: 80px; }
+    .difficulty-option input { display: none; }
+    .difficulty-option label {
+        display: block; text-align: center; padding: 0.6rem 0.4rem;
+        border: 2px solid #d1d5db; border-radius: 8px; cursor: pointer;
+        font-size: 0.85rem; transition: all 0.15s;
+    }
+    .difficulty-option input:checked + label { border-color: #6366f1; background: #eef2ff; color: #4338ca; font-weight: 600; }
+    .difficulty-option label:hover { border-color: #6366f1; }
+    @keyframes toastIn  { from { opacity:0; transform:translateY(-12px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes toastOut { 0%,70% { opacity:1; } 100% { opacity:0; pointer-events:none; } }
+    .toast {
+        position: fixed; top: 1.5rem; right: 1.5rem; z-index: 9999;
+        min-width: 280px; max-width: 380px;
+        border-radius: 10px; padding: 1rem 1.25rem;
+        box-shadow: 0 8px 24px rgba(0,0,0,.15);
+        display: flex; align-items: center; gap: 0.75rem;
+        font-size: 0.95rem; font-weight: 500;
+        animation: toastIn .25s ease, toastOut 3.5s .5s forwards;
+    }
+    .toast-success { background: #d1fae5; border: 1px solid #6ee7b7; color: #065f46; }
+    .toast-error   { background: #fee2e2; border: 1px solid #fca5a5; color: #991b1b; }
+    .toast-icon    { font-size: 1.4rem; flex-shrink: 0; }
+</style>
+{{end}}
+
+{{define "body"}}
+    <div class="student-dashboard-container">
+        <header class="student-dashboard-header">
+            <div class="header-content">
+                <div class="header-title">
+                    <img src="/static/logo.png" alt="EasyLab Logo" class="header-logo">
+                    <div class="student-dashboard-header-title">
+                        <h1>🎓 Student Portal</h1>
+                        <p class="subtitle">Share your feedback</p>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 0.75rem; align-items: center;">
+                    <a href="/student/dashboard" class="student-btn" style="text-decoration: none;">← Dashboard</a>
+                    <a href="/student/logout" class="student-logout-btn" title="Logout">
+                        <span>🚪</span>
+                        <span>Logout</span>
+                    </a>
+                </div>
+            </div>
+        </header>
+
+        <main>
+            <div class="student-card">
+                <h2>Lab Feedback</h2>
+                <p style="color: #6b7280; margin-bottom: 1.5rem;">Help us improve by sharing your experience with this lab session.</p>
+
+                {{if .Success}}
+                <div class="toast toast-success" style="position:static;animation:none;margin-bottom:1rem;">
+                    <span class="toast-icon">✅</span><span>Thank you! Your feedback has been saved.</span>
+                </div>
+                {{else if .Error}}
+                <div class="toast toast-error" style="position:static;animation:none;margin-bottom:1rem;">
+                    <span class="toast-icon">❌</span><span>{{.Error}}</span>
+                </div>
+                {{end}}
+
+                <form id="feedback-form"
+                      method="POST" action="/api/student/feedback"
+                      hx-post="/api/student/feedback"
+                      hx-target="#toast-container"
+                      hx-swap="innerHTML"
+                      hx-indicator="#submit-indicator"
+                      hx-on:htmx:after-request="if(event.detail.successful) this.reset()">
+
+                    <div class="student-form-group">
+                        <label for="lab_id">Select Lab *</label>
+                        <select id="lab_id" name="lab_id" required>
+                            <option value="">Loading labs...</option>
+                        </select>
+                        <small>Choose the lab you attended</small>
+                    </div>
+
+                    <div class="student-form-group">
+                        <label>Overall Rating *</label>
+                        <div class="star-rating">
+                            <input type="radio" id="star5" name="rating" value="5" required>
+                            <label for="star5" title="5 - Excellent">★</label>
+                            <input type="radio" id="star4" name="rating" value="4">
+                            <label for="star4" title="4 - Good">★</label>
+                            <input type="radio" id="star3" name="rating" value="3">
+                            <label for="star3" title="3 - Average">★</label>
+                            <input type="radio" id="star2" name="rating" value="2">
+                            <label for="star2" title="2 - Poor">★</label>
+                            <input type="radio" id="star1" name="rating" value="1">
+                            <label for="star1" title="1 - Very Poor">★</label>
+                        </div>
+                        <small>1 = Very Poor, 5 = Excellent</small>
+                    </div>
+
+                    <div class="student-form-group">
+                        <label>Difficulty Level *</label>
+                        <div class="difficulty-group">
+                            <div class="difficulty-option">
+                                <input type="radio" id="diff-too-easy" name="difficulty" value="too-easy" required>
+                                <label for="diff-too-easy">😴<br>Too Easy</label>
+                            </div>
+                            <div class="difficulty-option">
+                                <input type="radio" id="diff-easy" name="difficulty" value="a-bit-easy">
+                                <label for="diff-easy">🙂<br>A Bit Easy</label>
+                            </div>
+                            <div class="difficulty-option">
+                                <input type="radio" id="diff-right" name="difficulty" value="just-right">
+                                <label for="diff-right">👍<br>Just Right</label>
+                            </div>
+                            <div class="difficulty-option">
+                                <input type="radio" id="diff-challenging" name="difficulty" value="challenging">
+                                <label for="diff-challenging">🤔<br>Challenging</label>
+                            </div>
+                            <div class="difficulty-option">
+                                <input type="radio" id="diff-hard" name="difficulty" value="too-hard">
+                                <label for="diff-hard">🔥<br>Too Hard</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="student-form-group">
+                        <label>Would you recommend this lab?</label>
+                        <div class="recommend-group">
+                            <div class="recommend-option">
+                                <input type="radio" id="rec-yes" name="recommend" value="yes">
+                                <label for="rec-yes">👍 Yes, definitely!</label>
+                            </div>
+                            <div class="recommend-option">
+                                <input type="radio" id="rec-maybe" name="recommend" value="maybe">
+                                <label for="rec-maybe">🤔 Maybe</label>
+                            </div>
+                            <div class="recommend-option">
+                                <input type="radio" id="rec-no" name="recommend" value="no">
+                                <label for="rec-no">👎 Not really</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="student-form-group">
+                        <label for="comment">Comments & Suggestions</label>
+                        <textarea id="comment" name="comment" rows="6" maxlength="2000"
+                            placeholder="What did you enjoy? What could be improved? Any suggestions for the instructor?"></textarea>
+                        <span class="char-counter"><span id="char-count">0</span> / 2000</span>
+                        <small>Optional – max 2000 characters</small>
+                    </div>
+
+                    <button type="submit" class="student-btn" id="submit-btn">
+                        <span id="submit-indicator" class="htmx-indicator">⏳</span>
+                        Submit Feedback
+                    </button>
+                </form>
+            </div>
+        </main>
+    <!-- Toast notification container (fixed, top-right) -->
+    <div id="toast-container"></div>
+
+    <script>
+    (function () {
+        // Character counter for comment textarea
+        const textarea = document.getElementById('comment');
+        const counter = document.getElementById('char-count');
+        const counterEl = counter.parentElement;
+        textarea.addEventListener('input', function () {
+            const len = this.value.length;
+            counter.textContent = len;
+            if (len >= 1800) {
+                counterEl.classList.add('near-limit');
+            } else {
+                counterEl.classList.remove('near-limit');
+            }
+        });
+
+        // Load available labs (reuse existing endpoint)
+        fetch('/api/student/labs')
+            .then(r => r.json())
+            .then(labs => {
+                const sel = document.getElementById('lab_id');
+                if (!labs || labs.length === 0) {
+                    sel.innerHTML = '<option value="">No labs available</option>';
+                    return;
+                }
+                sel.innerHTML = '<option value="">Select a lab…</option>' +
+                    labs.map(l => {
+                        const name = (l.config && l.config.stack_name) ? l.config.stack_name : l.id;
+                        return `<option value="${l.id}">${name}</option>`;
+                    }).join('');
+            })
+            .catch(() => {
+                document.getElementById('lab_id').innerHTML = '<option value="">Failed to load labs</option>';
+            });
+    })();
+    </script>
+{{end}}

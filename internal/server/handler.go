@@ -36,6 +36,7 @@ type Handler struct {
 	templatesMu        sync.RWMutex
 	credentialsManager *CredentialsManager
 	ovhOptionsManager  *OVHOptionsManager
+	feedbackStore      *FeedbackStore
 }
 
 // emailRegex is a simple email validation regex
@@ -74,13 +75,14 @@ func atoiForm(s string) int {
 }
 
 // NewHandler creates a new HTTP handler
-func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsManager *CredentialsManager, ovhOptionsManager *OVHOptionsManager) *Handler {
+func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsManager *CredentialsManager, ovhOptionsManager *OVHOptionsManager, feedbackStore *FeedbackStore) *Handler {
 	return &Handler{
 		jobManager:         jobManager,
 		pulumiExec:         pulumiExec,
 		templates:          make(map[string]*template.Template),
 		credentialsManager: credentialsManager,
 		ovhOptionsManager:  ovhOptionsManager,
+		feedbackStore:      feedbackStore,
 	}
 }
 
@@ -473,6 +475,8 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 		"index.html":             "web/index.html",
 		"admin.html":             "web/admin.html",
 		"student-dashboard.html": "web/student-dashboard.html",
+		"student-feedback.html":  "web/student-feedback.html",
+		"admin-feedback.html":    "web/admin-feedback.html",
 		"credentials.html":       "web/credentials.html",
 		"ovh-credentials.html":   "web/ovh-credentials.html", // Keep for backward compatibility
 		"ovh-options.html":       "web/ovh-options.html",

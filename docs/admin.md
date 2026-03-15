@@ -18,6 +18,7 @@ As an admin (trainer, speaker, ...), you have access to the admin space to manag
     * [x] List workspaces
     * [x] Delete workspaces (one by one or in bulk)
     * [x] Retry a failing lab installation
+* [x] View student feedback per lab (rating, difficulty, comments)
 
 ![Admin header](screens/admin.png)
 
@@ -135,3 +136,23 @@ You can see all the labs you have created with following information:
 * **List of workspaces** created for this lab — delete workspaces one by one or in bulk
 
 ![Lab Workspaces](screens/list-workspaces.png){width=350}
+
+## Student Feedback
+
+EasyLab collects feedback from students after each lab session. Admins can review the aggregated results per lab.
+
+### Viewing feedback
+
+Navigate to **Feedback** in the admin header. Select a lab from the dropdown and click **View Feedback**.
+
+The page shows:
+
+* **Response count** — total number of feedback submissions for the selected lab
+* **Average rating** — mean star rating across all submissions
+* **Individual entries** — one card per submission, displaying:
+    * Star rating (1–5)
+    * Difficulty level (Too Easy / A Bit Easy / Just Right / Challenging / Too Hard)
+    * Free-text comment (if provided)
+    * Submission date and time
+
+If no feedback has been submitted yet, an empty state is displayed.

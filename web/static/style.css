@@ -1551,6 +1551,73 @@ body.student-dashboard-page {
     box-shadow: 0 0 0 3px rgba(72, 187, 120, 0.1);
 }
 
+.student-form-group textarea {
+    width: 100%;
+    padding: 0.75rem;
+    border: 2px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 1rem;
+    font-family: inherit;
+    line-height: 1.6;
+    resize: vertical;
+    min-height: 140px;
+    transition: border-color 0.2s;
+}
+
+.student-form-group textarea:focus {
+    outline: none;
+    border-color: #48bb78;
+    box-shadow: 0 0 0 3px rgba(72, 187, 120, 0.1);
+}
+
+.char-counter {
+    display: block;
+    text-align: right;
+    font-size: 0.8rem;
+    color: var(--text-light);
+    margin-top: 0.25rem;
+}
+
+.char-counter.near-limit {
+    color: var(--warning);
+    font-weight: 600;
+}
+
+.recommend-group {
+    display: flex;
+    gap: 1rem;
+}
+
+.recommend-option {
+    flex: 1;
+}
+
+.recommend-option input {
+    display: none;
+}
+
+.recommend-option label {
+    display: block;
+    text-align: center;
+    padding: 0.6rem 0.5rem;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.15s;
+}
+
+.recommend-option input:checked + label {
+    border-color: #48bb78;
+    background: #f0fdf4;
+    color: #166534;
+    font-weight: 600;
+}
+
+.recommend-option label:hover {
+    border-color: #48bb78;
+}
+
 .student-btn {
     padding: 0.75rem 1.5rem;
     background: #48bb78;

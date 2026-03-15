@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -198,9 +199,15 @@ func main() {
 		}
 	}()
 
+	// Initialize feedback store (persists alongside job data)
+	feedbackStore, err := server.NewFeedbackStore(filepath.Join(*dataDir, "feedback"))
+	if err != nil {
+		log.Fatalf("Failed to initialize feedback store: %v", err)
+	}
+
 	// Initialize handler (depends on all components)
 	handlerStart := time.Now()
-	handler = server.NewHandler(jobManager, pulumiExec, credentialsManager, ovhOptionsManager)
+	handler = server.NewHandler(jobManager, pulumiExec, credentialsManager, ovhOptionsManager, feedbackStore)
 	log.Printf("[STARTUP] Handler initialization took %v", time.Since(handlerStart))
 
 	// Setup routes
@@ -231,15 +238,18 @@ func main() {
 	})
 	mux.HandleFunc("/student/logout", authHandler.HandleStudentLogout)
 	mux.HandleFunc("/student/dashboard", authHandler.RequireStudentAuth(handler.ServeStudentDashboard))
+	mux.HandleFunc("/student/feedback", authHandler.RequireStudentAuth(handler.ServeFeedback))
 	mux.HandleFunc("/api/student/labs", authHandler.RequireStudentAuth(handler.ListLabs))
 	mux.HandleFunc("/api/student/labs/templates", authHandler.RequireStudentAuth(handler.ListLabTemplates))
 	mux.HandleFunc("/api/student/workspace/request", authHandler.RequireStudentAuth(handler.RequestWorkspace))
+	mux.HandleFunc("/api/student/feedback", authHandler.RequireStudentAuth(handler.SubmitFeedback))
 
 	// Public homepage (no auth required)
 	mux.HandleFunc("/", handler.ServeUI)
 
 	// Protected routes (auth required)
 	mux.HandleFunc("/admin", authHandler.RequireAuth(handler.ServeAdminUI))
+	mux.HandleFunc("/admin/feedback", authHandler.RequireAuth(handler.ServeAdminLabFeedback))
 	mux.HandleFunc("/labs", authHandler.RequireAuth(handler.ServeLabsList))
 	// Backward compatibility route
 	mux.HandleFunc("/jobs", authHandler.RequireAuth(handler.ServeLabsList))
