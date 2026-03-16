@@ -8,15 +8,27 @@ As a student, you have access to the student space to request new development en
 
 You can request **one workspace per template per lab**. If a lab has multiple templates (e.g. Docker, Go), you can request one workspace for each — so multiple workspaces in the same lab. Across different labs you can have even more workspaces running simultaneously.
 
+## Login
+
+To access the student portal, you must log in with:
+
+* **Email** — your email address (used to identify you and create your Coder account)
+* **Student Password** — provided by the workshop organiser
+
+Your email is validated on submission and stored in your session. It will be pre-filled automatically on all subsequent pages so you don't need to enter it again.
+
+![Student Login](screens/student-login.png){width=45%}
+
 ## Request a new development environment
 
 The request a new development environment page is the main page of the student space. It allows you to request a new development environment.
 
 You need to provide:
 
-* [x] your email address
 * [x] the lab (environment) you want to use
 * [x] the **template** (when the lab has multiple templates, a template dropdown appears — choose the workspace type you want)
+
+Your email address is automatically filled in from your login session and is not editable on this form.
 
 Then, you'll get all information needed to connect to your workspace!
 
@@ -32,7 +44,7 @@ You can store the workspace information in a secured cookie in your browser to b
 
 ## My Workspaces
 
-When you have saved at least one workspace, the **My Workspaces** panel appears at the top of the student portal. It displays a card for each workspace you have requested — across different labs and different templates within the same lab.
+When you have saved at least one workspace, the **My Workspaces** panel appears at the top of the student portal. It displays a card for each workspace you have requested — across different labs and different templates within the same lab. Only workspaces matching your logged-in email are shown.
 
 ### Workspace cards
 
