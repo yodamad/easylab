@@ -1282,8 +1282,77 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create workspace for user with automatic token refresh
+	// Determine workspace name (deterministic per student+lab+template)
 	workspaceName := buildWorkspaceName(stackName, labID, templateName)
+
+	// Check if the user already has a workspace with this name
+	var workspaceURL string
+	existingWS, updatedCfg, wsLookupErr := coder.GetWorkspaceByOwnerAndNameWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, user.ID.String(), workspaceName)
+	if wsLookupErr == nil {
+		// Workspace already exists — reuse it with fresh credentials
+		coderConfig = updatedCfg
+		workspaceURL = fmt.Sprintf("%s/@%s/%s", coderURL, user.Username, existingWS.Name)
+		log.Printf("Reusing existing workspace %s for user %s", existingWS.Name, email)
+
+		existingWSInfo := map[string]interface{}{
+			"email":              email,
+			"workspace_url":      workspaceURL,
+			"password":           password,
+			"encrypted_password": "",
+			"workspace_name":     existingWS.Name,
+			"lab_id":             labID,
+			"created_at":         time.Now().Format(time.RFC3339),
+		}
+		if existingWSInfoJSON, jsonErr := json.Marshal(existingWSInfo); jsonErr == nil {
+			isSecure := strings.HasPrefix(coderURL, "https://") || r.TLS != nil
+			cookieName := fmt.Sprintf("workspace_info_%s", labID)
+			http.SetCookie(w, &http.Cookie{
+				Name:     cookieName,
+				Value:    url.QueryEscape(string(existingWSInfoJSON)),
+				Path:     "/",
+				MaxAge:   86400,
+				HttpOnly: false,
+				Secure:   isSecure,
+				SameSite: http.SameSiteLaxMode,
+			})
+			log.Printf("Set %s cookie for email: %s", cookieName, email)
+		}
+
+		existingWSInfoForClient := map[string]interface{}{
+			"email":          email,
+			"workspace_url":  workspaceURL,
+			"password":       password,
+			"workspace_name": existingWS.Name,
+			"lab_id":         labID,
+			"created_at":     time.Now().Format(time.RFC3339),
+		}
+		existingWSInfoJSON, _ := json.Marshal(existingWSInfoForClient)
+		existingWSInfoJSONEscaped := template.HTMLEscapeString(string(existingWSInfoJSON))
+
+		w.Header().Set("Content-Type", "text/html")
+		var existingResp strings.Builder
+		existingResp.WriteString(`<div class="success-message">`)
+		existingResp.WriteString(`<h3>⚠️ Workspace Already Exists</h3>`)
+		existingResp.WriteString(`<div class="credentials-box">`)
+		existingResp.WriteString(`<h3>Your Workspace Credentials</h3>`)
+		existingResp.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Workspace URL:</label><div class="value"><a href="%s" target="_blank">%s</a></div></div>`, workspaceURL, workspaceURL))
+		existingResp.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Email:</label><div class="value">%s</div></div>`, template.HTMLEscapeString(email)))
+		existingResp.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Password:</label><div class="value">%s</div></div>`, template.HTMLEscapeString(password)))
+		existingResp.WriteString(`<p><strong>Important:</strong> Please save these credentials. You will need them to access your workspace.</p>`)
+		existingResp.WriteString(`<p><small>Your workspace information can be encrypted and saved locally. Click "Encrypt &amp; Save" below to store it securely.</small></p>`)
+		existingResp.WriteString(fmt.Sprintf(`<div data-workspace-info='%s' style="display:none;"></div>`, existingWSInfoJSONEscaped))
+		existingResp.WriteString(`<button onclick="encryptAndSaveWorkspaceInfo(this)" class="btn" style="margin-top: 1rem;">Encrypt &amp; Save Workspace Info</button>`)
+		existingResp.WriteString(`</div>`)
+		existingResp.WriteString(`</div>`)
+		fmt.Fprint(w, existingResp.String())
+		return
+	}
+	if !errors.Is(wsLookupErr, coder.ErrWorkspaceNotFound) {
+		log.Printf("Failed to check for existing workspace: %v", wsLookupErr)
+		// Non-fatal: fall through and attempt creation
+	}
+
+	// Workspace not found — create it
 	workspace, _, err := coder.CreateWorkspaceWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, user.ID, templateID, workspaceName)
 	if err != nil {
 		log.Printf("Failed to create workspace: %v", err)
@@ -1293,7 +1362,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build workspace URL
-	workspaceURL := fmt.Sprintf("%s/@%s/%s", coderURL, user.Username, workspace.Name)
+	workspaceURL = fmt.Sprintf("%s/@%s/%s", coderURL, user.Username, workspace.Name)
 
 	// Create workspace info structure for cookie
 	// Note: password will be encrypted client-side using email + student password

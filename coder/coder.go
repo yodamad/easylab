@@ -881,6 +881,54 @@ func ListWorkspacesWithRetry(config CoderClientConfig, adminEmail, adminPassword
 	return workspaces, config, nil
 }
 
+// ErrWorkspaceNotFound is returned when a workspace lookup finds no matching workspace.
+var ErrWorkspaceNotFound = errors.New("workspace not found")
+
+// GetWorkspaceByOwnerAndName looks up a workspace by owner ID and workspace name.
+// Returns ErrWorkspaceNotFound if the Coder API returns 404.
+func GetWorkspaceByOwnerAndName(config CoderClientConfig, ownerID, workspaceName string) (codersdk.Workspace, error) {
+	serverURL, err := url.Parse(config.ServerURL)
+	if err != nil {
+		return codersdk.Workspace{}, fmt.Errorf("failed to parse server URL: %w", err)
+	}
+
+	client := codersdk.New(serverURL)
+	client.SetSessionToken(config.SessionToken)
+
+	workspace, err := client.WorkspaceByOwnerAndName(context.Background(), ownerID, workspaceName, codersdk.WorkspaceOptions{})
+	if err != nil {
+		var sdkErr *codersdk.Error
+		if errors.As(err, &sdkErr) && sdkErr.StatusCode() == http.StatusNotFound {
+			return codersdk.Workspace{}, fmt.Errorf("%w: %s/%s", ErrWorkspaceNotFound, ownerID, workspaceName)
+		}
+		return codersdk.Workspace{}, fmt.Errorf("failed to get workspace: %w", err)
+	}
+
+	return workspace, nil
+}
+
+// GetWorkspaceByOwnerAndNameWithRetry looks up a workspace with automatic token refresh on failure.
+func GetWorkspaceByOwnerAndNameWithRetry(config CoderClientConfig, adminEmail, adminPassword, ownerID, workspaceName string) (codersdk.Workspace, CoderClientConfig, error) {
+	workspace, err := GetWorkspaceByOwnerAndName(config, ownerID, workspaceName)
+	if err != nil {
+		if errors.Is(err, ErrWorkspaceNotFound) {
+			return codersdk.Workspace{}, config, err
+		}
+		log.Printf("Workspace lookup failed, attempting token refresh...")
+		refreshedConfig, refreshErr := RefreshToken(config, adminEmail, adminPassword)
+		if refreshErr != nil {
+			return codersdk.Workspace{}, config, fmt.Errorf("failed to refresh token: %w", refreshErr)
+		}
+		workspace, err = GetWorkspaceByOwnerAndName(refreshedConfig, ownerID, workspaceName)
+		if err != nil {
+			return codersdk.Workspace{}, refreshedConfig, err
+		}
+		log.Printf("Token refreshed successfully")
+		return workspace, refreshedConfig, nil
+	}
+	return workspace, config, nil
+}
+
 // DeleteWorkspace deletes a workspace by ID.
 // Coder deletes workspaces by creating a build with transition "delete" (POST /api/v2/workspaces/{id}/builds),
 // not via a DELETE endpoint.
