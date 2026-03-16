@@ -41,7 +41,9 @@ function getAllWorkspaceCookies() {
 }
 
 function loadAllWorkspaceInfos() {
-    const workspaces = getAllWorkspaceCookies();
+    const currentEmail = document.querySelector('.student-dashboard-container')?.dataset.currentEmail || '';
+    const all = getAllWorkspaceCookies();
+    const workspaces = currentEmail ? all.filter(ws => ws.info.email === currentEmail) : all;
     const section = document.getElementById('workspaces-list-section');
     const container = document.getElementById('workspaces-list-container');
     if (!section || !container) return;

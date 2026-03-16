@@ -104,6 +104,7 @@
                                     {{else}}diff-too-hard{{end}}">
                                     {{.Difficulty}}
                                 </span>
+                                {{if .Email}}<span class="feedback-date">{{.Email}}</span>{{end}}
                             </div>
                             <span class="feedback-date">{{.SubmittedAt}}</span>
                         </div>

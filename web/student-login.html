@@ -18,8 +18,13 @@
         {{end}}
 
         <div class="form-group">
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email" required autofocus placeholder="your@email.com" autocomplete="email">
+        </div>
+
+        <div class="form-group">
             <label for="password">Student Password</label>
-            <input type="password" id="password" name="password_plain" required autofocus placeholder="Enter student password" autocomplete="current-password">
+            <input type="password" id="password" name="password_plain" required placeholder="Enter student password" autocomplete="current-password">
             <input type="hidden" id="password_hash" name="password_hash">
             <div class="secure-badge">🔒 Password is hashed before transmission</div>
         </div>

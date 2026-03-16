@@ -1004,7 +1004,8 @@ func (h *Handler) GetCoderCredentials(w http.ResponseWriter, r *http.Request) {
 
 // ServeStudentDashboard serves the student dashboard page
 func (h *Handler) ServeStudentDashboard(w http.ResponseWriter, r *http.Request) {
-	h.serveTemplate(w, "student-dashboard.html", nil)
+	email := studentEmailFromContext(r)
+	h.serveTemplate(w, "student-dashboard.html", map[string]interface{}{"Email": email})
 }
 
 // ListLabTemplates returns the list of Coder templates available for a lab
@@ -1108,17 +1109,13 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get form values using helper
-	email := getFormValue(r, "email")
 	labID := getFormValue(r, "lab_id")
 	templateIDStr := getFormValue(r, "template_id")
 
-	// Validate email
+	// Email comes from the authenticated session
+	email := studentEmailFromContext(r)
 	if email == "" {
-		http.Error(w, "Email is required", http.StatusBadRequest)
-		return
-	}
-	if !validateEmail(email) {
-		http.Error(w, "Invalid email format", http.StatusBadRequest)
+		http.Error(w, "Session email not found, please log in again", http.StatusUnauthorized)
 		return
 	}
 

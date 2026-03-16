@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,6 +11,7 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,9 +31,16 @@ const (
 	SessionExpiry = 24 * time.Hour
 )
 
+// contextKey is a type for context keys in this package
+type contextKey string
+
+// studentEmailContextKey is the context key for the student email
+const studentEmailContextKey contextKey = "studentEmail"
+
 // Session represents a user session
 type Session struct {
 	Token     string
+	Email     string
 	ExpiresAt time.Time
 }
 
@@ -301,17 +310,36 @@ func (ah *AuthHandler) RequireAuth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 // createStudentSession creates a new student session and returns the token
-func (ah *AuthHandler) createStudentSession() string {
+func (ah *AuthHandler) createStudentSession(email string) string {
 	ah.mu.Lock()
 	defer ah.mu.Unlock()
 
 	token := generateToken()
 	ah.studentSessions[token] = &Session{
 		Token:     token,
+		Email:     email,
 		ExpiresAt: time.Now().Add(SessionExpiry),
 	}
 
 	return token
+}
+
+// getStudentSessionEmail returns the email associated with a student session token
+func (ah *AuthHandler) getStudentSessionEmail(token string) string {
+	ah.mu.RLock()
+	defer ah.mu.RUnlock()
+
+	session, exists := ah.studentSessions[token]
+	if !exists {
+		return ""
+	}
+	return session.Email
+}
+
+// studentEmailFromContext retrieves the student email stored in the request context
+func studentEmailFromContext(r *http.Request) string {
+	email, _ := r.Context().Value(studentEmailContextKey).(string)
+	return email
 }
 
 // validateStudentSession checks if a student session token is valid
@@ -404,8 +432,15 @@ func (ah *AuthHandler) HandleStudentLogin(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Get and validate email from form
+	email := r.FormValue("email")
+	if email == "" || !strings.Contains(email, "@") {
+		http.Redirect(w, r, "/student/login?error=Invalid+email", http.StatusSeeOther)
+		return
+	}
+
 	// Create session
-	token := ah.createStudentSession()
+	token := ah.createStudentSession(email)
 
 	// Determine if HTTPS is being used
 	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
@@ -455,7 +490,9 @@ func (ah *AuthHandler) RequireStudentAuth(next http.HandlerFunc) http.HandlerFun
 			http.Redirect(w, r, "/student/login", http.StatusSeeOther)
 			return
 		}
-		next(w, r)
+		email := ah.getStudentSessionEmail(cookie.Value)
+		ctx := context.WithValue(r.Context(), studentEmailContextKey, email)
+		next(w, r.WithContext(ctx))
 	}
 }
 

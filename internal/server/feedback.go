@@ -15,6 +15,7 @@ import (
 type Feedback struct {
 	ID          string    `json:"id"`
 	LabID       string    `json:"lab_id"`
+	Email       string    `json:"email"`
 	Rating      int       `json:"rating"`     // 1-5
 	Difficulty  string    `json:"difficulty"` // "too-easy", "a-bit-easy", "just-right", "challenging", "too-hard"
 	Recommend   string    `json:"recommend"`  // "yes", "maybe", "no"
@@ -92,6 +93,7 @@ func (h *Handler) ServeFeedback(w http.ResponseWriter, r *http.Request) {
 	data := map[string]interface{}{
 		"Success": r.URL.Query().Get("success") == "1",
 		"Error":   r.URL.Query().Get("error"),
+		"Email":   studentEmailFromContext(r),
 	}
 	h.serveTemplate(w, "student-feedback.html", data)
 }
@@ -183,6 +185,7 @@ func (h *Handler) SubmitFeedback(w http.ResponseWriter, r *http.Request) {
 	f := Feedback{
 		ID:          fmt.Sprintf("%d", time.Now().UnixNano()),
 		LabID:       labID,
+		Email:       studentEmailFromContext(r),
 		Rating:      rating,
 		Difficulty:  difficulty,
 		Recommend:   recommend,
@@ -221,6 +224,7 @@ func (h *Handler) ServeAdminLabFeedback(w http.ResponseWriter, r *http.Request) 
 
 	type FeedbackDisplay struct {
 		ID          string
+		Email       string
 		Rating      int
 		Stars       string
 		Difficulty  string
@@ -297,6 +301,7 @@ func (h *Handler) ServeAdminLabFeedback(w http.ResponseWriter, r *http.Request) 
 			}
 			data.Feedbacks = append(data.Feedbacks, FeedbackDisplay{
 				ID:          e.ID,
+				Email:       e.Email,
 				Rating:      e.Rating,
 				Stars:       stars,
 				Difficulty:  difficultyLabel[e.Difficulty],

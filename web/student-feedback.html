@@ -62,6 +62,7 @@
         <main>
             <div class="student-card">
                 <h2>Lab Feedback</h2>
+                {{if .Email}}<p class="feedback-submitter-email">Submitting as: <strong>{{.Email}}</strong></p>{{end}}
                 <p style="color: #6b7280; margin-bottom: 1.5rem;">Help us improve by sharing your experience with this lab session.</p>
 
                 {{if .Success}}

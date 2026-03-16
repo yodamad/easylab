@@ -1534,6 +1534,19 @@ body.student-dashboard-page {
     color: var(--text-light);
 }
 
+.form-value-display {
+    font-weight: 500;
+    color: #374151;
+    margin: 0;
+    padding: 0.5rem 0;
+}
+
+.feedback-submitter-email {
+    font-size: 0.9rem;
+    color: #6b7280;
+    margin-bottom: 1rem;
+}
+
 .student-form-group input,
 .student-form-group select {
     width: 100%;
