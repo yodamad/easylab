@@ -258,7 +258,7 @@ func TestAuthHandler_StudentSession(t *testing.T) {
 	}
 
 	// Create a student session
-	token := ah.createStudentSession()
+	token := ah.createStudentSession("test@example.com")
 
 	// Check token is not empty
 	if token == "" {
@@ -368,7 +368,7 @@ func createUnauthenticatedRequest(method, url string) *http.Request {
 // createStudentAuthenticatedRequest creates an HTTP request with a valid student session cookie
 func createStudentAuthenticatedRequest(method, url string, authHandler *AuthHandler) *http.Request {
 	req := httptest.NewRequest(method, url, nil)
-	token := authHandler.createStudentSession()
+	token := authHandler.createStudentSession("test@example.com")
 	req.AddCookie(&http.Cookie{
 		Name:  StudentSessionCookieName,
 		Value: token,
@@ -634,7 +634,7 @@ func TestProtectedAdminEndpoints_Unauthenticated(t *testing.T) {
 	jm := NewJobManager("")
 	pe := &PulumiExecutor{}
 	cm := NewCredentialsManager()
-	h := NewHandler(jm, pe, cm, nil)
+	h := NewHandler(jm, pe, cm, nil, nil)
 
 	tests := []struct {
 		name     string
@@ -774,7 +774,7 @@ func TestProtectedAdminEndpoints_Authenticated(t *testing.T) {
 	jm := NewJobManager("")
 	pe := &PulumiExecutor{}
 	cm := NewCredentialsManager()
-	h := NewHandler(jm, pe, cm, nil)
+	h := NewHandler(jm, pe, cm, nil, nil)
 
 	tests := []struct {
 		name     string
@@ -848,7 +848,7 @@ func TestProtectedStudentEndpoints_Unauthenticated(t *testing.T) {
 	jm := NewJobManager("")
 	pe := &PulumiExecutor{}
 	cm := NewCredentialsManager()
-	h := NewHandler(jm, pe, cm, nil)
+	h := NewHandler(jm, pe, cm, nil, nil)
 
 	tests := []struct {
 		name     string
@@ -908,7 +908,7 @@ func TestProtectedStudentEndpoints_Authenticated(t *testing.T) {
 	jm := NewJobManager("")
 	pe := &PulumiExecutor{}
 	cm := NewCredentialsManager()
-	h := NewHandler(jm, pe, cm, nil)
+	h := NewHandler(jm, pe, cm, nil, nil)
 
 	tests := []struct {
 		name     string
@@ -961,7 +961,7 @@ func TestPublicEndpoints_NoAuthRequired(t *testing.T) {
 	jm := NewJobManager("")
 	pe := &PulumiExecutor{}
 	cm := NewCredentialsManager()
-	h := NewHandler(jm, pe, cm, nil)
+	h := NewHandler(jm, pe, cm, nil, nil)
 
 	tests := []struct {
 		name     string
