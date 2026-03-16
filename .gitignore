@@ -52,3 +52,6 @@ k8s-deployment/secret.yaml
 
 # Zensical
 site/
+
+# Claude
+.claude/
