@@ -47,12 +47,7 @@ func OvhConfig(ctx *pulumi.Context, key string) string {
 
 // OvhConfigOptional returns an optional config value (empty string if not set)
 func OvhConfigOptional(ctx *pulumi.Context, key string) string {
-	cfg := config.New(ctx, OvhGroup)
-	val := cfg.Get(key)
-	if val == "" {
-		return ""
-	}
-	return val
+	return config.New(ctx, OvhGroup).Get(key)
 }
 
 // Node pool config group
@@ -82,12 +77,7 @@ func K8sConfig(ctx *pulumi.Context, key string) string {
 }
 
 func K8sConfigOptional(ctx *pulumi.Context, key string) string {
-	cfg := config.New(ctx, K8sGroup)
-	val := cfg.Get(key)
-	if val == "" {
-		return ""
-	}
-	return val
+	return config.New(ctx, K8sGroup).Get(key)
 }
 
 // Coder config group
@@ -112,11 +102,5 @@ func CoderConfig(ctx *pulumi.Context, key string) string {
 
 // CoderConfigOptional returns an optional config value (empty string if not set)
 func CoderConfigOptional(ctx *pulumi.Context, key string) string {
-	cfg := config.New(ctx, CoderGroup)
-	// Try to get the config value, return empty string if not set
-	val := cfg.Get(key)
-	if val == "" {
-		return ""
-	}
-	return val
+	return config.New(ctx, CoderGroup).Get(key)
 }

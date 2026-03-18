@@ -288,69 +288,32 @@ func main() {
 	mux.HandleFunc("/api/labs/launch", authHandler.RequireAuth(handler.LaunchLab))
 	mux.HandleFunc("/api/labs/recreate", authHandler.RequireAuth(handler.RecreateLab))
 	mux.HandleFunc("/api/stacks/destroy", authHandler.RequireAuth(handler.DestroyStack))
-	mux.HandleFunc("/api/labs/", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
-		// Check if this is a workspace listing request
-		if strings.Contains(r.URL.Path, "/workspaces") && !strings.Contains(r.URL.Path, "/delete") {
-			if r.Method == http.MethodGet {
-				handler.ListLabWorkspaces(w, r)
-				return
-			}
-		}
-		// Check if this is a workspace delete request
-		if strings.Contains(r.URL.Path, "/workspaces/") && strings.Contains(r.URL.Path, "/delete") {
-			if r.Method == http.MethodPost {
-				handler.DeleteWorkspace(w, r)
-				return
-			}
-		}
-		// Check if this is a bulk workspace delete request
-		if strings.HasSuffix(r.URL.Path, "/workspaces/bulk-delete") {
-			if r.Method == http.MethodPost {
-				handler.DeleteWorkspace(w, r)
-				return
-			}
-		}
-		// Check if this is a retry request
-		if strings.HasSuffix(r.URL.Path, "/retry") {
+	// routeLabRequest is the shared handler for /api/labs/{id}/... and the
+	// backward-compatible /api/jobs/{id}/... prefix.
+	routeLabRequest := func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case strings.Contains(path, "/workspaces") && !strings.Contains(path, "/delete") && r.Method == http.MethodGet:
+			handler.ListLabWorkspaces(w, r)
+		case strings.Contains(path, "/workspaces/") && strings.Contains(path, "/delete") && r.Method == http.MethodPost:
+			handler.DeleteWorkspace(w, r)
+		case strings.HasSuffix(path, "/retry"):
 			handler.RetryJob(w, r)
-			return
-		}
-		// Check if this is a coder credentials request
-		if strings.HasSuffix(r.URL.Path, "/coder-credentials") {
-			if r.Method == http.MethodGet {
-				handler.GetCoderCredentials(w, r)
-				return
+		case strings.HasSuffix(path, "/coder-credentials") && r.Method == http.MethodGet:
+			handler.GetCoderCredentials(w, r)
+		case strings.HasSuffix(path, "/kubeconfig"):
+			handler.DownloadKubeconfig(w, r)
+		default:
+			if r.URL.Query().Get("format") == "json" {
+				handler.GetJobStatusJSON(w, r)
+			} else {
+				handler.GetJobStatus(w, r)
 			}
 		}
-		// Check if this is a kubeconfig download request
-		if strings.HasSuffix(r.URL.Path, "/kubeconfig") {
-			handler.DownloadKubeconfig(w, r)
-			return
-		}
-		if r.URL.Query().Get("format") == "json" {
-			handler.GetJobStatusJSON(w, r)
-		} else {
-			handler.GetJobStatus(w, r)
-		}
-	}))
+	}
+	mux.HandleFunc("/api/labs/", authHandler.RequireAuth(routeLabRequest))
 	// Backward compatibility route
-	mux.HandleFunc("/api/jobs/", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
-		// Check if this is a retry request
-		if strings.HasSuffix(r.URL.Path, "/retry") {
-			handler.RetryJob(w, r)
-			return
-		}
-		// Check if this is a kubeconfig download request
-		if strings.HasSuffix(r.URL.Path, "/kubeconfig") {
-			handler.DownloadKubeconfig(w, r)
-			return
-		}
-		if r.URL.Query().Get("format") == "json" {
-			handler.GetJobStatusJSON(w, r)
-		} else {
-			handler.GetJobStatus(w, r)
-		}
-	}))
+	mux.HandleFunc("/api/jobs/", authHandler.RequireAuth(routeLabRequest))
 	// Workspace management routes
 	mux.HandleFunc("/labs/", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
 		// Check if this is a workspace page request
@@ -367,7 +330,7 @@ func main() {
 		Addr:         addr,
 		Handler:      mux,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		WriteTimeout: 5 * time.Minute, // long enough for log-streaming and kubeconfig responses
 		IdleTimeout:  60 * time.Second,
 	}
 
