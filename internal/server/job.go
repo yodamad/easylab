@@ -9,6 +9,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // JobStatus represents the current status of a Pulumi job
@@ -167,12 +169,13 @@ func (jm *JobManager) CreateJob(config *LabConfig) string {
 	jm.mu.Lock()
 	defer jm.mu.Unlock()
 
-	jobID := fmt.Sprintf("job-%d", time.Now().UnixNano())
+	now := time.Now()
+	jobID := "job-" + uuid.New().String()
 	job := &Job{
 		ID:        jobID,
 		Status:    JobStatusPending,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		CreatedAt: now,
+		UpdatedAt: now,
 		Output:    []string{},
 		Config:    config,
 	}

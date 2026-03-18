@@ -101,19 +101,44 @@ func NewAuthHandler() (*AuthHandler, error) {
 		log.Printf("Student password hash initialized")
 	}
 
-	return &AuthHandler{
+	ah := &AuthHandler{
 		passwordHash:        passwordHash,
 		studentPasswordHash: studentPasswordHash,
 		sessions:            make(map[string]*Session),
 		studentSessions:     make(map[string]*Session),
 		templates:           make(map[string]*template.Template),
-	}, nil
+	}
+
+	// Periodically evict expired sessions so the maps don't grow unboundedly.
+	go func() {
+		ticker := time.NewTicker(15 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			now := time.Now()
+			ah.mu.Lock()
+			for tok, s := range ah.sessions {
+				if now.After(s.ExpiresAt) {
+					delete(ah.sessions, tok)
+				}
+			}
+			for tok, s := range ah.studentSessions {
+				if now.After(s.ExpiresAt) {
+					delete(ah.studentSessions, tok)
+				}
+			}
+			ah.mu.Unlock()
+		}
+	}()
+
+	return ah, nil
 }
 
 // generateToken creates a secure random token
 func generateToken() string {
 	bytes := make([]byte, 32)
-	rand.Read(bytes)
+	if _, err := rand.Read(bytes); err != nil {
+		panic(fmt.Sprintf("crypto/rand unavailable: %v", err))
+	}
 	return hex.EncodeToString(bytes)
 }
 

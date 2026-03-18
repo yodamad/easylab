@@ -150,6 +150,9 @@ func CloneFolderFromGitAndZipIt(repoUrl string, folder string, branch string) (s
 	})
 
 	if err != nil {
+		zipWriter.Close()
+		zipFile.Close()
+		os.Remove(absPath) // discard the incomplete zip
 		return "", fmt.Errorf("failed to add files to zip: %w", err)
 	}
 

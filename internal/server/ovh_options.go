@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -157,7 +158,7 @@ func (m *OVHOptionsManager) RefreshFromAPI() error {
 	flavorsMap := make(map[string][]ovhFlavor, len(regions))
 	for _, region := range regions {
 		var flavors []ovhFlavor
-		ep := fmt.Sprintf("/cloud/project/%s/capabilities/kube/flavors?region=%s", creds.ServiceName, region)
+		ep := fmt.Sprintf("/cloud/project/%s/capabilities/kube/flavors?region=%s", creds.ServiceName, url.QueryEscape(region))
 		if err := client.Get(ep, &flavors); err != nil {
 			log.Printf("[OVH-OPTIONS] Warning: failed to fetch flavors for region %s: %v", region, err)
 			continue

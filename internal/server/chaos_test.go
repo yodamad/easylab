@@ -35,7 +35,9 @@ func randomString(n int) string {
 // randomBytes generates random bytes of given length
 func randomBytes(n int) []byte {
 	b := make([]byte, n)
-	rand.Read(b)
+	for i := range b {
+		b[i] = byte(rand.Intn(256))
+	}
 	return b
 }
 

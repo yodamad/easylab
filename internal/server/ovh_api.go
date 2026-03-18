@@ -2,11 +2,12 @@ package server
 
 import (
 	"fmt"
+	"html"
 	"log"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
-	"strings"
 
 	"github.com/ovh/go-ovh/ovh"
 )
@@ -129,7 +130,7 @@ func (h *Handler) GetOVHFlavors(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var flavors []ovhFlavor
-	endpoint := fmt.Sprintf("/cloud/project/%s/capabilities/kube/flavors?region=%s", serviceName, region)
+	endpoint := fmt.Sprintf("/cloud/project/%s/capabilities/kube/flavors?region=%s", serviceName, url.QueryEscape(region))
 	if err := client.Get(endpoint, &flavors); err != nil {
 		log.Printf("GetOVHFlavors: OVH API error: %v", err)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -158,9 +159,5 @@ func (h *Handler) GetOVHFlavors(w http.ResponseWriter, r *http.Request) {
 }
 
 func escapeHTML(s string) string {
-	s = strings.ReplaceAll(s, "&", "&amp;")
-	s = strings.ReplaceAll(s, "<", "&lt;")
-	s = strings.ReplaceAll(s, ">", "&gt;")
-	s = strings.ReplaceAll(s, `"`, "&quot;")
-	return s
+	return html.EscapeString(s)
 }

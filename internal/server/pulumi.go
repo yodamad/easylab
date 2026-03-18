@@ -634,8 +634,7 @@ type JobPreparation struct {
 	Stack   auto.Stack
 	Writer  *jobOutputWriter
 	Context context.Context
-	Cleanup func()            // Cleanup function to restore env vars after Pulumi operations complete
-	EnvVars map[string]string // Environment variables to pass to Pulumi operations (Up, Preview, Destroy)
+	Cleanup func()
 }
 
 // prepareJob handles all common setup logic for Pulumi operations
@@ -716,54 +715,9 @@ func (pe *PulumiExecutor) prepareJob(jobID string, allowMissingDir bool) (*JobPr
 		}
 	}
 
-	// Set up environment variables - both OS env vars and Pulumi Automation API env vars
-	// Pulumi CLI reads from OS environment, so we need to set these as OS env vars too
-	originalEnv := make(map[string]string)
-
-	// Get Pulumi backend environment variables first (scoped to job directory)
-	pulumiBackendEnvVars := getLocalBackendEnvVars(jobDir)
-
-	envVars := make(map[string]string)
-
-	// Only set OVH credentials when not using an existing cluster
-	if !config.UseExistingCluster {
-		envVars["OVH_APPLICATION_KEY"] = config.OvhApplicationKey
-		envVars["OVH_APPLICATION_SECRET"] = config.OvhApplicationSecret
-		envVars["OVH_CONSUMER_KEY"] = config.OvhConsumerKey
-		envVars["OVH_SERVICE_NAME"] = config.OvhServiceName
-	}
-
-	// Add Pulumi backend environment variables to OS environment
-	for key, value := range pulumiBackendEnvVars {
-		if original, exists := os.LookupEnv(key); exists {
-			originalEnv[key] = original
-		}
-		os.Setenv(key, value)
-		envVars[key] = value // Track for cleanup
-	}
-
-	// Save original values and set new ones
-	for key, value := range envVars {
-		if original, exists := os.LookupEnv(key); exists {
-			if _, alreadyTracked := originalEnv[key]; !alreadyTracked {
-				originalEnv[key] = original
-			}
-		}
-		os.Setenv(key, value)
-	}
-
-	// Create cleanup function to restore original env vars after Pulumi operations complete
-	// This must be called by the caller (Execute, Preview, Destroy) after their operations finish
-	cleanup := func() {
-		for key, value := range originalEnv {
-			os.Setenv(key, value)
-		}
-		for key := range envVars {
-			if _, wasSet := originalEnv[key]; !wasSet {
-				os.Unsetenv(key)
-			}
-		}
-	}
+	// Env vars are passed per-workspace via auto.EnvVars inside getOrCreateStack /
+	// getOrCreateStackInline — no process-global os.Setenv needed.
+	cleanup := func() {}
 
 	// Get or create stack - use inline program if enabled
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Initializing Pulumi stack '%s'...", config.StackName))
@@ -798,7 +752,6 @@ func (pe *PulumiExecutor) prepareJob(jobID string, allowMissingDir bool) (*JobPr
 		Writer:  outputWriter,
 		Context: ctx,
 		Cleanup: cleanup,
-		EnvVars: envVars,
 	}, nil
 }
 
@@ -857,54 +810,9 @@ func (pe *PulumiExecutor) prepareJobForRetry(jobID string) (*JobPreparation, err
 
 	pe.jobManager.AppendOutput(jobID, "Reusing existing job directory and files...")
 
-	// Set up environment variables - both OS env vars and Pulumi Automation API env vars
-	// Pulumi CLI reads from OS environment, so we need to set these as OS env vars too
-	originalEnv := make(map[string]string)
-
-	// Get Pulumi backend environment variables first (scoped to job directory)
-	pulumiBackendEnvVars := getLocalBackendEnvVars(jobDir)
-
-	envVars := make(map[string]string)
-
-	// Only set OVH credentials when not using an existing cluster
-	if !config.UseExistingCluster {
-		envVars["OVH_APPLICATION_KEY"] = config.OvhApplicationKey
-		envVars["OVH_APPLICATION_SECRET"] = config.OvhApplicationSecret
-		envVars["OVH_CONSUMER_KEY"] = config.OvhConsumerKey
-		envVars["OVH_SERVICE_NAME"] = config.OvhServiceName
-	}
-
-	// Add Pulumi backend environment variables to OS environment
-	for key, value := range pulumiBackendEnvVars {
-		if original, exists := os.LookupEnv(key); exists {
-			originalEnv[key] = original
-		}
-		os.Setenv(key, value)
-		envVars[key] = value // Track for cleanup
-	}
-
-	// Save original values and set new ones
-	for key, value := range envVars {
-		if original, exists := os.LookupEnv(key); exists {
-			if _, alreadyTracked := originalEnv[key]; !alreadyTracked {
-				originalEnv[key] = original
-			}
-		}
-		os.Setenv(key, value)
-	}
-
-	// Create cleanup function to restore original env vars after Pulumi operations complete
-	// This must be called by the caller (ExecuteRetry) after their operations finish
-	cleanup := func() {
-		for key, value := range originalEnv {
-			os.Setenv(key, value)
-		}
-		for key := range envVars {
-			if _, wasSet := originalEnv[key]; !wasSet {
-				os.Unsetenv(key)
-			}
-		}
-	}
+	// Env vars are passed per-workspace via auto.EnvVars inside getOrCreateStack /
+	// getOrCreateStackInline — no process-global os.Setenv needed.
+	cleanup := func() {}
 
 	// Get existing stack (should exist from previous run)
 	// getOrCreateStack will create it if it doesn't exist
@@ -940,7 +848,6 @@ func (pe *PulumiExecutor) prepareJobForRetry(jobID string) (*JobPreparation, err
 		Writer:  outputWriter,
 		Context: ctx,
 		Cleanup: cleanup,
-		EnvVars: envVars,
 	}, nil
 }
 
@@ -1040,54 +947,9 @@ func (pe *PulumiExecutor) prepareDestroyJob(jobID string) (*JobPreparation, erro
 		}
 	}
 
-	// Set up environment variables - both OS env vars and Pulumi Automation API env vars
-	// Pulumi CLI reads from OS environment, so we need to set these as OS env vars too
-	originalEnv := make(map[string]string)
-
-	// Get Pulumi backend environment variables first
-	pulumiBackendEnvVars := getLocalBackendEnvVars()
-
-	osEnvVars := make(map[string]string)
-
-	// Only set OVH credentials when not using an existing cluster
-	if !config.UseExistingCluster {
-		osEnvVars["OVH_APPLICATION_KEY"] = config.OvhApplicationKey
-		osEnvVars["OVH_APPLICATION_SECRET"] = config.OvhApplicationSecret
-		osEnvVars["OVH_CONSUMER_KEY"] = config.OvhConsumerKey
-		osEnvVars["OVH_SERVICE_NAME"] = config.OvhServiceName
-	}
-
-	// Add Pulumi backend environment variables to OS environment
-	for key, value := range pulumiBackendEnvVars {
-		if original, exists := os.LookupEnv(key); exists {
-			originalEnv[key] = original
-		}
-		os.Setenv(key, value)
-		osEnvVars[key] = value // Track for cleanup
-	}
-
-	// Set credentials as OS environment variables
-	for key, value := range osEnvVars {
-		if original, exists := os.LookupEnv(key); exists {
-			if _, alreadyTracked := originalEnv[key]; !alreadyTracked {
-				originalEnv[key] = original
-			}
-		}
-		os.Setenv(key, value)
-	}
-
-	// Create cleanup function to restore original env vars after Pulumi operations complete
-	// This must be called by the caller (Destroy) after their operations finish
-	cleanup := func() {
-		for key, value := range originalEnv {
-			os.Setenv(key, value)
-		}
-		for key := range osEnvVars {
-			if _, wasSet := originalEnv[key]; !wasSet {
-				os.Unsetenv(key)
-			}
-		}
-	}
+	// Env vars are passed per-workspace via auto.EnvVars inside getPulumiEnvVars /
+	// auto.SelectStackLocalSource — no process-global os.Setenv needed.
+	cleanup := func() {}
 
 	// Get environment variables including OVH credentials for Pulumi Automation API (scoped to job directory)
 	pulumiEnvVars := getPulumiEnvVars(config, jobDir)
@@ -1225,7 +1087,6 @@ func (pe *PulumiExecutor) prepareDestroyJob(jobID string) (*JobPreparation, erro
 		Writer:  outputWriter,
 		Context: ctx,
 		Cleanup: cleanup,
-		EnvVars: pulumiEnvVars,
 	}, nil
 }
 
