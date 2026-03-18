@@ -162,6 +162,16 @@ func SetupCoder(ctx *pulumi.Context, k8sProvider *k8s.Provider, ns *k8score.Name
 		Version:     utils.CoderConfig(ctx, utils.CoderVersion),
 		Url:         "https://helm.coder.com/v2",
 		ReleaseName: "coder", // Explicit name to avoid Pulumi-generated suffixes and Helm ownership conflicts
+		Values: pulumi.Map{
+			"coder": pulumi.Map{
+				"env": pulumi.Array{
+					pulumi.Map{
+						"name":  pulumi.String("CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS"),
+						"value": pulumi.String("false"),
+					},
+				},
+			},
+		},
 	}
 
 	helmRelease, err := internalK8s.InitHelm(ctx, k8sProvider, helmValues, ns)
