@@ -37,8 +37,6 @@ COPY --from=builder /app/main .
 # Copy web static files
 COPY --from=builder /app/web ./web
 
-# Copy templates directory
-COPY --from=builder /app/templates ./templates
 
 # Create directories for data persistence and Go cache (including sumdb)
 RUN mkdir -p /app/data /app/jobs /app/.go/pkg/mod /app/.go/pkg/sumdb /app/.go/cache
@@ -59,9 +57,6 @@ RUN chown -R appuser:appgroup /app
 # Ensure web directory has proper read permissions
 RUN chmod -R 755 /app/web
 
-# Ensure templates directory has proper read permissions
-RUN chmod -R 755 /app/templates
-
 # Switch to non-root user
 USER appuser
 
@@ -72,7 +67,6 @@ EXPOSE 8080
 ENV PORT=8080
 ENV WORK_DIR=/app/jobs
 ENV DATA_DIR=/app/data
-ENV TEMPLATES_DIR=/app/templates
 ENV PULUMI_BACKEND_URL=file://
 ENV PULUMI_SKIP_UPDATE_CHECK=true
 ENV PULUMI_CONFIG_PASSPHRASE=passphrase

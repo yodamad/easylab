@@ -183,20 +183,11 @@ func main() {
 	pulumiExec = server.NewPulumiExecutor(jobManager, *workDir)
 	log.Printf("[STARTUP] PulumiExecutor initialization took %v", time.Since(pulumiStart))
 
-	// Check and install required Pulumi plugins, then pre-warm the Go module cache.
-	// Plugins must be healthy before module pre-warming compiles template code that
-	// references them, so both tasks run sequentially inside one goroutine.
+	// Check and install required Pulumi plugins at startup.
 	go func() {
 		pluginStart := time.Now()
 		pulumiExec.CheckAndInstallPlugins()
 		log.Printf("[STARTUP] Pulumi plugin check completed in %v", time.Since(pluginStart))
-
-		prewarmStart := time.Now()
-		if err := pulumiExec.PrewarmModuleCache(); err != nil {
-			log.Printf("[STARTUP] Warning: Go module cache pre-warming failed: %v", err)
-		} else {
-			log.Printf("[STARTUP] Go module cache pre-warming completed in %v", time.Since(prewarmStart))
-		}
 	}()
 
 	// Initialize feedback store (persists alongside job data)

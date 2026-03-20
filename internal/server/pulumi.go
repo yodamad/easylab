@@ -30,11 +30,8 @@ func getEnvOrDefault(key, defaultValue string) string {
 
 // PulumiExecutor handles Pulumi command execution
 type PulumiExecutor struct {
-	jobManager       *JobManager
-	workDir          string
-	templatesDir     string
-	moduleCacheReady bool // Indicates if Go module cache has been pre-warmed
-	useInlineProgram bool // If true, use pre-compiled inline program instead of template copying
+	jobManager *JobManager
+	workDir    string
 }
 
 // jobOutputWriter is a custom io.Writer that forwards output to jobManager
@@ -123,127 +120,13 @@ func getAppBaseDir() string {
 
 // NewPulumiExecutor creates a new Pulumi executor
 func NewPulumiExecutor(jobManager *JobManager, workDir string) *PulumiExecutor {
-	// Get templates directory from environment variable or derive from base dir
-	templatesDir := os.Getenv("TEMPLATES_DIR")
-	if templatesDir == "" {
-		templatesDir = filepath.Join(getAppBaseDir(), "templates")
-	}
-	log.Printf("Templates directory: %s", templatesDir)
 	log.Printf("Work directory: %s", workDir)
-
-	// Check if inline Pulumi program mode is enabled
-	// This mode uses pre-compiled code instead of copying templates
-	// Set USE_INLINE_PULUMI=false to fall back to template-copy mode
-	useInline := getEnvOrDefault("USE_INLINE_PULUMI", "true") == "true"
-	if useInline {
-		log.Printf("[PULUMI] Inline program mode ENABLED - using pre-compiled Pulumi program")
-	} else {
-		log.Printf("[PULUMI] Template mode - copying template files for each job")
-	}
-
 	return &PulumiExecutor{
-		jobManager:       jobManager,
-		workDir:          workDir,
-		templatesDir:     templatesDir,
-		moduleCacheReady: false,
-		useInlineProgram: useInline,
+		jobManager: jobManager,
+		workDir:    workDir,
 	}
 }
 
-// PrewarmModuleCache pre-downloads Go modules from templates directory
-// This should be called at application startup to avoid repeated downloads per job
-func (pe *PulumiExecutor) PrewarmModuleCache() error {
-	startTime := time.Now()
-	log.Printf("[PREWARM] Starting Go module cache pre-warming from templates directory: %s", pe.templatesDir)
-
-	// Verify templates directory exists
-	if _, err := os.Stat(pe.templatesDir); os.IsNotExist(err) {
-		return fmt.Errorf("templates directory not found: %s", pe.templatesDir)
-	}
-
-	// Get environment variables for Go module cache
-	envVars := getLocalBackendEnvVars()
-
-	// Ensure Go module cache directories exist
-	if gomodcache, ok := envVars["GOMODCACHE"]; ok {
-		if err := os.MkdirAll(gomodcache, 0755); err != nil {
-			log.Printf("[PREWARM] Warning: failed to create GOMODCACHE directory %s: %v", gomodcache, err)
-		} else {
-			log.Printf("[PREWARM] Go module cache directory: %s", gomodcache)
-		}
-	}
-	if gocache, ok := envVars["GOCACHE"]; ok {
-		if err := os.MkdirAll(gocache, 0755); err != nil {
-			log.Printf("[PREWARM] Warning: failed to create GOCACHE directory %s: %v", gocache, err)
-		}
-	}
-	if gopath, ok := envVars["GOPATH"]; ok {
-		if err := os.MkdirAll(gopath, 0755); err != nil {
-			log.Printf("[PREWARM] Warning: failed to create GOPATH directory %s: %v", gopath, err)
-		}
-	}
-
-	// Build environment for the command - start with current environment
-	cmdEnv := os.Environ()
-
-	// Add/override with all environment variables from getLocalBackendEnvVars
-	for key, value := range envVars {
-		// Remove existing entry if present
-		for i, env := range cmdEnv {
-			if strings.HasPrefix(env, key+"=") {
-				cmdEnv = append(cmdEnv[:i], cmdEnv[i+1:]...)
-				break
-			}
-		}
-		cmdEnv = append(cmdEnv, fmt.Sprintf("%s=%s", key, value))
-	}
-
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	// Run go mod download in templates directory
-	log.Printf("[PREWARM] Running go mod download in templates directory...")
-	downloadCmd := exec.CommandContext(ctx, "go", "mod", "download")
-	downloadCmd.Dir = pe.templatesDir
-	downloadCmd.Env = cmdEnv
-
-	output, err := downloadCmd.CombinedOutput()
-	if err != nil {
-		log.Printf("[PREWARM] Warning: go mod download failed: %v\nOutput: %s", err, string(output))
-		// Don't fail - modules might still be available from previous runs
-	} else {
-		log.Printf("[PREWARM] Go modules downloaded successfully")
-	}
-
-	// Verify critical subpackages are accessible
-	log.Printf("[PREWARM] Verifying critical subpackages...")
-	requiredSubpackages := []string{
-		"github.com/ovh/pulumi-ovh/sdk/v2/go/ovh/cloudproject",
-		"github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes",
-		"github.com/pulumi/pulumi/sdk/v3/go/pulumi",
-	}
-
-	for _, pkg := range requiredSubpackages {
-		listCmd := exec.CommandContext(ctx, "go", "list", pkg)
-		listCmd.Dir = pe.templatesDir
-		listCmd.Env = cmdEnv
-		if _, listErr := listCmd.CombinedOutput(); listErr != nil {
-			log.Printf("[PREWARM] Warning: subpackage %s not accessible: %v", pkg, listErr)
-		} else {
-			log.Printf("[PREWARM] Subpackage %s verified", pkg)
-		}
-	}
-
-	pe.moduleCacheReady = true
-	log.Printf("[PREWARM] Go module cache pre-warming completed in %v", time.Since(startTime))
-	return nil
-}
-
-// IsModuleCacheReady returns whether the module cache has been pre-warmed
-func (pe *PulumiExecutor) IsModuleCacheReady() bool {
-	return pe.moduleCacheReady
-}
 
 // GetWorkDir returns the work directory path
 func (pe *PulumiExecutor) GetWorkDir() string {
@@ -429,89 +312,6 @@ func getPulumiEnvVars(config *LabConfig, workDir ...string) map[string]string {
 	return envVars
 }
 
-// getOrCreateStack gets or creates a Pulumi stack using Automation API
-func (pe *PulumiExecutor) getOrCreateStack(ctx context.Context, stackName, workDir, jobID string, config *LabConfig) (auto.Stack, error) {
-	// Ensure workDir exists and is writable before proceeding
-	if err := os.MkdirAll(workDir, 0755); err != nil {
-		return auto.Stack{}, fmt.Errorf("failed to ensure work directory exists: %w", err)
-	}
-
-	// Verify workDir is writable
-	if err := os.WriteFile(filepath.Join(workDir, ".pulumi-test"), []byte("test"), 0644); err != nil {
-		return auto.Stack{}, fmt.Errorf("work directory is not writable: %w", err)
-	}
-	os.Remove(filepath.Join(workDir, ".pulumi-test"))
-
-	// Get environment variables including OVH credentials
-	envVars := getPulumiEnvVars(config, workDir)
-
-	// First, try to select the stack to check if it exists
-	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Checking if stack '%s' exists in %s...", stackName, workDir))
-	stack, err := auto.SelectStackLocalSource(ctx, stackName, workDir,
-		auto.WorkDir(workDir),
-		auto.EnvVars(envVars))
-	if err == nil {
-		// Stack exists, return it
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' exists, selected successfully", stackName))
-		return stack, nil
-	}
-
-	// If selection failed, check if it's because the stack doesn't exist
-	// Try to list stacks to verify
-	workspace, wsErr := auto.NewLocalWorkspace(ctx,
-		auto.WorkDir(workDir),
-		auto.EnvVars(envVars))
-	if wsErr != nil {
-		return auto.Stack{}, fmt.Errorf("failed to create workspace: %w", wsErr)
-	}
-
-	stacks, listErr := workspace.ListStacks(ctx)
-	if listErr != nil {
-		// If we can't list stacks, assume stack doesn't exist and try to create it
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' does not exist (could not verify), creating it...", stackName))
-		stack, createErr := auto.UpsertStackLocalSource(ctx, stackName, workDir,
-			auto.WorkDir(workDir),
-			auto.EnvVars(envVars))
-		if createErr != nil {
-			return auto.Stack{}, fmt.Errorf("failed to create stack: %w", createErr)
-		}
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' created successfully", stackName))
-		return stack, nil
-	}
-
-	// Verify stack doesn't exist in the list
-	stackExists := false
-	for _, s := range stacks {
-		if s.Name == stackName {
-			stackExists = true
-			break
-		}
-	}
-
-	if stackExists {
-		// Stack exists in list but selection failed - try again with more context
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' exists in workspace, retrying selection...", stackName))
-		stack, err := auto.SelectStackLocalSource(ctx, stackName, workDir,
-			auto.WorkDir(workDir),
-			auto.EnvVars(envVars))
-		if err != nil {
-			return auto.Stack{}, fmt.Errorf("failed to select existing stack: %w", err)
-		}
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' selected successfully", stackName))
-		return stack, nil
-	}
-
-	// Stack doesn't exist, create it
-	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' does not exist, creating it...", stackName))
-	stack, err = auto.UpsertStackLocalSource(ctx, stackName, workDir,
-		auto.WorkDir(workDir),
-		auto.EnvVars(envVars))
-	if err != nil {
-		return auto.Stack{}, fmt.Errorf("failed to create stack: %w", err)
-	}
-	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' created successfully", stackName))
-	return stack, nil
-}
 
 // getOrCreateStackInline gets or creates a Pulumi stack using inline program (pre-compiled)
 // This avoids the Go compilation step on each job, providing significant performance improvements
@@ -698,50 +498,14 @@ func (pe *PulumiExecutor) prepareJob(jobID string, allowMissingDir bool) (*JobPr
 		pe.jobManager.AppendOutput(jobID, "External kubeconfig written for existing cluster mode")
 	}
 
-	// When using inline program mode, skip template file generation and Go module download
-	// The program is pre-compiled into the binary, so we only need the job directory for state
-	if pe.useInlineProgram {
-		pe.jobManager.AppendOutput(jobID, "Using inline program mode - skipping template generation and Go module download")
-	} else {
-		// Write Pulumi.yaml (needed for local source mode)
-		pe.jobManager.AppendOutput(jobID, "Writing Pulumi.yaml...")
-		pulumiYaml := pe.generatePulumiYaml(config)
-		if err := os.WriteFile(filepath.Join(jobDir, "Pulumi.yaml"), []byte(pulumiYaml), 0644); err != nil {
-			pe.jobManager.SetError(jobID, fmt.Errorf("failed to write Pulumi.yaml: %w", err))
-			return nil, err
-		}
-
-		// Generate source files from templates
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Generating source files from templates in %s...", pe.templatesDir))
-		if err := pe.generateSourceFiles(jobDir, config); err != nil {
-			pe.jobManager.SetError(jobID, fmt.Errorf("failed to generate source files: %w", err))
-			return nil, err
-		}
-		pe.jobManager.AppendOutput(jobID, "Source files generated successfully")
-
-		// Pre-download Go modules to avoid hanging during compilation
-		pe.jobManager.AppendOutput(jobID, "Pre-downloading Go modules...")
-		if err := pe.downloadGoModules(jobDir, jobID); err != nil {
-			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to pre-download Go modules: %v. Pulumi will download them during compilation.", err))
-			// Don't fail - Pulumi can still download modules during compilation
-		} else {
-			pe.jobManager.AppendOutput(jobID, "Go modules downloaded successfully")
-		}
-	}
-
-	// Env vars are passed per-workspace via auto.EnvVars inside getOrCreateStack /
-	// getOrCreateStackInline — no process-global os.Setenv needed.
+	// Env vars are passed per-workspace via auto.EnvVars inside getOrCreateStackInline.
 	cleanup := func() {}
 
-	// Get or create stack - use inline program if enabled
+	// Get or create stack using inline program
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Initializing Pulumi stack '%s'...", config.StackName))
 	var stack auto.Stack
 	var err error
-	if pe.useInlineProgram {
-		stack, err = pe.getOrCreateStackInline(ctx, config.StackName, jobDir, jobID, config)
-	} else {
-		stack, err = pe.getOrCreateStack(ctx, config.StackName, jobDir, jobID, config)
-	}
+	stack, err = pe.getOrCreateStackInline(ctx, config.StackName, jobDir, jobID, config)
 	if err != nil {
 		cleanup() // Clean up env vars on error
 		pe.jobManager.SetError(jobID, fmt.Errorf("failed to get or create stack: %w", err))
@@ -824,20 +588,14 @@ func (pe *PulumiExecutor) prepareJobForRetry(jobID string) (*JobPreparation, err
 
 	pe.jobManager.AppendOutput(jobID, "Reusing existing job directory and files...")
 
-	// Env vars are passed per-workspace via auto.EnvVars inside getOrCreateStack /
-	// getOrCreateStackInline — no process-global os.Setenv needed.
+	// Env vars are passed per-workspace via auto.EnvVars inside getOrCreateStackInline.
 	cleanup := func() {}
 
 	// Get existing stack (should exist from previous run)
-	// getOrCreateStack will create it if it doesn't exist
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Selecting existing Pulumi stack '%s'...", config.StackName))
 	var stack auto.Stack
 	var err error
-	if pe.useInlineProgram {
-		stack, err = pe.getOrCreateStackInline(ctx, config.StackName, jobDir, jobID, config)
-	} else {
-		stack, err = pe.getOrCreateStack(ctx, config.StackName, jobDir, jobID, config)
-	}
+	stack, err = pe.getOrCreateStackInline(ctx, config.StackName, jobDir, jobID, config)
 	if err != nil {
 		cleanup() // Clean up env vars on error
 		pe.jobManager.SetError(jobID, fmt.Errorf("failed to get or create stack: %w", err))
@@ -892,77 +650,13 @@ func (pe *PulumiExecutor) prepareDestroyJob(jobID string) (*JobPreparation, erro
 	pe.jobManager.UpdateJobStatus(jobID, JobStatusRunning)
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy started at %s", time.Now().Format(time.RFC3339)))
 
-	// Find job directory
+	// Ensure job directory exists (needed for stack state storage)
 	jobDir := filepath.Join(pe.workDir, jobID)
-	if _, err := os.Stat(jobDir); os.IsNotExist(err) {
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Job directory not found: %s. Creating it...", jobDir))
-		if err := os.MkdirAll(jobDir, 0755); err != nil {
-			pe.jobManager.SetError(jobID, fmt.Errorf("failed to create job directory: %w", err))
-			return nil, err
-		}
-
-		// Write Pulumi.yaml
-		pulumiYaml := pe.generatePulumiYaml(config)
-		if err := os.WriteFile(filepath.Join(jobDir, "Pulumi.yaml"), []byte(pulumiYaml), 0644); err != nil {
-			pe.jobManager.SetError(jobID, fmt.Errorf("failed to write Pulumi.yaml: %w", err))
-			return nil, err
-		}
-
-		// Generate source files from templates (needed for pulumi destroy to know what to destroy)
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Generating source files from templates in %s...", pe.templatesDir))
-		if err := pe.generateSourceFiles(jobDir, config); err != nil {
-			pe.jobManager.SetError(jobID, fmt.Errorf("failed to generate source files: %w", err))
-			return nil, err
-		}
-		pe.jobManager.AppendOutput(jobID, "Source files generated successfully")
-
-		// Pre-download Go modules to avoid hanging during compilation
-		pe.jobManager.AppendOutput(jobID, "Pre-downloading Go modules...")
-		if err := pe.downloadGoModules(jobDir, jobID); err != nil {
-			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to pre-download Go modules: %v. Pulumi will download them during compilation.", err))
-			// Don't fail - Pulumi can still download modules during compilation
-		} else {
-			pe.jobManager.AppendOutput(jobID, "Go modules downloaded successfully")
-		}
+	if err := os.MkdirAll(jobDir, 0755); err != nil {
+		pe.jobManager.SetError(jobID, fmt.Errorf("failed to create job directory: %w", err))
+		return nil, err
 	}
 
-	// CRITICAL FIX: Ensure Pulumi.yaml exists even if directory exists
-	// After cleanupJobDirectory(jobID, true), .pulumi is preserved but Pulumi.yaml is removed
-	// Pulumi requires Pulumi.yaml to select stacks, so we must regenerate it
-	pulumiYamlPath := filepath.Join(jobDir, "Pulumi.yaml")
-	if _, err := os.Stat(pulumiYamlPath); os.IsNotExist(err) {
-		pe.jobManager.AppendOutput(jobID, "Pulumi.yaml not found, regenerating it...")
-		pulumiYaml := pe.generatePulumiYaml(config)
-		if err := os.WriteFile(pulumiYamlPath, []byte(pulumiYaml), 0644); err != nil {
-			pe.jobManager.SetError(jobID, fmt.Errorf("failed to write Pulumi.yaml: %w", err))
-			return nil, err
-		}
-		pe.jobManager.AppendOutput(jobID, "Pulumi.yaml regenerated successfully")
-	}
-
-	// Ensure source files exist (needed for pulumi destroy to know what to destroy)
-	// Check if main.go exists as indicator of source files
-	mainGoPath := filepath.Join(jobDir, "main.go")
-	if _, err := os.Stat(mainGoPath); os.IsNotExist(err) {
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Source files not found, regenerating from templates in %s...", pe.templatesDir))
-		if err := pe.generateSourceFiles(jobDir, config); err != nil {
-			pe.jobManager.SetError(jobID, fmt.Errorf("failed to generate source files: %w", err))
-			return nil, err
-		}
-		pe.jobManager.AppendOutput(jobID, "Source files regenerated successfully")
-
-		// Pre-download Go modules if we just regenerated source files
-		pe.jobManager.AppendOutput(jobID, "Pre-downloading Go modules...")
-		if err := pe.downloadGoModules(jobDir, jobID); err != nil {
-			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to pre-download Go modules: %v. Pulumi will download them during compilation.", err))
-			// Don't fail - Pulumi can still download modules during compilation
-		} else {
-			pe.jobManager.AppendOutput(jobID, "Go modules downloaded successfully")
-		}
-	}
-
-	// Env vars are passed per-workspace via auto.EnvVars inside getPulumiEnvVars /
-	// auto.SelectStackLocalSource — no process-global os.Setenv needed.
 	cleanup := func() {}
 
 	// Get environment variables including OVH credentials for Pulumi Automation API (scoped to job directory)
@@ -979,9 +673,10 @@ func (pe *PulumiExecutor) prepareDestroyJob(jobID string) (*JobPreparation, erro
 		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Found .pulumi directory at %s", pulumiDir))
 	}
 
-	// Try to select the stack (don't create if it doesn't exist)
+	// Try to select the stack using inline program
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Selecting Pulumi stack '%s'...", stackName))
-	stack, err := auto.SelectStackLocalSource(ctx, stackName, jobDir,
+	program := internalPulumi.CreateLabProgram()
+	stack, err := auto.SelectStackInlineSource(ctx, stackName, "easylab", program,
 		auto.WorkDir(jobDir),
 		auto.EnvVars(pulumiEnvVars))
 	if err != nil {
@@ -994,30 +689,24 @@ func (pe *PulumiExecutor) prepareDestroyJob(jobID string) (*JobPreparation, erro
 			auto.EnvVars(pulumiEnvVars))
 		if wsErr != nil {
 			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to create workspace for verification: %v", wsErr))
-			// Can't verify, assume stack doesn't exist
 			pe.jobManager.AppendOutput(jobID, "Cannot verify stack existence. Assuming stack does not exist.")
 			pe.jobManager.UpdateJobStatus(jobID, JobStatusDestroyed)
 			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy completed at %s (stack did not exist or state is missing)", time.Now().Format(time.RFC3339)))
-			cleanup() // Clean up env vars before returning
+			cleanup()
 			return nil, nil
 		}
 
 		stacks, listErr := workspace.ListStacks(ctx)
 		if listErr != nil {
 			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to list stacks: %v", listErr))
-			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Diagnostic: Pulumi.yaml exists: %v", func() bool {
-				_, err := os.Stat(filepath.Join(jobDir, "Pulumi.yaml"))
-				return err == nil
-			}()))
 			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Diagnostic: .pulumi directory exists: %v", func() bool {
 				_, err := os.Stat(pulumiDir)
 				return err == nil
 			}()))
-			// Can't list stacks, assume stack doesn't exist
 			pe.jobManager.AppendOutput(jobID, "Cannot list stacks. Assuming stack does not exist.")
 			pe.jobManager.UpdateJobStatus(jobID, JobStatusDestroyed)
 			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy completed at %s (stack did not exist or state is missing)", time.Now().Format(time.RFC3339)))
-			cleanup() // Clean up env vars before returning
+			cleanup()
 			return nil, nil
 		}
 
@@ -1041,36 +730,24 @@ func (pe *PulumiExecutor) prepareDestroyJob(jobID string) (*JobPreparation, erro
 		}
 
 		if !stackExists {
-			// Stack doesn't exist in the list - it's truly gone
 			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' not found in workspace. It may have been already destroyed.", stackName))
 			pe.jobManager.UpdateJobStatus(jobID, JobStatusDestroyed)
 			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy completed at %s (stack did not exist)", time.Now().Format(time.RFC3339)))
-			cleanup() // Clean up env vars before returning
+			cleanup()
 			return nil, nil
 		}
 
 		// Stack exists in list but selection failed - retry selection
 		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' exists in workspace but selection failed. Retrying selection...", stackName))
-		stack, err = auto.SelectStackLocalSource(ctx, stackName, jobDir,
+		stack, err = auto.SelectStackInlineSource(ctx, stackName, "easylab", program,
 			auto.WorkDir(jobDir),
 			auto.EnvVars(pulumiEnvVars))
 		if err != nil {
-			// Retry also failed - provide detailed error message with diagnostics
 			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Error: retry also failed to select stack '%s': %v", stackName, err))
 			pe.jobManager.AppendOutput(jobID, "This may occur if:")
 			pe.jobManager.AppendOutput(jobID, "  1. The stack state is corrupted")
 			pe.jobManager.AppendOutput(jobID, "  2. The stack name doesn't match exactly")
 			pe.jobManager.AppendOutput(jobID, "  3. There are permission issues accessing the stack state")
-			pe.jobManager.AppendOutput(jobID, "  4. Pulumi.yaml is missing or has incorrect project name")
-
-			// Diagnostic information
-			pulumiYamlPath := filepath.Join(jobDir, "Pulumi.yaml")
-			if _, statErr := os.Stat(pulumiYamlPath); os.IsNotExist(statErr) {
-				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Diagnostic: Pulumi.yaml is MISSING at %s", pulumiYamlPath))
-				pe.jobManager.AppendOutput(jobID, "This should have been regenerated. This may indicate a bug in the destroy preparation.")
-			} else {
-				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Diagnostic: Pulumi.yaml exists at %s", pulumiYamlPath))
-			}
 
 			if _, statErr := os.Stat(pulumiDir); os.IsNotExist(statErr) {
 				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Diagnostic: Stack state directory (.pulumi) is MISSING at %s", pulumiDir))
@@ -1078,13 +755,11 @@ func (pe *PulumiExecutor) prepareDestroyJob(jobID string) (*JobPreparation, erro
 			} else {
 				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Diagnostic: Stack state directory (.pulumi) EXISTS at %s", pulumiDir))
 				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Diagnostic: Stack '%s' exists in workspace list but selection failed", stackName))
-				pe.jobManager.AppendOutput(jobID, "The stack state may be corrupted or there may be a project name mismatch.")
-				pe.jobManager.AppendOutput(jobID, "Check that Pulumi.yaml has the correct project name (should be 'easylab').")
+				pe.jobManager.AppendOutput(jobID, "The stack state may be corrupted.")
 			}
 
-			// Return error instead of silently failing - this is a real problem
 			pe.jobManager.SetError(jobID, fmt.Errorf("failed to select stack '%s' for destruction: %w", stackName, err))
-			cleanup() // Clean up env vars on error
+			cleanup()
 			return nil, fmt.Errorf("failed to select stack '%s' after retry: %w", stackName, err)
 		}
 		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' selected successfully on retry", stackName))
@@ -1570,47 +1245,6 @@ type configCommand struct {
 	secret bool
 }
 
-// generatePulumiYaml generates the Pulumi.yaml content based on the provider
-func (pe *PulumiExecutor) generatePulumiYaml(config *LabConfig) string {
-	description := "Multi-cloud Gateway and Managed Kubernetes infrastructure"
-	configSection := ""
-
-	// BYOK mode: no cloud provider (OVH, etc.) is used — only k8s + Coder
-	// We still add ovh:endpoint for schema validation when OVH provider is a dependency
-	if config.UseExistingCluster {
-		description = "Kubernetes and Coder infrastructure (existing cluster)"
-		// OVH provider is still a dependency in go.mod; add placeholder to satisfy schema validation
-		configSection = "  ovh:endpoint: ovh-eu\n"
-	} else {
-		provider := config.Provider
-		if provider == "" {
-			provider = "ovh" // Default to OVH for backward compatibility
-		}
-
-		switch provider {
-		case "ovh":
-			description = "OVHcloud Gateway and Managed Kubernetes infrastructure"
-			endpoint := config.OvhEndpoint
-			if endpoint == "" {
-				endpoint = "ovh-eu" // Default per docs/ovhcloud.md
-			}
-			configSection = fmt.Sprintf("  ovh:endpoint: %s\n", endpoint)
-			// Future providers can be added here:
-			// case "aws":
-			//     description = "AWS Gateway and Managed Kubernetes infrastructure"
-			//     configSection = fmt.Sprintf("  aws:region: %s\n", config.AwsRegion)
-		}
-	}
-
-	configBlock := ""
-	if configSection != "" {
-		configBlock = fmt.Sprintf("\nconfig:\n%s", configSection)
-	}
-	return fmt.Sprintf(`name: easylab
-runtime: go
-description: %s%s
-`, description, configBlock)
-}
 
 func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 	var commands []configCommand
@@ -1682,287 +1316,4 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 	}
 
 	return commands
-}
-
-func (pe *PulumiExecutor) generateSourceFiles(jobDir string, config *LabConfig) error {
-	// Verify templates directory exists
-	if _, err := os.Stat(pe.templatesDir); os.IsNotExist(err) {
-		return fmt.Errorf("templates directory not found: %s", pe.templatesDir)
-	}
-
-	// Determine provider (default to ovh for backward compatibility)
-	provider := config.Provider
-	if provider == "" {
-		provider = "ovh"
-	}
-
-	// Create subdirectories - common directories plus provider-specific
-	dirs := []string{"coder", "k8s", "utils"}
-	// Add provider-specific directory
-	providerDir := provider
-	// For now, we use "ovh" directory, but structure allows for "providers/ovh" in future
-	dirs = append(dirs, providerDir)
-
-	for _, dir := range dirs {
-		if err := os.MkdirAll(filepath.Join(jobDir, dir), 0755); err != nil {
-			return fmt.Errorf("failed to create dir %s: %w", dir, err)
-		}
-	}
-
-	// Copy main.go from templates
-	if err := pe.copyFile(filepath.Join(pe.templatesDir, "main.go"), filepath.Join(jobDir, "main.go")); err != nil {
-		return fmt.Errorf("failed to copy main.go: %w", err)
-	}
-
-	// Copy go.mod and go.sum from templates
-	if err := pe.copyFile(filepath.Join(pe.templatesDir, "go.mod"), filepath.Join(jobDir, "go.mod")); err != nil {
-		return fmt.Errorf("failed to copy go.mod: %w", err)
-	}
-	// go.sum might not exist, continue on error
-	pe.copyFile(filepath.Join(pe.templatesDir, "go.sum"), filepath.Join(jobDir, "go.sum"))
-
-	// Copy all source files from template subdirectories
-	for _, dir := range dirs {
-		srcDir := filepath.Join(pe.templatesDir, dir)
-		dstDir := filepath.Join(jobDir, dir)
-		if err := pe.copyDir(srcDir, dstDir); err != nil {
-			return fmt.Errorf("failed to copy dir %s: %w", dir, err)
-		}
-	}
-
-	// Verify that all required package directories exist and contain .go files
-	requiredPackages := []string{"coder", "k8s", "ovh", "utils"}
-	for _, pkg := range requiredPackages {
-		pkgDir := filepath.Join(jobDir, pkg)
-		if _, err := os.Stat(pkgDir); os.IsNotExist(err) {
-			return fmt.Errorf("required package directory %s does not exist", pkg)
-		}
-		// Check if directory contains at least one .go file
-		entries, err := os.ReadDir(pkgDir)
-		if err != nil {
-			return fmt.Errorf("failed to read package directory %s: %w", pkg, err)
-		}
-		hasGoFile := false
-		for _, entry := range entries {
-			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".go") {
-				hasGoFile = true
-				break
-			}
-		}
-		if !hasGoFile {
-			return fmt.Errorf("package directory %s does not contain any .go files", pkg)
-		}
-	}
-
-	return nil
-}
-
-func (pe *PulumiExecutor) copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dst, data, 0644)
-}
-
-func (pe *PulumiExecutor) copyDir(srcDir, dstDir string) error {
-	entries, err := os.ReadDir(srcDir)
-	if err != nil {
-		return err
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if !strings.HasSuffix(entry.Name(), ".go") {
-			continue
-		}
-		src := filepath.Join(srcDir, entry.Name())
-		dst := filepath.Join(dstDir, entry.Name())
-		if err := pe.copyFile(src, dst); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// downloadGoModules pre-downloads Go modules to avoid hanging during Pulumi compilation
-// If module cache has been pre-warmed, this function skips the download step and only runs go mod tidy
-// Environment variable SKIP_GO_MOD_VERIFY=true can be used to skip verification in production
-func (pe *PulumiExecutor) downloadGoModules(jobDir string, jobID string) error {
-	// Check if module cache is already pre-warmed
-	skipDownload := pe.moduleCacheReady
-	if skipDownload {
-		pe.jobManager.AppendOutput(jobID, "Module cache is pre-warmed, skipping full download...")
-	}
-
-	// Check if go mod verify should be skipped (via environment variable)
-	skipVerify := getEnvOrDefault("SKIP_GO_MOD_VERIFY", "false") == "true"
-	if skipVerify {
-		pe.jobManager.AppendOutput(jobID, "SKIP_GO_MOD_VERIFY is set, skipping go mod verify...")
-	}
-
-	// Get all environment variables including PULUMI_HOME and Go cache settings (scoped to job directory)
-	envVars := getLocalBackendEnvVars(jobDir)
-
-	// Ensure Go module cache directory exists and is writable
-	if gomodcache, ok := envVars["GOMODCACHE"]; ok {
-		if err := os.MkdirAll(gomodcache, 0755); err != nil {
-			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to create GOMODCACHE directory %s: %v", gomodcache, err))
-		} else {
-			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Go module cache directory: %s", gomodcache))
-		}
-	}
-	if gocache, ok := envVars["GOCACHE"]; ok {
-		if err := os.MkdirAll(gocache, 0755); err != nil {
-			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to create GOCACHE directory %s: %v", gocache, err))
-		}
-	}
-	if gopath, ok := envVars["GOPATH"]; ok {
-		if err := os.MkdirAll(gopath, 0755); err != nil {
-			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to create GOPATH directory %s: %v", gopath, err))
-		}
-	}
-
-	// Build environment for the command - start with current environment
-	cmdEnv := os.Environ()
-
-	// Add/override with all environment variables from getLocalBackendEnvVars
-	// This includes PULUMI_HOME, GOMODCACHE, GOCACHE, GOPATH, etc.
-	for key, value := range envVars {
-		// Remove existing entry if present
-		for i, env := range cmdEnv {
-			if strings.HasPrefix(env, key+"=") {
-				cmdEnv = append(cmdEnv[:i], cmdEnv[i+1:]...)
-				break
-			}
-		}
-		cmdEnv = append(cmdEnv, fmt.Sprintf("%s=%s", key, value))
-	}
-
-	// Get job config to include provider credentials in environment
-	job, exists := pe.jobManager.GetJob(jobID)
-	if exists && job.Config != nil {
-		provider := job.Config.Provider
-		if provider == "" {
-			provider = "ovh" // Default to OVH for backward compatibility
-		}
-
-		// Add provider-specific credentials to command environment
-		switch provider {
-		case "ovh":
-			cmdEnv = append(cmdEnv, fmt.Sprintf("OVH_APPLICATION_KEY=%s", job.Config.OvhApplicationKey))
-			cmdEnv = append(cmdEnv, fmt.Sprintf("OVH_APPLICATION_SECRET=%s", job.Config.OvhApplicationSecret))
-			cmdEnv = append(cmdEnv, fmt.Sprintf("OVH_CONSUMER_KEY=%s", job.Config.OvhConsumerKey))
-			cmdEnv = append(cmdEnv, fmt.Sprintf("OVH_SERVICE_NAME=%s", job.Config.OvhServiceName))
-			// Future providers can be added here
-		}
-	}
-
-	// Run go mod tidy first to ensure go.mod is correct
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	pe.jobManager.AppendOutput(jobID, "Running go mod tidy to ensure module files are correct...")
-	tidyCmd := exec.CommandContext(ctx, "go", "mod", "tidy")
-	tidyCmd.Dir = jobDir
-	tidyCmd.Env = cmdEnv
-	tidyOutput, tidyErr := tidyCmd.CombinedOutput()
-	tidyOutputStr := string(tidyOutput)
-	if tidyErr != nil {
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("go mod tidy output: %s", tidyOutputStr))
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("go mod tidy failed: %v", tidyErr))
-
-		// Check if the error indicates package resolution issues - these are fatal
-		if strings.Contains(tidyOutputStr, "no required module provides package") ||
-			strings.Contains(tidyOutputStr, "cannot find package") ||
-			strings.Contains(tidyOutputStr, "package") && strings.Contains(tidyOutputStr, "is not in") {
-			return fmt.Errorf("go mod tidy failed with package resolution error: %w\nOutput: %s", tidyErr, tidyOutputStr)
-		}
-
-		// For other errors, log as warning but continue
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: go mod tidy failed with non-fatal error: %v. Continuing with download.", tidyErr))
-	} else {
-		pe.jobManager.AppendOutput(jobID, "go mod tidy completed successfully")
-	}
-
-	// Run go mod download with timeout to download all modules (skip if cache pre-warmed)
-	// This downloads the entire module including all subpackages
-	if !skipDownload {
-		pe.jobManager.AppendOutput(jobID, "Downloading Go modules...")
-		cmd := exec.CommandContext(ctx, "go", "mod", "download")
-		cmd.Dir = jobDir
-		cmd.Env = cmdEnv
-
-		// Capture output for logging
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			// Log the output even on error for debugging
-			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Go mod download output: %s", string(output)))
-			return fmt.Errorf("go mod download failed: %w\nOutput: %s", err, string(output))
-		}
-
-		pe.jobManager.AppendOutput(jobID, "Go modules downloaded successfully")
-
-		// Force Go to resolve subpackages by using 'go list' on them
-		// This ensures the packages are downloaded and available in the module cache
-		// before Pulumi tries to compile. 'go list' will download packages if needed.
-		pe.jobManager.AppendOutput(jobID, "Verifying required subpackages are accessible...")
-		requiredSubpackages := []string{
-			"github.com/ovh/pulumi-ovh/sdk/v2/go/ovh/cloudproject",
-		}
-
-		for _, pkg := range requiredSubpackages {
-			// Use 'go list' to verify the package exists - this will download it if needed
-			// and verify it's accessible with the current go.mod
-			listCmd := exec.CommandContext(ctx, "go", "list", "-m", "-f", "{{.Path}}", pkg)
-			listCmd.Dir = jobDir
-			listCmd.Env = cmdEnv
-			if listOutput, listErr := listCmd.CombinedOutput(); listErr != nil {
-				outputStr := string(listOutput)
-				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: go list -m failed for %s: %v", pkg, listErr))
-				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("go list output: %s", outputStr))
-			}
-
-			// Also try 'go list' without -m to verify the package path is valid
-			listPkgCmd := exec.CommandContext(ctx, "go", "list", pkg)
-			listPkgCmd.Dir = jobDir
-			listPkgCmd.Env = cmdEnv
-			if pkgOutput, pkgErr := listPkgCmd.CombinedOutput(); pkgErr != nil {
-				outputStr := string(pkgOutput)
-				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: go list failed for package %s: %v", pkg, pkgErr))
-				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("go list output: %s", outputStr))
-				// Check if this is a fatal package resolution error
-				if strings.Contains(outputStr, "no required module provides package") {
-					return fmt.Errorf("required subpackage %s is not available: %w\nOutput: %s\n\nThis usually means the module github.com/ovh/pulumi-ovh/sdk/v2 is not properly downloaded or the subpackage path is incorrect.", pkg, pkgErr, outputStr)
-				}
-			} else {
-				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Subpackage %s verified successfully", pkg))
-			}
-		}
-	} else {
-		pe.jobManager.AppendOutput(jobID, "Skipping go mod download (using pre-warmed cache)")
-	}
-
-	// Skip go mod verify when cache is pre-warmed or explicitly disabled via env var
-	if !skipDownload && !skipVerify {
-		// Run go mod verify to catch issues early
-		pe.jobManager.AppendOutput(jobID, "Verifying Go modules...")
-		verifyCmd := exec.CommandContext(ctx, "go", "mod", "verify")
-		verifyCmd.Dir = jobDir
-		verifyCmd.Env = cmdEnv
-		verifyOutput, verifyErr := verifyCmd.CombinedOutput()
-		if verifyErr != nil {
-			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: go mod verify failed: %v", verifyErr))
-			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("go mod verify output: %s", string(verifyOutput)))
-			// Don't fail on verify errors - they're warnings, not critical
-		} else {
-			pe.jobManager.AppendOutput(jobID, "Go modules verified successfully")
-		}
-	} else if skipVerify && !skipDownload {
-		pe.jobManager.AppendOutput(jobID, "Skipping go mod verify (SKIP_GO_MOD_VERIFY=true)")
-	}
-
-	return nil
 }

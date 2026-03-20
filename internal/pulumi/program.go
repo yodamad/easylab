@@ -14,9 +14,7 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
 
-// CreateLabProgram creates a Pulumi RunFunc that implements the lab infrastructure
-// This function replaces the template-based main.go generation
-// Note: This is currently not used - templates are copied directly instead
+// CreateLabProgram creates a Pulumi RunFunc that implements the lab infrastructure.
 func CreateLabProgram() pulumi.RunFunc {
 	return func(ctx *pulumi.Context) error {
 		useExisting := utils.K8sConfigOptional(ctx, utils.K8sUseExistingCluster)

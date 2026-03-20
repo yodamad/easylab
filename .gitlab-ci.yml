@@ -68,7 +68,6 @@ build:
     paths:
       - main
       - web/
-      - templates/
     expire_in: 1 hour
   cache:
     key: go-modules-${CI_COMMIT_REF_SLUG}

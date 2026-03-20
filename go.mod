@@ -8,7 +8,6 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/ovh/go-ovh v1.9.0
 	github.com/ovh/pulumi-ovh/sdk/v2 v2.11.0
-	github.com/pulumi/pulumi-command/sdk v1.1.3
 	github.com/pulumi/pulumi-kubernetes/sdk/v4 v4.24.1
 	github.com/pulumi/pulumi/sdk/v3 v3.210.0
 	golang.org/x/crypto v0.45.0
