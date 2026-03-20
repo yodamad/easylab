@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -103,4 +104,56 @@ func CoderConfig(ctx *pulumi.Context, key string) string {
 // CoderConfigOptional returns an optional config value (empty string if not set)
 func CoderConfigOptional(ctx *pulumi.Context, key string) string {
 	return config.New(ctx, CoderGroup).Get(key)
+}
+
+const CoderTemplatesKey = "templates"
+
+// CoderTemplateConfig holds the configuration for a single Coder template.
+type CoderTemplateConfig struct {
+	Name      string `json:"name"`
+	Source    string `json:"source"`
+	FilePath  string `json:"file_path,omitempty"`
+	GitRepo   string `json:"git_repo,omitempty"`
+	GitFolder string `json:"git_folder,omitempty"`
+	GitBranch string `json:"git_branch,omitempty"`
+}
+
+// GetCoderTemplatesFromConfig reads the coder:templates JSON config and returns the template list.
+// Returns nil if not set or empty. For backward compatibility, returns a single-template slice
+// when legacy single-template config is present.
+func GetCoderTemplatesFromConfig(ctx *pulumi.Context) []CoderTemplateConfig {
+	cfg := config.New(ctx, CoderGroup)
+	val := cfg.Get(CoderTemplatesKey)
+	if val == "" {
+		name := CoderConfigOptional(ctx, CoderTemplateName)
+		if name == "" {
+			return nil
+		}
+		source := CoderConfigOptional(ctx, CoderTemplateSource)
+		filePath := CoderConfigOptional(ctx, CoderTemplateFilePath)
+		gitRepo := CoderConfigOptional(ctx, CoderTemplateGitRepo)
+		gitFolder := CoderConfigOptional(ctx, CoderTemplateGitFolder)
+		gitBranch := CoderConfigOptional(ctx, CoderTemplateGitBranch)
+		if gitBranch == "" {
+			gitBranch = "main"
+		}
+		if source == "" && filePath != "" {
+			source = "upload"
+		} else if source == "" && gitRepo != "" {
+			source = "git"
+		}
+		return []CoderTemplateConfig{{
+			Name:      name,
+			Source:    source,
+			FilePath:  filePath,
+			GitRepo:   gitRepo,
+			GitFolder: gitFolder,
+			GitBranch: gitBranch,
+		}}
+	}
+	var templates []CoderTemplateConfig
+	if err := json.Unmarshal([]byte(val), &templates); err != nil {
+		return nil
+	}
+	return templates
 }

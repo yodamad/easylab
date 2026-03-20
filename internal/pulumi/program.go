@@ -97,62 +97,55 @@ func CreateLabProgram() pulumi.RunFunc {
 			return nil
 		}
 
-		// Determine template source and get template zip file
-		templateSource := utils.CoderConfigOptional(ctx, utils.CoderTemplateSource)
-		templateFilePath := utils.CoderConfigOptional(ctx, utils.CoderTemplateFilePath)
-		var zipFile string
-
-		if templateSource == "upload" || (templateSource == "" && templateFilePath != "") {
-			// Use uploaded template file
-			if templateFilePath == "" {
-				return fmt.Errorf("template file path is required when using upload source")
-			}
-			utils.LogInfo(ctx, "Using uploaded template file: "+templateFilePath)
-			// templateFilePath is relative to job directory (e.g., "template.zip")
-			// Pulumi runs from the job directory, so we need to make it absolute
-			// Get current working directory (should be job directory)
-			cwd, cwdErr := os.Getwd()
-			if cwdErr != nil {
-				return fmt.Errorf("failed to get current working directory: %w", cwdErr)
-			}
-			absTemplatePath := filepath.Join(cwd, templateFilePath)
-			// Verify file exists
-			if _, statErr := os.Stat(absTemplatePath); statErr != nil {
-				return fmt.Errorf("template file not found at %s: %w", absTemplatePath, statErr)
-			}
-			zipFile = absTemplatePath
-		} else if templateSource == "git" {
-			// Use Git-based template
-			gitRepo := utils.CoderConfigOptional(ctx, utils.CoderTemplateGitRepo)
-			if gitRepo == "" {
-				return fmt.Errorf("Git repository URL is required when using Git template source")
-			}
-			gitFolder := utils.CoderConfigOptional(ctx, utils.CoderTemplateGitFolder)
-			gitBranch := utils.CoderConfigOptional(ctx, utils.CoderTemplateGitBranch)
-			if gitBranch == "" {
-				gitBranch = "main"
-			}
-			utils.LogInfo(ctx, fmt.Sprintf("Using Git-based template: repo=%s, folder=%s, branch=%s", gitRepo, gitFolder, gitBranch))
-			var gitErr error
-			zipFile, gitErr = utils.CloneFolderFromGitAndZipIt(gitRepo, gitFolder, gitBranch)
+		templates := utils.GetCoderTemplatesFromConfig(ctx)
+		if len(templates) == 0 {
+			utils.LogInfo(ctx, "No templates configured, using default Git-based template")
+			zipFile, gitErr := utils.CloneFolderFromGitAndZipIt("https://gitlab.com/yodamad-workshops/coder-templates#", "docker", "main")
 			if gitErr != nil {
 				return fmt.Errorf("failed to clone and zip template from Git: %w", gitErr)
 			}
-		} else {
-			// Backward compatibility: fall back to default Git-based template
-			utils.LogInfo(ctx, "No template source specified, using default Git-based template")
-			var gitErr error
-			zipFile, gitErr = utils.CloneFolderFromGitAndZipIt("https://gitlab.com/yodamad-workshops/coder-templates#", "docker", "main")
-			if gitErr != nil {
-				return fmt.Errorf("failed to clone and zip template from Git: %w", gitErr)
-			}
+			templateOutput := coder.CreateTemplateFromZip(ctx, coderConfig, "docker-template", "file://"+zipFile)
+			templateOutput.ApplyT(func(_ interface{}) error {
+				utils.LogInfo(ctx, "Template created successfully!")
+				return nil
+			})
+			return nil
 		}
 
-		templateOutput := coder.CreateTemplateFromZip(ctx, coderConfig, utils.CoderConfig(ctx, utils.CoderTemplateName), "file://"+zipFile)
-		templateOutput.ApplyT(func(_ interface{}) error {
-			utils.LogInfo(ctx, "Template created successfully!")
-			return nil
-		})
+		for i, t := range templates {
+			var zipFile string
+			if t.Source == "upload" && t.FilePath != "" {
+				utils.LogInfo(ctx, fmt.Sprintf("Template %d (%s): using uploaded file", i+1, t.Name))
+				cwd, cwdErr := os.Getwd()
+				if cwdErr != nil {
+					return fmt.Errorf("failed to get current working directory: %w", cwdErr)
+				}
+				absTemplatePath := filepath.Join(cwd, t.FilePath)
+				if _, statErr := os.Stat(absTemplatePath); statErr != nil {
+					return fmt.Errorf("template file not found at %s: %w", absTemplatePath, statErr)
+				}
+				zipFile = absTemplatePath
+			} else if t.Source == "git" && t.GitRepo != "" {
+				gitBranch := t.GitBranch
+				if gitBranch == "" {
+					gitBranch = "main"
+				}
+				utils.LogInfo(ctx, fmt.Sprintf("Template %d (%s): cloning from Git repo=%s", i+1, t.Name, t.GitRepo))
+				var gitErr error
+				zipFile, gitErr = utils.CloneFolderFromGitAndZipIt(t.GitRepo, t.GitFolder, gitBranch)
+				if gitErr != nil {
+					return fmt.Errorf("failed to clone and zip template from Git: %w", gitErr)
+				}
+			} else {
+				return fmt.Errorf("template %d (%s): invalid config (source=%s, need file or git repo)", i+1, t.Name, t.Source)
+			}
+
+			templateOutput := coder.CreateTemplateFromZip(ctx, coderConfig, t.Name, "file://"+zipFile)
+			templateOutput.ApplyT(func(_ interface{}) error {
+				utils.LogInfo(ctx, fmt.Sprintf("Template %s created successfully!", t.Name))
+				return nil
+			})
+		}
 
 		return nil
 	}

@@ -133,8 +133,8 @@ func NewPulumiExecutor(jobManager *JobManager, workDir string) *PulumiExecutor {
 
 	// Check if inline Pulumi program mode is enabled
 	// This mode uses pre-compiled code instead of copying templates
-	// Set USE_INLINE_PULUMI=true to enable (experimental)
-	useInline := getEnvOrDefault("USE_INLINE_PULUMI", "false") == "true"
+	// Set USE_INLINE_PULUMI=false to fall back to template-copy mode
+	useInline := getEnvOrDefault("USE_INLINE_PULUMI", "true") == "true"
 	if useInline {
 		log.Printf("[PULUMI] Inline program mode ENABLED - using pre-compiled Pulumi program")
 	} else {
@@ -261,14 +261,17 @@ type requiredPlugin struct {
 var requiredPlugins = []requiredPlugin{
 	{"command", "1.1.3"},
 	{"kubernetes", "4.24.1"},
-	{"ovh", "2.10.0"},
+	{"ovh", "2.11.0"},
 }
 
 // CheckAndInstallPlugins verifies every required Pulumi resource plugin is healthy
 // inside PULUMI_HOME/plugins. For each plugin it:
-//  1. Checks whether the plugin binary exists; installs it via the Pulumi CLI if not.
-//  2. Creates a minimal PulumiPlugin.yaml when absent (name, version, runtime) — the
-//     Pulumi SDK requires that file to load a plugin even though recent releases may not ship it.
+//  1. Checks whether the plugin binary AND PulumiPlugin.yaml both exist.
+//     A missing YAML indicates an incomplete auto-acquired installation (Pulumi downloaded
+//     the binary but did not write the YAML), so both missing binary and missing YAML
+//     trigger a full reinstall via the Pulumi CLI.
+//  2. Creates a minimal PulumiPlugin.yaml when still absent after install — the
+//     Pulumi SDK requires that file to load a plugin even though some releases do not ship it.
 func (pe *PulumiExecutor) CheckAndInstallPlugins() {
 	pulumiHome := getEnvOrDefault("PULUMI_HOME", filepath.Join(getAppBaseDir(), ".pulumi"))
 	pluginsDir := filepath.Join(pulumiHome, "plugins")
@@ -281,32 +284,43 @@ func (pe *PulumiExecutor) CheckAndInstallPlugins() {
 		binaryPath := filepath.Join(pluginDir, fmt.Sprintf("pulumi-resource-%s", p.Name))
 		yamlPath := filepath.Join(pluginDir, "PulumiPlugin.yaml")
 
-		// Step 1: ensure binary is present.
-		if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
-			log.Printf("[PLUGINS] Plugin %s v%s binary missing — installing...", p.Name, p.Version)
+		_, binaryErr := os.Stat(binaryPath)
+		binaryMissing := os.IsNotExist(binaryErr)
+		_, yamlErr := os.Stat(yamlPath)
+		yamlMissing := os.IsNotExist(yamlErr)
+
+		// Step 1: install (or reinstall) when the binary is missing or the YAML is absent.
+		// A missing YAML signals an incomplete installation. Before reinstalling, remove the
+		// plugin directory so `pulumi plugin install` doesn't skip the download because it
+		// sees an existing (stub) directory and considers the plugin already present.
+		if binaryMissing || yamlMissing {
+			reason := "binary missing"
+			if !binaryMissing {
+				reason = "PulumiPlugin.yaml missing (incomplete prior installation) — reinstalling"
+			}
+			log.Printf("[PLUGINS] Plugin %s v%s %s...", p.Name, p.Version, reason)
+			// Remove the incomplete directory so the installer performs a fresh download.
+			if _, statErr := os.Stat(pluginDir); statErr == nil {
+				if removeErr := os.RemoveAll(pluginDir); removeErr != nil {
+					log.Printf("[PLUGINS] Warning: failed to remove incomplete plugin dir %s: %v", pluginDir, removeErr)
+				}
+			}
 			if installErr := pe.installPlugin(p.Name, p.Version, pulumiHome); installErr != nil {
 				log.Printf("[PLUGINS] Warning: could not install plugin %s v%s: %v", p.Name, p.Version, installErr)
 			} else {
 				log.Printf("[PLUGINS] Plugin %s v%s installed successfully", p.Name, p.Version)
+				// Refresh YAML presence after reinstall.
+				_, yamlErr = os.Stat(yamlPath)
+				yamlMissing = os.IsNotExist(yamlErr)
 			}
 		} else {
 			log.Printf("[PLUGINS] Plugin %s v%s binary OK", p.Name, p.Version)
 		}
 
-		// Step 2: ensure PulumiPlugin.yaml exists and contains a 'runtime' attribute.
-		needsWrite := false
-		if _, err := os.Stat(yamlPath); os.IsNotExist(err) {
-			log.Printf("[PLUGINS] Plugin %s v%s missing PulumiPlugin.yaml — creating it...", p.Name, p.Version)
-			needsWrite = true
-		} else {
-			// File exists — verify it contains the required 'runtime' field.
-			existing, readErr := os.ReadFile(yamlPath)
-			if readErr != nil || !strings.Contains(string(existing), "runtime:") {
-				log.Printf("[PLUGINS] Plugin %s v%s PulumiPlugin.yaml missing 'runtime' — rewriting it...", p.Name, p.Version)
-				needsWrite = true
-			}
-		}
-		if needsWrite {
+		// Step 2: synthesize PulumiPlugin.yaml if the install did not produce one.
+		// Some provider releases do not bundle this file; the Pulumi SDK needs it to load the plugin.
+		if yamlMissing {
+			log.Printf("[PLUGINS] Plugin %s v%s still missing PulumiPlugin.yaml — creating it...", p.Name, p.Version)
 			if mkErr := os.MkdirAll(pluginDir, 0755); mkErr != nil {
 				log.Printf("[PLUGINS] Warning: failed to create plugin dir %s: %v", pluginDir, mkErr)
 				continue
