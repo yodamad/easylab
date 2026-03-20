@@ -1,3 +1,5 @@
+nameOverride: easylab
+
 namespace:
   create: true
   name: easylab

@@ -1,5 +1,5 @@
 apiVersion: v2
-name: easylab
+name: easylab-helm
 description: A Helm chart for deploying EasyLab — a lab-as-code platform that provisions cloud-based lab environments
 type: application
 version: 0.0.0-dev

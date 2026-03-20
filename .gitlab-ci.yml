@@ -151,7 +151,7 @@ helm-package:
     - helm package helm/easylab --version "${VERSION}" --app-version "${VERSION}"
   artifacts:
     paths:
-      - easylab-*.tgz
+      - easylab-helm-*.tgz
     expire_in: 1 hour
   only:
     - tags
@@ -288,7 +288,7 @@ helm-publish:
     - export VERSION="${CI_COMMIT_TAG#v}"
     - helm registry login registry-1.docker.io -u "$DOCKER_REGISTRY_USER" -p "$DOCKER_REGISTRY_PASSWORD"
   script:
-    - helm push "easylab-${VERSION}.tgz" oci://registry-1.docker.io/yodamad
+    - helm push "easylab-helm-${VERSION}.tgz" oci://registry-1.docker.io/yodamad
   after_script:
     - helm registry logout registry-1.docker.io
   only:

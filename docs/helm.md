@@ -15,7 +15,7 @@ EasyLab is available as a Helm chart published on Docker Hub as an OCI artifact.
 ## Install
 
 ```bash
-helm install easylab oci://registry-1.docker.io/yodamad/easylab \
+helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
   --version __VERSION__ \
   --set secrets.adminPassword="your-secure-password"
 ```
@@ -24,10 +24,10 @@ Versions follow [SemVer](https://semver.org/) without the `v` prefix.
 
 ## Available versions
 
-Check available versions on [Docker Hub](https://hub.docker.com/r/yodamad/easylab/tags?name=&ordering=-name&page_size=25) or with:
+Check available versions on [Docker Hub](https://hub.docker.com/r/yodamad/easylab-helm/tags?name=&ordering=-name&page_size=25) or with:
 
 ```bash
-helm show chart oci://registry-1.docker.io/yodamad/easylab --version __VERSION__
+helm show chart oci://registry-1.docker.io/yodamad/easylab-helm --version __VERSION__
 ```
 
 ## Configuration
@@ -35,7 +35,7 @@ helm show chart oci://registry-1.docker.io/yodamad/easylab --version __VERSION__
 All configuration is done through `values.yaml` overrides. You can either pass `--set` flags or provide a custom values file:
 
 ```bash
-helm install easylab oci://registry-1.docker.io/yodamad/easylab \
+helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
   --version __VERSION__ \
   -f my-values.yaml
 ```
@@ -84,7 +84,7 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab \
 ### Minimal install
 
 ```bash
-helm install easylab oci://registry-1.docker.io/yodamad/easylab \
+helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
   --version __VERSION__ \
   --set secrets.adminPassword="SuperAdmin"
 ```
@@ -92,7 +92,7 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab \
 ### With ingress and TLS
 
 ```bash
-helm install easylab oci://registry-1.docker.io/yodamad/easylab \
+helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
   --version __VERSION__ \
   --set secrets.adminPassword="SuperAdmin" \
   --set ingress.enabled=true \
@@ -105,7 +105,7 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab \
 ### With OVH credentials
 
 ```bash
-helm install easylab oci://registry-1.docker.io/yodamad/easylab \
+helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
   --version __VERSION__ \
   --set secrets.adminPassword="SuperAdmin" \
   --set secrets.ovh.applicationKey="your-key" \
@@ -149,7 +149,7 @@ persistence:
 Then install:
 
 ```bash
-helm install easylab oci://registry-1.docker.io/yodamad/easylab \
+helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
   --version __VERSION__ \
   -f my-values.yaml
 ```
@@ -157,7 +157,7 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab \
 ## Upgrade
 
 ```bash
-helm upgrade easylab oci://registry-1.docker.io/yodamad/easylab \
+helm upgrade easylab oci://registry-1.docker.io/yodamad/easylab-helm \
   --version __VERSION__ \
   -f my-values.yaml
 ```
@@ -181,7 +181,7 @@ If you prefer deploying with plain `kubectl` instead of Helm, you can use `helm 
 ### Render to stdout
 
 ```bash
-helm template easylab oci://registry-1.docker.io/yodamad/easylab \
+helm template easylab oci://registry-1.docker.io/yodamad/easylab-helm \
   --version __VERSION__ \
   --set secrets.adminPassword="SuperAdmin" \
   > easylab-manifests.yaml
@@ -190,7 +190,7 @@ helm template easylab oci://registry-1.docker.io/yodamad/easylab \
 ### Render with custom values
 
 ```bash
-helm template easylab oci://registry-1.docker.io/yodamad/easylab \
+helm template easylab oci://registry-1.docker.io/yodamad/easylab-helm \
   --version __VERSION__ \
   -f my-values.yaml \
   > easylab-manifests.yaml
