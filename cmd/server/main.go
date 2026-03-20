@@ -295,7 +295,7 @@ func main() {
 		switch {
 		case strings.Contains(path, "/workspaces") && !strings.Contains(path, "/delete") && r.Method == http.MethodGet:
 			handler.ListLabWorkspaces(w, r)
-		case strings.Contains(path, "/workspaces/") && strings.Contains(path, "/delete") && r.Method == http.MethodPost:
+		case strings.Contains(path, "/workspaces/") && strings.Contains(path, "delete") && r.Method == http.MethodPost:
 			handler.DeleteWorkspace(w, r)
 		case strings.HasSuffix(path, "/retry"):
 			handler.RetryJob(w, r)

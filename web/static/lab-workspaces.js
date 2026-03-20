@@ -52,13 +52,13 @@ function deleteSelected() {
         return;
     }
 
-    const formData = new FormData();
-    formData.append('workspace_ids', JSON.stringify(workspaceIds));
-    formData.append('lab_id', LAB_ID);
+    const params = new URLSearchParams();
+    params.append('workspace_ids', JSON.stringify(workspaceIds));
+    params.append('lab_id', LAB_ID);
 
     fetch(`/api/labs/${LAB_ID}/workspaces/bulk-delete`, {
         method: 'POST',
-        body: formData
+        body: params
     })
     .then(response => {
         if (response.ok || response.status === 207) { // 207 is Partial Content
