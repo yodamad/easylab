@@ -1,13 +1,16 @@
 name: Announce Release
 
 on:
-  push:
-    tags:
-      - '*'
+  workflow_run:
+    workflows:
+      - Release
+    types:
+      - completed
 
 jobs:
   bluesky:
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     continue-on-error: true
     steps:
       - name: Get release notes
@@ -19,7 +22,7 @@ jobs:
           timeout_minutes: 1
           max_attempts: 3
           command: |
-            BODY=$(gh api repos/${{ github.repository }}/releases/tags/${{ github.ref_name }} --jq '.body // ""')
+            BODY=$(gh api repos/${{ github.repository }}/releases/tags/${{ github.event.workflow_run.head_branch }} --jq '.body // ""')
             SUMMARY=$(echo "$BODY" | head -n 6 | sed 's/\*\*//g' | sed 's/\* [a-f0-9]\{40\} /\* /g' | sed '/^$/d')
             echo "summary<<EOF" >> "$GITHUB_OUTPUT"
             echo "$SUMMARY" >> "$GITHUB_OUTPUT"
@@ -31,10 +34,10 @@ jobs:
           handle: ${{ secrets.BLUESKY_HANDLE }}
           password: ${{ secrets.BLUESKY_APP_PASSWORD }}
           text: |
-            🧪 EasyLab ${{ github.ref_name }} is out! 🚀
+            🧪 EasyLab ${{ github.event.workflow_run.head_branch }} is out! 🚀
 
             ${{ steps.release.outputs.summary }}
 
-            🔗 https://github.com/yodamad/easylab/releases/tag/${{ github.ref_name }}
-            📦 docker.io/yodamad/easylab:${{ github.ref_name }}
+            🔗 https://github.com/yodamad/easylab/releases/tag/${{ github.event.workflow_run.head_branch }}
+            📦 docker.io/yodamad/easylab:${{ github.event.workflow_run.head_branch }}
             
