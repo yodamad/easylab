@@ -196,7 +196,7 @@
                     <div class="step-content">
                         <div class="form-group">
                             <label for="stack_name">Stack Name *</label>
-                            <input type="text" id="stack_name" name="stack_name" value="dev" required pattern="[a-zA-Z0-9_-]+" title="Only letters, numbers, hyphens and underscores allowed">
+                            <input type="text" id="stack_name" name="stack_name" value="dev" required pattern="[a-zA-Z0-9_\-]+" title="Only letters, numbers, hyphens and underscores allowed">
                             <small>Unique name for this deployment (e.g., dev, prod, test-lab-1)</small>
                         </div>
                     </div>
@@ -367,8 +367,12 @@
                         </div>
 
                         <div class="form-group">
-                            <label for="coder_version">Coder Version *</label>
-                            <input type="text" id="coder_version" name="coder_version" value="2.29.1" required>
+                            <label for="coder_version_select">Coder Version *</label>
+                            <select id="coder_version_select">
+                                <option value="">Loading versions…</option>
+                            </select>
+                            <input type="text" id="coder_version" name="coder_version" placeholder="e.g. 2.29.1" required style="display: none;">
+                            <small id="coder_version_custom_hint" style="display: none;">Enter a specific version (e.g. 2.29.1)</small>
                         </div>
 
                         <div class="form-group">

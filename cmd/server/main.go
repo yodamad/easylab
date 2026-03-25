@@ -271,6 +271,7 @@ func main() {
 	}))
 	mux.HandleFunc("/api/ovh/regions", authHandler.RequireAuth(handler.GetOVHRegions))
 	mux.HandleFunc("/api/ovh/flavors", authHandler.RequireAuth(handler.GetOVHFlavors))
+	mux.HandleFunc("/api/coder/versions", authHandler.RequireAuth(handler.GetCoderVersions))
 	mux.HandleFunc("/admin/ovh-options", authHandler.RequireAuth(handler.ServeOVHOptions))
 	mux.HandleFunc("/api/ovh-options", authHandler.RequireAuth(handler.SaveOVHOptions))
 	mux.HandleFunc("/api/ovh-options/refresh", authHandler.RequireAuth(handler.RefreshOVHOptions))

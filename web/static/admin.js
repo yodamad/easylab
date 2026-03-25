@@ -273,6 +273,11 @@ const wizard = {
         if (this.currentStep === 5) {
             loadOVHFlavors();
         }
+        // Fetch Coder versions when entering step 6 for the first time
+        if (this.currentStep === 6 && !this._coderVersionsLoaded) {
+            this._coderVersionsLoaded = true;
+            loadCoderVersions();
+        }
     }
 };
 
@@ -516,6 +521,49 @@ function loadOVHFlavors() {
         });
 }
 
+// Fetch available Coder versions from GitHub and populate the version select
+function loadCoderVersions() {
+    const versionSelect = document.getElementById('coder_version_select');
+    const versionInput = document.getElementById('coder_version');
+    if (!versionSelect || !versionInput) return;
+
+    versionSelect.innerHTML = '<option value="">Loading versions…</option>';
+
+    fetch('/api/coder/versions')
+        .then(response => {
+            if (!response.ok) throw new Error('Failed to load versions');
+            return response.text();
+        })
+        .then(html => {
+            versionSelect.innerHTML = html;
+            syncCoderVersionFromSelect();
+        })
+        .catch(err => {
+            console.error('Error loading Coder versions:', err);
+            versionSelect.innerHTML = '<option value="custom" selected>Custom version…</option>';
+            syncCoderVersionFromSelect();
+        });
+}
+
+// Sync the hidden coder_version input from the select value, showing/hiding the manual input
+function syncCoderVersionFromSelect() {
+    const versionSelect = document.getElementById('coder_version_select');
+    const versionInput = document.getElementById('coder_version');
+    const hint = document.getElementById('coder_version_custom_hint');
+    if (!versionSelect || !versionInput) return;
+
+    if (versionSelect.value === 'custom') {
+        versionInput.style.display = '';
+        versionInput.required = true;
+        if (hint) hint.style.display = '';
+    } else {
+        versionInput.style.display = 'none';
+        versionInput.required = false;
+        versionInput.value = versionSelect.value;
+        if (hint) hint.style.display = 'none';
+    }
+}
+
 // Toggle flavor filters section visibility (lab creation form)
 function toggleFlavorFiltersSection() {
     var body = document.getElementById('flavor-filters-body');
@@ -717,6 +765,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const regionSelect = document.getElementById('network_region');
     if (regionSelect) {
         regionSelect.addEventListener('change', loadOVHFlavors);
+    }
+
+    // Sync coder version input when select changes
+    const coderVersionSelect = document.getElementById('coder_version_select');
+    if (coderVersionSelect) {
+        coderVersionSelect.addEventListener('change', syncCoderVersionFromSelect);
     }
 
     // Reload flavors when flavor filter inputs change
