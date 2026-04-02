@@ -4,6 +4,9 @@ ARG SKIP_BUILD=false
 # Build stage (skipped in CI when SKIP_BUILD=true)
 FROM pulumi/pulumi-go:latest AS builder
 ARG SKIP_BUILD
+# Align Go binary with image platform (BuildKit sets TARGETARCH for e.g. --platform linux/amd64).
+# Without this, docker build on arm64 hosts produces an arm64 binary that fails on amd64 clusters.
+ARG TARGETARCH
 
 WORKDIR /app
 
@@ -17,7 +20,8 @@ COPY . .
 
 ENV GOFLAGS=-buildvcs=false
 RUN if [ "$SKIP_BUILD" = "false" ]; then \
-      CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main ./cmd/server; \
+      ARCH="${TARGETARCH:-$(go env GOARCH)}"; \
+      CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" go build -a -installsuffix cgo -o main ./cmd/server; \
     fi
 
 # Runtime stage
