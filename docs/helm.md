@@ -12,17 +12,27 @@ EasyLab is available as a Helm chart published on Docker Hub as an OCI artifact.
 - Kubernetes cluster (v1.24+)
 - Helm 3.8+ (OCI support required)
 
+## App image platforms (multi-arch)
+
+Tags of the **application** image published from this project’s CI (for example `docker.io/yodamad/easylab`) are **multi-platform**: each tag is a manifest list for `linux/amd64` and `linux/arm64`. Kubernetes (and `docker pull`) selects the variant that matches the node or host. You do not need separate Helm values per architecture—`image.repository` and `image.tag` stay the same.
+
 ## Image CPU architecture (`exec format error`)
 
-If the pod exits immediately with `exec /app/main: exec format error`, the image’s architecture does not match your nodes (for example an **arm64** image on **amd64** workers). That often happens when the image is built on Apple Silicon with plain `docker build` and no platform flag.
+If the pod exits immediately with `exec /app/main: exec format error`, the image’s architecture does not match your nodes (for example an **arm64** image on **amd64** workers). That often happens when you build a **custom** image on Apple Silicon with plain `docker build` and no platform flag.
 
-**Fix:** build and push with an explicit platform that matches your cluster (most cloud clusters are `linux/amd64`):
+**Fix for custom builds:** build and push with an explicit platform that matches your cluster (most cloud clusters are `linux/amd64`):
 
 ```bash
 docker buildx build --platform linux/amd64 -t your-registry/easylab:your-tag --push .
 ```
 
-For **arm64** nodes (for example AWS Graviton), use `--platform linux/arm64` instead. CI images built on typical `linux/amd64` GitLab runners already match common clusters.
+For **arm64** nodes (for example AWS Graviton), use `--platform linux/arm64` instead. To publish **both** architectures in one tag (like CI does), use:
+
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 -t your-registry/easylab:your-tag --push .
+```
+
+(`--load` only supports a single platform; multi-arch builds must be pushed to a registry.)
 
 ## Install
 

@@ -85,6 +85,14 @@ The Docker Compose setup includes two named volumes for data persistence:
 docker build -t easylab .
 ```
 
+**Multi-architecture (amd64 + arm64):** CI publishes each tag as `linux/amd64` and `linux/arm64` so the same tag works on typical cloud nodes and on arm64 (for example AWS Graviton). To reproduce that locally with Buildx (requires a registry; `--load` does not support multiple platforms):
+
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 --build-arg SKIP_BUILD=false -t your-registry/easylab:tag --push .
+```
+
+For a **single** platform into the local Docker daemon, use one platform and `--load`, for example `--platform linux/amd64`.
+
 ### Run with Docker Compose:
 ```bash
 # Start in detached mode

@@ -13,6 +13,8 @@
 # Image Tagging Strategy:
 #   - Tagged as "dev" for branch commits
 #   - Tagged with Git tag name for Git tag commits (e.g., v1.0.0)
+#   - Images are multi-platform (linux/amd64, linux/arm64); build uses Docker Buildx + SKIP_BUILD=false
+#     so each architecture is compiled inside the image build (see docker-build job).
 #
 # Helm Chart Publishing (tags only):
 #   - Chart version derived from Git tag (v prefix stripped)
@@ -106,34 +108,46 @@ hadolint:
     - hadolint Dockerfile
   allow_failure: false
 
-# Build Docker image (reuses pre-built binary via SKIP_BUILD arg)
+# Multi-arch Docker image (linux/amd64 + linux/arm64), push manifest to registry.
+# SKIP_BUILD=false: compile Go per TARGETARCH inside Docker (single CI "main" artifact is amd64-only).
+# Requires privileged job for QEMU/binfmt when cross-building on single-arch runners.
 docker-build:
   stage: package
   image: docker:24
   services:
     - docker:24-dind
+  variables:
+    DOCKER_BUILDKIT: "1"
   needs:
-    - job: build
-      artifacts: true
     - job: test
       artifacts: false
     - job: hadolint
       artifacts: false
   before_script:
     - !reference [.image-tag, before_script]
-    - echo "Building Docker image ${IMAGE_NAME}:${IMAGE_TAG}"
+    - echo "Building and pushing multi-arch image ${IMAGE_NAME}:${IMAGE_TAG}"
+    - docker info
+    - docker run --rm --privileged tonistiigi/binfmt:latest --install all
+    - docker buildx rm -f ci-easylab-multiarch 2>/dev/null || true
+    - docker buildx create --name ci-easylab-multiarch --driver docker-container --use
+    - docker buildx inspect --bootstrap
+    - echo "$DOCKER_REGISTRY_PASSWORD" | docker login -u "$DOCKER_REGISTRY_USER" --password-stdin
   script:
-    - docker build --build-arg SKIP_BUILD=true -t ${IMAGE_NAME}:${IMAGE_TAG} .
-    - docker save ${IMAGE_NAME}:${IMAGE_TAG} -o image.tar
-  artifacts:
-    paths:
-      - image.tar
-    expire_in: 1 hour
+    - |
+      docker buildx build \
+        --platform linux/amd64,linux/arm64 \
+        --build-arg SKIP_BUILD=false \
+        -t "${IMAGE_NAME}:${IMAGE_TAG}" \
+        --push \
+        .
+  after_script:
+    - docker logout || true
   only:
     - branches
     - tags
   tags:
     - docker
+  privileged: true
 
 # Package Helm chart (tags only — version derived from Git tag)
 helm-package:
@@ -155,18 +169,21 @@ helm-package:
   only:
     - tags
 
-# Security scan with Trivy
+# Security scan with Trivy (pulls published image; multi-arch resolves to runner-native variant)
 trivy-scan:
   stage: security
   image: aquasec/trivy:latest
   needs:
     - job: docker-build
-      artifacts: true
+      artifacts: false
+  variables:
+    TRIVY_USERNAME: "${DOCKER_REGISTRY_USER}"
+    TRIVY_PASSWORD: "${DOCKER_REGISTRY_PASSWORD}"
   before_script:
     - !reference [.image-tag, before_script]
   script: |
-    trivy image --input image.tar --exit-code 0 --severity HIGH,CRITICAL --format table
-    trivy image --input image.tar --exit-code 0 --severity HIGH,CRITICAL --format json --output gl-container-scanning-report.json || true
+    trivy image "${IMAGE_NAME}:${IMAGE_TAG}" --exit-code 0 --severity HIGH,CRITICAL --format table
+    trivy image "${IMAGE_NAME}:${IMAGE_TAG}" --exit-code 0 --severity HIGH,CRITICAL --format json --output gl-container-scanning-report.json || true
   artifacts:
     reports:
       container_scanning: gl-container-scanning-report.json
@@ -179,37 +196,11 @@ trivy-scan:
     - branches
     - tags
 
-# Push Docker image to Docker Hub
-docker-push:
-  stage: deploy
-  image: docker:24
-  services:
-    - docker:24-dind
-  needs:
-    - job: docker-build
-      artifacts: true
-    - job: trivy-scan
-      artifacts: false
-  before_script:
-    - !reference [.image-tag, before_script]
-    - echo "Pushing Docker image ${IMAGE_NAME}:${IMAGE_TAG}"
-    - docker load -i image.tar
-    - echo "$DOCKER_REGISTRY_PASSWORD" | docker login -u "$DOCKER_REGISTRY_USER" --password-stdin
-  script:
-    - docker push ${IMAGE_NAME}:${IMAGE_TAG}
-  after_script:
-    - docker logout
-  only:
-    - branches
-    - tags
-  tags:
-    - docker
-
 docker-hub-readme:
   stage: publish
   image: alpine:3
   needs:
-    - job: docker-push
+    - job: trivy-scan
       artifacts: false
   before_script:
     - apk add --no-cache curl jq
@@ -234,7 +225,7 @@ update-docker-compose:
   stage: publish
   image: alpine:3
   needs:
-    - job: docker-push
+    - job: trivy-scan
       artifacts: false
   before_script:
     - apk add --no-cache git sed
