@@ -56,8 +56,18 @@ Namespace to use.
 {{- end }}
 
 {{/*
-Image tag — defaults to chart appVersion.
+Image tag — defaults to chart appVersion with a leading v when missing, so it matches
+Docker Hub tags from Git tags (e.g. appVersion 1.0.0 -> v1.0.0). User-set image.tag is used as-is.
 */}}
 {{- define "easylab.imageTag" -}}
-{{- .Values.image.tag | default .Chart.AppVersion }}
+{{- if .Values.image.tag }}
+{{- .Values.image.tag }}
+{{- else }}
+{{- $av := .Chart.AppVersion | toString }}
+{{- if hasPrefix "v" $av }}
+{{- $av }}
+{{- else }}
+{{- printf "v%s" $av }}
+{{- end }}
+{{- end }}
 {{- end }}

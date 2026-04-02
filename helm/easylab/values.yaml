@@ -6,7 +6,7 @@ namespace:
 
 image:
   repository: docker.io/yodamad/easylab
-  tag: ""  # defaults to chart appVersion
+  tag: ""  # defaults to v<appVersion> if appVersion has no leading v (matches release images)
   pullPolicy: Always
 
 replicaCount: 1

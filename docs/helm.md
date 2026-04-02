@@ -47,7 +47,7 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 | `namespace.create` | Create a dedicated namespace | `true` |
 | `namespace.name` | Namespace name | `easylab` |
 | `image.repository` | Docker image repository | `docker.io/yodamad/easylab` |
-| `image.tag` | Docker image tag (defaults to chart appVersion) | `""` |
+| `image.tag` | Docker image tag (defaults to `v` + chart appVersion when appVersion has no leading `v`, to match Git-tag Docker images) | `""` |
 | `image.pullPolicy` | Image pull policy | `Always` |
 | `replicaCount` | Number of replicas | `1` |
 | `config.port` | Application port | `"8080"` |
