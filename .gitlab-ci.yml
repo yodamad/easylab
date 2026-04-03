@@ -127,13 +127,16 @@ docker-build:
     - !reference [.image-tag, before_script]
     - echo "Building and pushing multi-arch image ${IMAGE_NAME}:${IMAGE_TAG}"
     - docker context create ci-context
-    - docker buildx create --name ci-easylab-multiarch --driver docker-container --context ci-context --use
+    - docker buildx create --name ci-easylab-multiarch --driver docker-container --use
+    - docker run --privileged --rm tonistiigi/binfmt --install all
+    - docker buildx inspect --bootstrap
     - echo "$DOCKER_REGISTRY_PASSWORD" | docker login -u "$DOCKER_REGISTRY_USER" --password-stdin
   script:
     - |
       docker buildx build \
         --platform linux/amd64,linux/arm64 \
         --build-arg SKIP_BUILD=false \
+        --context ci-context \
         -t "${IMAGE_NAME}:${IMAGE_TAG}" \
         --push \
         .
