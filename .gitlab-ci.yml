@@ -126,11 +126,6 @@ docker-build:
   before_script:
     - !reference [.image-tag, before_script]
     - echo "Building and pushing multi-arch image ${IMAGE_NAME}:${IMAGE_TAG}"
-    - docker info
-    - docker run --rm --privileged tonistiigi/binfmt:latest --install all
-    - docker buildx rm -f ci-easylab-multiarch 2>/dev/null || true
-    - docker buildx create --name ci-easylab-multiarch --driver docker-container --use
-    - docker buildx inspect --bootstrap
     - echo "$DOCKER_REGISTRY_PASSWORD" | docker login -u "$DOCKER_REGISTRY_USER" --password-stdin
   script:
     - |
@@ -147,7 +142,6 @@ docker-build:
     - tags
   tags:
     - docker
-  privileged: true
 
 # Package Helm chart (tags only — version derived from Git tag)
 helm-package:
