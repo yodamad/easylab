@@ -85,10 +85,18 @@ The Docker Compose setup includes two named volumes for data persistence:
 docker build -t easylab .
 ```
 
-**Multi-architecture (amd64 + arm64):** CI publishes each tag as `linux/amd64` and `linux/arm64` so the same tag works on typical cloud nodes and on arm64 (for example AWS Graviton). To reproduce that locally with Buildx (requires a registry; `--load` does not support multiple platforms):
+**Multi-architecture (amd64 + arm64):** CI publishes each tag as `linux/amd64` and `linux/arm64` so the same tag works on typical cloud nodes and on arm64 (for example AWS Graviton). The GitLab pipeline builds both architectures with GoReleaser and passes `--build-arg SKIP_BUILD=true` so each image layer copies the matching prebuilt binary from `docker-prebuild/linux_${TARGETARCH}/main`.
+
+**Local multi-arch with Buildx** (compile inside Docker per platform; default `SKIP_BUILD=false`):
 
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 --build-arg SKIP_BUILD=false -t your-registry/easylab:tag --push .
+```
+
+**Local multi-arch reusing prebuilt binaries** (same layout as CI: run `goreleaser build --clean --snapshot -f .goreleaser.gitlab.yaml`, then copy each `dist/.../main` into `docker-prebuild/linux_amd64/main` and `docker-prebuild/linux_arm64/main` as in `.gitlab-ci.yml`, or use your own paths and adjust the Dockerfile):
+
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 --build-arg SKIP_BUILD=true -t your-registry/easylab:tag --push .
 ```
 
 For a **single** platform into the local Docker daemon, use one platform and `--load`, for example `--platform linux/amd64`.

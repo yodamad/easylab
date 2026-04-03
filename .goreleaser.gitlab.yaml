@@ -8,8 +8,21 @@ changelog:
       - "^test:"
 
 builds:
-  - id: "no-build"
-    skip: true
+  - id: server
+    main: ./cmd/server
+    binary: main
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+      - GOFLAGS=-buildvcs=false
+    flags:
+      - -trimpath
+      - -a
+      - -installsuffix=cgo
 
 release:
   gitlab:

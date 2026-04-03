@@ -1,4 +1,4 @@
-# Set to "true" in CI to skip the Go build (pre-built binary provided as artifact)
+# Set to "true" in CI to skip the in-image Go build and use docker-prebuild/linux_${TARGETARCH}/main (GoReleaser).
 ARG SKIP_BUILD=false
 
 # Build stage (skipped in CI when SKIP_BUILD=true)
@@ -19,7 +19,10 @@ RUN if [ "$SKIP_BUILD" = "false" ]; then \
 COPY . .
 
 ENV GOFLAGS=-buildvcs=false
-RUN if [ "$SKIP_BUILD" = "false" ]; then \
+RUN if [ "$SKIP_BUILD" = "true" ]; then \
+      test -f "docker-prebuild/linux_${TARGETARCH}/main" || (echo "missing prebuilt binary for linux/${TARGETARCH}" && exit 1); \
+      cp "docker-prebuild/linux_${TARGETARCH}/main" /app/main && chmod +x /app/main; \
+    else \
       ARCH="${TARGETARCH:-$(go env GOARCH)}"; \
       CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" go build -a -installsuffix cgo -o main ./cmd/server; \
     fi

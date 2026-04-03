@@ -13,8 +13,9 @@
 # Image Tagging Strategy:
 #   - Tagged as "dev" for branch commits
 #   - Tagged with Git tag name for Git tag commits (e.g., v1.0.0)
-#   - Images are multi-platform (linux/amd64, linux/arm64); build uses Docker Buildx + SKIP_BUILD=false
-#     so each architecture is compiled inside the image build (see docker-build job).
+#   - Images are multi-platform (linux/amd64, linux/arm64). The build job runs GoReleaser (linux/amd64 + arm64)
+#     and stages binaries under docker-prebuild/; docker-build uses SKIP_BUILD=true to copy the matching
+#     prebuilt main per TARGETARCH (see docker-build job).
 #
 # Helm Chart Publishing (tags only):
 #   - Chart version derived from Git tag (v prefix stripped)
@@ -58,15 +59,35 @@ stages:
     - go mod download
     - go mod verify
 
-# Build a static Linux binary for Docker
+# Multi-arch Linux binaries (amd64 + arm64) via GoReleaser for Docker image reuse
 build:
-  extends: .go-base
   stage: build
+  image:
+    name: goreleaser/goreleaser
+    entrypoint: [""]
+  variables:
+    GOMODCACHE: ${CI_PROJECT_DIR}/.go-mod-cache
+  before_script:
+    - go version
   script:
-    - CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main ./cmd/server
+    - goreleaser build --clean --snapshot -f .goreleaser.gitlab.yaml
+    - |
+      mkdir -p docker-prebuild/linux_amd64 docker-prebuild/linux_arm64
+      find dist -type f -name main | while IFS= read -r f; do
+        case "$f" in
+          *linux_amd64*) cp "$f" docker-prebuild/linux_amd64/main ;;
+          *linux_arm64*) cp "$f" docker-prebuild/linux_arm64/main ;;
+        esac
+      done
+      if [ ! -f docker-prebuild/linux_amd64/main ] || [ ! -f docker-prebuild/linux_arm64/main ]; then
+        echo "Expected prebuilt binaries under docker-prebuild/linux_{amd64,arm64}/main"
+        find dist -type f || true
+        exit 1
+      fi
+      chmod +x docker-prebuild/linux_amd64/main docker-prebuild/linux_arm64/main
   artifacts:
     paths:
-      - main
+      - docker-prebuild/
       - web/
     expire_in: 1 hour
   cache:
@@ -107,8 +128,8 @@ hadolint:
   allow_failure: false
 
 # Multi-arch Docker image (linux/amd64 + linux/arm64), push manifest to registry.
-# SKIP_BUILD=false: compile Go per TARGETARCH inside Docker (single CI "main" artifact is amd64-only).
-# Requires privileged job for QEMU/binfmt when cross-building on single-arch runners.
+# SKIP_BUILD=true: copy prebuilt GoReleaser binaries from docker-prebuild/ (build job) per TARGETARCH.
+# Requires privileged job for QEMU/binfmt for arch-specific image layers (Pulumi plugins, apt, etc.).
 docker-build:
   stage: package
   image: docker:24
@@ -117,6 +138,8 @@ docker-build:
   variables:
     DOCKER_BUILDKIT: "1"
   needs:
+    - job: build
+      artifacts: true
     - job: test
       artifacts: false
     - job: hadolint
@@ -133,7 +156,7 @@ docker-build:
     - |
       docker buildx build \
         --platform linux/amd64,linux/arm64 \
-        --build-arg SKIP_BUILD=false \
+        --build-arg SKIP_BUILD=true \
         -t "${IMAGE_NAME}:${IMAGE_TAG}" \
         --push \
         .
