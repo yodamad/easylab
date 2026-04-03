@@ -57,8 +57,6 @@ stages:
     - go version
     - go mod download
     - go mod verify
-  tags:
-    - docker
 
 # Build a static Linux binary for Docker
 build:
@@ -144,8 +142,6 @@ docker-build:
   only:
     - branches
     - tags
-  tags:
-    - docker
 
 # Package Helm chart (tags only — version derived from Git tag)
 helm-package:
@@ -247,8 +243,6 @@ update-docker-compose:
       git push "https://gitlab-ci-token:${GITLAB_PROJECT_ACCESS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" HEAD:${CI_DEFAULT_BRANCH}
   only:
     - tags
-  tags:
-    - docker
 
 goreleaser:
   stage: publish
@@ -299,7 +293,5 @@ pages:
     paths:
       - site
   publish: site
-  tags:
-    - docker
   retry: 2 # In case of ulimit errors
 
