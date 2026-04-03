@@ -136,7 +136,6 @@ docker-build:
       docker buildx build \
         --platform linux/amd64,linux/arm64 \
         --build-arg SKIP_BUILD=false \
-        --context ci-context \
         -t "${IMAGE_NAME}:${IMAGE_TAG}" \
         --push \
         .
