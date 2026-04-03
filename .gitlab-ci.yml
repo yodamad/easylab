@@ -126,6 +126,7 @@ docker-build:
   before_script:
     - !reference [.image-tag, before_script]
     - echo "Building and pushing multi-arch image ${IMAGE_NAME}:${IMAGE_TAG}"
+    - docker buildx create --name ci-easylab-multiarch --driver docker-container --use
     - echo "$DOCKER_REGISTRY_PASSWORD" | docker login -u "$DOCKER_REGISTRY_USER" --password-stdin
   script:
     - |
