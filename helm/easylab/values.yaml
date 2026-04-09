@@ -11,6 +11,10 @@ image:
 
 replicaCount: 1
 
+# Raised in the container entrypoint (ulimit -n) so Pulumi/fsnotify does not hit RLIMIT_NOFILE in pods.
+runtime:
+  openFilesLimit: 65536
+
 config:
   port: "8080"
   workDir: "/app/jobs"

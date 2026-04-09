@@ -24,14 +24,12 @@ spec:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ include "easylab.imageTag" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["/app/main"]
+          # Shell wrapper raises nofile before exec — avoids "fsnotify watcher: too many open files" in Kubernetes.
+          command: ["/bin/sh", "-c"]
           args:
-            - "--port"
-            - {{ .Values.config.port | quote }}
-            - "--work-dir"
-            - {{ .Values.config.workDir | quote }}
-            - "--data-dir"
-            - {{ .Values.config.dataDir | quote }}
+            - >-
+              ulimit -n {{ int .Values.runtime.openFilesLimit }} &&
+              exec /app/main --port {{ .Values.config.port | quote }} --work-dir {{ .Values.config.workDir | quote }} --data-dir {{ .Values.config.dataDir | quote }}
           ports:
             - containerPort: {{ int .Values.config.port }}
               name: http

@@ -55,6 +55,7 @@ RUN mkdir -p /app/.pulumi/plugins && \
     pulumi plugin install resource kubernetes v4.24.1 && \
     pulumi plugin install resource command v1.1.3 && \
     pulumi plugin install resource ovh v2.11.0 --server github://api.github.com/ovh/pulumi-ovh && \
+    printf 'name: ovh\nversion: 2.11.0\nruntime: go\n' > /app/.pulumi/plugins/resource-ovh-v2.11.0/PulumiPlugin.yaml && \
     chown -R appuser:appgroup /app/.pulumi && \
     pulumi plugin ls --json | grep -q "ovh" || (echo "ERROR: pulumi-resource-ovh plugin not found after installation" && exit 1)
 

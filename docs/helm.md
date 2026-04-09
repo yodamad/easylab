@@ -72,6 +72,7 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 | `image.tag` | Docker image tag (defaults to `v` + chart appVersion when appVersion has no leading `v`, to match Git-tag Docker images) | `""` |
 | `image.pullPolicy` | Image pull policy | `Always` |
 | `replicaCount` | Number of replicas | `1` |
+| `runtime.openFilesLimit` | Process `ulimit -n` before starting the app (helps Pulumi/fsnotify in pods) | `65536` |
 | `config.port` | Application port | `"8080"` |
 | `config.workDir` | Job workspace directory | `"/app/jobs"` |
 | `config.dataDir` | Data persistence directory | `"/app/data"` |

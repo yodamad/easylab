@@ -138,23 +138,23 @@ func (pe *PulumiExecutor) GetWorkDir() string {
 type requiredPlugin struct {
 	Name    string
 	Version string
+	Server  string // optional custom download URL (e.g. GitHub releases for third-party providers)
 }
 
 // requiredPlugins is the list of Pulumi resource plugins the templates depend on.
 var requiredPlugins = []requiredPlugin{
-	{"command", "1.1.3"},
-	{"kubernetes", "4.24.1"},
-	{"ovh", "2.11.0"},
+	{Name: "command", Version: "1.1.3"},
+	{Name: "kubernetes", Version: "4.24.1"},
+	{Name: "ovh", Version: "2.11.0", Server: "github://api.github.com/ovh/pulumi-ovh"},
 }
 
 // CheckAndInstallPlugins verifies every required Pulumi resource plugin is healthy
 // inside PULUMI_HOME/plugins. For each plugin it:
-//  1. Checks whether the plugin binary AND PulumiPlugin.yaml both exist.
-//     A missing YAML indicates an incomplete auto-acquired installation (Pulumi downloaded
-//     the binary but did not write the YAML), so both missing binary and missing YAML
-//     trigger a full reinstall via the Pulumi CLI.
-//  2. Creates a minimal PulumiPlugin.yaml when still absent after install — the
-//     Pulumi SDK requires that file to load a plugin even though some releases do not ship it.
+//  1. If the binary is missing, performs a full reinstall via the Pulumi CLI.
+//  2. If the binary exists but PulumiPlugin.yaml is absent (common for third-party
+//     providers like OVH), synthesizes the YAML without touching the working binary.
+//  3. After a full reinstall, synthesizes PulumiPlugin.yaml if the installer did not
+//     produce one.
 func (pe *PulumiExecutor) CheckAndInstallPlugins() {
 	pulumiHome := getEnvOrDefault("PULUMI_HOME", filepath.Join(getAppBaseDir(), ".pulumi"))
 	pluginsDir := filepath.Join(pulumiHome, "plugins")
@@ -172,38 +172,32 @@ func (pe *PulumiExecutor) CheckAndInstallPlugins() {
 		_, yamlErr := os.Stat(yamlPath)
 		yamlMissing := os.IsNotExist(yamlErr)
 
-		// Step 1: install (or reinstall) when the binary is missing or the YAML is absent.
-		// A missing YAML signals an incomplete installation. Before reinstalling, remove the
-		// plugin directory so `pulumi plugin install` doesn't skip the download because it
-		// sees an existing (stub) directory and considers the plugin already present.
-		if binaryMissing || yamlMissing {
-			reason := "binary missing"
-			if !binaryMissing {
-				reason = "PulumiPlugin.yaml missing (incomplete prior installation) — reinstalling"
-			}
-			log.Printf("[PLUGINS] Plugin %s v%s %s...", p.Name, p.Version, reason)
-			// Remove the incomplete directory so the installer performs a fresh download.
+		if binaryMissing {
+			// Full reinstall: binary is absent so we need the CLI to download everything.
+			log.Printf("[PLUGINS] Plugin %s v%s binary missing — installing...", p.Name, p.Version)
 			if _, statErr := os.Stat(pluginDir); statErr == nil {
 				if removeErr := os.RemoveAll(pluginDir); removeErr != nil {
 					log.Printf("[PLUGINS] Warning: failed to remove incomplete plugin dir %s: %v", pluginDir, removeErr)
 				}
 			}
-			if installErr := pe.installPlugin(p.Name, p.Version, pulumiHome); installErr != nil {
+			if installErr := pe.installPlugin(p.Name, p.Version, p.Server, pulumiHome); installErr != nil {
 				log.Printf("[PLUGINS] Warning: could not install plugin %s v%s: %v", p.Name, p.Version, installErr)
 			} else {
 				log.Printf("[PLUGINS] Plugin %s v%s installed successfully", p.Name, p.Version)
-				// Refresh YAML presence after reinstall.
-				_, yamlErr = os.Stat(yamlPath)
-				yamlMissing = os.IsNotExist(yamlErr)
 			}
+			// Refresh YAML presence after reinstall.
+			_, yamlErr = os.Stat(yamlPath)
+			yamlMissing = os.IsNotExist(yamlErr)
+		} else if yamlMissing {
+			// Binary is fine but PulumiPlugin.yaml is missing (e.g. OVH provider).
+			// Just synthesize the YAML — no need to delete the working binary.
+			log.Printf("[PLUGINS] Plugin %s v%s PulumiPlugin.yaml missing — creating it...", p.Name, p.Version)
 		} else {
-			log.Printf("[PLUGINS] Plugin %s v%s binary OK", p.Name, p.Version)
+			log.Printf("[PLUGINS] Plugin %s v%s OK", p.Name, p.Version)
 		}
 
-		// Step 2: synthesize PulumiPlugin.yaml if the install did not produce one.
-		// Some provider releases do not bundle this file; the Pulumi SDK needs it to load the plugin.
+		// Synthesize PulumiPlugin.yaml when absent (after install or for an existing binary).
 		if yamlMissing {
-			log.Printf("[PLUGINS] Plugin %s v%s still missing PulumiPlugin.yaml — creating it...", p.Name, p.Version)
 			if mkErr := os.MkdirAll(pluginDir, 0755); mkErr != nil {
 				log.Printf("[PLUGINS] Warning: failed to create plugin dir %s: %v", pluginDir, mkErr)
 				continue
@@ -221,12 +215,18 @@ func (pe *PulumiExecutor) CheckAndInstallPlugins() {
 }
 
 // installPlugin runs `pulumi plugin install resource <name> <version>` with the
-// given PULUMI_HOME, with a 5-minute timeout.
-func (pe *PulumiExecutor) installPlugin(name, version, pulumiHome string) error {
+// given PULUMI_HOME, with a 5-minute timeout. When server is non-empty it is
+// passed as --server (required for third-party providers like OVH that are not
+// in the default Pulumi registry).
+func (pe *PulumiExecutor) installPlugin(name, version, server, pulumiHome string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "pulumi", "plugin", "install", "resource", name, version)
+	args := []string{"plugin", "install", "resource", name, version}
+	if server != "" {
+		args = append(args, "--server", server)
+	}
+	cmd := exec.CommandContext(ctx, "pulumi", args...)
 	cmd.Env = append(os.Environ(), fmt.Sprintf("PULUMI_HOME=%s", pulumiHome))
 
 	output, err := cmd.CombinedOutput()
