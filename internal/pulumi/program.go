@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 
 	k8sPkg "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
@@ -150,13 +149,16 @@ func CreateLabProgram() pulumi.RunFunc {
 }
 
 func checkRequirements(ctx *pulumi.Context) string {
-	ovhVars := []string{os.Getenv(utils.OvhApplicationSecret), os.Getenv(utils.OvhApplicationKey),
-		os.Getenv(utils.OvhServiceName), os.Getenv(utils.OvhConsumerKey)}
-	if slices.Contains(ovhVars, "") {
-		_ = ctx.Log.Error("A mandatory variable is missing, "+
-			"check that all these variables are set: "+
-			"OVH_APPLICATION_SECRET, OVH_APPLICATION_KEY, OVH_SERVICE_NAME, OVH_CONSUMER_KEY",
-			nil)
+	// Read service name from Pulumi config first (works with inline programs
+	// where auto.EnvVars only propagates to plugin child processes, not to
+	// the current process's os.Getenv).
+	serviceName := utils.OvhCloudConfigOptional(ctx, utils.OvhCloudServiceName)
+	if serviceName == "" {
+		serviceName = os.Getenv(utils.OvhServiceName)
 	}
-	return os.Getenv(utils.OvhServiceName)
+	if serviceName == "" {
+		_ = ctx.Log.Error("OVH service name (project ID) is not configured. "+
+			"Set it via the credentials UI or the OVH_SERVICE_NAME environment variable.", nil)
+	}
+	return serviceName
 }

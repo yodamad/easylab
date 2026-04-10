@@ -433,6 +433,18 @@ func (pe *PulumiExecutor) setStackConfig(ctx context.Context, stack auto.Stack, 
 			if err != nil {
 				return fmt.Errorf("failed to set config ovh:endpoint: %w", err)
 			}
+			// Pass service name via Pulumi config so the inline program can
+			// read it without relying on os.Getenv() (auto.EnvVars only
+			// propagates to plugin child processes, not the current process).
+			if config.OvhServiceName != "" {
+				err = stack.SetConfig(ctx, "ovhcloud:serviceName", auto.ConfigValue{
+					Value:  config.OvhServiceName,
+					Secret: false,
+				})
+				if err != nil {
+					return fmt.Errorf("failed to set config ovhcloud:serviceName: %w", err)
+				}
+			}
 			// Future providers can be added here:
 			// case "aws":
 			//     err := stack.SetConfig(ctx, "aws:region", auto.ConfigValue{...})

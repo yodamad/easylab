@@ -31,6 +31,15 @@ const OvhApplicationSecret = "OVH_APPLICATION_SECRET"
 const OvhConsumerKey = "OVH_CONSUMER_KEY"
 const OvhServiceName = "OVH_SERVICE_NAME"
 
+// OVH cloud project config group (for inline Pulumi programs where env vars
+// are set on the workspace, not on the process)
+const OvhCloudGroup = "ovhcloud"
+const OvhCloudServiceName = "serviceName"
+
+func OvhCloudConfigOptional(ctx *pulumi.Context, key string) string {
+	return config.New(ctx, OvhCloudGroup).Get(key)
+}
+
 // OVH config group
 const OvhGroup = "network"
 const OvhRegion = "region"
