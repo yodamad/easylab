@@ -102,6 +102,45 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 | `resources.limits.memory` | Memory limit | `4096Mi` |
 | `resources.limits.cpu` | CPU limit | `3000m` |
 
+### Exposing with Traefik
+
+The chart creates a standard **Kubernetes Ingress** and defaults `ingress.className` to **`traefik`**, which matches Traefik’s default IngressClass on many clusters (for example [k3s](https://docs.k3s.io/networking#traefik-ingress-controller) and typical [Traefik Helm](https://doc.traefik.io/traefik/getting-started/install-traefik/) installs).
+
+**Prerequisites**
+
+- Traefik running with the Kubernetes Ingress provider enabled.
+- An IngressClass whose name matches `ingress.className` (default `traefik`). Check with:
+
+  ```bash
+  kubectl get ingressclass
+  ```
+
+  If your class is named differently (for example `traefik-internal`), set `--set ingress.className=traefik-internal` or the same field in your values file.
+
+**Expose EasyLab**
+
+1. Keep the app service internal: leave `service.type` as `ClusterIP` (default).
+2. Enable ingress and set your hostname:
+
+   ```yaml
+   ingress:
+     enabled: true
+     host: easylab.example.com
+     className: traefik
+   ```
+
+3. Optional: add Traefik-specific annotations under `ingress.annotations` if your install uses non-default entrypoint names, for example:
+
+   ```yaml
+   ingress:
+     annotations:
+       traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+   ```
+
+   Adjust names to match your Traefik static configuration (`entryPoints`).
+
+TLS can be enabled with `ingress.tls` and a TLS secret in the same namespace, or with cert-manager annotations on the Ingress (same pattern as other ingress controllers).
+
 ## Examples
 
 ### Minimal install
@@ -112,7 +151,24 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
   --set secrets.adminPassword="SuperAdmin"
 ```
 
-### With ingress and TLS
+### With Traefik ingress and TLS (cert-manager)
+
+`ingress.className` defaults to `traefik`; set it explicitly here only if your IngressClass name differs.
+
+```bash
+helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
+  --version __VERSION__ \
+  --set secrets.adminPassword="SuperAdmin" \
+  --set ingress.enabled=true \
+  --set ingress.host="easylab.example.com" \
+  --set ingress.tls.enabled=true \
+  --set ingress.className=traefik \
+  --set ingress.annotations."cert-manager\.io/cluster-issuer"=letsencrypt
+```
+
+### With nginx ingress and TLS
+
+If you use the NGINX Ingress Controller instead, set `ingress.className` to your NGINX IngressClass (often `nginx`).
 
 ```bash
 helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
@@ -157,6 +213,7 @@ secrets:
 ingress:
   enabled: true
   host: easylab.mycompany.com
+  className: traefik
   tls:
     enabled: true
 
