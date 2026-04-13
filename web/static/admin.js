@@ -994,6 +994,118 @@ function reindexTemplateRows() {
     initTemplateRowHandlers();
 }
 
+function createVariableRow(templateIdx, varName, varValue, description, required) {
+    const div = document.createElement('div');
+    div.className = 'template-variable-row';
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.name = 'template_' + templateIdx + '_var_name';
+    nameInput.placeholder = 'Variable name';
+    nameInput.value = varName || '';
+    if (required) nameInput.setAttribute('data-required', 'true');
+
+    const valueInput = document.createElement('input');
+    valueInput.type = 'text';
+    valueInput.name = 'template_' + templateIdx + '_var_value';
+    valueInput.placeholder = description || 'Value';
+    valueInput.value = varValue || '';
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn btn-secondary btn-remove-variable';
+    removeBtn.textContent = 'x';
+    removeBtn.title = 'Remove variable';
+    removeBtn.addEventListener('click', function() {
+        div.remove();
+    });
+
+    div.appendChild(nameInput);
+    div.appendChild(valueInput);
+    div.appendChild(removeBtn);
+    return div;
+}
+
+function addVariableRow(row) {
+    const idx = parseInt(row.getAttribute('data-template-index'), 10);
+    const container = row.querySelector('.template-variables-container');
+    if (container) {
+        container.appendChild(createVariableRow(idx, '', '', '', false));
+    }
+}
+
+function detectVariables(row) {
+    const idx = parseInt(row.getAttribute('data-template-index'), 10);
+    const sourceRadio = row.querySelector('input[data-field="source"]:checked');
+    const source = sourceRadio ? sourceRadio.value : 'git';
+    const container = row.querySelector('.template-variables-container');
+    const detectBtn = row.querySelector('.btn-detect-variables');
+    if (!container || !detectBtn) return;
+
+    detectBtn.disabled = true;
+    detectBtn.textContent = 'Detecting...';
+
+    const formData = new FormData();
+    formData.append('source', source);
+
+    if (source === 'upload') {
+        const fileInput = row.querySelector('input[data-field="file"]');
+        if (!fileInput || !fileInput.files || !fileInput.files[0]) {
+            detectBtn.disabled = false;
+            detectBtn.textContent = 'Detect Variables';
+            alert('Please select a template file first.');
+            return;
+        }
+        formData.append('template_file', fileInput.files[0]);
+    } else if (source === 'git') {
+        const repoInput = row.querySelector('input[data-field="git_repo"]');
+        const folderInput = row.querySelector('input[data-field="git_folder"]');
+        const branchInput = row.querySelector('input[data-field="git_branch"]');
+        if (!repoInput || !repoInput.value) {
+            detectBtn.disabled = false;
+            detectBtn.textContent = 'Detect Variables';
+            alert('Please enter a Git repository URL first.');
+            return;
+        }
+        formData.append('git_repo', repoInput.value);
+        if (folderInput && folderInput.value) formData.append('git_folder', folderInput.value);
+        if (branchInput && branchInput.value) formData.append('git_branch', branchInput.value);
+    }
+
+    fetch('/api/templates/detect-variables', {
+        method: 'POST',
+        body: formData
+    })
+    .then(resp => {
+        if (!resp.ok) {
+            return resp.json().then(data => { throw new Error(data.message || 'Detection failed'); });
+        }
+        return resp.json();
+    })
+    .then(variables => {
+        container.innerHTML = '';
+        if (!variables || variables.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'detect-variables-status';
+            empty.textContent = 'No Terraform variables found in this template.';
+            container.appendChild(empty);
+        } else {
+            variables.forEach(v => {
+                container.appendChild(createVariableRow(idx, v.name, v.default || '', v.description || '', v.required));
+            });
+        }
+    })
+    .catch(err => {
+        const errDiv = document.createElement('div');
+        errDiv.className = 'detect-variables-status error-message';
+        errDiv.textContent = 'Detection failed: ' + err.message;
+        container.appendChild(errDiv);
+    })
+    .finally(() => {
+        detectBtn.disabled = false;
+        detectBtn.textContent = 'Detect Variables';
+    });
+}
+
 function updateRowSourceVisibility(row) {
     const sourceRadios = row.querySelectorAll('input[data-field="source"]');
     const selectedSource = Array.from(sourceRadios).find(r => r.checked)?.value;
@@ -1078,6 +1190,22 @@ function initTemplateRowHandlers() {
                     fileInput.dispatchEvent(new Event('change', { bubbles: true }));
                 }
             }, false);
+        }
+
+        const detectBtn = row.querySelector('.btn-detect-variables');
+        if (detectBtn) {
+            detectBtn.replaceWith(detectBtn.cloneNode(true));
+            row.querySelector('.btn-detect-variables').addEventListener('click', function() {
+                detectVariables(row);
+            });
+        }
+
+        const addVarBtn = row.querySelector('.btn-add-variable');
+        if (addVarBtn) {
+            addVarBtn.replaceWith(addVarBtn.cloneNode(true));
+            row.querySelector('.btn-add-variable').addEventListener('click', function() {
+                addVariableRow(row);
+            });
         }
     });
 }

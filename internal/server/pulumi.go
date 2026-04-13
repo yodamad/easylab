@@ -11,7 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"easylab/coder"
 	internalPulumi "easylab/internal/pulumi"
+	"easylab/utils"
 
 	"github.com/pulumi/pulumi/sdk/v3/go/auto"
 	"github.com/pulumi/pulumi/sdk/v3/go/auto/optdestroy"
@@ -463,6 +465,11 @@ type JobPreparation struct {
 	Cleanup func()
 }
 
+// pulumiExecutionTimeout is the maximum duration for a full Pulumi operation
+// (stack init + up/preview). This prevents jobs from hanging indefinitely when
+// downstream operations (e.g. Coder template processing) get stuck.
+const pulumiExecutionTimeout = 45 * time.Minute
+
 // prepareJob handles all common setup logic for Pulumi operations
 func (pe *PulumiExecutor) prepareJob(jobID string, allowMissingDir bool) (*JobPreparation, error) {
 	// Validate job exists
@@ -472,8 +479,8 @@ func (pe *PulumiExecutor) prepareJob(jobID string, allowMissingDir bool) (*JobPr
 	}
 	config := job.Config
 
-	// Create context
-	ctx := context.Background()
+	// Create context with timeout to prevent indefinite hangs
+	ctx, cancel := context.WithTimeout(context.Background(), pulumiExecutionTimeout)
 
 	// Update status to running
 	pe.jobManager.UpdateJobStatus(jobID, JobStatusRunning)
@@ -487,6 +494,7 @@ func (pe *PulumiExecutor) prepareJob(jobID string, allowMissingDir bool) (*JobPr
 		if _, err := os.Stat(jobDir); os.IsNotExist(err) {
 			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Job directory not found: %s. Creating it...", jobDir))
 			if err := os.MkdirAll(jobDir, 0755); err != nil {
+				cancel()
 				pe.jobManager.SetError(jobID, fmt.Errorf("failed to create job directory: %w", err))
 				return nil, err
 			}
@@ -495,6 +503,7 @@ func (pe *PulumiExecutor) prepareJob(jobID string, allowMissingDir bool) (*JobPr
 		// For create/preview operations - always create directory
 		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Creating job directory: %s", jobDir))
 		if err := os.MkdirAll(jobDir, 0755); err != nil {
+			cancel()
 			pe.jobManager.SetError(jobID, fmt.Errorf("failed to create job directory: %w", err))
 			return nil, err
 		}
@@ -504,6 +513,7 @@ func (pe *PulumiExecutor) prepareJob(jobID string, allowMissingDir bool) (*JobPr
 	if config != nil && config.UseExistingCluster && config.ExternalKubeconfig != "" {
 		kubeconfigPath := filepath.Join(jobDir, "external-kubeconfig.yaml")
 		if err := os.WriteFile(kubeconfigPath, []byte(config.ExternalKubeconfig), 0600); err != nil {
+			cancel()
 			pe.jobManager.SetError(jobID, fmt.Errorf("failed to write external-kubeconfig.yaml: %w", err))
 			return nil, err
 		}
@@ -511,7 +521,7 @@ func (pe *PulumiExecutor) prepareJob(jobID string, allowMissingDir bool) (*JobPr
 	}
 
 	// Env vars are passed per-workspace via auto.EnvVars inside getOrCreateStackInline.
-	cleanup := func() {}
+	cleanup := func() { cancel() }
 
 	// Get or create stack using inline program
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Initializing Pulumi stack '%s'...", config.StackName))
@@ -589,8 +599,8 @@ func (pe *PulumiExecutor) prepareJobForRetry(jobID string) (*JobPreparation, err
 		return pe.prepareJob(jobID, false)
 	}
 
-	// Create context
-	ctx := context.Background()
+	// Create context with timeout to prevent indefinite hangs
+	ctx, cancel := context.WithTimeout(context.Background(), pulumiExecutionTimeout)
 
 	// Update status to running
 	pe.jobManager.UpdateJobStatus(jobID, JobStatusRunning)
@@ -601,7 +611,7 @@ func (pe *PulumiExecutor) prepareJobForRetry(jobID string) (*JobPreparation, err
 	pe.jobManager.AppendOutput(jobID, "Reusing existing job directory and files...")
 
 	// Env vars are passed per-workspace via auto.EnvVars inside getOrCreateStackInline.
-	cleanup := func() {}
+	cleanup := func() { cancel() }
 
 	// Get existing stack (should exist from previous run)
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Selecting existing Pulumi stack '%s'...", config.StackName))
@@ -655,8 +665,8 @@ func (pe *PulumiExecutor) prepareDestroyJob(jobID string) (*JobPreparation, erro
 		return nil, fmt.Errorf("job %s has no stack name", jobID)
 	}
 
-	// Create context
-	ctx := context.Background()
+	// Create context with timeout to prevent indefinite hangs
+	ctx, cancel := context.WithTimeout(context.Background(), pulumiExecutionTimeout)
 
 	// Update status to running
 	pe.jobManager.UpdateJobStatus(jobID, JobStatusRunning)
@@ -665,11 +675,12 @@ func (pe *PulumiExecutor) prepareDestroyJob(jobID string) (*JobPreparation, erro
 	// Ensure job directory exists (needed for stack state storage)
 	jobDir := filepath.Join(pe.workDir, jobID)
 	if err := os.MkdirAll(jobDir, 0755); err != nil {
+		cancel()
 		pe.jobManager.SetError(jobID, fmt.Errorf("failed to create job directory: %w", err))
 		return nil, err
 	}
 
-	cleanup := func() {}
+	cleanup := func() { cancel() }
 
 	// Get environment variables including OVH credentials for Pulumi Automation API (scoped to job directory)
 	pulumiEnvVars := getPulumiEnvVars(config, jobDir)
@@ -917,42 +928,23 @@ func (pe *PulumiExecutor) Execute(jobID string) error {
 		// Persist failed job to disk
 		if saveErr := pe.jobManager.SaveJob(jobID); saveErr != nil {
 			log.Printf("Warning: failed to persist failed job %s: %v", jobID, saveErr)
-			// Don't fail the job if persistence fails
 		}
 		return err
 	}
 
+	pe.jobManager.AppendOutput(jobID, "Pulumi infrastructure deployment completed.")
+
 	// Extract outputs from the result
 	pe.jobManager.AppendOutput(jobID, "Extracting stack outputs...")
-
-	// Extract kubeconfig if cluster was created
 	pe.extractKubeconfigFromOutputs(jobID, upResult.Outputs)
 
-	// Extract Coder configuration from stack outputs
-	pe.jobManager.AppendOutput(jobID, "Extracting Coder configuration...")
-	if coderURLVal, ok := upResult.Outputs["coderServerURL"]; ok {
-		job, _ := pe.jobManager.GetJob(jobID) // We know job exists from prepareJob
-		config := job.Config
-
-		coderURL := pe.outputValueToString(coderURLVal)
-		if coderURL != "" {
-			coderSessionToken := ""
-			coderOrganizationID := ""
-
-			if tokenVal, ok := upResult.Outputs["coderSessionToken"]; ok {
-				coderSessionToken = pe.outputValueToString(tokenVal)
-			}
-			if orgIDVal, ok := upResult.Outputs["coderOrganizationID"]; ok {
-				coderOrganizationID = pe.outputValueToString(orgIDVal)
-			}
-
-			// Store Coder config in job
-			if err := pe.jobManager.SetCoderConfig(jobID, coderURL, config.CoderAdminEmail, config.CoderAdminPassword, coderSessionToken, coderOrganizationID); err != nil {
-				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to store Coder config: %v", err))
-			} else {
-				pe.jobManager.AppendOutput(jobID, "Coder configuration extracted and stored successfully")
-			}
+	// Post-deployment: initialize Coder and create templates (runs outside Pulumi engine)
+	if err := pe.initCoderAndTemplates(jobID, upResult.Outputs); err != nil {
+		pe.jobManager.SetError(jobID, fmt.Errorf("infrastructure deployed but Coder setup failed: %w", err))
+		if saveErr := pe.jobManager.SaveJob(jobID); saveErr != nil {
+			log.Printf("Warning: failed to persist failed job %s: %v", jobID, saveErr)
 		}
+		return err
 	}
 
 	// Success
@@ -960,16 +952,13 @@ func (pe *PulumiExecutor) Execute(jobID string) error {
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Deployment completed successfully at %s", time.Now().Format(time.RFC3339)))
 
 	// Clean up source files but preserve .pulumi directory for file backend
-	// This ensures stack state is available for future destroy operations
 	if err := pe.cleanupJobDirectory(jobID, true); err != nil {
 		log.Printf("Warning: failed to cleanup job directory for %s: %v", jobID, err)
-		// Don't fail the job if cleanup fails
 	}
 
 	// Persist completed job to disk
 	if err := pe.jobManager.SaveJob(jobID); err != nil {
 		log.Printf("Warning: failed to persist job %s: %v", jobID, err)
-		// Don't fail the job if persistence fails
 	}
 
 	return nil
@@ -1021,37 +1010,19 @@ func (pe *PulumiExecutor) ExecuteRetry(jobID string) error {
 		return err
 	}
 
+	pe.jobManager.AppendOutput(jobID, "Pulumi infrastructure deployment completed.")
+
 	// Extract outputs from the result
 	pe.jobManager.AppendOutput(jobID, "Extracting stack outputs...")
-
-	// Extract kubeconfig if cluster was created
 	pe.extractKubeconfigFromOutputs(jobID, upResult.Outputs)
 
-	// Extract Coder configuration from stack outputs
-	pe.jobManager.AppendOutput(jobID, "Extracting Coder configuration...")
-	if coderURLVal, ok := upResult.Outputs["coderServerURL"]; ok {
-		job, _ := pe.jobManager.GetJob(jobID) // We know job exists from prepareJobForRetry
-		config := job.Config
-
-		coderURL := pe.outputValueToString(coderURLVal)
-		if coderURL != "" {
-			coderSessionToken := ""
-			coderOrganizationID := ""
-
-			if tokenVal, ok := upResult.Outputs["coderSessionToken"]; ok {
-				coderSessionToken = pe.outputValueToString(tokenVal)
-			}
-			if orgIDVal, ok := upResult.Outputs["coderOrganizationID"]; ok {
-				coderOrganizationID = pe.outputValueToString(orgIDVal)
-			}
-
-			// Store Coder config in job
-			if err := pe.jobManager.SetCoderConfig(jobID, coderURL, config.CoderAdminEmail, config.CoderAdminPassword, coderSessionToken, coderOrganizationID); err != nil {
-				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to store Coder config: %v", err))
-			} else {
-				pe.jobManager.AppendOutput(jobID, "Coder configuration extracted and stored successfully")
-			}
+	// Post-deployment: initialize Coder and create templates (runs outside Pulumi engine)
+	if err := pe.initCoderAndTemplates(jobID, upResult.Outputs); err != nil {
+		pe.jobManager.SetError(jobID, fmt.Errorf("infrastructure deployed but Coder setup failed: %w", err))
+		if saveErr := pe.jobManager.SaveJob(jobID); saveErr != nil {
+			log.Printf("Warning: failed to persist failed job %s: %v", jobID, saveErr)
 		}
+		return err
 	}
 
 	// Success
@@ -1059,16 +1030,13 @@ func (pe *PulumiExecutor) ExecuteRetry(jobID string) error {
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Deployment completed successfully at %s", time.Now().Format(time.RFC3339)))
 
 	// Clean up source files but preserve .pulumi directory for file backend
-	// This ensures stack state is available for future destroy operations
 	if err := pe.cleanupJobDirectory(jobID, true); err != nil {
 		log.Printf("Warning: failed to cleanup job directory for %s: %v", jobID, err)
-		// Don't fail the job if cleanup fails
 	}
 
 	// Persist completed job to disk
 	if err := pe.jobManager.SaveJob(jobID); err != nil {
 		log.Printf("Warning: failed to persist job %s: %v", jobID, err)
-		// Don't fail the job if persistence fails
 	}
 
 	return nil
@@ -1196,6 +1164,94 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 	if err := pe.cleanupJobDirectory(jobID, false); err != nil {
 		log.Printf("Warning: failed to cleanup job directory for %s: %v", jobID, err)
 		// Don't fail the job if cleanup fails
+	}
+
+	return nil
+}
+
+// initCoderAndTemplates performs Coder initialization and template creation after
+// Stack.Up() completes. This runs outside the Pulumi engine, so it won't block
+// the Pulumi resource operations from finishing.
+func (pe *PulumiExecutor) initCoderAndTemplates(jobID string, outputs auto.OutputMap) error {
+	job, exists := pe.jobManager.GetJob(jobID)
+	if !exists || job.Config == nil {
+		return nil
+	}
+	config := job.Config
+
+	// Get external IP from Pulumi outputs
+	var externalIP string
+	if ipVal, ok := outputs["externalIp"]; ok {
+		externalIP = pe.outputValueToString(ipVal)
+	}
+	if externalIP == "" {
+		pe.jobManager.AppendOutput(jobID, "No external IP found in outputs, skipping Coder initialization")
+		return nil
+	}
+
+	logFunc := func(msg string) {
+		pe.jobManager.AppendOutput(jobID, msg)
+	}
+
+	// Initialize Coder: wait for reachability, create first user, login
+	pe.jobManager.AppendOutput(jobID, "Initializing Coder server...")
+	coderCfg, err := coder.InitCoderStandalone(externalIP, config.CoderAdminEmail, config.CoderAdminPassword, logFunc)
+	if err != nil {
+		return fmt.Errorf("failed to initialize Coder: %w", err)
+	}
+
+	// Store Coder config in job
+	if err := pe.jobManager.SetCoderConfig(jobID, coderCfg.ServerURL, config.CoderAdminEmail, config.CoderAdminPassword, coderCfg.SessionToken, coderCfg.OrganizationID); err != nil {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to store Coder config: %v", err))
+	} else {
+		pe.jobManager.AppendOutput(jobID, "Coder initialized and configuration stored successfully")
+	}
+
+	// Create Coder templates
+	templates := config.GetCoderTemplates()
+	if len(templates) == 0 {
+		pe.jobManager.AppendOutput(jobID, "No templates configured, using default Git-based template")
+		zipFile, gitErr := utils.CloneFolderFromGitAndZipIt("https://gitlab.com/yodamad-workshops/coder-templates#", "docker", "main")
+		if gitErr != nil {
+			return fmt.Errorf("failed to clone and zip default template: %w", gitErr)
+		}
+		if err := coder.CreateTemplateStandalone(coderCfg, "docker-template", zipFile, nil, logFunc); err != nil {
+			return fmt.Errorf("failed to create default template: %w", err)
+		}
+		return nil
+	}
+
+	jobDir := filepath.Join(pe.workDir, jobID)
+	for i, t := range templates {
+		var zipFile string
+		if t.Source == "upload" && t.FilePath != "" {
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Template %d (%s): using uploaded file", i+1, t.Name))
+			zipFile = filepath.Join(jobDir, t.FilePath)
+			if _, statErr := os.Stat(zipFile); statErr != nil {
+				return fmt.Errorf("template file not found at %s: %w", zipFile, statErr)
+			}
+		} else if t.Source == "git" && t.GitRepo != "" {
+			gitBranch := t.GitBranch
+			if gitBranch == "" {
+				gitBranch = "main"
+			}
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Template %d (%s): cloning from Git repo=%s", i+1, t.Name, t.GitRepo))
+			var gitErr error
+			zipFile, gitErr = utils.CloneFolderFromGitAndZipIt(t.GitRepo, t.GitFolder, gitBranch)
+			if gitErr != nil {
+				return fmt.Errorf("failed to clone and zip template from Git: %w", gitErr)
+			}
+		} else {
+			return fmt.Errorf("template %d (%s): invalid config (source=%s, need file or git repo)", i+1, t.Name, t.Source)
+		}
+
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Creating Coder template: %s", t.Name))
+		if len(t.Variables) > 0 {
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("  with %d variable(s)", len(t.Variables)))
+		}
+		if err := coder.CreateTemplateStandalone(coderCfg, t.Name, zipFile, t.Variables, logFunc); err != nil {
+			return fmt.Errorf("failed to create template %s: %w", t.Name, err)
+		}
 	}
 
 	return nil

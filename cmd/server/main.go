@@ -275,6 +275,7 @@ func main() {
 	mux.HandleFunc("/admin/ovh-options", authHandler.RequireAuth(handler.ServeOVHOptions))
 	mux.HandleFunc("/api/ovh-options", authHandler.RequireAuth(handler.SaveOVHOptions))
 	mux.HandleFunc("/api/ovh-options/refresh", authHandler.RequireAuth(handler.RefreshOVHOptions))
+	mux.HandleFunc("/api/templates/detect-variables", authHandler.RequireAuth(handler.DetectTemplateVariables))
 	mux.HandleFunc("/api/labs", authHandler.RequireAuth(handler.CreateLab))
 	mux.HandleFunc("/api/labs/dry-run", authHandler.RequireAuth(handler.DryRunLab))
 	mux.HandleFunc("/api/labs/launch", authHandler.RequireAuth(handler.LaunchLab))

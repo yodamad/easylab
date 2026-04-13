@@ -303,6 +303,178 @@ func InitCoder(ctx *pulumi.Context, externalIp string) (CoderConfig, error) {
 	}, nil
 }
 
+// waitForCoderReachableStandalone polls the Coder API until it responds.
+// Uses a callback for logging instead of a Pulumi context.
+func waitForCoderReachableStandalone(baseURL string, logFunc func(string)) error {
+	checkURL := baseURL + "/api/v2/buildinfo"
+	interval := 15 * time.Second
+	maxAttempts := 40
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, checkURL, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+		httpClient := &http.Client{Timeout: 10 * time.Second}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			logFunc(fmt.Sprintf("Coder not ready yet (attempt %d/%d): %v", attempt, maxAttempts, err))
+			if attempt < maxAttempts {
+				time.Sleep(interval)
+			} else {
+				return fmt.Errorf("Coder did not become reachable after %d attempts: %w", maxAttempts, err)
+			}
+			continue
+		}
+		resp.Body.Close()
+		logFunc(fmt.Sprintf("Coder is ready (attempt %d, status %d)", attempt, resp.StatusCode))
+		return nil
+	}
+	return fmt.Errorf("Coder did not become reachable after %d attempts", maxAttempts)
+}
+
+// InitCoderStandalone initializes Coder outside of the Pulumi engine.
+// It waits for Coder to be reachable, creates the first user if needed,
+// and returns the client configuration.
+func InitCoderStandalone(externalIp, email, password string, logFunc func(string)) (CoderClientConfig, error) {
+	serverURL := &url.URL{
+		Scheme: "http",
+		Host:   externalIp,
+	}
+	baseURL := serverURL.String()
+
+	if err := waitForCoderReachableStandalone(baseURL, logFunc); err != nil {
+		return CoderClientConfig{}, err
+	}
+
+	client := codersdk.New(serverURL)
+
+	loginRes, err := client.LoginWithPassword(context.Background(), codersdk.LoginWithPasswordRequest{
+		Email:    email,
+		Password: password,
+	})
+
+	var organizationID uuid.UUID
+
+	if err != nil {
+		logFunc("First user not found, creating first user...")
+		createRes, createErr := client.CreateFirstUser(context.Background(), codersdk.CreateFirstUserRequest{
+			Email:    email,
+			Username: "admin",
+			Password: password,
+		})
+		if createErr != nil {
+			return CoderClientConfig{}, fmt.Errorf("failed to create first user: %w", createErr)
+		}
+
+		logFunc("First user created: " + createRes.UserID.String())
+		organizationID = createRes.OrganizationID
+
+		loginRes, err = client.LoginWithPassword(context.Background(), codersdk.LoginWithPasswordRequest{
+			Email:    email,
+			Password: password,
+		})
+		if err != nil {
+			return CoderClientConfig{}, fmt.Errorf("failed to login with new user: %w", err)
+		}
+	} else {
+		logFunc("First user already exists, skipping creation")
+		authClient := codersdk.New(serverURL)
+		authClient.SetSessionToken(loginRes.SessionToken)
+		authUser, userErr := authClient.User(context.Background(), codersdk.Me)
+		if userErr != nil {
+			return CoderClientConfig{}, fmt.Errorf("failed to get authenticated user: %w", userErr)
+		}
+
+		if len(authUser.OrganizationIDs) > 0 {
+			organizationID = authUser.OrganizationIDs[0]
+		} else {
+			orgs, orgErr := authClient.OrganizationsByUser(context.Background(), authUser.ID.String())
+			if orgErr != nil || len(orgs) == 0 {
+				return CoderClientConfig{}, fmt.Errorf("failed to get organization: %w", orgErr)
+			}
+			organizationID = orgs[0].ID
+		}
+	}
+
+	return CoderClientConfig{
+		ServerURL:      baseURL,
+		SessionToken:   loginRes.SessionToken,
+		OrganizationID: organizationID.String(),
+	}, nil
+}
+
+// CreateTemplateStandalone creates a Coder template from a zip file synchronously.
+// Designed to be called after Stack.Up() returns, outside the Pulumi engine.
+// variables is an optional map of Terraform variable values to set on the template version.
+func CreateTemplateStandalone(config CoderClientConfig, templateName, zipFilePath string, variables map[string]string, logFunc func(string)) error {
+	serverURL, err := url.Parse(config.ServerURL)
+	if err != nil {
+		return fmt.Errorf("failed to parse server URL: %w", err)
+	}
+
+	organizationID, err := uuid.Parse(config.OrganizationID)
+	if err != nil {
+		return fmt.Errorf("failed to parse organization ID: %w", err)
+	}
+
+	client := codersdk.New(serverURL)
+	client.SetSessionToken(config.SessionToken)
+
+	logFunc("Reading template zip from: " + zipFilePath)
+	zipContent, err := os.ReadFile(zipFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to read zip file: %w", err)
+	}
+
+	logFunc("Uploading template archive to Coder...")
+	uploadResp, err := client.Upload(context.Background(), codersdk.ContentTypeZip, bytes.NewReader(zipContent))
+	if err != nil {
+		return fmt.Errorf("failed to upload template archive: %w", err)
+	}
+	logFunc("Template archive uploaded with hash: " + uploadResp.ID.String())
+
+	versionReq := codersdk.CreateTemplateVersionRequest{
+		Name:          templateName,
+		FileID:        uploadResp.ID,
+		StorageMethod: codersdk.ProvisionerStorageMethodFile,
+		Provisioner:   codersdk.ProvisionerTypeTerraform,
+	}
+
+	if len(variables) > 0 {
+		varValues := make([]codersdk.VariableValue, 0, len(variables))
+		for k, v := range variables {
+			varValues = append(varValues, codersdk.VariableValue{Name: k, Value: v})
+		}
+		versionReq.UserVariableValues = varValues
+		logFunc(fmt.Sprintf("Setting %d template variable(s)", len(varValues)))
+	}
+
+	logFunc("Creating template version...")
+	templateVersion, err := client.CreateTemplateVersion(context.Background(), organizationID, versionReq)
+	if err != nil {
+		return fmt.Errorf("failed to create template version: %w", err)
+	}
+	logFunc("Template version created: " + templateVersion.ID.String())
+
+	logFunc("Waiting for template version to be processed...")
+	if err := waitForTemplateVersion(client, templateVersion.ID); err != nil {
+		return fmt.Errorf("template version failed: %w", err)
+	}
+
+	logFunc("Creating template: " + templateName)
+	template, err := client.CreateTemplate(context.Background(), organizationID, codersdk.CreateTemplateRequest{
+		Name:      templateName,
+		VersionID: templateVersion.ID,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create template: %w", err)
+	}
+
+	logFunc(fmt.Sprintf("Template created successfully: %s (ID: %s)", template.Name, template.ID.String()))
+	return nil
+}
+
 // InitCoderOutput initializes Coder and returns a Pulumi-compatible output struct
 func InitCoderOutput(ctx *pulumi.Context, externalIp pulumi.StringOutput) *CoderConfigOutput {
 	// Use ApplyT to transform the IP string into config values
@@ -483,9 +655,17 @@ func CreateTemplateFromZip(ctx *pulumi.Context, coderInfos *CoderConfigOutput, t
 	})
 }
 
-// waitForTemplateVersion polls the template version status until it's ready or fails
+// waitForTemplateVersion polls the template version status until it's ready or fails.
+// Times out after 15 minutes to prevent infinite hangs when the provisioner is stuck.
 func waitForTemplateVersion(client *codersdk.Client, versionID uuid.UUID) error {
+	const maxDuration = 15 * time.Minute
+	deadline := time.Now().Add(maxDuration)
+
 	for {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out after %v waiting for template version %s to be processed", maxDuration, versionID)
+		}
+
 		version, err := client.TemplateVersion(context.Background(), versionID)
 		if err != nil {
 			return fmt.Errorf("failed to get template version status: %w", err)
@@ -1092,10 +1272,18 @@ func CreateTemplateAsync(config AsyncTemplateConfig) <-chan error {
 	return resultChan
 }
 
-// waitForTemplateVersionAsync polls the template version status with logging
+// waitForTemplateVersionAsync polls the template version status with logging.
+// Times out after 15 minutes to prevent infinite hangs.
 func waitForTemplateVersionAsync(client *codersdk.Client, versionID uuid.UUID, logFunc func(string)) error {
+	const maxDuration = 15 * time.Minute
+	deadline := time.Now().Add(maxDuration)
 	pollCount := 0
+
 	for {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out after %v waiting for template version %s to be processed", maxDuration, versionID)
+		}
+
 		version, err := client.TemplateVersion(context.Background(), versionID)
 		if err != nil {
 			return fmt.Errorf("failed to get template version status: %w", err)
@@ -1110,7 +1298,6 @@ func waitForTemplateVersionAsync(client *codersdk.Client, versionID uuid.UUID, l
 			return fmt.Errorf("template version job was canceled")
 		}
 
-		// Log progress every 5 polls (10 seconds)
 		pollCount++
 		if pollCount%5 == 0 {
 			logFunc(fmt.Sprintf("[ASYNC_TEMPLATE] Still processing template version (status: %s)...", version.Job.Status))

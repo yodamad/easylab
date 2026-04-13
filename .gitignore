@@ -16,6 +16,7 @@ tmp/
 /easylab
 /templates/easylab
 main
+server
 
 # Docker
 image.tar

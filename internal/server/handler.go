@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"easylab/coder"
+	"easylab/internal/tfparse"
 	"easylab/utils"
 	"encoding/base64"
 	"encoding/json"
@@ -25,6 +26,8 @@ import (
 	"time"
 
 	"github.com/coder/coder/v2/codersdk"
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/uuid"
 )
 
@@ -274,6 +277,24 @@ func parseCoderTemplatesFromForm(r *http.Request, templateFilePaths []string) []
 		if source == "upload" && i < len(templateFilePaths) && templateFilePaths[i] != "" {
 			t.FilePath = templateFilePaths[i]
 		}
+
+		varNames := r.Form[fmt.Sprintf("template_%d_var_name", i)]
+		varValues := r.Form[fmt.Sprintf("template_%d_var_value", i)]
+		if len(varNames) > 0 {
+			t.Variables = make(map[string]string)
+			for j, vn := range varNames {
+				vn = strings.TrimSpace(vn)
+				if vn == "" {
+					continue
+				}
+				vv := ""
+				if j < len(varValues) {
+					vv = varValues[j]
+				}
+				t.Variables[vn] = vv
+			}
+		}
+
 		templates = append(templates, t)
 	}
 	return templates
@@ -2672,4 +2693,144 @@ func buildWorkspaceName(labName, labID string, templateName string) string {
 		name = strings.TrimRight(name, "-")
 	}
 	return name
+}
+
+// DetectTemplateVariables parses uploaded .tf/.zip files or clones a Git repo
+// to extract Terraform variable blocks from template source files.
+func (h *Handler) DetectTemplateVariables(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	source := r.FormValue("source")
+
+	var variables []tfparse.TFVariable
+	var err error
+
+	switch source {
+	case "upload":
+		variables, err = h.detectVariablesFromUpload(r)
+	case "git":
+		variables, err = h.detectVariablesFromGit(r)
+	default:
+		writeJSONError(w, http.StatusBadRequest, "invalid source: must be 'upload' or 'git'")
+		return
+	}
+
+	if err != nil {
+		log.Printf("Failed to detect template variables: %v", err)
+		writeJSONError(w, http.StatusUnprocessableEntity, fmt.Sprintf("failed to detect variables: %v", err))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(variables)
+}
+
+func (h *Handler) detectVariablesFromUpload(r *http.Request) ([]tfparse.TFVariable, error) {
+	if err := r.ParseMultipartForm(50 << 20); err != nil {
+		return nil, fmt.Errorf("failed to parse form: %w", err)
+	}
+
+	file, header, err := r.FormFile("template_file")
+	if err != nil {
+		return nil, fmt.Errorf("no file uploaded: %w", err)
+	}
+	defer file.Close()
+
+	tmpDir, err := os.MkdirTemp("", "detect-vars-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	tmpPath := filepath.Join(tmpDir, header.Filename)
+	out, err := os.Create(tmpPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp file: %w", err)
+	}
+	if _, err := io.Copy(out, file); err != nil {
+		out.Close()
+		return nil, fmt.Errorf("failed to write temp file: %w", err)
+	}
+	out.Close()
+
+	filename := strings.ToLower(header.Filename)
+	if strings.HasSuffix(filename, ".zip") {
+		return tfparse.ParseVariablesFromZip(tmpPath)
+	}
+	if strings.HasSuffix(filename, ".tf") {
+		return tfparse.ParseVariablesFromFile(tmpPath)
+	}
+	return nil, fmt.Errorf("unsupported file type: expected .tf or .zip")
+}
+
+func (h *Handler) detectVariablesFromGit(r *http.Request) ([]tfparse.TFVariable, error) {
+	repoURL := r.FormValue("git_repo")
+	folder := r.FormValue("git_folder")
+	branch := r.FormValue("git_branch")
+
+	if repoURL == "" {
+		return nil, fmt.Errorf("git_repo is required")
+	}
+	if branch == "" {
+		branch = "main"
+	}
+
+	tmpDir, err := os.MkdirTemp("", "detect-vars-git-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cloneOpts := &git.CloneOptions{
+		URL:           repoURL,
+		ReferenceName: plumbing.NewBranchReferenceName(branch),
+		SingleBranch:  true,
+		Depth:         1,
+	}
+
+	if _, err := git.PlainClone(tmpDir, false, cloneOpts); err != nil {
+		return nil, fmt.Errorf("failed to clone repository: %w", err)
+	}
+
+	targetDir := tmpDir
+	if folder != "" {
+		targetDir = filepath.Join(tmpDir, folder)
+		if _, err := os.Stat(targetDir); err != nil {
+			return nil, fmt.Errorf("folder '%s' not found in repository: %w", folder, err)
+		}
+	}
+
+	entries, err := os.ReadDir(targetDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read directory: %w", err)
+	}
+
+	seen := make(map[string]tfparse.TFVariable)
+	var order []string
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".tf") {
+			continue
+		}
+		vars, parseErr := tfparse.ParseVariablesFromFile(filepath.Join(targetDir, entry.Name()))
+		if parseErr != nil {
+			log.Printf("Warning: failed to parse %s: %v", entry.Name(), parseErr)
+			continue
+		}
+		for _, v := range vars {
+			if _, exists := seen[v.Name]; !exists {
+				order = append(order, v.Name)
+			}
+			seen[v.Name] = v
+		}
+	}
+
+	result := make([]tfparse.TFVariable, 0, len(order))
+	for _, name := range order {
+		result = append(result, seen[name])
+	}
+	return result, nil
 }

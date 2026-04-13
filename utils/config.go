@@ -119,12 +119,13 @@ const CoderTemplatesKey = "templates"
 
 // CoderTemplateConfig holds the configuration for a single Coder template.
 type CoderTemplateConfig struct {
-	Name      string `json:"name"`
-	Source    string `json:"source"`
-	FilePath  string `json:"file_path,omitempty"`
-	GitRepo   string `json:"git_repo,omitempty"`
-	GitFolder string `json:"git_folder,omitempty"`
-	GitBranch string `json:"git_branch,omitempty"`
+	Name      string            `json:"name"`
+	Source    string            `json:"source"`
+	FilePath  string            `json:"file_path,omitempty"`
+	GitRepo   string            `json:"git_repo,omitempty"`
+	GitFolder string            `json:"git_folder,omitempty"`
+	GitBranch string            `json:"git_branch,omitempty"`
+	Variables map[string]string `json:"variables,omitempty"`
 }
 
 // GetCoderTemplatesFromConfig reads the coder:templates JSON config and returns the template list.

@@ -629,6 +629,76 @@ main {
     margin: 0;
 }
 
+.template-variables-section {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.template-variables-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.template-variables-header label {
+    font-weight: 600;
+}
+
+.template-variables-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.template-variables-actions .btn {
+    padding: 0.35rem 0.75rem;
+    font-size: 0.85rem;
+}
+
+.template-variable-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+    margin-bottom: 0.5rem;
+}
+
+.template-variable-row input {
+    flex: 1;
+}
+
+.template-variable-row .btn-remove-variable {
+    padding: 0.35rem 0.5rem;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+    align-self: flex-end;
+    margin-bottom: 0.25rem;
+}
+
+.template-variable-row .variable-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.template-variable-row .variable-info small {
+    color: var(--text-secondary);
+}
+
+.template-variables-container:empty + .template-variables-empty,
+.template-variables-empty {
+    color: var(--text-secondary);
+    font-style: italic;
+    font-size: 0.9rem;
+    padding: 0.5rem 0;
+}
+
+.detect-variables-status {
+    font-size: 0.85rem;
+    margin-top: 0.25rem;
+}
+
 .form-actions {
     display: flex;
     gap: 1rem;
