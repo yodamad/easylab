@@ -469,6 +469,22 @@ main {
     white-space: nowrap;
 }
 
+.lifetime-input {
+    display: flex;
+    gap: 0.5rem;
+    align-items: stretch;
+}
+
+.lifetime-input input[type="number"] {
+    flex: 0 0 5rem;
+    width: 5rem;
+}
+
+.lifetime-input select {
+    flex: 1;
+    width: auto;
+}
+
 /* File Upload Styling */
 .file-upload-wrapper {
     position: relative;

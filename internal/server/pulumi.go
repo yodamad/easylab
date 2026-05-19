@@ -129,7 +129,6 @@ func NewPulumiExecutor(jobManager *JobManager, workDir string) *PulumiExecutor {
 	}
 }
 
-
 // GetWorkDir returns the work directory path
 func (pe *PulumiExecutor) GetWorkDir() string {
 	return pe.workDir
@@ -313,7 +312,6 @@ func getPulumiEnvVars(config *LabConfig, workDir ...string) map[string]string {
 
 	return envVars
 }
-
 
 // getOrCreateStackInline gets or creates a Pulumi stack using inline program (pre-compiled)
 // This avoids the Go compilation step on each job, providing significant performance improvements
@@ -1312,7 +1310,6 @@ type configCommand struct {
 	value  string
 	secret bool
 }
-
 
 func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 	var commands []configCommand

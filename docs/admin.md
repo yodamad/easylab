@@ -86,6 +86,12 @@ You need to setup the secrets for the Coder instance:
     * `Coder Db Name`: The name of the coder database
     * `Coder Template Name`: The name of the coder template
 
+#### Workspace Lifetime
+
+Set **Workspace Lifetime (hours)** to automatically delete student workspaces after a given duration. The server checks every 5 minutes and deletes any workspace whose creation time exceeds the configured limit.
+
+Leave the field empty or set it to `0` to disable automatic cleanup (workspaces persist until deleted manually).
+
 Then, you need to define **one or more** [Coder templates](https://coder.com/docs/admin/templates){target="_blank"} for the lab. Each template is a different workspace type (e.g. Docker, Go, Node) that students can choose when requesting a workspace.
 
 ![Coder template selection](screens/templates.png)

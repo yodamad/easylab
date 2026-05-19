@@ -121,6 +121,9 @@ func main() {
 		*dataDir = defaultDataDir
 	}
 
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
+
 	log.Printf("[STARTUP] Starting application initialization...")
 
 	// Create work directory if it doesn't exist
@@ -200,6 +203,8 @@ func main() {
 	handlerStart := time.Now()
 	handler = server.NewHandler(jobManager, pulumiExec, credentialsManager, ovhOptionsManager, feedbackStore)
 	log.Printf("[STARTUP] Handler initialization took %v", time.Since(handlerStart))
+
+	go handler.StartWorkspaceCleanup(appCtx)
 
 	// Setup routes
 	mux := http.NewServeMux()
@@ -365,6 +370,7 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
+	appCancel()
 	log.Println("Shutting down server...")
 
 	// Graceful shutdown with timeout

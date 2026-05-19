@@ -94,20 +94,21 @@ type LabConfig struct {
 	NodePoolMaxNodeCount     int    `json:"nodepool_max_node_count"`
 
 	// Coder Configuration
-	CoderNamespace     string `json:"coder_namespace,omitempty"`
-	CoderAdminEmail    string `json:"coder_admin_email"`
-	CoderAdminPassword string `json:"coder_admin_password"`
-	CoderVersion       string `json:"coder_version"`
-	CoderDbUser        string `json:"coder_db_user"`
-	CoderDbPassword    string `json:"coder_db_password"`
-	CoderDbName        string `json:"coder_db_name"`
+	CoderNamespace         string `json:"coder_namespace,omitempty"`
+	CoderAdminEmail        string `json:"coder_admin_email"`
+	CoderAdminPassword     string `json:"coder_admin_password"`
+	CoderVersion           string `json:"coder_version"`
+	CoderDbUser            string `json:"coder_db_user"`
+	CoderDbPassword        string `json:"coder_db_password"`
+	CoderDbName            string `json:"coder_db_name"`
+	WorkspaceLifetimeHours int    `json:"workspace_lifetime_hours,omitempty"`
 
 	// Coder Templates (multiple templates per lab)
 	CoderTemplates []CoderTemplate `json:"coder_templates,omitempty"`
 
 	// Legacy single-template fields (kept for backward compatibility when loading persisted jobs)
-	CoderTemplateName  string `json:"coder_template_name,omitempty"`
-	TemplateFilePath   string `json:"template_file_path,omitempty"`
+	CoderTemplateName string `json:"coder_template_name,omitempty"`
+	TemplateFilePath  string `json:"template_file_path,omitempty"`
 	TemplateSource    string `json:"template_source,omitempty"`
 	TemplateGitRepo   string `json:"template_git_repo,omitempty"`
 	TemplateGitFolder string `json:"template_git_folder,omitempty"`

@@ -375,6 +375,25 @@
                             <small id="coder_version_custom_hint" style="display: none;">Enter a specific version (e.g. 2.29.1)</small>
                         </div>
 
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="coder_namespace">Coder Namespace (Optional)</label>
+                                <input type="text" id="coder_namespace" name="coder_namespace" value="coder" placeholder="coder">
+                                <small>Kubernetes namespace for Coder. Defaults to "coder".</small>
+                            </div>                            
+                            <div class="form-group">
+                                <label for="workspace_lifetime_hours">Workspace Lifetime (Optional)</label>
+                                <div class="lifetime-input">
+                                    <input type="number" id="workspace_lifetime_hours" name="workspace_lifetime_hours" min="0" placeholder="0">
+                                    <select id="workspace_lifetime_unit" name="workspace_lifetime_unit">
+                                        <option value="hours">Hours</option>
+                                        <option value="days">Days</option>
+                                    </select>
+                                </div>
+                                <small>Auto-delete workspaces after this duration. Leave 0 to disable.</small>
+                            </div>
+                        </div>                        
+
                         <div class="form-group">
                             <label>Coder Templates *</label>
                             <p class="section-description">Define one or more Coder templates. Each can use an uploaded file or a Git repository.</p>
@@ -544,12 +563,6 @@
                         </template>
 
                         <h3 class="subsection-title">Database Configuration</h3>
-
-                        <div class="form-group">
-                            <label for="coder_namespace">Coder Namespace (Optional)</label>
-                            <input type="text" id="coder_namespace" name="coder_namespace" value="coder" placeholder="coder">
-                            <small>Kubernetes namespace for Coder installation. Defaults to "coder" if not specified.</small>
-                        </div>
                         
                         <div class="form-group">
                             <label for="coder_db_user">Database User *</label>

@@ -282,11 +282,11 @@ func (h *Handler) ServeAdminLabFeedback(w http.ResponseWriter, r *http.Request) 
 		}
 
 		difficultyLabel := map[string]string{
-			"too-easy":   "😴 Too Easy",
-			"a-bit-easy": "🙂 A Bit Easy",
-			"just-right": "👍 Just Right",
+			"too-easy":    "😴 Too Easy",
+			"a-bit-easy":  "🙂 A Bit Easy",
+			"just-right":  "👍 Just Right",
 			"challenging": "🤔 Challenging",
-			"too-hard":   "🔥 Too Hard",
+			"too-hard":    "🔥 Too Hard",
 		}
 
 		var totalRating int

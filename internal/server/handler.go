@@ -327,6 +327,12 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 		CoderTemplates:     templates,
 	}
 
+	workspaceLifetime, _ := strconv.Atoi(r.FormValue("workspace_lifetime_hours"))
+	if r.FormValue("workspace_lifetime_unit") == "days" {
+		workspaceLifetime *= 24
+	}
+	config.WorkspaceLifetimeHours = workspaceLifetime
+
 	if !useExistingCluster {
 		// Parse integer fields only for new infrastructure
 		desiredNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_desired_node_count"))
