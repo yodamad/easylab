@@ -162,6 +162,16 @@ function showCopyFeedback(btn) {
     setTimeout(function () { btn.textContent = orig; }, 2000);
 }
 
+document.addEventListener('DOMContentLoaded', function () {
+    if (typeof syncEasylabHeaderProviderDropdown === 'function') {
+        var pref =
+            typeof getEasylabHeaderProviderPreference === 'function'
+                ? getEasylabHeaderProviderPreference()
+                : 'ovh';
+        syncEasylabHeaderProviderDropdown(pref);
+    }
+});
+
 function toggleCoderPasswordVisibility() {
     var input = document.getElementById('coder-cred-password');
     var btn = document.querySelector('.credentials-toggle-password');

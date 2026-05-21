@@ -130,13 +130,21 @@ Dry-run jobs do not create any cloud or Kubernetes resources; only real runs do.
 
 ## Provider credentials
 
-Cloud provider API credentials (e.g. OVHcloud) are configured from the header: **OVH** → **Credentials**. Credentials are stored in memory only and are used for all lab deployments. When using **Use Existing Cluster**, no cloud credentials are required.
+Cloud provider credentials and options are accessed from the **Provider** dropdown in the header. It contains two entries:
 
-For OVHcloud-specific setup (regions, flavors), see [OVH Options](#ovh-options) and [OVHcloud configuration](ovhcloud.md).
+* **OVH** — opens the OVH configuration page (`/admin/ovh-options`)
+* **Azure** — opens the Azure configuration page (`/admin/azure-options`)
+
+Each provider page has two tabs:
+
+* **Credentials** — enter and save the API credentials for the provider. Credentials are stored in memory only and are cleared on application restart. When using **Use Existing Cluster**, no cloud credentials are required.
+* **Options** — configure available regions and compute flavors/VM sizes for the lab creation wizard. Use **Refresh** to fetch the latest data from the provider API.
+
+For OVHcloud-specific setup, see [OVHcloud configuration](ovhcloud.md). For Azure-specific setup, see [Azure configuration](azure.md).
 
 ## Manage your labs
 
-Clicking on the `Labs` button in the header will redirect you to the labs list page.
+Clicking on the `Labs` button in the header will redirect you to the labs list page. The **Provider** dropdown is available on every admin page and navigates directly to the OVH or Azure configuration page.
 
 ![Lab Info](screens/lab-info.png){width=350}
 

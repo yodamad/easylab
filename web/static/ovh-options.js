@@ -1,3 +1,15 @@
+function switchProviderTab(tabName) {
+    document.querySelectorAll('.provider-tab').forEach(function(t) {
+        t.classList.toggle('active', t.dataset.tab === tabName);
+    });
+    document.querySelectorAll('.provider-tab-panel').forEach(function(p) {
+        p.classList.toggle('active', p.id === 'tab-' + tabName);
+    });
+    if (history.replaceState) {
+        history.replaceState(null, '', '#' + tabName);
+    }
+}
+
 // Invert all checkboxes with the given name attribute
 function invertCheckboxes(name) {
     document.querySelectorAll('input[type="checkbox"][name="' + name + '"]').forEach(function (cb) {
@@ -44,6 +56,12 @@ function toggleFlavors(region) {
 }
 
 document.addEventListener('DOMContentLoaded', function () {
+    // Restore tab from URL hash
+    var hash = window.location.hash.replace('#', '');
+    if (hash === 'options' || hash === 'credentials') {
+        switchProviderTab(hash);
+    }
+
     // Clear flavor filters button
     var clearBtn = document.getElementById('ovh_flavor_filter_clear_btn');
     if (clearBtn) {

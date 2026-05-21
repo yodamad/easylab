@@ -42,6 +42,12 @@ function switchProvider() {
     }
     
     currentProvider = newProvider;
+    if (typeof syncEasylabHeaderProviderDropdown === 'function') {
+        syncEasylabHeaderProviderDropdown(newProvider);
+    }
+    if (typeof setEasylabHeaderProviderPreference === 'function') {
+        setEasylabHeaderProviderPreference(newProvider);
+    }
     
     // Check credentials for the selected provider
     checkCredentials(newProvider);
@@ -167,20 +173,27 @@ function loadCurrentCredentials(provider) {
 
 // Initialize page
 document.addEventListener('DOMContentLoaded', function() {
-    // Check URL parameters for provider selection
-    const urlParams = new URLSearchParams(window.location.search);
-    const providerParam = urlParams.get('provider');
-    
-    if (providerParam && providerConfig[providerParam]) {
-        document.getElementById('provider-select').value = providerParam;
-        currentProvider = providerParam;
+    const providerSelect = document.getElementById('provider-select');
+    if (providerSelect) {
+        // Multi-provider page (credentials.html)
+        const urlParams = new URLSearchParams(window.location.search);
+        const providerParam = urlParams.get('provider');
+        if (providerParam && providerConfig[providerParam]) {
+            providerSelect.value = providerParam;
+            currentProvider = providerParam;
+        }
+        switchProvider();
+        loadCurrentCredentials(currentProvider);
+    } else {
+        // Single-provider page (ovh-options, azure-options)
+        ['ovh', 'azure'].forEach(function(p) {
+            if (document.getElementById('provider-section-' + p)) {
+                currentProvider = p;
+                loadCurrentCredentials(p);
+                checkCredentials(p);
+            }
+        });
     }
-    
-    // Initialize provider view
-    switchProvider();
-    
-    // Load current credentials for the selected provider
-    loadCurrentCredentials(currentProvider);
 });
 
 // Handle form submission success

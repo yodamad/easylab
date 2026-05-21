@@ -723,6 +723,12 @@ function handleProviderChange() {
     }
 
     checkCredentialsStatus();
+    if (typeof syncEasylabHeaderProviderDropdown === 'function') {
+        syncEasylabHeaderProviderDropdown(provider);
+    }
+    if (typeof setEasylabHeaderProviderPreference === 'function') {
+        setEasylabHeaderProviderPreference(provider);
+    }
 }
 
 // Fetch Azure VM sizes for the selected location
