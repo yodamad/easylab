@@ -147,6 +147,7 @@ var requiredPlugins = []requiredPlugin{
 	{Name: "command", Version: "1.1.3"},
 	{Name: "kubernetes", Version: "4.24.1"},
 	{Name: "ovh", Version: "2.11.0", Server: "github://api.github.com/ovh/pulumi-ovh"},
+	{Name: "azure-native", Version: "3.18.0"},
 }
 
 // CheckAndInstallPlugins verifies every required Pulumi resource plugin is healthy
@@ -302,11 +303,11 @@ func getPulumiEnvVars(config *LabConfig, workDir ...string) map[string]string {
 			envVars["OVH_CONSUMER_KEY"] = config.OvhConsumerKey
 			envVars["OVH_SERVICE_NAME"] = config.OvhServiceName
 			// OVH_ENDPOINT is set via Pulumi config, not env var
-			// Future providers can be added here:
-			// case "aws":
-			//     envVars["AWS_ACCESS_KEY_ID"] = config.AwsAccessKeyId
-			//     envVars["AWS_SECRET_ACCESS_KEY"] = config.AwsSecretAccessKey
-			//     ...
+		case "azure":
+			envVars["AZURE_CLIENT_ID"] = config.AzureClientID
+			envVars["AZURE_CLIENT_SECRET"] = config.AzureClientSecret
+			envVars["AZURE_TENANT_ID"] = config.AzureTenantID
+			envVars["AZURE_SUBSCRIPTION_ID"] = config.AzureSubscriptionID
 		}
 	}
 
@@ -445,10 +446,23 @@ func (pe *PulumiExecutor) setStackConfig(ctx context.Context, stack auto.Stack, 
 					return fmt.Errorf("failed to set config ovhcloud:serviceName: %w", err)
 				}
 			}
-			// Future providers can be added here:
-			// case "aws":
-			//     err := stack.SetConfig(ctx, "aws:region", auto.ConfigValue{...})
-			//     ...
+		case "azure":
+			azureConfigs := []struct {
+				key    string
+				value  string
+				secret bool
+			}{
+				{"azure-native:location", config.AzureLocation, false},
+				{"azure-native:clientId", config.AzureClientID, true},
+				{"azure-native:clientSecret", config.AzureClientSecret, true},
+				{"azure-native:tenantId", config.AzureTenantID, false},
+				{"azure-native:subscriptionId", config.AzureSubscriptionID, false},
+			}
+			for _, c := range azureConfigs {
+				if err := stack.SetConfig(ctx, c.key, auto.ConfigValue{Value: c.value, Secret: c.secret}); err != nil {
+					return fmt.Errorf("failed to set config %s: %w", c.key, err)
+				}
+			}
 		}
 	}
 
@@ -1319,6 +1333,11 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 		coderNamespace = "coder"
 	}
 
+	provider := config.Provider
+	if provider == "" {
+		provider = "ovh"
+	}
+
 	if config.UseExistingCluster {
 		// BYOK mode: only Coder config + kubeconfig path
 		commands = []configCommand{
@@ -1334,8 +1353,29 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 
 		// The kubeconfig file path is relative to the job directory
 		commands = append(commands, configCommand{"k8s:externalKubeconfigPath", "external-kubeconfig.yaml", false})
+	} else if provider == "azure" {
+		// Azure mode: AKS-managed networking, no gateway/private network
+		prefixedK8sClusterName := fmt.Sprintf("%s-%s", config.StackName, config.K8sClusterName)
+		prefixedNodePoolName := fmt.Sprintf("%s-%s", config.StackName, config.NodePoolName)
+
+		commands = []configCommand{
+			{"azure:location", config.AzureLocation, false},
+			{"nodepool:name", prefixedNodePoolName, false},
+			{"nodepool:flavor", config.NodePoolFlavor, false},
+			{"nodepool:desiredNodeCount", fmt.Sprintf("%d", config.NodePoolDesiredNodeCount), false},
+			{"nodepool:minNodeCount", fmt.Sprintf("%d", config.NodePoolMinNodeCount), false},
+			{"nodepool:maxNodeCount", fmt.Sprintf("%d", config.NodePoolMaxNodeCount), false},
+			{"k8s:clusterName", prefixedK8sClusterName, false},
+			{"coder:namespace", coderNamespace, false},
+			{"coder:adminEmail", config.CoderAdminEmail, false},
+			{"coder:adminPassword", config.CoderAdminPassword, true},
+			{"coder:version", config.CoderVersion, false},
+			{"coder:dbUser", config.CoderDbUser, false},
+			{"coder:dbPassword", config.CoderDbPassword, true},
+			{"coder:dbName", config.CoderDbName, false},
+		}
 	} else {
-		// Standard mode: full infrastructure config
+		// OVH mode (default): full infrastructure config with gateway/private network
 		prefixedGatewayName := fmt.Sprintf("%s-%s", config.StackName, config.NetworkGatewayName)
 		prefixedPrivateNetworkName := fmt.Sprintf("%s-%s", config.StackName, config.NetworkPrivateNetworkName)
 		prefixedK8sClusterName := fmt.Sprintf("%s-%s", config.StackName, config.K8sClusterName)

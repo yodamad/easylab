@@ -264,14 +264,33 @@ const wizard = {
 
         document.querySelector('.wizard-progress').scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-        // Fetch OVH regions when entering step 3 for the first time
-        if (this.currentStep === 3 && !this._regionsLoaded) {
-            this._regionsLoaded = true;
-            loadOVHRegions();
+        // Fetch cloud regions when entering step 3 for the first time (provider-specific).
+        // Avoid calling OVH APIs when Azure is selected — that only produced GetOVHRegions noise and errors.
+        if (this.currentStep === 3) {
+            const providerSelect = document.getElementById('provider');
+            const isAzure = providerSelect && providerSelect.value === 'azure';
+            if (isAzure) {
+                if (!this._azureLocationsLoaded) {
+                    this._azureLocationsLoaded = true;
+                    loadAzureLocations();
+                }
+            } else if (!this._ovhRegionsLoaded) {
+                this._ovhRegionsLoaded = true;
+                loadOVHRegions();
+            }
         }
-        // Fetch OVH flavors when entering step 5
+        // Node pool sizes: OVH flavors vs Azure VM sizes
         if (this.currentStep === 5) {
-            loadOVHFlavors();
+            const providerSelect = document.getElementById('provider');
+            const isAzure = providerSelect && providerSelect.value === 'azure';
+            if (isAzure) {
+                const loc = document.getElementById('azure_location');
+                if (loc && loc.value) {
+                    loadAzureVMSizes();
+                }
+            } else {
+                loadOVHFlavors();
+            }
         }
         // Fetch Coder versions when entering step 6 for the first time
         if (this.currentStep === 6 && !this._coderVersionsLoaded) {
@@ -452,6 +471,28 @@ function generateSecurePassword(length) {
     return password.join('');
 }
 
+// Fetch available Azure locations and populate the region select (wizard step 3).
+function loadAzureLocations() {
+    const locationSelect = document.getElementById('azure_location');
+    if (!locationSelect) return;
+
+    locationSelect.innerHTML = '<option value="">Loading regions…</option>';
+
+    fetch('/api/azure/locations')
+        .then(response => {
+            if (!response.ok) throw new Error('Failed to load regions');
+            return response.text();
+        })
+        .then(html => {
+            locationSelect.innerHTML = html;
+            wizard._azureLocationsLoaded = true;
+        })
+        .catch(err => {
+            console.error('Error loading Azure regions:', err);
+            locationSelect.innerHTML = '<option value="" disabled selected>Failed to load regions</option>';
+        });
+}
+
 // Fetch available OVH regions and populate the region select
 function loadOVHRegions() {
     const regionSelect = document.getElementById('network_region');
@@ -466,6 +507,7 @@ function loadOVHRegions() {
         })
         .then(html => {
             regionSelect.innerHTML = html;
+            wizard._ovhRegionsLoaded = true;
             // Trigger flavor load for the initially selected region
             loadOVHFlavors();
         })
@@ -586,6 +628,79 @@ function clearFlavorFilters() {
         if (el) el.value = '0';
     });
     loadOVHFlavors();
+}
+
+// Switch between OVH and Azure network/flavor UI based on selected provider
+function handleProviderChange() {
+    const providerSelect = document.getElementById('provider');
+    if (!providerSelect) return;
+    const provider = providerSelect.value;
+    const isAzure = provider === 'azure';
+
+    const ovhFields = document.getElementById('ovh-network-fields');
+    const azureFields = document.getElementById('azure-network-fields');
+    if (ovhFields) ovhFields.style.display = isAzure ? 'none' : '';
+    if (azureFields) azureFields.style.display = isAzure ? '' : 'none';
+
+    // Update step 3 header
+    const stepTitle = document.getElementById('network-step-title');
+    const stepDesc = document.getElementById('network-step-desc');
+    if (stepTitle) stepTitle.textContent = isAzure ? 'Azure Region' : 'Network Configuration';
+    if (stepDesc) stepDesc.textContent = isAzure
+        ? 'Select the Azure region for your AKS cluster'
+        : 'Configure private network and gateway settings';
+
+    // Update flavor label
+    const flavorLabel = document.getElementById('nodepool-flavor-label');
+    if (flavorLabel) flavorLabel.textContent = isAzure ? 'VM Size *' : 'Flavor *';
+
+    // For Azure: load regions when switching provider (e.g. step 3 with OVH → Azure).
+    // For OVH: repopulate regions if we're on network step and left Azure.
+    const azureLocationSelect = document.getElementById('azure_location');
+    if (isAzure && azureLocationSelect) {
+        wizard._azureLocationsLoaded = false;
+        loadAzureLocations();
+        azureLocationSelect.removeEventListener('change', loadAzureVMSizes);
+        azureLocationSelect.addEventListener('change', loadAzureVMSizes);
+        if (azureLocationSelect.value) loadAzureVMSizes();
+        else {
+            const flavorSelect = document.getElementById('nodepool_flavor');
+            if (flavorSelect) flavorSelect.innerHTML = '<option value="">Select a region first…</option>';
+        }
+    } else if (!isAzure && wizard.currentStep === 3) {
+        wizard._ovhRegionsLoaded = false;
+        loadOVHRegions();
+    }
+
+    checkCredentialsStatus();
+}
+
+// Fetch Azure VM sizes for the selected location
+function loadAzureVMSizes() {
+    const locationSelect = document.getElementById('azure_location');
+    const flavorSelect = document.getElementById('nodepool_flavor');
+    if (!locationSelect || !flavorSelect) return;
+
+    const location = locationSelect.value;
+    if (!location) {
+        flavorSelect.innerHTML = '<option value="" disabled selected>Select a region first</option>';
+        return;
+    }
+
+    flavorSelect.innerHTML = '<option value="">Loading VM sizes…</option>';
+
+    fetch('/api/azure/vm-sizes?location=' + encodeURIComponent(location))
+        .then(response => {
+            if (!response.ok) throw new Error('Failed to load VM sizes');
+            return response.text();
+        })
+        .then(html => {
+            flavorSelect.innerHTML = html;
+        })
+        .catch(err => {
+            console.error('Error loading Azure VM sizes:', err);
+            flavorSelect.innerHTML = '<option value="" disabled selected>Failed to load VM sizes</option>';
+        });
 }
 
 // Check credentials status and show/hide disclaimer
@@ -761,7 +876,15 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // Reload flavors when region selection changes
+    // Handle provider selection change (OVH vs Azure)
+    const providerSelect = document.getElementById('provider');
+    if (providerSelect) {
+        providerSelect.addEventListener('change', handleProviderChange);
+        // Apply initial state
+        handleProviderChange();
+    }
+
+    // Reload flavors when region selection changes (OVH)
     const regionSelect = document.getElementById('network_region');
     if (regionSelect) {
         regionSelect.addEventListener('change', loadOVHFlavors);

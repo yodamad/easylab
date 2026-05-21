@@ -16,8 +16,15 @@ type OVHCredentials struct {
 	Endpoint          string `json:"endpoint"`
 }
 
+// AzureCredentials holds Azure Service Principal credentials
+type AzureCredentials struct {
+	ClientID       string `json:"client_id"`
+	ClientSecret   string `json:"client_secret"`
+	TenantID       string `json:"tenant_id"`
+	SubscriptionID string `json:"subscription_id"`
+}
+
 // ProviderCredentials is a generic interface for provider credentials
-// For now, we keep OVHCredentials as the concrete type, but this allows for future expansion
 type ProviderCredentials interface {
 	GetProviderName() string
 }
@@ -27,15 +34,19 @@ func (c *OVHCredentials) GetProviderName() string {
 	return "ovh"
 }
 
-// loadCredentialsFromEnv attempts to load OVH credentials from environment variables
-func loadCredentialsFromEnv() *OVHCredentials {
+// GetProviderName returns the provider name for Azure credentials
+func (c *AzureCredentials) GetProviderName() string {
+	return "azure"
+}
+
+// loadOVHCredentialsFromEnv attempts to load OVH credentials from environment variables.
+func loadOVHCredentialsFromEnv() *OVHCredentials {
 	appKey := os.Getenv("OVH_APPLICATION_KEY")
 	appSecret := os.Getenv("OVH_APPLICATION_SECRET")
 	consumerKey := os.Getenv("OVH_CONSUMER_KEY")
 	serviceName := os.Getenv("OVH_SERVICE_NAME")
 	endpoint := os.Getenv("OVH_ENDPOINT")
 
-	// Check if all required environment variables are present
 	if appKey == "" || appSecret == "" || consumerKey == "" || serviceName == "" || endpoint == "" {
 		return nil
 	}
@@ -46,6 +57,25 @@ func loadCredentialsFromEnv() *OVHCredentials {
 		ConsumerKey:       consumerKey,
 		ServiceName:       serviceName,
 		Endpoint:          endpoint,
+	}
+}
+
+// loadAzureCredentialsFromEnv attempts to load Azure credentials from environment variables.
+func loadAzureCredentialsFromEnv() *AzureCredentials {
+	clientID := os.Getenv("AZURE_CLIENT_ID")
+	clientSecret := os.Getenv("AZURE_CLIENT_SECRET")
+	tenantID := os.Getenv("AZURE_TENANT_ID")
+	subscriptionID := os.Getenv("AZURE_SUBSCRIPTION_ID")
+
+	if clientID == "" || clientSecret == "" || tenantID == "" || subscriptionID == "" {
+		return nil
+	}
+
+	return &AzureCredentials{
+		ClientID:       clientID,
+		ClientSecret:   clientSecret,
+		TenantID:       tenantID,
+		SubscriptionID: subscriptionID,
 	}
 }
 
@@ -61,12 +91,19 @@ func NewCredentialsManager() *CredentialsManager {
 		credentials: make(map[string]ProviderCredentials),
 	}
 
-	// Try to load OVH credentials from environment variables
-	if creds := loadCredentialsFromEnv(); creds != nil {
+	if creds := loadOVHCredentialsFromEnv(); creds != nil {
 		if err := cm.SetCredentials(creds); err != nil {
 			log.Printf("Warning: Failed to load OVH credentials from environment variables: %v", err)
 		} else {
 			log.Printf("[STARTUP] OVH credentials loaded from environment variables")
+		}
+	}
+
+	if creds := loadAzureCredentialsFromEnv(); creds != nil {
+		if err := cm.SetCredentials(creds); err != nil {
+			log.Printf("Warning: Failed to load Azure credentials from environment variables: %v", err)
+		} else {
+			log.Printf("[STARTUP] Azure credentials loaded from environment variables")
 		}
 	}
 
@@ -75,14 +112,18 @@ func NewCredentialsManager() *CredentialsManager {
 
 // SetCredentials stores provider credentials in memory
 func (cm *CredentialsManager) SetCredentials(creds ProviderCredentials) error {
-	ovhCreds, ok := creds.(*OVHCredentials)
-	if !ok {
+	switch c := creds.(type) {
+	case *OVHCredentials:
+		if c.ApplicationKey == "" || c.ApplicationSecret == "" ||
+			c.ConsumerKey == "" || c.ServiceName == "" || c.Endpoint == "" {
+			return fmt.Errorf("all OVH credentials are required")
+		}
+	case *AzureCredentials:
+		if c.ClientID == "" || c.ClientSecret == "" || c.TenantID == "" || c.SubscriptionID == "" {
+			return fmt.Errorf("all Azure credentials are required (client_id, client_secret, tenant_id, subscription_id)")
+		}
+	default:
 		return fmt.Errorf("unsupported credentials type")
-	}
-
-	if ovhCreds.ApplicationKey == "" || ovhCreds.ApplicationSecret == "" ||
-		ovhCreds.ConsumerKey == "" || ovhCreds.ServiceName == "" || ovhCreds.Endpoint == "" {
-		return fmt.Errorf("all OVH credentials are required")
 	}
 
 	cm.mu.Lock()
@@ -107,14 +148,21 @@ func (cm *CredentialsManager) GetCredentials(providerName string) (ProviderCrede
 		return nil, fmt.Errorf("%s credentials not configured", providerName)
 	}
 
-	// Return OVH credentials as a copy to prevent external modification
-	if ovhCreds, ok := creds.(*OVHCredentials); ok {
+	switch c := creds.(type) {
+	case *OVHCredentials:
 		return &OVHCredentials{
-			ApplicationKey:    ovhCreds.ApplicationKey,
-			ApplicationSecret: ovhCreds.ApplicationSecret,
-			ConsumerKey:       ovhCreds.ConsumerKey,
-			ServiceName:       ovhCreds.ServiceName,
-			Endpoint:          ovhCreds.Endpoint,
+			ApplicationKey:    c.ApplicationKey,
+			ApplicationSecret: c.ApplicationSecret,
+			ConsumerKey:       c.ConsumerKey,
+			ServiceName:       c.ServiceName,
+			Endpoint:          c.Endpoint,
+		}, nil
+	case *AzureCredentials:
+		return &AzureCredentials{
+			ClientID:       c.ClientID,
+			ClientSecret:   c.ClientSecret,
+			TenantID:       c.TenantID,
+			SubscriptionID: c.SubscriptionID,
 		}, nil
 	}
 

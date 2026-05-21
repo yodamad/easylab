@@ -12,8 +12,8 @@ const providerConfig = {
     },
     azure: {
         name: "Microsoft Azure",
-        enabled: false,
-        statusFields: []
+        enabled: true,
+        statusFields: ['subscription_id', 'tenant_id']
     },
     gcp: {
         name: "Google Cloud Platform",
@@ -122,32 +122,39 @@ function loadCurrentCredentials(provider) {
                 if (provider === 'ovh') {
                     const serviceNameInput = document.getElementById('ovh_service_name');
                     const endpointSelect = document.getElementById('ovh_endpoint');
-                    
+
                     if (serviceNameInput && data.service_name) {
                         serviceNameInput.value = data.service_name;
                     }
-                    
+
                     if (endpointSelect && data.endpoint) {
                         endpointSelect.value = data.endpoint;
                     }
+                } else if (provider === 'azure') {
+                    const tenantInput = document.getElementById('azure_tenant_id');
+                    const subscriptionInput = document.getElementById('azure_subscription_id');
+                    if (tenantInput && data.tenant_id) tenantInput.value = data.tenant_id;
+                    if (subscriptionInput && data.subscription_id) subscriptionInput.value = data.subscription_id;
                 }
-                // Future: Add handling for other providers here
-                
+
                 // Show info that credentials exist
                 const formSection = document.querySelector(`#provider-section-${provider} .form-section`);
                 if (formSection && !formSection.querySelector('.existing-creds-info')) {
                     const existingInfo = document.createElement('div');
                     existingInfo.className = 'info-box existing-creds-info';
                     existingInfo.style.marginBottom = '1.5rem';
-                    
+
                     let infoHTML = `<h3>📝 Update Existing Credentials</h3>
                         <p>Credentials are currently configured. Fill in the fields below to update them.</p>`;
-                    
+
                     if (provider === 'ovh') {
                         infoHTML += `<p><strong>Service Name:</strong> ${data.service_name || 'N/A'}</p>
                             <p><strong>Endpoint:</strong> ${data.endpoint || 'N/A'}</p>`;
+                    } else if (provider === 'azure') {
+                        infoHTML += `<p><strong>Subscription ID:</strong> ${data.subscription_id || 'N/A'}</p>
+                            <p><strong>Tenant ID:</strong> ${data.tenant_id || 'N/A'}</p>`;
                     }
-                    
+
                     existingInfo.innerHTML = infoHTML;
                     formSection.insertBefore(existingInfo, formSection.firstChild.nextSibling);
                 }

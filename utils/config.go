@@ -31,6 +31,20 @@ const OvhApplicationSecret = "OVH_APPLICATION_SECRET"
 const OvhConsumerKey = "OVH_CONSUMER_KEY"
 const OvhServiceName = "OVH_SERVICE_NAME"
 
+// Azure config keys from environment variables
+const AzureClientID = "AZURE_CLIENT_ID"
+const AzureClientSecret = "AZURE_CLIENT_SECRET"
+const AzureTenantID = "AZURE_TENANT_ID"
+const AzureSubscriptionID = "AZURE_SUBSCRIPTION_ID"
+
+// Azure Pulumi config group and keys
+const AzureGroup = "azure"
+const AzureLocation = "location"
+
+func AzureConfigOptional(ctx *pulumi.Context, key string) string {
+	return config.New(ctx, AzureGroup).Get(key)
+}
+
 // OVH cloud project config group (for inline Pulumi programs where env vars
 // are set on the workspace, not on the process)
 const OvhCloudGroup = "ovhcloud"

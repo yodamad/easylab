@@ -33,13 +33,14 @@ import (
 
 // Handler handles HTTP requests
 type Handler struct {
-	jobManager         *JobManager
-	pulumiExec         *PulumiExecutor
-	templates          map[string]*template.Template
-	templatesMu        sync.RWMutex
-	credentialsManager *CredentialsManager
-	ovhOptionsManager  *OVHOptionsManager
-	feedbackStore      *FeedbackStore
+	jobManager          *JobManager
+	pulumiExec          *PulumiExecutor
+	templates           map[string]*template.Template
+	templatesMu         sync.RWMutex
+	credentialsManager  *CredentialsManager
+	ovhOptionsManager   *OVHOptionsManager
+	azureOptionsManager *AzureOptionsManager
+	feedbackStore       *FeedbackStore
 }
 
 // emailRegex is a simple email validation regex
@@ -78,14 +79,15 @@ func atoiForm(s string) int {
 }
 
 // NewHandler creates a new HTTP handler
-func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsManager *CredentialsManager, ovhOptionsManager *OVHOptionsManager, feedbackStore *FeedbackStore) *Handler {
+func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsManager *CredentialsManager, ovhOptionsManager *OVHOptionsManager, azureOptionsManager *AzureOptionsManager, feedbackStore *FeedbackStore) *Handler {
 	return &Handler{
-		jobManager:         jobManager,
-		pulumiExec:         pulumiExec,
-		templates:          make(map[string]*template.Template),
-		credentialsManager: credentialsManager,
-		ovhOptionsManager:  ovhOptionsManager,
-		feedbackStore:      feedbackStore,
+		jobManager:          jobManager,
+		pulumiExec:          pulumiExec,
+		templates:           make(map[string]*template.Template),
+		credentialsManager:  credentialsManager,
+		ovhOptionsManager:   ovhOptionsManager,
+		azureOptionsManager: azureOptionsManager,
+		feedbackStore:       feedbackStore,
 	}
 }
 
@@ -361,19 +363,21 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 		config.NodePoolMinNodeCount = minNodeCount
 		config.NodePoolMaxNodeCount = maxNodeCount
 
-		// Add provider-specific credentials
-		if ovhCreds, ok := providerCreds.(*OVHCredentials); ok {
-			config.OvhApplicationKey = ovhCreds.ApplicationKey
-			config.OvhApplicationSecret = ovhCreds.ApplicationSecret
-			config.OvhConsumerKey = ovhCreds.ConsumerKey
-			config.OvhServiceName = ovhCreds.ServiceName
-			config.OvhEndpoint = ovhCreds.Endpoint
+		// Copy provider-specific credentials into config
+		switch c := providerCreds.(type) {
+		case *OVHCredentials:
+			config.OvhApplicationKey = c.ApplicationKey
+			config.OvhApplicationSecret = c.ApplicationSecret
+			config.OvhConsumerKey = c.ConsumerKey
+			config.OvhServiceName = c.ServiceName
+			config.OvhEndpoint = c.Endpoint
+		case *AzureCredentials:
+			config.AzureClientID = c.ClientID
+			config.AzureClientSecret = c.ClientSecret
+			config.AzureTenantID = c.TenantID
+			config.AzureSubscriptionID = c.SubscriptionID
+			config.AzureLocation = r.FormValue("azure_location")
 		}
-		// Future providers can be added here:
-		// if awsCreds, ok := providerCreds.(*AWSCredentials); ok {
-		//     config.AwsAccessKeyId = awsCreds.AccessKeyId
-		//     ...
-		// }
 	}
 
 	// Validate email if provided
@@ -1524,15 +1528,24 @@ func (h *Handler) ServeCredentials(w http.ResponseWriter, r *http.Request) {
 	var currentCreds map[string]interface{}
 	creds, err := h.credentialsManager.GetCredentials(provider)
 	if err == nil {
-		if ovhCreds, ok := creds.(*OVHCredentials); ok {
+		switch c := creds.(type) {
+		case *OVHCredentials:
 			currentCreds = map[string]interface{}{
 				"configured":   true,
 				"provider":     provider,
-				"service_name": ovhCreds.ServiceName,
-				"endpoint":     ovhCreds.Endpoint,
+				"service_name": c.ServiceName,
+				"endpoint":     c.Endpoint,
 			}
+		case *AzureCredentials:
+			currentCreds = map[string]interface{}{
+				"configured":      true,
+				"provider":        provider,
+				"subscription_id": c.SubscriptionID,
+				"tenant_id":       c.TenantID,
+			}
+		default:
+			currentCreds = map[string]interface{}{"configured": true, "provider": provider}
 		}
-		// Future: Add handling for other provider types here
 	} else {
 		currentCreds = map[string]interface{}{
 			"configured": false,
@@ -1586,6 +1599,8 @@ func (h *Handler) SetCredentials(w http.ResponseWriter, r *http.Request) {
 	switch provider {
 	case "ovh":
 		h.setOVHCredentialsFromForm(w, r)
+	case "azure":
+		h.setAzureCredentialsFromForm(w, r)
 	default:
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprintf(w, `
@@ -1638,6 +1653,35 @@ func (h *Handler) SetOVHCredentials(w http.ResponseWriter, r *http.Request) {
 	h.SetCredentials(w, r)
 }
 
+// setAzureCredentialsFromForm handles Azure-specific credential setting
+func (h *Handler) setAzureCredentialsFromForm(w http.ResponseWriter, r *http.Request) {
+	creds := &AzureCredentials{
+		ClientID:       getFormValue(r, "azure_client_id"),
+		ClientSecret:   getFormValue(r, "azure_client_secret"),
+		TenantID:       getFormValue(r, "azure_tenant_id"),
+		SubscriptionID: getFormValue(r, "azure_subscription_id"),
+	}
+
+	if err := h.credentialsManager.SetCredentials(creds); err != nil {
+		log.Printf("Failed to set Azure credentials: %v", err)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `
+			<div class="error-message">
+				<h3>Failed to Save Credentials</h3>
+				<p>%s</p>
+				<p><small>Please ensure all fields are filled correctly.</small></p>
+			</div>`, template.HTMLEscapeString(err.Error()))
+		return
+	}
+
+	log.Printf("Azure credentials saved successfully")
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `
+		<div class="success-message">
+			<p>✅ Azure credentials saved successfully</p>
+		</div>`)
+}
+
 // GetCredentials handles getting provider credentials status
 func (h *Handler) GetCredentials(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -1662,19 +1706,16 @@ func (h *Handler) GetCredentials(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle provider-specific response
+	// Handle provider-specific response (return non-secret info only)
+	w.Header().Set("Content-Type", "application/json")
 	switch provider {
 	case "ovh":
 		ovhCreds, ok := creds.(*OVHCredentials)
 		if !ok {
-			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": "Invalid credentials type"})
 			return
 		}
-
-		// Return limited info (not the actual secrets)
-		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"configured":          true,
 			"provider":            provider,
@@ -1683,8 +1724,22 @@ func (h *Handler) GetCredentials(w http.ResponseWriter, r *http.Request) {
 			"has_application_key": ovhCreds.ApplicationKey != "",
 			"has_consumer_key":    ovhCreds.ConsumerKey != "",
 		})
+	case "azure":
+		azCreds, ok := creds.(*AzureCredentials)
+		if !ok {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Invalid credentials type"})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"configured":        true,
+			"provider":          provider,
+			"subscription_id":   azCreds.SubscriptionID,
+			"tenant_id":         azCreds.TenantID,
+			"has_client_id":     azCreds.ClientID != "",
+			"has_client_secret": azCreds.ClientSecret != "",
+		})
 	default:
-		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"configured": false,
@@ -1865,7 +1920,17 @@ func (h *Handler) ListProviders(w http.ResponseWriter, r *http.Request) {
 				{"name": "ovh_endpoint", "label": "OVH Endpoint", "type": "select", "required": true, "options": []string{"ovh-eu", "ovh-us", "ovh-ca"}},
 			},
 		},
-		// Future providers can be added here
+		{
+			"id":      "azure",
+			"name":    "Microsoft Azure",
+			"enabled": true,
+			"fields": []map[string]interface{}{
+				{"name": "azure_client_id", "label": "Client ID (Application ID)", "type": "password", "required": true},
+				{"name": "azure_client_secret", "label": "Client Secret", "type": "password", "required": true},
+				{"name": "azure_tenant_id", "label": "Tenant ID (Directory ID)", "type": "password", "required": true},
+				{"name": "azure_subscription_id", "label": "Subscription ID", "type": "text", "required": true},
+			},
+		},
 		{
 			"id":      "aws",
 			"name":    "Amazon Web Services",

@@ -116,6 +116,13 @@ type LabConfig struct {
 
 	// OVH Endpoint
 	OvhEndpoint string `json:"ovh_endpoint"`
+
+	// Azure credentials (for AKS provisioning)
+	AzureClientID       string `json:"azure_client_id,omitempty"`
+	AzureClientSecret   string `json:"azure_client_secret,omitempty"`
+	AzureTenantID       string `json:"azure_tenant_id,omitempty"`
+	AzureSubscriptionID string `json:"azure_subscription_id,omitempty"`
+	AzureLocation       string `json:"azure_location,omitempty"`
 }
 
 // GetCoderTemplates returns the list of Coder templates, migrating from legacy single-template fields if needed

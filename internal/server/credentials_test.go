@@ -278,9 +278,9 @@ func TestLoadCredentialsFromEnv(t *testing.T) {
 		os.Setenv("OVH_SERVICE_NAME", "env-service")
 		os.Setenv("OVH_ENDPOINT", "env-endpoint")
 
-		creds := loadCredentialsFromEnv()
+		creds := loadOVHCredentialsFromEnv()
 		if creds == nil {
-			t.Fatal("loadCredentialsFromEnv() returned nil")
+			t.Fatal("loadOVHCredentialsFromEnv() returned nil")
 		}
 
 		if creds.ApplicationKey != "env-key" {
@@ -307,9 +307,9 @@ func TestLoadCredentialsFromEnv(t *testing.T) {
 		os.Setenv("OVH_SERVICE_NAME", "env-service")
 		os.Unsetenv("OVH_ENDPOINT") // Missing endpoint
 
-		creds := loadCredentialsFromEnv()
+		creds := loadOVHCredentialsFromEnv()
 		if creds != nil {
-			t.Error("loadCredentialsFromEnv() should return nil when env var is missing")
+			t.Error("loadOVHCredentialsFromEnv() should return nil when env var is missing")
 		}
 	})
 }

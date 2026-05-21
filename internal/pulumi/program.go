@@ -1,6 +1,7 @@
 package pulumi
 
 import (
+	"easylab/azure"
 	"easylab/coder"
 	"easylab/k8s"
 	"easylab/ovh"
@@ -11,6 +12,7 @@ import (
 
 	k8sPkg "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
+	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
 )
 
 // CreateLabProgram creates a Pulumi RunFunc that implements the lab infrastructure.
@@ -39,28 +41,70 @@ func CreateLabProgram() pulumi.RunFunc {
 				return fmt.Errorf("failed to create Kubernetes provider from kubeconfig: %w", err)
 			}
 		} else {
-			serviceName := checkRequirements(ctx)
+			location := utils.AzureConfigOptional(ctx, utils.AzureLocation)
+			isAzure := location != "" // azure:location is set only for Azure labs
 
-			utils.LogInfo(ctx, "Starting infrastructure setup...")
+			if isAzure {
+				utils.LogInfo(ctx, "Starting Azure AKS infrastructure setup...")
+				stackName := ctx.Stack()
 
-			netInfra, err := ovh.InitNetworkInfrastructure(ctx, serviceName)
-			if err != nil {
-				return fmt.Errorf("failed to initialize network infrastructure: %w", err)
-			}
+				rg, err := azure.InitResourceGroup(ctx, location, stackName)
+				if err != nil {
+					return fmt.Errorf("failed to create Azure resource group: %w", err)
+				}
 
-			kubeCluster, err := ovh.InitManagedKubernetesClusterWithNetwork(ctx, serviceName, netInfra)
-			if err != nil {
-				return fmt.Errorf("failed to create Kubernetes cluster: %w", err)
-			}
+				clusterName := utils.K8sConfigOptional(ctx, utils.K8sClusterName)
+				npCfg := config.New(ctx, utils.NodePoolGroup)
+				nodepoolName := npCfg.Get(utils.NodePoolName)
+				vmSize := npCfg.Get(utils.NodePoolFlavor)
+				desiredCount := npCfg.GetInt(utils.NodePoolDesiredNodeCount)
+				minCount := npCfg.GetInt(utils.NodePoolMinNodeCount)
+				maxCount := npCfg.GetInt(utils.NodePoolMaxNodeCount)
 
-			nodepool, err := ovh.InitNodePools(ctx, serviceName, kubeCluster)
-			if err != nil {
-				return fmt.Errorf("failed to create node pools: %w", err)
-			}
+				clusterCfg := azure.ClusterConfig{
+					ClusterName:  clusterName,
+					NodePoolName: nodepoolName,
+					VMSize:       vmSize,
+					NodeCount:    desiredCount,
+					MinNodeCount: minCount,
+					MaxNodeCount: maxCount,
+				}
 
-			k8sProvider, err = k8s.InitK8sProvider(ctx, kubeCluster, nodepool)
-			if err != nil {
-				return fmt.Errorf("failed to create Kubernetes provider: %w", err)
+				cluster, err := azure.InitManagedKubernetesCluster(ctx, rg, clusterCfg)
+				if err != nil {
+					return fmt.Errorf("failed to create AKS cluster: %w", err)
+				}
+
+				kubeconfig := azure.GetKubeconfig(ctx, cluster, rg)
+
+				k8sProvider, err = k8s.InitK8sProviderFromString(ctx, kubeconfig, []pulumi.Resource{cluster})
+				if err != nil {
+					return fmt.Errorf("failed to create Kubernetes provider: %w", err)
+				}
+			} else {
+				serviceName := checkRequirements(ctx)
+
+				utils.LogInfo(ctx, "Starting OVH infrastructure setup...")
+
+				netInfra, err := ovh.InitNetworkInfrastructure(ctx, serviceName)
+				if err != nil {
+					return fmt.Errorf("failed to initialize network infrastructure: %w", err)
+				}
+
+				kubeCluster, err := ovh.InitManagedKubernetesClusterWithNetwork(ctx, serviceName, netInfra)
+				if err != nil {
+					return fmt.Errorf("failed to create Kubernetes cluster: %w", err)
+				}
+
+				nodepool, err := ovh.InitNodePools(ctx, serviceName, kubeCluster)
+				if err != nil {
+					return fmt.Errorf("failed to create node pools: %w", err)
+				}
+
+				k8sProvider, err = k8s.InitK8sProvider(ctx, kubeCluster, nodepool)
+				if err != nil {
+					return fmt.Errorf("failed to create Kubernetes provider: %w", err)
+				}
 			}
 		}
 

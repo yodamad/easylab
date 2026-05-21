@@ -128,11 +128,7 @@
                                 <label for="provider">Cloud Provider *</label>
                                 <select id="provider" name="provider">
                                     <option value="ovh" selected>OVHcloud</option>
-                                    <!-- Future providers can be added here:
-                                    <option value="aws">Amazon Web Services (AWS)</option>
                                     <option value="azure">Microsoft Azure</option>
-                                    <option value="gcp">Google Cloud Platform (GCP)</option>
-                                    -->
                                 </select>
                                 <small>Choose the cloud provider for your infrastructure deployment</small>
                             </div>
@@ -205,54 +201,69 @@
                 <!-- Step 3: Network Configuration -->
                 <section class="wizard-step" data-step="3">
                     <div class="step-header">
-                        <h2>Network Configuration</h2>
-                        <p class="section-description">Configure private network and gateway settings</p>
+                        <h2 id="network-step-title">Network Configuration</h2>
+                        <p class="section-description" id="network-step-desc">Configure private network and gateway settings</p>
                     </div>
                     <div class="step-content">
-                        <div class="form-group">
-                            <label for="network_gateway_name">Gateway Name *</label>
-                            <input type="text" id="network_gateway_name" name="network_gateway_name" value="dev-gateway" required data-base-name="gateway">
-                        </div>
 
-                        <div class="form-group">
-                            <label for="network_gateway_model">Gateway Model *</label>
-                            <select id="network_gateway_model" name="network_gateway_model" required>
-                                <option value="s" selected>s (Small)</option>
-                                <option value="m">m (Medium)</option>
-                                <option value="l">l (Large)</option>
-                            </select>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="network_private_network_name">Private Network Name *</label>
-                            <input type="text" id="network_private_network_name" name="network_private_network_name" value="dev-network" required data-base-name="network">
-                        </div>
-
-                        <div class="form-group">
-                            <label for="network_id">Network ID</label>
-                            <input type="text" id="network_id" name="network_id" placeholder="New network ID" required>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="network_region">Region *</label>
-                            <select id="network_region" name="network_region" required>
-                                <option value="">Loading regions…</option>
-                            </select>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="network_mask">Network Mask (CIDR) *</label>
-                            <input type="text" id="network_mask" name="network_mask" value="10.0.0.0/24" required>
-                            <small>e.g., 10.0.0.0/24</small>
-                            <div id="network-calculated-info" class="calculated-info" style="margin-top: 0.75rem; padding: 0.75rem; background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border);">
-                                <div style="font-size: 0.875rem; color: var(--text-light);">
-                                    <div><strong>Start IP:</strong> <span id="calculated-start-ip">10.0.0.100</span></div>
-                                    <div style="margin-top: 0.5rem;"><strong>End IP:</strong> <span id="calculated-end-ip">10.0.0.254</span></div>
-                                </div>
+                        <!-- OVH-specific network fields -->
+                        <div id="ovh-network-fields">
+                            <div class="form-group">
+                                <label for="network_gateway_name">Gateway Name *</label>
+                                <input type="text" id="network_gateway_name" name="network_gateway_name" value="dev-gateway" data-base-name="gateway">
                             </div>
-                            <!-- Hidden fields to submit calculated values -->
-                            <input type="hidden" id="network_start_ip" name="network_start_ip" value="10.0.0.100">
-                            <input type="hidden" id="network_end_ip" name="network_end_ip" value="10.0.0.254">
+
+                            <div class="form-group">
+                                <label for="network_gateway_model">Gateway Model *</label>
+                                <select id="network_gateway_model" name="network_gateway_model">
+                                    <option value="s" selected>s (Small)</option>
+                                    <option value="m">m (Medium)</option>
+                                    <option value="l">l (Large)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="network_private_network_name">Private Network Name *</label>
+                                <input type="text" id="network_private_network_name" name="network_private_network_name" value="dev-network" data-base-name="network">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="network_id">Network ID</label>
+                                <input type="text" id="network_id" name="network_id" placeholder="New network ID">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="network_region">Region *</label>
+                                <select id="network_region" name="network_region">
+                                    <option value="">Loading regions…</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="network_mask">Network Mask (CIDR) *</label>
+                                <input type="text" id="network_mask" name="network_mask" value="10.0.0.0/24">
+                                <small>e.g., 10.0.0.0/24</small>
+                                <div id="network-calculated-info" class="calculated-info" style="margin-top: 0.75rem; padding: 0.75rem; background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border);">
+                                    <div style="font-size: 0.875rem; color: var(--text-light);">
+                                        <div><strong>Start IP:</strong> <span id="calculated-start-ip">10.0.0.100</span></div>
+                                        <div style="margin-top: 0.5rem;"><strong>End IP:</strong> <span id="calculated-end-ip">10.0.0.254</span></div>
+                                    </div>
+                                </div>
+                                <!-- Hidden fields to submit calculated values -->
+                                <input type="hidden" id="network_start_ip" name="network_start_ip" value="10.0.0.100">
+                                <input type="hidden" id="network_end_ip" name="network_end_ip" value="10.0.0.254">
+                            </div>
+                        </div>
+
+                        <!-- Azure-specific location field -->
+                        <div id="azure-network-fields" style="display: none;">
+                            <div class="form-group">
+                                <label for="azure_location">Azure Region *</label>
+                                <select id="azure_location" name="azure_location">
+                                    <option value="">Loading regions…</option>
+                                </select>
+                                <small>The Azure region where the AKS cluster will be provisioned</small>
+                            </div>
                         </div>
 
                     </div>
@@ -317,12 +328,15 @@
                         </div>
 
                         <div class="form-group">
-                            <label for="nodepool_flavor">Flavor *</label>
+                            <label for="nodepool_flavor" id="nodepool-flavor-label">Flavor *</label>
                             <select id="nodepool_flavor" name="nodepool_flavor" required>
                                 <option value="">Select a region first…</option>
                             </select>
                             <div id="flavor-filter-hint" style="display: none; margin-top: 0.25rem; font-size: 0.875rem; color: var(--text-light);">No flavors match your filters. Set min/max to 0 for no limit or adjust the values above.</div>
                         </div>
+
+                        <!-- Flavor filters are OVH-only -->
+                        <div id="ovh-flavor-filters-wrapper"></div>
 
                         <div class="form-row">
                             <div class="form-group">

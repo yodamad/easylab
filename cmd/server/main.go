@@ -138,12 +138,13 @@ func main() {
 
 	// Initialize independent components in parallel
 	var (
-		jobManager         *server.JobManager
-		credentialsManager *server.CredentialsManager
-		authHandler        *server.AuthHandler
-		ovhOptionsManager  *server.OVHOptionsManager
-		pulumiExec         *server.PulumiExecutor
-		handler            *server.Handler
+		jobManager          *server.JobManager
+		credentialsManager  *server.CredentialsManager
+		authHandler         *server.AuthHandler
+		ovhOptionsManager   *server.OVHOptionsManager
+		azureOptionsManager *server.AzureOptionsManager
+		pulumiExec          *server.PulumiExecutor
+		handler             *server.Handler
 	)
 
 	var wg sync.WaitGroup
@@ -181,6 +182,11 @@ func main() {
 	ovhOptionsManager = server.NewOVHOptionsManager(*dataDir, credentialsManager)
 	log.Printf("[STARTUP] OVHOptionsManager initialization took %v", time.Since(ovhOptionsStart))
 
+	// Initialize Azure options manager (depends on credentialsManager)
+	azureOptionsStart := time.Now()
+	azureOptionsManager = server.NewAzureOptionsManager(*dataDir, credentialsManager)
+	log.Printf("[STARTUP] AzureOptionsManager initialization took %v", time.Since(azureOptionsStart))
+
 	// Initialize pulumiExec (depends on jobManager)
 	pulumiStart := time.Now()
 	pulumiExec = server.NewPulumiExecutor(jobManager, *workDir)
@@ -201,7 +207,7 @@ func main() {
 
 	// Initialize handler (depends on all components)
 	handlerStart := time.Now()
-	handler = server.NewHandler(jobManager, pulumiExec, credentialsManager, ovhOptionsManager, feedbackStore)
+	handler = server.NewHandler(jobManager, pulumiExec, credentialsManager, ovhOptionsManager, azureOptionsManager, feedbackStore)
 	log.Printf("[STARTUP] Handler initialization took %v", time.Since(handlerStart))
 
 	go handler.StartWorkspaceCleanup(appCtx)
@@ -280,6 +286,17 @@ func main() {
 	mux.HandleFunc("/admin/ovh-options", authHandler.RequireAuth(handler.ServeOVHOptions))
 	mux.HandleFunc("/api/ovh-options", authHandler.RequireAuth(handler.SaveOVHOptions))
 	mux.HandleFunc("/api/ovh-options/refresh", authHandler.RequireAuth(handler.RefreshOVHOptions))
+
+	// Azure-specific routes
+	mux.HandleFunc("/azure-credentials", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/credentials?provider=azure", http.StatusMovedPermanently)
+	}))
+	mux.HandleFunc("/admin/azure-options", authHandler.RequireAuth(handler.ServeAzureOptions))
+	mux.HandleFunc("/api/azure/locations", authHandler.RequireAuth(handler.GetAzureLocations))
+	mux.HandleFunc("/api/azure/vm-sizes", authHandler.RequireAuth(handler.GetAzureVMSizes))
+	mux.HandleFunc("/api/azure-options/region-vm-sizes", authHandler.RequireAuth(handler.GetAzureOptionsRegionVMSizeHTML))
+	mux.HandleFunc("/api/azure-options", authHandler.RequireAuth(handler.SaveAzureOptions))
+	mux.HandleFunc("/api/azure-options/refresh", authHandler.RequireAuth(handler.RefreshAzureOptions))
 	mux.HandleFunc("/api/templates/detect-variables", authHandler.RequireAuth(handler.DetectTemplateVariables))
 	mux.HandleFunc("/api/labs", authHandler.RequireAuth(handler.CreateLab))
 	mux.HandleFunc("/api/labs/dry-run", authHandler.RequireAuth(handler.DryRunLab))
@@ -362,6 +379,18 @@ func main() {
 				log.Printf("[STARTUP] Warning: OVH options cache refresh failed: %v", err)
 			} else {
 				log.Printf("[STARTUP] OVH options cache refresh completed in %v", time.Since(refreshStart))
+			}
+		}()
+	}
+
+	// Pre-populate Azure options cache asynchronously if credentials are available
+	if credentialsManager.HasCredentials("azure") {
+		go func() {
+			refreshStart := time.Now()
+			if err := azureOptionsManager.RefreshFromAPI(); err != nil {
+				log.Printf("[STARTUP] Warning: Azure options cache refresh failed: %v", err)
+			} else {
+				log.Printf("[STARTUP] Azure options cache refresh completed in %v", time.Since(refreshStart))
 			}
 		}()
 	}
