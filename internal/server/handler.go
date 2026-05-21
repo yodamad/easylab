@@ -511,6 +511,7 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 		"credentials.html":       "web/credentials.html",
 		"ovh-credentials.html":   "web/ovh-credentials.html", // Keep for backward compatibility
 		"ovh-options.html":       "web/ovh-options.html",
+		"azure-options.html":     "web/azure-options.html",
 		"labs-list.html":         "web/labs-list.html",
 		"lab-workspaces.html":    "web/lab-workspaces.html",
 	}
@@ -1886,6 +1887,124 @@ func (h *Handler) RefreshOVHOptions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("HX-Redirect", "/admin/ovh-options")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprint(w, `<div class="success-message"><p>Cache refreshed successfully. Reloading...</p></div>`)
+}
+
+// ServeAzureOptions serves the Azure options admin page.
+func (h *Handler) ServeAzureOptions(w http.ResponseWriter, r *http.Request) {
+	if h.azureOptionsManager == nil {
+		http.Error(w, "Azure options not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	cfg := h.azureOptionsManager.GetConfig()
+	regions := h.azureOptionsManager.GetCachedRegions()
+	hasCache := h.azureOptionsManager.HasCache()
+
+	enabledRegionSet := toSet(cfg.Regions.Enabled)
+	showAllRegions := len(enabledRegionSet) == 0
+
+	type azureRegionRow struct {
+		Name        string
+		DisplayName string
+		Enabled     bool
+		Default     bool
+	}
+
+	var regionsData []azureRegionRow
+	for _, name := range regions {
+		regionsData = append(regionsData, azureRegionRow{
+			Name:        name,
+			DisplayName: h.azureOptionsManager.RegionDisplayName(name),
+			Enabled:     showAllRegions || enabledRegionSet[name],
+			Default:     name == cfg.Regions.Default,
+		})
+	}
+
+	data := map[string]interface{}{
+		"HasCache": hasCache,
+		"Regions":  regionsData,
+		"Config":   cfg,
+	}
+	h.serveTemplate(w, "azure-options.html", data)
+}
+
+// SaveAzureOptions handles saving Azure options admin preferences.
+func (h *Handler) SaveAzureOptions(w http.ResponseWriter, r *http.Request) {
+	if h.azureOptionsManager == nil {
+		http.Error(w, "Azure options not available", http.StatusServiceUnavailable)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		log.Printf("SaveAzureOptions: failed to parse form: %v", err)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<div class="error-message"><p>Failed to parse form</p></div>`)
+		return
+	}
+
+	cfg := AzureOptionsConfig{
+		Regions: AzureItemConfig{
+			Enabled: r.Form["region_enabled"],
+			Default: r.FormValue("region_default"),
+		},
+		VMSizes: make(map[string]AzureItemConfig),
+	}
+
+	for _, region := range h.azureOptionsManager.GetCachedRegions() {
+		enabledKey := fmt.Sprintf("vmsize_enabled_%s", region)
+		defaultKey := fmt.Sprintf("vmsize_default_%s", region)
+		enabled := r.Form[enabledKey]
+		defaultVal := r.FormValue(defaultKey)
+		if len(enabled) > 0 || defaultVal != "" {
+			cfg.VMSizes[region] = AzureItemConfig{
+				Enabled: enabled,
+				Default: defaultVal,
+			}
+		}
+	}
+
+	h.azureOptionsManager.SetConfig(cfg)
+	if err := h.azureOptionsManager.SaveConfig(); err != nil {
+		log.Printf("SaveAzureOptions: failed to save config: %v", err)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, `<div class="error-message"><p>Failed to save: %s</p></div>`, escapeHTML(err.Error()))
+		return
+	}
+
+	if r.Header.Get("HX-Request") == "true" {
+		w.Header().Set("HX-Redirect", "/admin/azure-options")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<div class="success-message"><p>Azure options saved successfully</p></div>`)
+	} else {
+		http.Redirect(w, r, "/admin/azure-options", http.StatusSeeOther)
+	}
+}
+
+// RefreshAzureOptions triggers a cache refresh from the Azure API.
+func (h *Handler) RefreshAzureOptions(w http.ResponseWriter, r *http.Request) {
+	if h.azureOptionsManager == nil {
+		http.Error(w, "Azure options not available", http.StatusServiceUnavailable)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := h.azureOptionsManager.RefreshFromAPI(); err != nil {
+		log.Printf("RefreshAzureOptions: %v", err)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, `<div class="error-message"><p>Failed to refresh: %s</p></div>`, escapeHTML(err.Error()))
+		return
+	}
+
+	w.Header().Set("HX-Redirect", "/admin/azure-options")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprint(w, `<div class="success-message"><p>Cache refreshed successfully. Reloading...</p></div>`)
 }

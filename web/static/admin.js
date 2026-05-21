@@ -104,6 +104,17 @@ const wizard = {
             }
         });
 
+        // Handle azure_location required state (not in infraFieldIds)
+        const azureLocEl = document.getElementById('azure_location');
+        if (azureLocEl && useExisting) {
+            azureLocEl.removeAttribute('required');
+        }
+
+        // When creating new infra, adjust required attrs for OVH vs Azure fields
+        if (!useExisting) {
+            syncRequiredAttrsForProvider();
+        }
+
         // Reset to step 1 when switching modes
         this.currentStep = 1;
         this.updateProgressBar();
@@ -627,7 +638,41 @@ function clearFlavorFilters() {
         const el = document.getElementById(id);
         if (el) el.value = '0';
     });
-    loadOVHFlavors();
+    const providerSelect = document.getElementById('provider');
+    if (providerSelect && providerSelect.value === 'azure') {
+        loadAzureVMSizes();
+    } else {
+        loadOVHFlavors();
+    }
+}
+
+// Sync required attributes on OVH-only vs Azure-only network fields based on current provider.
+// Must be called after setClusterMode sets the base required state on infra fields.
+function syncRequiredAttrsForProvider() {
+    const providerSelect = document.getElementById('provider');
+    const isAzure = providerSelect && providerSelect.value === 'azure';
+    // Fields only relevant to OVH (inside #ovh-network-fields, hidden when Azure is selected)
+    const ovhOnlyIds = [
+        'network_gateway_name', 'network_gateway_model', 'network_private_network_name',
+        'network_id', 'network_region', 'network_mask'
+    ];
+    ovhOnlyIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (isAzure) {
+            el.removeAttribute('required');
+        } else {
+            el.setAttribute('required', 'required');
+        }
+    });
+    const azureLocEl = document.getElementById('azure_location');
+    if (azureLocEl) {
+        if (isAzure) {
+            azureLocEl.setAttribute('required', 'required');
+        } else {
+            azureLocEl.removeAttribute('required');
+        }
+    }
 }
 
 // Switch between OVH and Azure network/flavor UI based on selected provider
@@ -653,6 +698,11 @@ function handleProviderChange() {
     // Update flavor label
     const flavorLabel = document.getElementById('nodepool-flavor-label');
     if (flavorLabel) flavorLabel.textContent = isAzure ? 'VM Size *' : 'Flavor *';
+
+    // Sync required attributes when switching provider (cluster mode already chosen)
+    if (wizard.clusterModeSelected && !wizard.useExistingCluster) {
+        syncRequiredAttrsForProvider();
+    }
 
     // For Azure: load regions when switching provider (e.g. step 3 with OVH → Azure).
     // For OVH: repopulate regions if we're on network step and left Azure.
@@ -687,9 +737,19 @@ function loadAzureVMSizes() {
         return;
     }
 
+    let url = '/api/azure/vm-sizes?location=' + encodeURIComponent(location);
+    const minVcpus = document.getElementById('flavor_filter_min_vcpus');
+    const maxVcpus = document.getElementById('flavor_filter_max_vcpus');
+    const minRam = document.getElementById('flavor_filter_min_ram');
+    const maxRam = document.getElementById('flavor_filter_max_ram');
+    if (minVcpus && minVcpus.value) url += '&min_vcpus=' + encodeURIComponent(minVcpus.value);
+    if (maxVcpus && maxVcpus.value) url += '&max_vcpus=' + encodeURIComponent(maxVcpus.value);
+    if (minRam && minRam.value) url += '&min_ram=' + encodeURIComponent(minRam.value);
+    if (maxRam && maxRam.value) url += '&max_ram=' + encodeURIComponent(maxRam.value);
+
     flavorSelect.innerHTML = '<option value="">Loading VM sizes…</option>';
 
-    fetch('/api/azure/vm-sizes?location=' + encodeURIComponent(location))
+    fetch(url)
         .then(response => {
             if (!response.ok) throw new Error('Failed to load VM sizes');
             return response.text();
@@ -896,11 +956,18 @@ document.addEventListener('DOMContentLoaded', function() {
         coderVersionSelect.addEventListener('change', syncCoderVersionFromSelect);
     }
 
-    // Reload flavors when flavor filter inputs change
+    // Reload flavors when flavor filter inputs change (provider-aware)
     ['flavor_filter_min_vcpus', 'flavor_filter_max_vcpus', 'flavor_filter_min_ram', 'flavor_filter_max_ram'].forEach(function (id) {
         const el = document.getElementById(id);
         if (el) {
-            el.addEventListener('change', loadOVHFlavors);
+            el.addEventListener('change', function () {
+                const ps = document.getElementById('provider');
+                if (ps && ps.value === 'azure') {
+                    loadAzureVMSizes();
+                } else {
+                    loadOVHFlavors();
+                }
+            });
         }
     });
 

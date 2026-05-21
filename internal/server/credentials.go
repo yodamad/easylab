@@ -178,6 +178,19 @@ func (cm *CredentialsManager) GetOVHCredentials() (*OVHCredentials, error) {
 	return creds.(*OVHCredentials), nil
 }
 
+// GetAzureCredentials retrieves Azure service principal credentials.
+func (cm *CredentialsManager) GetAzureCredentials() (*AzureCredentials, error) {
+	creds, err := cm.GetCredentials("azure")
+	if err != nil {
+		return nil, err
+	}
+	az, ok := creds.(*AzureCredentials)
+	if !ok {
+		return nil, fmt.Errorf("invalid credentials type for azure")
+	}
+	return az, nil
+}
+
 // HasCredentials checks if credentials are configured for a provider
 func (cm *CredentialsManager) HasCredentials(providerName string) bool {
 	if providerName == "" {
