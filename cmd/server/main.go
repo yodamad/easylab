@@ -244,6 +244,7 @@ func main() {
 	mux.HandleFunc("/api/student/labs", authHandler.RequireStudentAuth(handler.ListLabs))
 	mux.HandleFunc("/api/student/labs/templates", authHandler.RequireStudentAuth(handler.ListLabTemplates))
 	mux.HandleFunc("/api/student/workspace/request", authHandler.RequireStudentAuth(handler.RequestWorkspace))
+	mux.HandleFunc("/api/student/workspace/status", authHandler.RequireStudentAuth(handler.WorkspaceStatus))
 	mux.HandleFunc("/api/student/feedback", authHandler.RequireStudentAuth(handler.SubmitFeedback))
 
 	// Public homepage (no auth required)

@@ -1365,6 +1365,10 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		var existingResp strings.Builder
 		existingResp.WriteString(`<div class="success-message">`)
 		existingResp.WriteString(`<h3>⚠️ Workspace Already Exists</h3>`)
+		existingPollURL := fmt.Sprintf("/api/student/workspace/status?lab_id=%s&workspace_name=%s&owner_id=%s",
+			url.QueryEscape(labID), url.QueryEscape(existingWS.Name), url.QueryEscape(user.Username))
+		existingResp.WriteString(fmt.Sprintf(`<div class="workspace-ready-status workspace-ready-status--starting" data-poll-url="%s"><span class="workspace-status-spinner"></span><span>Checking workspace status...</span></div>`,
+			template.HTMLEscapeString(existingPollURL)))
 		existingResp.WriteString(`<div class="credentials-box">`)
 		existingResp.WriteString(`<h3>Your Workspace Credentials</h3>`)
 		existingResp.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Workspace URL:</label><div class="value"><a href="%s" target="_blank">%s</a></div></div>`, workspaceURL, workspaceURL))
@@ -1452,6 +1456,10 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	var response strings.Builder
 	response.WriteString(`<div class="success-message">`)
 	response.WriteString(`<h3>✅ Workspace Created Successfully!</h3>`)
+	pollURL := fmt.Sprintf("/api/student/workspace/status?lab_id=%s&workspace_name=%s&owner_id=%s",
+		url.QueryEscape(labID), url.QueryEscape(workspace.Name), url.QueryEscape(user.Username))
+	response.WriteString(fmt.Sprintf(`<div class="workspace-ready-status workspace-ready-status--starting" data-poll-url="%s"><span class="workspace-status-spinner"></span><span>Workspace is starting, this may take a moment...</span></div>`,
+		template.HTMLEscapeString(pollURL)))
 	response.WriteString(`<div class="credentials-box">`)
 	response.WriteString(`<h3>Your Workspace Credentials</h3>`)
 	response.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Workspace URL:</label><div class="value"><a href="%s" target="_blank">%s</a></div></div>`, workspaceURL, workspaceURL))
@@ -1465,6 +1473,131 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	response.WriteString(`</div>`)
 
 	fmt.Fprint(w, response.String())
+}
+
+// WorkspaceStatus returns the current readiness status of a student workspace as an HTML partial.
+// It is polled by HTMX after a workspace is created; polling stops once the workspace is running.
+func (h *Handler) WorkspaceStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	labID := r.URL.Query().Get("lab_id")
+	workspaceName := r.URL.Query().Get("workspace_name")
+	ownerID := r.URL.Query().Get("owner_id")
+
+	if labID == "" || workspaceName == "" || ownerID == "" {
+		http.Error(w, "lab_id, workspace_name, and owner_id are required", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("[debug] WorkspaceStatus called: lab_id=%s workspace=%s owner=%s", labID, workspaceName, ownerID)
+
+	job, exists := h.jobManager.GetJob(labID)
+	if !exists {
+		log.Printf("[debug] WorkspaceStatus: job not found for lab_id=%s", labID)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, ownerID, "unknown"))
+		return
+	}
+
+	job.mu.RLock()
+	coderURL := extractStringFromConfigValue(job.CoderURL)
+	coderSessionToken := extractStringFromConfigValue(job.CoderSessionToken)
+	coderOrganizationID := extractStringFromConfigValue(job.CoderOrganizationID)
+	coderAdminEmail := extractStringFromConfigValue(job.CoderAdminEmail)
+	coderAdminPassword := extractStringFromConfigValue(job.CoderAdminPassword)
+	// Fall back to LabConfig credentials for older persisted jobs where job-level fields may be empty.
+	if coderAdminEmail == "" && job.Config != nil {
+		coderAdminEmail = job.Config.CoderAdminEmail
+	}
+	if coderAdminPassword == "" && job.Config != nil {
+		coderAdminPassword = job.Config.CoderAdminPassword
+	}
+	job.mu.RUnlock()
+
+	log.Printf("[debug] WorkspaceStatus: coderURL=%q hasToken=%v hasAdminEmail=%v hasAdminPassword=%v orgID=%q",
+		coderURL, coderSessionToken != "", coderAdminEmail != "", coderAdminPassword != "", coderOrganizationID)
+
+	if coderURL == "" || coderSessionToken == "" {
+		log.Printf("[debug] WorkspaceStatus: missing coderURL or sessionToken, returning checking")
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, ownerID, "checking"))
+		return
+	}
+
+	coderConfig := coder.CoderClientConfig{
+		ServerURL:      coderURL,
+		SessionToken:   coderSessionToken,
+		OrganizationID: coderOrganizationID,
+	}
+
+	workspace, _, err := coder.GetWorkspaceByOwnerAndNameWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, ownerID, workspaceName)
+	if err != nil {
+		log.Printf("[debug] WorkspaceStatus: lookup failed workspace=%s owner=%s error=%v", workspaceName, ownerID, err)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, ownerID, "checking"))
+		return
+	}
+
+	readiness := workspaceReadinessStatus(workspace)
+	log.Printf("[debug] WorkspaceStatus: workspace=%s buildStatus=%s transition=%s readiness=%s failingAgents=%d",
+		workspaceName, workspace.LatestBuild.Status, workspace.LatestBuild.Transition, readiness, len(workspace.Health.FailingAgents))
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, ownerID, readiness))
+}
+
+// workspaceReadinessStatus derives a single readiness string from a workspace.
+// It promotes "running" to "agents_starting" or "agents_failed" when the build is
+// done but agents have not yet reached the ready lifecycle state.
+func workspaceReadinessStatus(ws codersdk.Workspace) string {
+	buildStatus := string(ws.LatestBuild.Status)
+	if buildStatus != "running" {
+		return buildStatus
+	}
+	if !ws.Health.Healthy {
+		for _, resource := range ws.LatestBuild.Resources {
+			for _, agent := range resource.Agents {
+				switch agent.LifecycleState {
+				case codersdk.WorkspaceAgentLifecycleStartTimeout, codersdk.WorkspaceAgentLifecycleStartError:
+					return "agents_failed"
+				}
+				if agent.Status == codersdk.WorkspaceAgentTimeout {
+					return "agents_failed"
+				}
+			}
+		}
+		return "agents_starting"
+	}
+	return "running"
+}
+
+// buildWorkspaceStatusHTML returns an HTML partial for the workspace readiness indicator.
+// When the workspace is running, the returned HTML has no HTMX polling attributes so polling stops.
+func buildWorkspaceStatusHTML(labID, workspaceName, ownerID, status string) string {
+	switch status {
+	case "running":
+		return `<div class="workspace-ready-status workspace-ready-status--ready"><span>✅ Workspace is ready!</span></div>`
+	case "failed", "agents_failed":
+		return `<div class="workspace-ready-status workspace-ready-status--error"><span>❌ Workspace failed to start. Please contact the lab administrator.</span></div>`
+	case "canceled", "canceling":
+		return `<div class="workspace-ready-status workspace-ready-status--error"><span>⚠ Workspace startup was canceled.</span></div>`
+	default:
+		pollURL := fmt.Sprintf("/api/student/workspace/status?lab_id=%s&workspace_name=%s&owner_id=%s",
+			url.QueryEscape(labID), url.QueryEscape(workspaceName), url.QueryEscape(ownerID))
+		var message string
+		switch status {
+		case "checking", "":
+			message = "Checking workspace status..."
+		case "agents_starting":
+			message = "Workspace is provisioned, waiting for agent to be ready..."
+		default:
+			message = fmt.Sprintf("Workspace is %s, this may take a moment...", status)
+		}
+		return fmt.Sprintf(`<div class="workspace-ready-status workspace-ready-status--starting" data-poll-url="%s"><span class="workspace-status-spinner"></span><span>%s</span></div>`,
+			template.HTMLEscapeString(pollURL), template.HTMLEscapeString(message))
+	}
 }
 
 // getFormKeys returns all keys from both PostForm and Form

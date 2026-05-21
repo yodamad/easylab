@@ -3054,3 +3054,47 @@ body.student-dashboard-page {
     padding: 0.5rem 0.75rem;
     font-size: 0.875rem;
 }
+
+/* ============================================
+   WORKSPACE READINESS STATUS
+   ============================================ */
+
+.workspace-ready-status {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    margin: 0.75rem 0 1rem;
+}
+
+.workspace-ready-status--starting {
+    background: #dbeafe;
+    color: #1e40af;
+    border: 1px solid #93c5fd;
+}
+
+.workspace-ready-status--ready {
+    background: #d1fae5;
+    color: #065f46;
+    border: 1px solid #6ee7b7;
+}
+
+.workspace-ready-status--error {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fca5a5;
+}
+
+.workspace-status-spinner {
+    display: inline-block;
+    width: 1rem;
+    height: 1rem;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    flex-shrink: 0;
+    animation: spin 0.8s linear infinite;
+}

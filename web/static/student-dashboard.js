@@ -550,6 +550,34 @@ function loadLabs() {
         });
 }
 
+let _workspacePollTimer = null;
+
+function startWorkspaceStatusPolling() {
+    if (_workspacePollTimer) clearInterval(_workspacePollTimer);
+    _workspacePollTimer = setInterval(function() {
+        const pollEl = document.querySelector('[data-poll-url]');
+        if (!pollEl) {
+            clearInterval(_workspacePollTimer);
+            return;
+        }
+        const pollUrl = pollEl.getAttribute('data-poll-url');
+        fetch(pollUrl, { credentials: 'same-origin' })
+            .then(function(r) { if (r.ok) return r.text(); })
+            .then(function(html) {
+                if (!html) return;
+                const tmp = document.createElement('div');
+                tmp.innerHTML = html;
+                const newEl = tmp.firstElementChild;
+                if (!newEl || !newEl.classList.contains('workspace-ready-status')) return;
+                pollEl.replaceWith(newEl);
+                if (newEl.classList.contains('workspace-ready-status--ready')) {
+                    clearInterval(_workspacePollTimer);
+                }
+            })
+            .catch(function() {});
+    }, 2000);
+}
+
 const workspaceForm = document.getElementById('workspace-request-form');
 
 if (typeof htmx !== 'undefined') {
@@ -564,6 +592,7 @@ if (typeof htmx !== 'undefined') {
         btn.disabled = false;
         btn.textContent = 'Request Workspace';
         setTimeout(loadAllWorkspaceInfos, 500);
+        setTimeout(startWorkspaceStatusPolling, 100);
     });
 } else {
     workspaceForm.addEventListener('submit', function(e) {
@@ -588,6 +617,7 @@ if (typeof htmx !== 'undefined') {
             btn.disabled = false;
             btn.textContent = 'Request Workspace';
             setTimeout(loadAllWorkspaceInfos, 500);
+            setTimeout(startWorkspaceStatusPolling, 100);
         })
         .catch(error => {
             responseDiv.innerHTML = `<div class="error-message">Error: ${error.message}</div>`;
