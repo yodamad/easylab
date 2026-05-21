@@ -15,11 +15,25 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
 )
 
+func resolveKubeconfigPath(relOrAbs, jobDir string) (string, error) {
+	if filepath.IsAbs(relOrAbs) {
+		return relOrAbs, nil
+	}
+	if jobDir != "" {
+		return filepath.Join(jobDir, relOrAbs), nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("failed to get current working directory: %w", err)
+	}
+	return filepath.Join(cwd, relOrAbs), nil
+}
+
 // CreateLabProgram creates a Pulumi RunFunc that implements the lab infrastructure.
 // It handles only declarative resource creation (cloud infra, Helm charts).
 // Imperative operations (Coder user creation, template upload) are performed
 // after Stack.Up() returns — see PulumiExecutor.initCoderAndTemplates().
-func CreateLabProgram() pulumi.RunFunc {
+func CreateLabProgram(jobDir string) pulumi.RunFunc {
 	return func(ctx *pulumi.Context) error {
 		useExisting := utils.K8sConfigOptional(ctx, utils.K8sUseExistingCluster)
 
@@ -29,11 +43,10 @@ func CreateLabProgram() pulumi.RunFunc {
 			utils.LogInfo(ctx, "Using existing Kubernetes cluster...")
 			kubeconfigPath := utils.K8sConfig(ctx, utils.K8sExternalKubeconfigPath)
 
-			cwd, cwdErr := os.Getwd()
-			if cwdErr != nil {
-				return fmt.Errorf("failed to get current working directory: %w", cwdErr)
+			absKubeconfigPath, pathErr := resolveKubeconfigPath(kubeconfigPath, jobDir)
+			if pathErr != nil {
+				return pathErr
 			}
-			absKubeconfigPath := filepath.Join(cwd, kubeconfigPath)
 
 			var err error
 			k8sProvider, err = k8s.InitK8sProviderFromKubeconfig(ctx, absKubeconfigPath)

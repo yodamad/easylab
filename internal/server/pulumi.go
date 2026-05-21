@@ -282,10 +282,19 @@ func getLocalBackendEnvVars(workDir ...string) map[string]string {
 	return envVars
 }
 
+// EnvJobDir is the absolute path of the job workspace directory (Pulumi Automations use this
+// as the stack work dir). The inline Pulumi program resolves relative k8s:externalKubeconfigPath
+// against this directory instead of os.Getwd(), which points at the process/repo cwd.
+const EnvJobDir = "EASYLAB_JOB_DIR"
+
 // getPulumiEnvVars returns environment variables for Pulumi operations including provider credentials
 // workDir is optional - if provided, backend URL will be scoped to that directory
 func getPulumiEnvVars(config *LabConfig, workDir ...string) map[string]string {
 	envVars := getLocalBackendEnvVars(workDir...)
+
+	if len(workDir) > 0 && workDir[0] != "" {
+		envVars[EnvJobDir] = workDir[0]
+	}
 
 	// Add provider-specific credentials to environment variables
 	// These are needed by the Pulumi program when it runs (e.g., during go build)
@@ -328,7 +337,7 @@ func (pe *PulumiExecutor) getOrCreateStackInline(ctx context.Context, stackName,
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Using inline Pulumi program (pre-compiled) for stack '%s'...", stackName))
 
 	// Create the inline program RunFunc
-	program := internalPulumi.CreateLabProgram()
+	program := internalPulumi.CreateLabProgram(workDir)
 
 	// Try to select existing stack first
 	stack, err := auto.SelectStackInlineSource(ctx, stackName, "easylab", program,
@@ -620,6 +629,17 @@ func (pe *PulumiExecutor) prepareJobForRetry(jobID string) (*JobPreparation, err
 	// Get job directory
 	jobDir := filepath.Join(pe.workDir, jobID)
 
+	// BYOK: same as prepareJob — ensure kubeconfig file exists after cleanup/restart
+	if config != nil && config.UseExistingCluster && config.ExternalKubeconfig != "" {
+		kubeconfigPath := filepath.Join(jobDir, "external-kubeconfig.yaml")
+		if err := os.WriteFile(kubeconfigPath, []byte(config.ExternalKubeconfig), 0600); err != nil {
+			cancel()
+			pe.jobManager.SetError(jobID, fmt.Errorf("failed to write external-kubeconfig.yaml: %w", err))
+			return nil, err
+		}
+		pe.jobManager.AppendOutput(jobID, "External kubeconfig written for existing cluster mode (retry)")
+	}
+
 	pe.jobManager.AppendOutput(jobID, "Reusing existing job directory and files...")
 
 	// Env vars are passed per-workspace via auto.EnvVars inside getOrCreateStackInline.
@@ -710,7 +730,7 @@ func (pe *PulumiExecutor) prepareDestroyJob(jobID string) (*JobPreparation, erro
 
 	// Try to select the stack using inline program
 	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Selecting Pulumi stack '%s'...", stackName))
-	program := internalPulumi.CreateLabProgram()
+	program := internalPulumi.CreateLabProgram(jobDir)
 	stack, err := auto.SelectStackInlineSource(ctx, stackName, "easylab", program,
 		auto.WorkDir(jobDir),
 		auto.EnvVars(pulumiEnvVars))
