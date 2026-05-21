@@ -3,25 +3,41 @@ module easylab
 go 1.26.0
 
 require (
+	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.8.2
+	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v6 v6.4.0
+	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armsubscriptions v1.3.0
 	github.com/coder/coder/v2 v2.29.1
 	github.com/go-git/go-git/v5 v5.18.0
 	github.com/google/uuid v1.6.0
+	github.com/hashicorp/hcl/v2 v2.24.0
 	github.com/ovh/go-ovh v1.9.0
 	github.com/ovh/pulumi-ovh/sdk/v2 v2.11.0
 	github.com/pulumi/pulumi-kubernetes/sdk/v4 v4.24.1
+<<<<<<< HEAD
 	github.com/pulumi/pulumi/sdk/v3 v3.237.0
 	golang.org/x/crypto v0.48.0
+=======
+	github.com/pulumi/pulumi/sdk/v3 v3.210.0
+	github.com/zclconf/go-cty v1.17.0
+	golang.org/x/crypto v0.45.0
+>>>>>>> 22632a0 (Update go deps)
 )
 
 require (
 	cdr.dev/slog v1.6.2-0.20250703074222-9df5e0a6c145 // indirect
 	dario.cat/mergo v1.0.1 // indirect
+<<<<<<< HEAD
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.20.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.13.1 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.11.2 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v6 v6.4.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armsubscriptions v1.3.0 // indirect
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.6.0 // indirect
+=======
+	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.17.1 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/internal v1.10.0 // indirect
+	github.com/AzureAD/microsoft-authentication-library-for-go v1.4.1 // indirect
+>>>>>>> 22632a0 (Update go deps)
 	github.com/DataDog/appsec-internal-go v1.11.2 // indirect
 	github.com/DataDog/datadog-agent/comp/core/tagger/origindetection v0.64.2 // indirect
 	github.com/DataDog/datadog-agent/pkg/obfuscate v0.64.2 // indirect
@@ -104,8 +120,12 @@ require (
 	github.com/hashicorp/go-hclog v1.6.3 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
+<<<<<<< HEAD
 	github.com/hashicorp/go-version v1.8.0 // indirect
 	github.com/hashicorp/hcl/v2 v2.24.0 // indirect
+=======
+	github.com/hashicorp/go-version v1.7.0 // indirect
+>>>>>>> 22632a0 (Update go deps)
 	github.com/hashicorp/logutils v1.0.0 // indirect
 	github.com/hashicorp/terraform-plugin-go v0.29.0 // indirect
 	github.com/hashicorp/terraform-plugin-log v0.9.0 // indirect
@@ -116,7 +136,10 @@ require (
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
+<<<<<<< HEAD
 	github.com/klauspost/compress v1.18.1 // indirect
+=======
+>>>>>>> 22632a0 (Update go deps)
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20250317134145-8bc96cf8fc35 // indirect
@@ -191,7 +214,6 @@ require (
 	github.com/xhit/go-str2duration/v2 v2.1.0 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	github.com/zclconf/go-cty v1.17.0 // indirect
 	github.com/zeebo/errs v1.4.0 // indirect
 	go.nhat.io/otelsql v0.16.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
