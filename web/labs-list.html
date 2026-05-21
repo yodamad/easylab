@@ -73,6 +73,14 @@
                             <span class="lab-meta-label">Created:</span>
                             <span class="lab-meta-value">{{.CreatedAt}}</span>
                         </div>
+                        <div class="lab-meta">
+                            <span class="lab-meta-label">Cleanup:</span>
+                            {{if gt .WorkspaceLifetimeHours 0}}
+                            <span class="lab-meta-value">After {{.WorkspaceLifetimeHours}}h</span>
+                            {{else}}
+                            <span class="lab-meta-value lab-meta-muted">No cleanup policy defined</span>
+                            {{end}}
+                        </div>
                     </div>
 
                     <div class="lab-card-footer">

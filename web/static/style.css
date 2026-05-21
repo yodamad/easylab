@@ -2855,6 +2855,11 @@ body.student-dashboard-page {
     color: var(--text);
 }
 
+.lab-meta-muted {
+    color: var(--text-light);
+    font-style: italic;
+}
+
 .lab-card-footer {
     display: flex;
     justify-content: flex-start;

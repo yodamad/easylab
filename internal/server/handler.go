@@ -2214,17 +2214,18 @@ func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
 
 	// Prepare lab data for template (without sensitive info)
 	type LabDisplay struct {
-		ID            string
-		IDShort       string
-		Status        string
-		CreatedAt     string
-		UpdatedAt     string
-		StackName     string
-		IsDryRun      bool
-		HasError      bool
-		ErrorMsg      string
-		HasKubeconfig bool
-		IsDestroyed   bool
+		ID                     string
+		IDShort                string
+		Status                 string
+		CreatedAt              string
+		UpdatedAt              string
+		StackName              string
+		IsDryRun               bool
+		HasError               bool
+		ErrorMsg               string
+		HasKubeconfig          bool
+		IsDestroyed            bool
+		WorkspaceLifetimeHours int
 	}
 
 	labsDisplay := make([]LabDisplay, 0, len(allJobs))
@@ -2242,20 +2243,25 @@ func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
 		isDestroyed := job.Status == JobStatusDestroyed
 		createdAt := job.CreatedAt.Format("2006-01-02 15:04:05")
 		updatedAt := job.UpdatedAt.Format("2006-01-02 15:04:05")
+		workspaceLifetimeHours := 0
+		if job.Config != nil {
+			workspaceLifetimeHours = job.Config.WorkspaceLifetimeHours
+		}
 		job.mu.RUnlock()
 
 		labsDisplay = append(labsDisplay, LabDisplay{
-			ID:            job.ID,
-			IDShort:       shortenLabID(job.ID),
-			Status:        status,
-			CreatedAt:     createdAt,
-			UpdatedAt:     updatedAt,
-			StackName:     stackName,
-			IsDryRun:      isDryRun,
-			HasError:      hasError,
-			ErrorMsg:      errorMsg,
-			HasKubeconfig: hasKubeconfig,
-			IsDestroyed:   isDestroyed,
+			ID:                     job.ID,
+			IDShort:                shortenLabID(job.ID),
+			Status:                 status,
+			CreatedAt:              createdAt,
+			UpdatedAt:              updatedAt,
+			StackName:              stackName,
+			IsDryRun:               isDryRun,
+			HasError:               hasError,
+			ErrorMsg:               errorMsg,
+			HasKubeconfig:          hasKubeconfig,
+			IsDestroyed:            isDestroyed,
+			WorkspaceLifetimeHours: workspaceLifetimeHours,
 		})
 	}
 
