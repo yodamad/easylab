@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"log"
@@ -16,6 +18,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/microsoft"
 )
 
 const (
@@ -23,12 +27,18 @@ const (
 	EnvAdminPassword = "LAB_ADMIN_PASSWORD"
 	// Environment variable for the student password
 	EnvStudentPassword = "LAB_STUDENT_PASSWORD"
+	// Environment variables for Azure AD OAuth student login
+	EnvAzureADClientID     = "AZURE_AD_CLIENT_ID"
+	EnvAzureADClientSecret = "AZURE_AD_CLIENT_SECRET"
+	EnvAzureADTenantID     = "AZURE_AD_TENANT_ID"
 	// Cookie name for session
 	SessionCookieName = "lab_session"
 	// Cookie name for student session
 	StudentSessionCookieName = "lab_student_session"
 	// Session expiry duration
 	SessionExpiry = 24 * time.Hour
+	// OAuth state expiry (short-lived, only valid during the redirect round-trip)
+	azureOAuthStateExpiry = 5 * time.Minute
 )
 
 // contextKey is a type for context keys in this package
@@ -50,6 +60,9 @@ type AuthHandler struct {
 	studentPasswordHash string
 	sessions            map[string]*Session
 	studentSessions     map[string]*Session
+	azureADEnabled      bool
+	azureADConfig       *oauth2.Config
+	azureOAuthStates    map[string]time.Time
 	templates           map[string]*template.Template
 	templatesMu         sync.RWMutex
 	mu                  sync.RWMutex
@@ -101,15 +114,36 @@ func NewAuthHandler() (*AuthHandler, error) {
 		log.Printf("Student password hash initialized")
 	}
 
+	// Initialize Azure AD OAuth for student login
+	azureClientID := os.Getenv(EnvAzureADClientID)
+	azureClientSecret := os.Getenv(EnvAzureADClientSecret)
+	azureTenantID := os.Getenv(EnvAzureADTenantID)
+
+	var azureADEnabled bool
+	var azureADConfig *oauth2.Config
+	if azureClientID != "" && azureClientSecret != "" && azureTenantID != "" {
+		azureADConfig = &oauth2.Config{
+			ClientID:     azureClientID,
+			ClientSecret: azureClientSecret,
+			Scopes:       []string{"openid", "email", "profile"},
+			Endpoint:     microsoft.AzureADEndpoint(azureTenantID),
+		}
+		azureADEnabled = true
+		log.Printf("Azure AD student login enabled (tenant: %s)", azureTenantID)
+	}
+
 	ah := &AuthHandler{
 		passwordHash:        passwordHash,
 		studentPasswordHash: studentPasswordHash,
 		sessions:            make(map[string]*Session),
 		studentSessions:     make(map[string]*Session),
+		azureADEnabled:      azureADEnabled,
+		azureADConfig:       azureADConfig,
+		azureOAuthStates:    make(map[string]time.Time),
 		templates:           make(map[string]*template.Template),
 	}
 
-	// Periodically evict expired sessions so the maps don't grow unboundedly.
+	// Periodically evict expired sessions and OAuth states so the maps don't grow unboundedly.
 	go func() {
 		ticker := time.NewTicker(15 * time.Minute)
 		defer ticker.Stop()
@@ -124,6 +158,11 @@ func NewAuthHandler() (*AuthHandler, error) {
 			for tok, s := range ah.studentSessions {
 				if now.After(s.ExpiresAt) {
 					delete(ah.studentSessions, tok)
+				}
+			}
+			for state, expiry := range ah.azureOAuthStates {
+				if now.After(expiry) {
+					delete(ah.azureOAuthStates, state)
 				}
 			}
 			ah.mu.Unlock()
@@ -417,7 +456,8 @@ func (ah *AuthHandler) ServeStudentLogin(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	data := map[string]interface{}{
-		"Error": r.URL.Query().Get("error"),
+		"Error":          r.URL.Query().Get("error"),
+		"AzureADEnabled": ah.azureADEnabled,
 	}
 
 	if err := tmpl.ExecuteTemplate(w, "base", data); err != nil {
@@ -506,7 +546,7 @@ func (ah *AuthHandler) HandleStudentLogout(w http.ResponseWriter, r *http.Reques
 // RequireStudentAuth is middleware that requires student authentication
 func (ah *AuthHandler) RequireStudentAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if ah.studentPasswordHash == "" {
+		if ah.studentPasswordHash == "" && !ah.azureADEnabled {
 			http.Error(w, "Student login is disabled", http.StatusForbidden)
 			return
 		}
@@ -519,6 +559,154 @@ func (ah *AuthHandler) RequireStudentAuth(next http.HandlerFunc) http.HandlerFun
 		ctx := context.WithValue(r.Context(), studentEmailContextKey, email)
 		next(w, r.WithContext(ctx))
 	}
+}
+
+// HandleAzureADLogin initiates the Azure AD OAuth 2.0 flow for student login.
+func (ah *AuthHandler) HandleAzureADLogin(w http.ResponseWriter, r *http.Request) {
+	if !ah.azureADEnabled {
+		http.Redirect(w, r, "/student/login?error=Azure+AD+login+not+configured", http.StatusSeeOther)
+		return
+	}
+
+	state := generateToken()
+	ah.mu.Lock()
+	ah.azureOAuthStates[state] = time.Now().Add(azureOAuthStateExpiry)
+	ah.mu.Unlock()
+
+	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	scheme := "http"
+	if isSecure {
+		scheme = "https"
+	}
+	redirectURI := scheme + "://" + r.Host + "/student/auth/azure/callback"
+
+	authURL := ah.azureADConfig.AuthCodeURL(state, oauth2.SetAuthURLParam("redirect_uri", redirectURI))
+	http.Redirect(w, r, authURL, http.StatusFound)
+}
+
+// HandleAzureADCallback handles the OAuth 2.0 callback from Azure AD.
+// It exchanges the authorization code for tokens, extracts the student email,
+// and creates a local session — identical to the password-based login flow.
+func (ah *AuthHandler) HandleAzureADCallback(w http.ResponseWriter, r *http.Request) {
+	if !ah.azureADEnabled {
+		http.Redirect(w, r, "/student/login?error=Azure+AD+login+not+configured", http.StatusSeeOther)
+		return
+	}
+
+	errParam := r.URL.Query().Get("error")
+	if errParam != "" {
+		log.Printf("Azure AD OAuth error: %s", errParam)
+		http.Redirect(w, r, "/student/login?error=Azure+AD+authentication+failed", http.StatusSeeOther)
+		return
+	}
+
+	state := r.URL.Query().Get("state")
+	code := r.URL.Query().Get("code")
+
+	// Validate state to prevent CSRF
+	ah.mu.Lock()
+	expiry, valid := ah.azureOAuthStates[state]
+	if valid {
+		delete(ah.azureOAuthStates, state)
+	}
+	ah.mu.Unlock()
+
+	if !valid || time.Now().After(expiry) {
+		log.Printf("Azure AD callback: invalid or expired state")
+		http.Redirect(w, r, "/student/login?error=Invalid+authentication+state", http.StatusSeeOther)
+		return
+	}
+
+	if code == "" {
+		http.Redirect(w, r, "/student/login?error=Missing+authorization+code", http.StatusSeeOther)
+		return
+	}
+
+	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	scheme := "http"
+	if isSecure {
+		scheme = "https"
+	}
+	redirectURI := scheme + "://" + r.Host + "/student/auth/azure/callback"
+
+	token, err := ah.azureADConfig.Exchange(r.Context(), code, oauth2.SetAuthURLParam("redirect_uri", redirectURI))
+	if err != nil {
+		log.Printf("Azure AD token exchange failed: %v", err)
+		http.Redirect(w, r, "/student/login?error=Authentication+failed", http.StatusSeeOther)
+		return
+	}
+
+	email, err := extractEmailFromIDToken(token)
+	if err != nil {
+		log.Printf("Azure AD: failed to extract email: %v", err)
+		http.Redirect(w, r, "/student/login?error=Could+not+retrieve+email+from+Azure+AD", http.StatusSeeOther)
+		return
+	}
+
+	if !strings.Contains(email, "@") {
+		log.Printf("Azure AD: invalid email format: %s", email)
+		http.Redirect(w, r, "/student/login?error=Invalid+email+from+Azure+AD", http.StatusSeeOther)
+		return
+	}
+
+	sessionToken := ah.createStudentSession(email)
+
+	// Use SameSite=Lax (not Strict) so the cookie is included when the browser
+	// follows the 303 redirect from our callback — the overall navigation context
+	// is cross-site (originated from login.microsoftonline.com), and Strict would
+	// prevent the cookie from being sent on that first same-site hop in some browsers.
+	http.SetCookie(w, &http.Cookie{
+		Name:     StudentSessionCookieName,
+		Value:    sessionToken,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   isSecure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(SessionExpiry.Seconds()),
+	})
+
+	log.Printf("Successful Azure AD student login")
+	http.Redirect(w, r, "/student/dashboard", http.StatusSeeOther)
+}
+
+// extractEmailFromIDToken decodes the JWT id_token and returns the student's email.
+// The token is already obtained from Microsoft's HTTPS endpoint so we trust the claims.
+func extractEmailFromIDToken(token *oauth2.Token) (string, error) {
+	rawIDToken, ok := token.Extra("id_token").(string)
+	if !ok || rawIDToken == "" {
+		return "", fmt.Errorf("id_token not present in token response")
+	}
+
+	parts := strings.Split(rawIDToken, ".")
+	if len(parts) != 3 {
+		return "", fmt.Errorf("malformed id_token: expected 3 segments, got %d", len(parts))
+	}
+
+	claimsJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", fmt.Errorf("failed to decode id_token claims: %w", err)
+	}
+
+	var claims struct {
+		Email             string `json:"email"`
+		PreferredUsername string `json:"preferred_username"`
+		UPN               string `json:"upn"`
+	}
+	if err := json.Unmarshal(claimsJSON, &claims); err != nil {
+		return "", fmt.Errorf("failed to parse id_token claims: %w", err)
+	}
+
+	if claims.Email != "" {
+		return claims.Email, nil
+	}
+	if strings.Contains(claims.PreferredUsername, "@") {
+		return claims.PreferredUsername, nil
+	}
+	if strings.Contains(claims.UPN, "@") {
+		return claims.UPN, nil
+	}
+
+	return "", fmt.Errorf("no email found in id_token claims")
 }
 
 // GenerateSecurePassword generates a secure random password

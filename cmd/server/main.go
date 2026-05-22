@@ -238,6 +238,8 @@ func main() {
 			authHandler.ServeStudentLogin(w, r)
 		}
 	})
+	mux.HandleFunc("/student/auth/azure/login", authHandler.HandleAzureADLogin)
+	mux.HandleFunc("/student/auth/azure/callback", authHandler.HandleAzureADCallback)
 	mux.HandleFunc("/student/logout", authHandler.HandleStudentLogout)
 	mux.HandleFunc("/student/dashboard", authHandler.RequireStudentAuth(handler.ServeStudentDashboard))
 	mux.HandleFunc("/student/feedback", authHandler.RequireStudentAuth(handler.ServeFeedback))

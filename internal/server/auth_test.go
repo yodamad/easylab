@@ -2,13 +2,19 @@ package server
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/microsoft"
 )
 
 func TestHashPassword(t *testing.T) {
@@ -345,6 +351,7 @@ func createTestAuthHandler() *AuthHandler {
 		studentPasswordHash: studentHash,
 		sessions:            make(map[string]*Session),
 		studentSessions:     make(map[string]*Session),
+		azureOAuthStates:    make(map[string]time.Time),
 		templates:           make(map[string]*template.Template),
 	}
 }
@@ -1033,4 +1040,253 @@ func TestPublicEndpoints_NoAuthRequired(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ---- Azure AD authentication tests ----
+
+func TestNewAuthHandler_AzureADEnabled(t *testing.T) {
+	t.Setenv(EnvAdminPassword, "test-admin-password")
+	t.Setenv(EnvAzureADClientID, "test-client-id")
+	t.Setenv(EnvAzureADClientSecret, "test-client-secret")
+	t.Setenv(EnvAzureADTenantID, "test-tenant-id")
+
+	ah, err := NewAuthHandler()
+	if err != nil {
+		t.Fatalf("NewAuthHandler() error = %v", err)
+	}
+	if !ah.azureADEnabled {
+		t.Error("azureADEnabled = false, want true when all AZURE_AD_* env vars are set")
+	}
+	if ah.azureADConfig == nil {
+		t.Error("azureADConfig = nil, want non-nil when Azure AD is enabled")
+	}
+}
+
+func TestNewAuthHandler_AzureADDisabled(t *testing.T) {
+	t.Setenv(EnvAdminPassword, "test-admin-password")
+	// Do not set AZURE_AD_* vars
+
+	ah, err := NewAuthHandler()
+	if err != nil {
+		t.Fatalf("NewAuthHandler() error = %v", err)
+	}
+	if ah.azureADEnabled {
+		t.Error("azureADEnabled = true, want false when AZURE_AD_* env vars are absent")
+	}
+}
+
+func TestNewAuthHandler_AzureADPartialConfig(t *testing.T) {
+	t.Setenv(EnvAdminPassword, "test-admin-password")
+	t.Setenv(EnvAzureADClientID, "test-client-id")
+	// Missing CLIENT_SECRET and TENANT_ID
+
+	ah, err := NewAuthHandler()
+	if err != nil {
+		t.Fatalf("NewAuthHandler() error = %v", err)
+	}
+	if ah.azureADEnabled {
+		t.Error("azureADEnabled = true, want false when only partial AZURE_AD_* vars are set")
+	}
+}
+
+func TestHandleAzureADLogin_WhenDisabled(t *testing.T) {
+	ah := createTestAuthHandler() // azureADEnabled = false
+
+	req := httptest.NewRequest("GET", "/student/auth/azure/login", nil)
+	w := httptest.NewRecorder()
+
+	ah.HandleAzureADLogin(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	loc := w.Header().Get("Location")
+	if loc != "/student/login?error=Azure+AD+login+not+configured" {
+		t.Errorf("Location = %q, want redirect to student login with error", loc)
+	}
+}
+
+func TestHandleAzureADLogin_WhenEnabled(t *testing.T) {
+	ah := createTestAuthHandlerWithAzureAD()
+
+	req := httptest.NewRequest("GET", "/student/auth/azure/login", nil)
+	req.Host = "localhost:8081"
+	w := httptest.NewRecorder()
+
+	ah.HandleAzureADLogin(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want %d (redirect to Microsoft)", w.Code, http.StatusFound)
+	}
+	loc := w.Header().Get("Location")
+	if !strings.Contains(loc, "login.microsoftonline.com") {
+		t.Errorf("Location = %q, want URL containing login.microsoftonline.com", loc)
+	}
+	if !strings.Contains(loc, "test-tenant-id") {
+		t.Errorf("Location = %q, want URL containing the tenant ID", loc)
+	}
+}
+
+func TestHandleAzureADCallback_InvalidState(t *testing.T) {
+	ah := createTestAuthHandlerWithAzureAD()
+
+	req := httptest.NewRequest("GET", "/student/auth/azure/callback?state=invalid-state&code=somecode", nil)
+	req.Host = "localhost:8081"
+	w := httptest.NewRecorder()
+
+	ah.HandleAzureADCallback(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	loc := w.Header().Get("Location")
+	if !strings.Contains(loc, "error=") {
+		t.Errorf("Location = %q, want redirect with error for invalid state", loc)
+	}
+}
+
+func TestHandleAzureADCallback_ErrorParam(t *testing.T) {
+	ah := createTestAuthHandlerWithAzureAD()
+
+	req := httptest.NewRequest("GET", "/student/auth/azure/callback?error=access_denied", nil)
+	w := httptest.NewRecorder()
+
+	ah.HandleAzureADCallback(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	loc := w.Header().Get("Location")
+	if !strings.Contains(loc, "error=") {
+		t.Errorf("Location = %q, want redirect with error", loc)
+	}
+}
+
+func TestHandleAzureADCallback_WhenDisabled(t *testing.T) {
+	ah := createTestAuthHandler() // azureADEnabled = false
+
+	req := httptest.NewRequest("GET", "/student/auth/azure/callback?code=abc&state=xyz", nil)
+	w := httptest.NewRecorder()
+
+	ah.HandleAzureADCallback(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	loc := w.Header().Get("Location")
+	if loc != "/student/login?error=Azure+AD+login+not+configured" {
+		t.Errorf("Location = %q, want redirect to student login with error", loc)
+	}
+}
+
+func TestExtractEmailFromIDToken_EmailClaim(t *testing.T) {
+	token := buildFakeIDToken(map[string]string{"email": "student@example.com"})
+	email, err := extractEmailFromIDToken(token)
+	if err != nil {
+		t.Fatalf("extractEmailFromIDToken() error = %v", err)
+	}
+	if email != "student@example.com" {
+		t.Errorf("email = %q, want student@example.com", email)
+	}
+}
+
+func TestExtractEmailFromIDToken_PreferredUsernameFallback(t *testing.T) {
+	token := buildFakeIDToken(map[string]string{"preferred_username": "user@tenant.onmicrosoft.com"})
+	email, err := extractEmailFromIDToken(token)
+	if err != nil {
+		t.Fatalf("extractEmailFromIDToken() error = %v", err)
+	}
+	if email != "user@tenant.onmicrosoft.com" {
+		t.Errorf("email = %q, want user@tenant.onmicrosoft.com", email)
+	}
+}
+
+func TestExtractEmailFromIDToken_MissingEmail(t *testing.T) {
+	token := buildFakeIDToken(map[string]string{"sub": "abc123"})
+	_, err := extractEmailFromIDToken(token)
+	if err == nil {
+		t.Error("expected error when no email claim present, got nil")
+	}
+}
+
+func TestExtractEmailFromIDToken_MissingIDToken(t *testing.T) {
+	// Token with no extras at all → id_token absent
+	token := &oauth2.Token{}
+	_, err := extractEmailFromIDToken(token)
+	if err == nil {
+		t.Error("expected error when id_token is absent, got nil")
+	}
+}
+
+func TestRequireStudentAuth_AzureADOnlyEnabled(t *testing.T) {
+	adminSha256 := sha256.Sum256([]byte("test-admin"))
+	adminHash, _ := hashPassword(hex.EncodeToString(adminSha256[:]))
+
+	// Azure AD enabled, no student password
+	ah := createTestAuthHandlerWithAzureAD()
+	ah.passwordHash = adminHash
+	ah.studentPasswordHash = ""
+
+	protectedHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}
+	wrappedHandler := ah.RequireStudentAuth(protectedHandler)
+
+	// Without a session cookie → should redirect to login, not return 403
+	req := createUnauthenticatedRequest("GET", "/student/protected")
+	w := httptest.NewRecorder()
+	wrappedHandler(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("status = %d, want %d (redirect, not forbidden)", w.Code, http.StatusSeeOther)
+	}
+}
+
+// createTestAuthHandlerWithAzureAD returns an AuthHandler with Azure AD enabled
+// using a real oauth2.Config against the Microsoft tenant "test-tenant-id".
+func createTestAuthHandlerWithAzureAD() *AuthHandler {
+	adminSha256 := sha256.Sum256([]byte("test-admin"))
+	adminHash, _ := hashPassword(hex.EncodeToString(adminSha256[:]))
+
+	studentSha256 := sha256.Sum256([]byte("test-student"))
+	studentHash, _ := hashPassword(hex.EncodeToString(studentSha256[:]))
+
+	oauthCfg := buildTestOAuth2Config()
+
+	return &AuthHandler{
+		passwordHash:        adminHash,
+		studentPasswordHash: studentHash,
+		sessions:            make(map[string]*Session),
+		studentSessions:     make(map[string]*Session),
+		azureADEnabled:      true,
+		azureADConfig:       oauthCfg,
+		azureOAuthStates:    make(map[string]time.Time),
+		templates:           make(map[string]*template.Template),
+	}
+}
+
+// buildTestOAuth2Config returns an oauth2.Config pointed at the real Microsoft
+// authorization endpoint for the fake tenant "test-tenant-id".
+func buildTestOAuth2Config() *oauth2.Config {
+	return &oauth2.Config{
+		ClientID:     "test-client-id",
+		ClientSecret: "test-client-secret",
+		Scopes:       []string{"openid", "email", "profile"},
+		Endpoint:     microsoft.AzureADEndpoint("test-tenant-id"),
+	}
+}
+
+// buildFakeIDToken builds a fake *oauth2.Token carrying a minimal JWT id_token
+// with the supplied string claims. Pass nil to get a token with no id_token.
+func buildFakeIDToken(claims map[string]string) *oauth2.Token {
+	if claims == nil {
+		return &oauth2.Token{}
+	}
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+	claimsJSON, _ := json.Marshal(claims)
+	payload := base64.RawURLEncoding.EncodeToString(claimsJSON)
+	idToken := header + "." + payload + "."
+	return (&oauth2.Token{}).WithExtra(map[string]interface{}{
+		"id_token": idToken,
+	})
 }

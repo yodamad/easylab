@@ -19,6 +19,12 @@ Your email is validated on submission and stored in your session. It will be pre
 
 ![Student Login](screens/student-login.png){width=45%}
 
+### Azure AD login (optional)
+
+If the workshop organiser has configured Azure AD authentication, a **Login with Microsoft** button is displayed below the password form. Click it to authenticate with your Microsoft account — any valid account in the organisation's tenant is accepted. No separate student password is required via this method.
+
+After a successful Azure AD login, your Coder account is created automatically using your Microsoft email address, exactly as with the password-based flow.
+
 ## Request a new development environment
 
 The request a new development environment page is the main page of the student space. It allows you to request a new development environment.

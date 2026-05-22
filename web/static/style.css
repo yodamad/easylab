@@ -1536,6 +1536,52 @@ body.student-login-page {
     background: #38a169;
 }
 
+.login-social {
+    padding: 2rem 2rem 0;
+}
+
+.login-divider {
+    display: flex;
+    align-items: center;
+    text-align: center;
+    margin-top: 1.5rem;
+    color: #a0aec0;
+    font-size: 0.8125rem;
+}
+
+.login-divider::before,
+.login-divider::after {
+    content: '';
+    flex: 1;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.login-divider span {
+    padding: 0 0.75rem;
+    white-space: nowrap;
+}
+
+.btn-azure {
+    display: block;
+    width: 215px;
+    margin: 0 auto;
+    text-decoration: none;
+    border-radius: 2px;
+    transition: box-shadow 0.15s ease, opacity 0.15s ease;
+    line-height: 0;
+}
+
+.btn-azure svg {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.btn-azure:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+    opacity: 0.92;
+}
+
 /* ============================================
    STUDENT DASHBOARD STYLES
    ============================================ */
