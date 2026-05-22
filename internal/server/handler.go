@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -1369,16 +1370,16 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 			url.QueryEscape(labID), url.QueryEscape(existingWS.Name), url.QueryEscape(user.Username))
 		existingResp.WriteString(fmt.Sprintf(`<div class="workspace-ready-status workspace-ready-status--starting" data-poll-url="%s"><span class="workspace-status-spinner"></span><span>Checking workspace status...</span></div>`,
 			template.HTMLEscapeString(existingPollURL)))
-		existingResp.WriteString(`<div class="credentials-box">`)
-		existingResp.WriteString(`<h3>Your Workspace Credentials</h3>`)
+		existingResp.WriteString(`<details class="credentials-box">`)
+		existingResp.WriteString(`<summary>Your Workspace Credentials</summary>`)
 		existingResp.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Workspace URL:</label><div class="value"><a href="%s" target="_blank">%s</a></div></div>`, workspaceURL, workspaceURL))
 		existingResp.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Email:</label><div class="value">%s</div></div>`, template.HTMLEscapeString(email)))
 		existingResp.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Password:</label><div class="value">%s</div></div>`, template.HTMLEscapeString(password)))
 		existingResp.WriteString(`<p><strong>Important:</strong> Please save these credentials. You will need them to access your workspace.</p>`)
 		existingResp.WriteString(`<p><small>Your workspace information can be encrypted and saved locally. Click "Encrypt &amp; Save" below to store it securely.</small></p>`)
 		existingResp.WriteString(fmt.Sprintf(`<div data-workspace-info='%s' style="display:none;"></div>`, existingWSInfoJSONEscaped))
-		existingResp.WriteString(`<button onclick="encryptAndSaveWorkspaceInfo(this)" class="btn" style="margin-top: 1rem;">Encrypt &amp; Save Workspace Info</button>`)
-		existingResp.WriteString(`</div>`)
+		existingResp.WriteString(`<button onclick="encryptAndSaveWorkspaceInfo(this)" class="btn credentials-save-btn">Encrypt &amp; Save Workspace Info</button>`)
+		existingResp.WriteString(`</details>`)
 		existingResp.WriteString(`</div>`)
 		fmt.Fprint(w, existingResp.String())
 		return
@@ -1460,16 +1461,16 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		url.QueryEscape(labID), url.QueryEscape(workspace.Name), url.QueryEscape(user.Username))
 	response.WriteString(fmt.Sprintf(`<div class="workspace-ready-status workspace-ready-status--starting" data-poll-url="%s"><span class="workspace-status-spinner"></span><span>Workspace is starting, this may take a moment...</span></div>`,
 		template.HTMLEscapeString(pollURL)))
-	response.WriteString(`<div class="credentials-box">`)
-	response.WriteString(`<h3>Your Workspace Credentials</h3>`)
+	response.WriteString(`<details class="credentials-box">`)
+	response.WriteString(`<summary>Your Workspace Credentials</summary>`)
 	response.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Workspace URL:</label><div class="value"><a href="%s" target="_blank">%s</a></div></div>`, workspaceURL, workspaceURL))
 	response.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Email:</label><div class="value">%s</div></div>`, template.HTMLEscapeString(email)))
 	response.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Password:</label><div class="value">%s</div></div>`, template.HTMLEscapeString(password)))
 	response.WriteString(`<p><strong>Important:</strong> Please save these credentials. You will need them to access your workspace.</p>`)
 	response.WriteString(`<p><small>Your workspace information can be encrypted and saved locally. Click "Encrypt & Save" below to store it securely.</small></p>`)
 	response.WriteString(fmt.Sprintf(`<div data-workspace-info='%s' style="display:none;"></div>`, workspaceInfoJSONEscaped))
-	response.WriteString(`<button onclick="encryptAndSaveWorkspaceInfo(this)" class="btn" style="margin-top: 1rem;">Encrypt & Save Workspace Info</button>`)
-	response.WriteString(`</div>`)
+	response.WriteString(`<button onclick="encryptAndSaveWorkspaceInfo(this)" class="btn credentials-save-btn">Encrypt & Save Workspace Info</button>`)
+	response.WriteString(`</details>`)
 	response.WriteString(`</div>`)
 
 	fmt.Fprint(w, response.String())
@@ -1498,7 +1499,7 @@ func (h *Handler) WorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 	if !exists {
 		log.Printf("[debug] WorkspaceStatus: job not found for lab_id=%s", labID)
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, ownerID, "unknown"))
+		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, ownerID, "unknown", ""))
 		return
 	}
 
@@ -1523,7 +1524,7 @@ func (h *Handler) WorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 	if coderURL == "" || coderSessionToken == "" {
 		log.Printf("[debug] WorkspaceStatus: missing coderURL or sessionToken, returning checking")
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, ownerID, "checking"))
+		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, ownerID, "checking", ""))
 		return
 	}
 
@@ -1537,47 +1538,132 @@ func (h *Handler) WorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("[debug] WorkspaceStatus: lookup failed workspace=%s owner=%s error=%v", workspaceName, ownerID, err)
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, ownerID, "checking"))
+		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, ownerID, "checking", ""))
 		return
 	}
 
 	readiness := workspaceReadinessStatus(workspace)
-	log.Printf("[debug] WorkspaceStatus: workspace=%s buildStatus=%s transition=%s readiness=%s failingAgents=%d",
-		workspaceName, workspace.LatestBuild.Status, workspace.LatestBuild.Transition, readiness, len(workspace.Health.FailingAgents))
+	for _, res := range workspace.LatestBuild.Resources {
+		for _, ag := range res.Agents {
+			log.Printf("[debug] WorkspaceStatus: agent=%s status=%s lifecycle=%s", ag.Name, ag.Status, ag.LifecycleState)
+			for _, app := range ag.Apps {
+				log.Printf("[debug] WorkspaceStatus:   app=%s health=%s", app.Slug, app.Health)
+			}
+		}
+	}
+	log.Printf("[debug] WorkspaceStatus: workspace=%s buildStatus=%s readiness=%s",
+		workspaceName, workspace.LatestBuild.Status, readiness)
+
+	wsURL := ""
+	if readiness == "running" {
+		agentName := workspaceFirstAgentName(workspace)
+		appPath := fmt.Sprintf("/@%s/%s.%s/apps/code-server/?folder=/workspaces",
+			workspace.OwnerName, workspace.Name, agentName)
+		// Create a short-lived API key for the student so the browser can access the
+		// workspace app directly without a login prompt (token is read by Coder from
+		// the ?coder_session_token= query parameter before proxying).
+		if studentKey, keyErr := createStudentAppToken(coderURL, coderSessionToken, ownerID); keyErr == nil {
+			wsURL = fmt.Sprintf("%s%s&%s=%s",
+				coderURL, appPath, codersdk.SessionTokenCookie, url.QueryEscape(studentKey))
+		} else {
+			log.Printf("WorkspaceStatus: failed to create student token for %s: %v", ownerID, keyErr)
+			wsURL = fmt.Sprintf("%s/login?redirect=%s", coderURL, url.QueryEscape(appPath))
+		}
+	}
 	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, ownerID, readiness))
+	fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, ownerID, readiness, wsURL))
 }
 
 // workspaceReadinessStatus derives a single readiness string from a workspace.
-// It promotes "running" to "agents_starting" or "agents_failed" when the build is
-// done but agents have not yet reached the ready lifecycle state.
+// "running" is only returned when every agent has lifecycle_state=="ready" and
+// every app with a healthcheck is "healthy" (not still "initializing").
 func workspaceReadinessStatus(ws codersdk.Workspace) string {
 	buildStatus := string(ws.LatestBuild.Status)
 	if buildStatus != "running" {
 		return buildStatus
 	}
-	if !ws.Health.Healthy {
-		for _, resource := range ws.LatestBuild.Resources {
-			for _, agent := range resource.Agents {
-				switch agent.LifecycleState {
-				case codersdk.WorkspaceAgentLifecycleStartTimeout, codersdk.WorkspaceAgentLifecycleStartError:
-					return "agents_failed"
-				}
-				if agent.Status == codersdk.WorkspaceAgentTimeout {
+
+	hasAgents := false
+	for _, resource := range ws.LatestBuild.Resources {
+		for _, agent := range resource.Agents {
+			hasAgents = true
+
+			// Hard failure: agent timed out connecting
+			if agent.Status == codersdk.WorkspaceAgentTimeout {
+				return "agents_failed"
+			}
+			// Hard failure: startup scripts failed or timed out
+			switch agent.LifecycleState {
+			case codersdk.WorkspaceAgentLifecycleStartTimeout, codersdk.WorkspaceAgentLifecycleStartError:
+				return "agents_failed"
+			}
+			// Startup scripts still running — agent not fully ready
+			if agent.LifecycleState != codersdk.WorkspaceAgentLifecycleReady {
+				return "agents_starting"
+			}
+			// Wait for any app healthchecks to pass
+			for _, app := range agent.Apps {
+				switch app.Health {
+				case codersdk.WorkspaceAppHealthInitializing:
+					return "agents_starting"
+				case codersdk.WorkspaceAppHealthUnhealthy:
 					return "agents_failed"
 				}
 			}
 		}
+	}
+
+	if !hasAgents {
 		return "agents_starting"
 	}
 	return "running"
 }
 
+// workspaceFirstAgentName returns the name of the first agent in the workspace resources.
+// Falls back to "main" when no agents are found (the conventional default name).
+func workspaceFirstAgentName(ws codersdk.Workspace) string {
+	for _, resource := range ws.LatestBuild.Resources {
+		for _, agent := range resource.Agents {
+			if agent.Name != "" {
+				return agent.Name
+			}
+		}
+	}
+	return "main"
+}
+
+// createStudentAppToken uses the admin session token to create a browser-session API key
+// scoped to the given student username. The returned key can be passed as
+// ?coder_session_token= on workspace app URLs so the student lands directly in
+// code-server without a login prompt (Coder reads the query param before proxying).
+func createStudentAppToken(coderURL, adminToken, username string) (string, error) {
+	parsedURL, err := url.Parse(coderURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse coder URL: %w", err)
+	}
+	ctx := context.Background()
+	client := codersdk.New(parsedURL)
+	client.SetSessionToken(adminToken)
+	// Coder marks users dormant after inactivity; reactivate before creating the key.
+	if _, err := client.UpdateUserStatus(ctx, username, codersdk.UserStatusActive); err != nil {
+		log.Printf("createStudentAppToken: could not reactivate user %s (continuing): %v", username, err)
+	}
+	resp, err := client.CreateAPIKey(ctx, username)
+	if err != nil {
+		return "", fmt.Errorf("failed to create API key for %s: %w", username, err)
+	}
+	return resp.Key, nil
+}
+
 // buildWorkspaceStatusHTML returns an HTML partial for the workspace readiness indicator.
 // When the workspace is running, the returned HTML has no HTMX polling attributes so polling stops.
-func buildWorkspaceStatusHTML(labID, workspaceName, ownerID, status string) string {
+func buildWorkspaceStatusHTML(labID, workspaceName, ownerID, status, workspaceURL string) string {
 	switch status {
 	case "running":
+		if workspaceURL != "" {
+			return fmt.Sprintf(`<div class="workspace-ready-status workspace-ready-status--ready"><span>✅ Workspace is ready!</span><a href="%s" target="_blank" class="btn-workspace-connect">Open in code-server</a></div>`,
+				template.HTMLEscapeString(workspaceURL))
+		}
 		return `<div class="workspace-ready-status workspace-ready-status--ready"><span>✅ Workspace is ready!</span></div>`
 	case "failed", "agents_failed":
 		return `<div class="workspace-ready-status workspace-ready-status--error"><span>❌ Workspace failed to start. Please contact the lab administrator.</span></div>`

@@ -891,6 +891,24 @@ func RefreshToken(config CoderClientConfig, adminEmail, adminPassword string) (C
 	}, nil
 }
 
+// GetStudentSessionToken authenticates as a student Coder user and returns their session token.
+// The token can be appended to workspace app URLs as ?token= for silent login.
+func GetStudentSessionToken(serverURL, email, password string) (string, error) {
+	parsedURL, err := url.Parse(serverURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse server URL: %w", err)
+	}
+	client := codersdk.New(parsedURL)
+	loginRes, err := client.LoginWithPassword(context.Background(), codersdk.LoginWithPasswordRequest{
+		Email:    email,
+		Password: password,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to get student session token: %w", err)
+	}
+	return loginRes.SessionToken, nil
+}
+
 // GetTemplatesWithRetry gets templates with automatic token refresh on failure
 func GetTemplatesWithRetry(config CoderClientConfig, adminEmail, adminPassword string) ([]codersdk.Template, error) {
 	templates, err := GetTemplates(config)

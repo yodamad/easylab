@@ -3085,12 +3085,38 @@ body.student-dashboard-page {
     background: #d1fae5;
     color: #065f46;
     border: 1px solid #6ee7b7;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+.workspace-ready-status--ready .btn-workspace-connect {
+    margin-left: 0;
+    margin-top: 0.5rem;
+    align-self: stretch;
+    text-align: center;
 }
 
 .workspace-ready-status--error {
     background: #fee2e2;
     color: #991b1b;
     border: 1px solid #fca5a5;
+}
+
+.btn-workspace-connect {
+    margin-left: auto;
+    padding: 0.375rem 0.875rem;
+    background: #065f46;
+    color: white;
+    border-radius: var(--radius);
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: background 0.2s;
+}
+
+.btn-workspace-connect:hover {
+    background: #047857;
 }
 
 .workspace-status-spinner {
@@ -3102,6 +3128,89 @@ body.student-dashboard-page {
     border-radius: 50%;
     flex-shrink: 0;
     animation: spin 0.8s linear infinite;
+}
+
+/* ============================================
+   COLLAPSIBLE CREDENTIALS BOX
+   ============================================ */
+
+details.credentials-box {
+    background: #f0f9ff;
+    border: 2px solid #48bb78;
+    border-radius: var(--radius);
+    padding: 0;
+    margin-top: 1rem;
+}
+
+details.credentials-box summary {
+    padding: 0.875rem 1.25rem;
+    font-weight: 600;
+    font-size: 1rem;
+    color: #065f46;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+details.credentials-box summary::-webkit-details-marker {
+    display: none;
+}
+
+details.credentials-box summary::before {
+    content: '▶';
+    font-size: 0.75rem;
+    transition: transform 0.2s;
+    flex-shrink: 0;
+}
+
+details.credentials-box[open] summary::before {
+    transform: rotate(90deg);
+}
+
+details.credentials-box summary:hover {
+    background: #e6f7f0;
+    border-radius: var(--radius);
+}
+
+details.credentials-box > :not(summary) {
+    padding: 0 1.25rem;
+}
+
+details.credentials-box > :last-child {
+    padding-bottom: 1.25rem;
+}
+
+.credential-item {
+    margin-bottom: 0.875rem;
+}
+
+.credential-item label {
+    font-weight: 600;
+    color: var(--text);
+    display: block;
+    margin-bottom: 0.25rem;
+    font-size: 0.875rem;
+}
+
+.credential-item .value {
+    font-family: monospace;
+    background: white;
+    padding: 0.5rem;
+    border-radius: var(--radius);
+    word-break: break-all;
+    border: 1px solid var(--border);
+}
+
+.credential-item .value a {
+    color: #2563eb;
+    text-decoration: underline;
+}
+
+.credentials-save-btn {
+    margin-top: 0.5rem;
 }
 
 /* Provider page tabs */
