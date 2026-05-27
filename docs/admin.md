@@ -128,6 +128,39 @@ Before creating a lab, you can run a **dry run** to preview what Pulumi would do
 
 Dry-run jobs do not create any cloud or Kubernetes resources; only real runs do.
 
+## Azure AD student authentication (optional)
+
+EasyLab can delegate student login to Azure AD (Microsoft Entra ID). When enabled, a **Sign in with Microsoft** button appears at the top of the student login page. Any account in the configured tenant is accepted — no allow-list is required.
+
+### How it works
+
+1. The student clicks **Sign in with Microsoft** and is redirected to Microsoft's login page.
+2. After a successful Microsoft login, EasyLab creates a local session using the student's email address.
+3. When the student first requests a workspace, a Coder account is provisioned automatically using that email address and a server-generated password — identical to the password-based flow. Azure AD is never configured on Coder itself.
+
+### Setup — Azure App Registration
+
+1. In the [Azure portal](https://portal.azure.com), go to **Microsoft Entra ID → App registrations → New registration**.
+2. Set **Redirect URI** to `https://<your-easylab-host>/student/auth/azure/callback` (Web platform).
+3. Under **Certificates & secrets**, create a new client secret and copy its value immediately.
+4. Note the **Application (client) ID** and **Directory (tenant) ID** from the Overview page.
+5. Under **API permissions**, ensure the following delegated permissions are granted: `openid`, `email`, `profile`.
+
+### Configuration — environment variables
+
+Set the following three variables at startup (in your `.env` file or as Docker environment variables):
+
+| Variable | Description |
+|---|---|
+| `AZURE_AD_CLIENT_ID` | Application (client) ID of the app registration |
+| `AZURE_AD_CLIENT_SECRET` | Client secret value created in the app registration |
+| `AZURE_AD_TENANT_ID` | Directory (tenant) ID |
+
+If any of the three variables is absent, Azure AD login is disabled and only the password form is shown.
+
+!!! note
+    These are separate from the Azure infrastructure credentials (`AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` / `AZURE_TENANT_ID`) used for AKS provisioning. You may use a dedicated app registration for student SSO.
+
 ## Provider credentials
 
 Cloud provider credentials and options are accessed from the **Provider** dropdown in the header. It contains two entries:

@@ -21,7 +21,7 @@ Your email is validated on submission and stored in your session. It will be pre
 
 ### Azure AD login (optional)
 
-If the workshop organiser has configured Azure AD authentication, a **Login with Microsoft** button is displayed below the password form. Click it to authenticate with your Microsoft account — any valid account in the organisation's tenant is accepted. No separate student password is required via this method.
+If the workshop organiser has configured Azure AD authentication, a **Sign in with Microsoft** button is displayed at the top of the login page, above the password form. Click it to authenticate with your Microsoft account — any valid account in the organisation's tenant is accepted. No separate student password is required via this method.
 
 After a successful Azure AD login, your Coder account is created automatically using your Microsoft email address, exactly as with the password-based flow.
 

@@ -55,6 +55,14 @@ The application can be configured using the following environment variables:
 - `WORK_DIR`: Directory for job workspaces (default: /app/jobs)
 - `DATA_DIR`: Directory for persisting job data (default: /app/data)
 
+**Azure AD student login** (optional — all three required to enable):
+
+- `AZURE_AD_CLIENT_ID`: Application (client) ID of the Azure app registration
+- `AZURE_AD_CLIENT_SECRET`: Client secret of the Azure app registration
+- `AZURE_AD_TENANT_ID`: Directory (tenant) ID
+
+See [Admin guide — Azure AD student authentication](admin.md#azure-ad-student-authentication-optional) for the full setup steps.
+
 You can also set OVHcloud credentials via environment variables (`OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, `OVH_SERVICE_NAME`, `OVH_ENDPOINT`); see [OVHcloud configuration](ovhcloud.md).
 
 ### Environment file {#environment-file}
