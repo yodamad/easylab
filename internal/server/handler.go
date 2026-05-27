@@ -1110,6 +1110,117 @@ func (h *Handler) ListLabTemplates(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(options)
 }
 
+// UploadTemplateToLab uploads a zip file and creates a new Coder template in an existing lab.
+func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	// Expect: api/labs/{id}/templates/upload or api/jobs/{id}/templates/upload
+	if len(pathParts) < 5 || (pathParts[1] != "labs" && pathParts[1] != "jobs") {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	jobID := pathParts[2]
+
+	job, exists := h.jobManager.GetJob(jobID)
+	if !exists {
+		http.Error(w, "Lab not found", http.StatusNotFound)
+		return
+	}
+
+	job.mu.RLock()
+	status := job.Status
+	coderURL := job.CoderURL
+	coderSessionToken := job.CoderSessionToken
+	coderOrganizationID := job.CoderOrganizationID
+	coderAdminEmail := job.CoderAdminEmail
+	coderAdminPassword := job.CoderAdminPassword
+	job.mu.RUnlock()
+
+	if status != JobStatusCompleted {
+		http.Error(w, "Lab is not ready yet", http.StatusBadRequest)
+		return
+	}
+
+	coderURL = extractStringFromConfigValue(coderURL)
+	coderSessionToken = extractStringFromConfigValue(coderSessionToken)
+	coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
+	coderAdminEmail = extractStringFromConfigValue(coderAdminEmail)
+	coderAdminPassword = extractStringFromConfigValue(coderAdminPassword)
+
+	if coderURL == "" || coderSessionToken == "" || coderOrganizationID == "" || coderAdminEmail == "" || coderAdminPassword == "" {
+		http.Error(w, "Coder configuration not available for this lab", http.StatusInternalServerError)
+		return
+	}
+
+	if err := r.ParseMultipartForm(50 << 20); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	templateName := strings.TrimSpace(r.FormValue("template_name"))
+	if templateName == "" {
+		http.Error(w, "template_name is required", http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("template_file")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get template file: %v", err), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	if !strings.HasSuffix(strings.ToLower(header.Filename), ".zip") {
+		http.Error(w, "Only .zip files are allowed", http.StatusBadRequest)
+		return
+	}
+
+	jobDir := filepath.Join(h.pulumiExec.GetWorkDir(), jobID)
+	if err := os.MkdirAll(jobDir, 0755); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create job directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+	// Sanitize template name to avoid path traversal
+	safeName := filepath.Base(templateName)
+	zipPath := filepath.Join(jobDir, fmt.Sprintf("template-upload-%s.zip", safeName))
+	if !strings.HasPrefix(zipPath, jobDir) {
+		http.Error(w, "Invalid file path", http.StatusBadRequest)
+		return
+	}
+
+	dst, err := os.Create(zipPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save file: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if _, err := io.Copy(dst, file); err != nil {
+		dst.Close()
+		http.Error(w, fmt.Sprintf("Failed to write file: %v", err), http.StatusInternalServerError)
+		return
+	}
+	dst.Close()
+
+	coderConfig := coder.CoderClientConfig{
+		ServerURL:      coderURL,
+		SessionToken:   coderSessionToken,
+		OrganizationID: coderOrganizationID,
+	}
+
+	if err := coder.CreateTemplateStandalone(coderConfig, templateName, zipPath, nil, func(msg string) {
+		log.Printf("[UploadTemplate][%s] %s", jobID, msg)
+	}); err != nil {
+		log.Printf("Failed to create template for lab %s: %v", jobID, err)
+		http.Error(w, fmt.Sprintf("Failed to create template: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "template": templateName})
+}
+
 // ListLabs returns a list of completed jobs (labs) available for workspace requests
 func (h *Handler) ListLabs(w http.ResponseWriter, r *http.Request) {
 	h.jobManager.mu.RLock()

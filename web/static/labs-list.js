@@ -162,6 +162,94 @@ function showCopyFeedback(btn) {
     setTimeout(function () { btn.textContent = orig; }, 2000);
 }
 
+var _uploadTemplatLabId = null;
+
+function showUploadTemplateModal(labId) {
+    _uploadTemplatLabId = labId;
+    var overlay = document.getElementById('upload-template-overlay');
+    var errorEl = document.getElementById('upload-template-error');
+    var successEl = document.getElementById('upload-template-success');
+    var form = document.getElementById('upload-template-form');
+    var submitBtn = document.getElementById('upload-template-submit-btn');
+
+    form.reset();
+    errorEl.style.display = 'none';
+    errorEl.textContent = '';
+    successEl.style.display = 'none';
+    successEl.textContent = '';
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Upload';
+
+    overlay.classList.add('visible');
+    overlay.setAttribute('aria-hidden', 'false');
+}
+
+function closeUploadTemplateModal() {
+    var overlay = document.getElementById('upload-template-overlay');
+    overlay.classList.remove('visible');
+    overlay.setAttribute('aria-hidden', 'true');
+    _uploadTemplatLabId = null;
+}
+
+function submitUploadTemplate(event) {
+    event.preventDefault();
+    if (!_uploadTemplatLabId) return;
+
+    var name = document.getElementById('upload-template-name').value.trim();
+    var fileInput = document.getElementById('upload-template-file');
+    var errorEl = document.getElementById('upload-template-error');
+    var successEl = document.getElementById('upload-template-success');
+    var submitBtn = document.getElementById('upload-template-submit-btn');
+
+    errorEl.style.display = 'none';
+    errorEl.textContent = '';
+    successEl.style.display = 'none';
+
+    if (!name) {
+        errorEl.textContent = 'Template name is required.';
+        errorEl.style.display = 'block';
+        return;
+    }
+    if (!fileInput.files || !fileInput.files[0]) {
+        errorEl.textContent = 'Please select a zip file.';
+        errorEl.style.display = 'block';
+        return;
+    }
+
+    var formData = new FormData();
+    formData.append('template_name', name);
+    formData.append('template_file', fileInput.files[0]);
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Uploading…';
+
+    fetch('/api/labs/' + encodeURIComponent(_uploadTemplatLabId) + '/templates/upload', {
+        method: 'POST',
+        body: formData
+    })
+    .then(function (response) {
+        if (!response.ok) {
+            return response.text().then(function (text) {
+                return Promise.reject(text || 'Upload failed (' + response.status + ').');
+            });
+        }
+        return response.json();
+    })
+    .then(function () {
+        successEl.textContent = 'Template "' + name + '" uploaded successfully.';
+        successEl.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Upload';
+        document.getElementById('upload-template-form').reset();
+    })
+    .catch(function (err) {
+        errorEl.textContent = typeof err === 'string' ? err : 'Failed to upload template.';
+        errorEl.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Upload';
+    });
+}
+
 document.addEventListener('DOMContentLoaded', function () {
     if (typeof syncEasylabHeaderProviderDropdown === 'function') {
         var pref =

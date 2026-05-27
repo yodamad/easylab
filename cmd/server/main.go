@@ -317,6 +317,8 @@ func main() {
 			handler.DeleteWorkspace(w, r)
 		case strings.HasSuffix(path, "/retry"):
 			handler.RetryJob(w, r)
+		case strings.HasSuffix(path, "/templates/upload") && r.Method == http.MethodPost:
+			handler.UploadTemplateToLab(w, r)
 		case strings.HasSuffix(path, "/coder-credentials") && r.Method == http.MethodGet:
 			handler.GetCoderCredentials(w, r)
 		case strings.HasSuffix(path, "/kubeconfig"):

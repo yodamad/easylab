@@ -118,6 +118,12 @@
                             </svg>
                             <span class="tooltip">Coder admin credentials</span>
                         </button>
+                        <button type="button" class="btn btn-primary btn-icon-only tooltip-trigger" title="Upload a new template to this lab" onclick="showUploadTemplateModal('{{.ID}}')">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                            </svg>
+                            <span class="tooltip">Upload Template</span>
+                        </button>
                         {{end}}
                         {{if eq .Status "failed"}}
                         <button type="button" class="btn btn-primary btn-icon-only tooltip-trigger" title="Retry this failed lab deployment" onclick="retryLab('{{.ID}}')">
@@ -159,6 +165,32 @@
             {{end}}
 
         </main>
+
+        <div id="upload-template-overlay" class="credentials-modal-overlay" onclick="closeUploadTemplateModal()" aria-hidden="true">
+            <div class="credentials-modal" onclick="event.stopPropagation()">
+                <div class="credentials-modal-header">
+                    <h3>Upload Template</h3>
+                    <button type="button" class="credentials-modal-close" onclick="closeUploadTemplateModal()" title="Close" aria-label="Close">&times;</button>
+                </div>
+                <div class="credentials-modal-body">
+                    <div id="upload-template-error" class="credentials-modal-error" style="display: none;"></div>
+                    <div id="upload-template-success" class="success-message" style="display: none;"></div>
+                    <form id="upload-template-form" onsubmit="submitUploadTemplate(event)">
+                        <div class="credentials-modal-row">
+                            <label for="upload-template-name">Template name</label>
+                            <input type="text" id="upload-template-name" class="credentials-modal-input" placeholder="my-template" required />
+                        </div>
+                        <div class="credentials-modal-row">
+                            <label for="upload-template-file">Template zip</label>
+                            <input type="file" id="upload-template-file" accept=".zip" required />
+                        </div>
+                        <div class="credentials-modal-row">
+                            <button type="submit" id="upload-template-submit-btn" class="btn btn-primary">Upload</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
 
         <div id="coder-credentials-overlay" class="credentials-modal-overlay" onclick="closeCoderCredentialsModal()" aria-hidden="true">
             <div class="credentials-modal" onclick="event.stopPropagation()">
