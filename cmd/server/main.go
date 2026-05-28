@@ -255,6 +255,8 @@ func main() {
 	// Protected routes (auth required)
 	mux.HandleFunc("/admin", authHandler.RequireAuth(handler.ServeAdminUI))
 	mux.HandleFunc("/admin/feedback", authHandler.RequireAuth(handler.ServeAdminLabFeedback))
+	mux.HandleFunc("/admin/stats", authHandler.RequireAuth(handler.ServeAdminStats))
+	mux.HandleFunc("/api/admin/stats", authHandler.RequireAuth(handler.GetProjectStats))
 	mux.HandleFunc("/labs", authHandler.RequireAuth(handler.ServeLabsList))
 	// Backward compatibility route
 	mux.HandleFunc("/jobs", authHandler.RequireAuth(handler.ServeLabsList))

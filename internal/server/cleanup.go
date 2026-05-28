@@ -73,12 +73,22 @@ func (h *Handler) cleanupExpiredWorkspaces() {
 			log.Printf("[cleanup] failed to list workspaces for job %s: %v", job.ID, err)
 			continue
 		}
+		deleted := 0
 		for _, ws := range workspaces {
 			if time.Since(ws.CreatedAt) > lifetime {
 				log.Printf("[cleanup] deleting workspace %s (%s) in job %s: exceeded %dh lifetime", ws.Name, ws.ID, job.ID, job.Config.WorkspaceLifetimeHours)
 				if _, err := coder.DeleteWorkspaceWithRetry(coderConfig, job.CoderAdminEmail, job.CoderAdminPassword, ws.ID); err != nil {
 					log.Printf("[cleanup] failed to delete workspace %s: %v", ws.ID, err)
+				} else {
+					deleted++
 				}
+			}
+		}
+		if deleted > 0 {
+			if err := h.jobManager.RecordCleanupEvent(job.ID, deleted); err != nil {
+				log.Printf("[cleanup] failed to record cleanup event for job %s: %v", job.ID, err)
+			} else if err := h.jobManager.SaveJob(job.ID); err != nil {
+				log.Printf("[cleanup] failed to persist cleanup event for job %s: %v", job.ID, err)
 			}
 		}
 	}

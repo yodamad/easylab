@@ -533,6 +533,7 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 		"azure-options.html":     "web/azure-options.html",
 		"labs-list.html":         "web/labs-list.html",
 		"lab-workspaces.html":    "web/lab-workspaces.html",
+		"admin-stats.html":       "web/admin-stats.html",
 	}
 
 	tmplPath, ok := templatePaths[filename]
@@ -3426,4 +3427,100 @@ func (h *Handler) detectVariablesFromGit(r *http.Request) ([]tfparse.TFVariable,
 		result = append(result, seen[name])
 	}
 	return result, nil
+}
+
+// ServeAdminStats serves the admin statistics page.
+// Route: GET /admin/stats
+func (h *Handler) ServeAdminStats(w http.ResponseWriter, r *http.Request) {
+	jobs := h.jobManager.GetAllJobs()
+
+	seen := make(map[string]struct{})
+	var projects []string
+	for _, job := range jobs {
+		if job.Config != nil && job.Config.StackName != "" {
+			if _, ok := seen[job.Config.StackName]; !ok {
+				seen[job.Config.StackName] = struct{}{}
+				projects = append(projects, job.Config.StackName)
+			}
+		}
+	}
+
+	type StatsPageData struct {
+		Projects        []string
+		SelectedProject string
+	}
+
+	h.serveTemplate(w, "admin-stats.html", StatsPageData{
+		Projects:        projects,
+		SelectedProject: r.URL.Query().Get("project"),
+	})
+}
+
+// GetProjectStats returns time-series JSON for created/destroyed labs in a project.
+// Route: GET /api/admin/stats?project=<stackName>
+func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
+	project := r.URL.Query().Get("project")
+	if project == "" {
+		http.Error(w, "project query param required", http.StatusBadRequest)
+		return
+	}
+
+	type monthBucket struct {
+		created int
+		deleted int
+	}
+
+	buckets := make(map[string]*monthBucket)
+	var orderedMonths []string
+
+	addMonth := func(month string) {
+		if _, ok := buckets[month]; !ok {
+			buckets[month] = &monthBucket{}
+			orderedMonths = append(orderedMonths, month)
+		}
+	}
+
+	jobs := h.jobManager.GetAllJobs()
+	// GetAllJobs returns newest-first; iterate in reverse for chronological order
+	for i := len(jobs) - 1; i >= 0; i-- {
+		job := jobs[i]
+		if job.Config == nil || job.Config.StackName != project {
+			continue
+		}
+		// Count completed and destroyed jobs both as "created" (they were deployed)
+		if job.Status == JobStatusCompleted || job.Status == JobStatusDestroyed {
+			month := job.CreatedAt.Format("2006-01")
+			addMonth(month)
+			buckets[month].created++
+		}
+		// Count auto-cleanup events as "deleted"
+		job.mu.RLock()
+		for _, evt := range job.CleanupEvents {
+			month := evt.At.Format("2006-01")
+			addMonth(month)
+			buckets[month].deleted += evt.Count
+		}
+		job.mu.RUnlock()
+	}
+
+	type statsResponse struct {
+		Labels  []string `json:"labels"`
+		Created []int    `json:"created"`
+		Deleted []int    `json:"deleted"`
+	}
+
+	resp := statsResponse{
+		Labels:  orderedMonths,
+		Created: make([]int, len(orderedMonths)),
+		Deleted: make([]int, len(orderedMonths)),
+	}
+	for i, m := range orderedMonths {
+		resp.Created[i] = buckets[m].created
+		resp.Deleted[i] = buckets[m].deleted
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("failed to encode stats response: %v", err)
+	}
 }

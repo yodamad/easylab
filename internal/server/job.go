@@ -25,6 +25,12 @@ const (
 	JobStatusDestroyed       JobStatus = "destroyed"
 )
 
+// CleanupEvent records a single automatic workspace cleanup run.
+type CleanupEvent struct {
+	At    time.Time `json:"at"`
+	Count int       `json:"count"`
+}
+
 // Job represents a Pulumi execution job
 type Job struct {
 	ID         string     `json:"id"`
@@ -36,12 +42,13 @@ type Job struct {
 	Config     *LabConfig `json:"config,omitempty"`
 	Kubeconfig string     `json:"kubeconfig,omitempty"`
 	// Coder configuration stored after deployment
-	CoderURL            string       `json:"coder_url,omitempty"`
-	CoderAdminEmail     string       `json:"coder_admin_email,omitempty"`
-	CoderAdminPassword  string       `json:"coder_admin_password,omitempty"`
-	CoderSessionToken   string       `json:"coder_session_token,omitempty"`
-	CoderOrganizationID string       `json:"coder_organization_id,omitempty"`
-	mu                  sync.RWMutex `json:"-"`
+	CoderURL            string         `json:"coder_url,omitempty"`
+	CoderAdminEmail     string         `json:"coder_admin_email,omitempty"`
+	CoderAdminPassword  string         `json:"coder_admin_password,omitempty"`
+	CoderSessionToken   string         `json:"coder_session_token,omitempty"`
+	CoderOrganizationID string         `json:"coder_organization_id,omitempty"`
+	CleanupEvents       []CleanupEvent `json:"cleanup_events,omitempty"`
+	mu                  sync.RWMutex   `json:"-"`
 }
 
 // CoderTemplate defines a single Coder template (upload or git source)
@@ -310,6 +317,21 @@ func (jm *JobManager) SetCoderConfig(id string, coderURL, coderAdminEmail, coder
 	job.CoderSessionToken = coderSessionToken
 	job.CoderOrganizationID = coderOrganizationID
 	job.UpdatedAt = time.Now()
+	return nil
+}
+
+// RecordCleanupEvent appends an auto-cleanup event to a job.
+func (jm *JobManager) RecordCleanupEvent(id string, count int) error {
+	jm.mu.RLock()
+	job, exists := jm.jobs[id]
+	jm.mu.RUnlock()
+	if !exists {
+		return fmt.Errorf("job %s not found", id)
+	}
+	job.mu.Lock()
+	job.CleanupEvents = append(job.CleanupEvents, CleanupEvent{At: time.Now(), Count: count})
+	job.UpdatedAt = time.Now()
+	job.mu.Unlock()
 	return nil
 }
 

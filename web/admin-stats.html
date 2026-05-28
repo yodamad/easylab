@@ -1,0 +1,130 @@
+{{define "title"}}Stats{{end}}
+{{define "body-class"}}{{end}}
+{{define "head-extra"}}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<style>
+    .stats-page-container { max-width: 900px; margin: 0 auto; padding: 2rem 1rem; }
+    .project-selector-form { display: flex; gap: 0.75rem; align-items: flex-end; margin-bottom: 2rem; flex-wrap: wrap; }
+    .project-selector-form label { font-weight: 600; font-size: 0.9rem; color: #374151; display: block; margin-bottom: 0.3rem; }
+    .project-selector-form select { padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.95rem; min-width: 260px; }
+    .project-selector-form button { padding: 0.5rem 1.25rem; background: #4f46e5; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.95rem; }
+    .project-selector-form button:hover { background: #4338ca; }
+    .chart-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 1.5rem; }
+    .chart-title { font-size: 1rem; font-weight: 600; color: #374151; margin-bottom: 1.25rem; }
+    .empty-state { text-align: center; padding: 3rem 1rem; color: #6b7280; }
+    .empty-state-icon { font-size: 3rem; display: block; margin-bottom: 1rem; }
+</style>
+{{end}}
+
+{{define "body"}}
+<div class="container stats-page-container">
+    <header>
+        <div class="header-content">
+            <div class="header-title">
+                <img src="/static/logo.png" alt="EasyLab Logo" class="header-logo">
+                <div>
+                    <h1>EasyLab</h1>
+                    <p class="subtitle">Lab Stats</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <a href="/labs" class="header-btn" title="Labs History">
+                    <span class="btn-icon">📋</span>
+                    <span class="btn-text">Labs</span>
+                </a>
+                <a href="/admin" class="header-btn" title="Create Lab">
+                    <span class="btn-icon">➕</span>
+                    <span class="btn-text">New Lab</span>
+                </a>
+                <a href="/admin/feedback" class="header-btn" title="Feedbacks">
+                    <span class="btn-icon">💬</span>
+                    <span class="btn-text">Feedbacks</span>
+                </a>
+                <a href="/logout" class="logout-btn" title="Logout">
+                    <span class="logout-icon">🚪</span>
+                    <span class="logout-text">Logout</span>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <form class="project-selector-form" method="GET" action="/admin/stats">
+            <div>
+                <label for="project_input">Select a Project</label>
+                <select id="project_input" name="project">
+                    <option value="">— choose a project —</option>
+                    {{range .Projects}}
+                    <option value="{{.}}" {{if eq . $.SelectedProject}}selected{{end}}>{{.}}</option>
+                    {{end}}
+                </select>
+            </div>
+            <button type="submit">View Stats</button>
+        </form>
+
+        {{if .SelectedProject}}
+        <div class="chart-card">
+            <div class="chart-title">Workspace activity for <strong>{{.SelectedProject}}</strong></div>
+            <canvas id="statsChart" data-project="{{.SelectedProject}}"></canvas>
+        </div>
+        {{else}}
+        <div class="empty-state">
+            <span class="empty-state-icon">📊</span>
+            <p>Select a project above to view its stats.</p>
+        </div>
+        {{end}}
+    </main>
+</div>
+
+{{if .SelectedProject}}
+<script>
+(function() {
+    var canvas = document.getElementById('statsChart');
+    var project = canvas.dataset.project;
+    fetch('/api/admin/stats?project=' + encodeURIComponent(project))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.labels || data.labels.length === 0) {
+                canvas.parentElement.innerHTML = '<div class="empty-state"><span class="empty-state-icon">📊</span><p>No completed or destroyed labs found for this project.</p></div>';
+                return;
+            }
+            new Chart(canvas.getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: data.labels,
+                    datasets: [
+                        {
+                            label: 'Created',
+                            data: data.created,
+                            backgroundColor: 'rgba(79, 70, 229, 0.7)',
+                            borderColor: 'rgba(79, 70, 229, 1)',
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Auto-cleaned',
+                            data: data.deleted,
+                            backgroundColor: 'rgba(239, 68, 68, 0.7)',
+                            borderColor: 'rgba(239, 68, 68, 1)',
+                            borderWidth: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { position: 'top' }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: { stepSize: 1 }
+                        }
+                    }
+                }
+            });
+        });
+})();
+</script>
+{{end}}
+
+{{end}}
