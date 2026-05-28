@@ -1,3 +1,7 @@
+---
+icon: lucide/cloud-check
+title: Azure
+---
 # Azure Setup Guide
 
 This guide explains how to configure EasyLab to provision lab environments on Microsoft Azure using AKS (Azure Kubernetes Service).
