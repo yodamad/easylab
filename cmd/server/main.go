@@ -213,11 +213,13 @@ func main() {
 	handlerStart := time.Now()
 	handler = server.NewHandler(jobManager, pulumiExec, credentialsManager, ovhOptionsManager, azureOptionsManager, feedbackStore)
 	handler.SetAzureADConfigurer(authHandler.ConfigureAzureAD)
+	handler.SetClassicLoginConfigurer(authHandler.SetClassicLoginDisabled)
 	log.Printf("[STARTUP] Handler initialization took %v", time.Since(handlerStart))
 
 	// Apply persisted Azure AD config (overrides env vars if set via UI)
 	if azureAD := azureOptionsManager.GetAzureADConfig(); azureAD.ClientID != "" && azureAD.ClientSecret != "" && azureAD.TenantID != "" {
 		authHandler.ConfigureAzureAD(azureAD.ClientID, azureAD.ClientSecret, azureAD.TenantID)
+		authHandler.SetClassicLoginDisabled(azureAD.DisableClassicLogin)
 		log.Printf("[STARTUP] Azure AD config loaded from persisted storage")
 	}
 

@@ -18,9 +18,10 @@ type AzureItemConfig struct {
 
 // AzureADConfig holds Azure AD OAuth configuration for student login.
 type AzureADConfig struct {
-	ClientID     string `json:"client_id"`
-	ClientSecret string `json:"client_secret"`
-	TenantID     string `json:"tenant_id"`
+	ClientID             string `json:"client_id"`
+	ClientSecret         string `json:"client_secret"`
+	TenantID             string `json:"tenant_id"`
+	DisableClassicLogin  bool   `json:"disable_classic_login,omitempty"`
 }
 
 // AzureOptionsConfig is persisted admin preferences for Azure regions and VM sizes.

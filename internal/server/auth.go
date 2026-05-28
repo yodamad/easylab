@@ -56,16 +56,17 @@ type Session struct {
 
 // AuthHandler handles authentication
 type AuthHandler struct {
-	passwordHash        string
-	studentPasswordHash string
-	sessions            map[string]*Session
-	studentSessions     map[string]*Session
-	azureADEnabled      bool
-	azureADConfig       *oauth2.Config
-	azureOAuthStates    map[string]time.Time
-	templates           map[string]*template.Template
-	templatesMu         sync.RWMutex
-	mu                  sync.RWMutex
+	passwordHash         string
+	studentPasswordHash  string
+	sessions             map[string]*Session
+	studentSessions      map[string]*Session
+	azureADEnabled       bool
+	azureADConfig        *oauth2.Config
+	azureOAuthStates     map[string]time.Time
+	classicLoginDisabled bool
+	templates            map[string]*template.Template
+	templatesMu          sync.RWMutex
+	mu                   sync.RWMutex
 }
 
 // hashPassword creates a bcrypt hash of the password
@@ -198,6 +199,14 @@ func (ah *AuthHandler) AzureADEnabled() bool {
 	ah.mu.RLock()
 	defer ah.mu.RUnlock()
 	return ah.azureADEnabled
+}
+
+// SetClassicLoginDisabled enables or disables the password-based student login form.
+// Classic login can only be disabled when Azure AD is enabled; the flag is ignored otherwise.
+func (ah *AuthHandler) SetClassicLoginDisabled(disabled bool) {
+	ah.mu.Lock()
+	defer ah.mu.Unlock()
+	ah.classicLoginDisabled = disabled
 }
 
 // generateToken creates a secure random token
@@ -483,9 +492,15 @@ func (ah *AuthHandler) ServeStudentLogin(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Expires", "0")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
+	ah.mu.RLock()
+	azureADEnabled := ah.azureADEnabled
+	classicDisabled := ah.classicLoginDisabled && ah.azureADEnabled
+	ah.mu.RUnlock()
+
 	data := map[string]interface{}{
-		"Error":          r.URL.Query().Get("error"),
-		"AzureADEnabled": ah.azureADEnabled,
+		"Error":                r.URL.Query().Get("error"),
+		"AzureADEnabled":       azureADEnabled,
+		"ClassicLoginDisabled": classicDisabled,
 	}
 
 	if err := tmpl.ExecuteTemplate(w, "base", data); err != nil {
@@ -500,8 +515,17 @@ func (ah *AuthHandler) HandleStudentLogin(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if ah.studentPasswordHash == "" {
+	ah.mu.RLock()
+	storedHash := ah.studentPasswordHash
+	classicDisabled := ah.classicLoginDisabled && ah.azureADEnabled
+	ah.mu.RUnlock()
+
+	if storedHash == "" {
 		http.Redirect(w, r, "/student/login?error=Student+login+disabled", http.StatusSeeOther)
+		return
+	}
+	if classicDisabled {
+		http.Redirect(w, r, "/student/login?error=Password+login+is+disabled%2C+please+use+Microsoft+login", http.StatusSeeOther)
 		return
 	}
 
@@ -519,7 +543,7 @@ func (ah *AuthHandler) HandleStudentLogin(w http.ResponseWriter, r *http.Request
 	}
 
 	// Compare received SHA-256 hash with stored bcrypt(SHA-256(password)) hash
-	if !comparePassword(ah.studentPasswordHash, passwordHash) {
+	if !comparePassword(storedHash, passwordHash) {
 		log.Printf("Failed student login attempt")
 		http.Redirect(w, r, "/student/login?error=Invalid+password", http.StatusSeeOther)
 		return

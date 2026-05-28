@@ -44,12 +44,18 @@ type Handler struct {
 	ovhOptionsManager    *OVHOptionsManager
 	azureOptionsManager  *AzureOptionsManager
 	feedbackStore        *FeedbackStore
-	azureADConfigurer    func(clientID, clientSecret, tenantID string)
+	azureADConfigurer          func(clientID, clientSecret, tenantID string)
+	classicLoginConfigurer     func(disabled bool)
 }
 
 // SetAzureADConfigurer wires a callback so the handler can update Azure AD OAuth config at runtime.
 func (h *Handler) SetAzureADConfigurer(fn func(clientID, clientSecret, tenantID string)) {
 	h.azureADConfigurer = fn
+}
+
+// SetClassicLoginConfigurer wires a callback to enable/disable password-based student login at runtime.
+func (h *Handler) SetClassicLoginConfigurer(fn func(disabled bool)) {
+	h.classicLoginConfigurer = fn
 }
 
 // emailRegex is a simple email validation regex
@@ -2345,6 +2351,7 @@ func (h *Handler) SaveAzureADConfig(w http.ResponseWriter, r *http.Request) {
 	clientID := strings.TrimSpace(r.FormValue("azure_ad_client_id"))
 	clientSecret := strings.TrimSpace(r.FormValue("azure_ad_client_secret"))
 	tenantID := strings.TrimSpace(r.FormValue("azure_ad_tenant_id"))
+	disableClassic := r.FormValue("azure_ad_disable_classic_login") == "on"
 
 	// Preserve existing secret when the field is left blank (password fields submit empty on re-display)
 	if clientSecret == "" && h.azureOptionsManager != nil && clientID != "" {
@@ -2352,10 +2359,16 @@ func (h *Handler) SaveAzureADConfig(w http.ResponseWriter, r *http.Request) {
 		clientSecret = existing.ClientSecret
 	}
 
+	// Classic login can only be disabled when Azure AD credentials are provided
+	if clientID == "" {
+		disableClassic = false
+	}
+
 	cfg := AzureADConfig{
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
-		TenantID:     tenantID,
+		ClientID:            clientID,
+		ClientSecret:        clientSecret,
+		TenantID:            tenantID,
+		DisableClassicLogin: disableClassic,
 	}
 
 	if h.azureOptionsManager != nil {
@@ -2369,6 +2382,9 @@ func (h *Handler) SaveAzureADConfig(w http.ResponseWriter, r *http.Request) {
 
 	if h.azureADConfigurer != nil {
 		h.azureADConfigurer(clientID, clientSecret, tenantID)
+	}
+	if h.classicLoginConfigurer != nil {
+		h.classicLoginConfigurer(disableClassic)
 	}
 
 	if r.Header.Get("HX-Request") == "true" {

@@ -166,6 +166,17 @@
                                            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
                                     <small>Your Azure AD tenant ID (found in Azure Portal → Azure Active Directory)</small>
                                 </div>
+
+                                {{if .AzureAD.ClientID}}
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" name="azure_ad_disable_classic_login" id="azure_ad_disable_classic_login"
+                                               {{if .AzureAD.DisableClassicLogin}}checked{{end}}>
+                                        Disable password login for students
+                                    </label>
+                                    <small>When checked, the student password form is hidden and only Microsoft login is available. Has no effect if Azure AD is not configured.</small>
+                                </div>
+                                {{end}}
                             </div>
 
                             <div class="form-actions">
