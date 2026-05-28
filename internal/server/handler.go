@@ -36,14 +36,20 @@ import (
 
 // Handler handles HTTP requests
 type Handler struct {
-	jobManager          *JobManager
-	pulumiExec          *PulumiExecutor
-	templates           map[string]*template.Template
-	templatesMu         sync.RWMutex
-	credentialsManager  *CredentialsManager
-	ovhOptionsManager   *OVHOptionsManager
-	azureOptionsManager *AzureOptionsManager
-	feedbackStore       *FeedbackStore
+	jobManager           *JobManager
+	pulumiExec           *PulumiExecutor
+	templates            map[string]*template.Template
+	templatesMu          sync.RWMutex
+	credentialsManager   *CredentialsManager
+	ovhOptionsManager    *OVHOptionsManager
+	azureOptionsManager  *AzureOptionsManager
+	feedbackStore        *FeedbackStore
+	azureADConfigurer    func(clientID, clientSecret, tenantID string)
+}
+
+// SetAzureADConfigurer wires a callback so the handler can update Azure AD OAuth config at runtime.
+func (h *Handler) SetAzureADConfigurer(fn func(clientID, clientSecret, tenantID string)) {
+	h.azureADConfigurer = fn
 }
 
 // emailRegex is a simple email validation regex
@@ -2309,12 +2315,69 @@ func (h *Handler) ServeAzureOptions(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	azureAD := AzureADConfig{}
+	if h.azureOptionsManager != nil {
+		azureAD = h.azureOptionsManager.GetAzureADConfig()
+	}
+
 	data := map[string]interface{}{
 		"HasCache": hasCache,
 		"Regions":  regionsData,
 		"Config":   cfg,
+		"AzureAD":  azureAD,
 	}
 	h.serveTemplate(w, "azure-options.html", data)
+}
+
+// SaveAzureADConfig handles saving Azure AD OAuth configuration from the admin page.
+func (h *Handler) SaveAzureADConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<div class="error-message"><p>Failed to parse form</p></div>`)
+		return
+	}
+
+	clientID := strings.TrimSpace(r.FormValue("azure_ad_client_id"))
+	clientSecret := strings.TrimSpace(r.FormValue("azure_ad_client_secret"))
+	tenantID := strings.TrimSpace(r.FormValue("azure_ad_tenant_id"))
+
+	// Preserve existing secret when the field is left blank (password fields submit empty on re-display)
+	if clientSecret == "" && h.azureOptionsManager != nil && clientID != "" {
+		existing := h.azureOptionsManager.GetAzureADConfig()
+		clientSecret = existing.ClientSecret
+	}
+
+	cfg := AzureADConfig{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		TenantID:     tenantID,
+	}
+
+	if h.azureOptionsManager != nil {
+		if err := h.azureOptionsManager.SetAzureADConfig(cfg); err != nil {
+			log.Printf("SaveAzureADConfig: failed to persist: %v", err)
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprintf(w, `<div class="error-message"><p>Failed to save Azure AD config: %s</p></div>`, escapeHTML(err.Error()))
+			return
+		}
+	}
+
+	if h.azureADConfigurer != nil {
+		h.azureADConfigurer(clientID, clientSecret, tenantID)
+	}
+
+	if r.Header.Get("HX-Request") == "true" {
+		w.Header().Set("HX-Redirect", "/admin/azure-options#credentials")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<div class="success-message"><p>Azure AD configuration saved</p></div>`)
+	} else {
+		http.Redirect(w, r, "/admin/azure-options#credentials", http.StatusSeeOther)
+	}
 }
 
 // SaveAzureOptions handles saving Azure options admin preferences.

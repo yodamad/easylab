@@ -172,6 +172,34 @@ func NewAuthHandler() (*AuthHandler, error) {
 	return ah, nil
 }
 
+// ConfigureAzureAD updates the Azure AD OAuth config at runtime. Passing empty strings disables it.
+func (ah *AuthHandler) ConfigureAzureAD(clientID, clientSecret, tenantID string) {
+	ah.mu.Lock()
+	defer ah.mu.Unlock()
+
+	if clientID != "" && clientSecret != "" && tenantID != "" {
+		ah.azureADConfig = &oauth2.Config{
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
+			Scopes:       []string{"openid", "email", "profile"},
+			Endpoint:     microsoft.AzureADEndpoint(tenantID),
+		}
+		ah.azureADEnabled = true
+		log.Printf("Azure AD student login configured (tenant: %s)", tenantID)
+	} else {
+		ah.azureADConfig = nil
+		ah.azureADEnabled = false
+		log.Printf("Azure AD student login disabled")
+	}
+}
+
+// AzureADEnabled reports whether Azure AD login is currently enabled.
+func (ah *AuthHandler) AzureADEnabled() bool {
+	ah.mu.RLock()
+	defer ah.mu.RUnlock()
+	return ah.azureADEnabled
+}
+
 // generateToken creates a secure random token
 func generateToken() string {
 	bytes := make([]byte, 32)

@@ -114,6 +114,72 @@
                             <div id="status-content-azure"></div>
                         </div>
                     </div>
+
+                    <!-- Azure AD Configuration -->
+                    <div class="provider-section">
+                        <form id="azure-ad-form"
+                              method="POST"
+                              action="/api/azure-ad-config"
+                              hx-post="/api/azure-ad-config"
+                              hx-target="#save-response"
+                              hx-swap="innerHTML"
+                              hx-indicator="#azure-ad-loading"
+                              hx-boost="false">
+                            <div id="azure-ad-loading" class="htmx-indicator">
+                                <div class="spinner"></div>
+                                <p>Saving Azure AD configuration...</p>
+                            </div>
+
+                            <div class="form-section">
+                                <h2>Azure AD — Student Login (OAuth)</h2>
+                                <p class="section-description">Configure Azure AD (Entra ID) to allow students to log in with their Microsoft account. Leave all fields empty to disable.</p>
+
+                                {{if .AzureAD.ClientID}}
+                                <div class="info-box">
+                                    <p>Azure AD login is currently <strong>enabled</strong> (client ID configured).</p>
+                                </div>
+                                {{else}}
+                                <div class="info-box">
+                                    <p>Azure AD login is currently <strong>disabled</strong>. Fill in the fields below to enable it.</p>
+                                </div>
+                                {{end}}
+
+                                <div class="form-group">
+                                    <label for="azure_ad_client_id">Application (Client) ID</label>
+                                    <input type="text" id="azure_ad_client_id" name="azure_ad_client_id"
+                                           value="{{.AzureAD.ClientID}}"
+                                           placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                                    <small>The Application (client) ID of your Azure AD app registration</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="azure_ad_client_secret">Client Secret</label>
+                                    <input type="password" id="azure_ad_client_secret" name="azure_ad_client_secret"
+                                           {{if .AzureAD.ClientSecret}}placeholder="(saved — enter new value to change)"{{end}}>
+                                    <small>The client secret for your Azure AD app registration</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="azure_ad_tenant_id">Directory (Tenant) ID</label>
+                                    <input type="text" id="azure_ad_tenant_id" name="azure_ad_tenant_id"
+                                           value="{{.AzureAD.TenantID}}"
+                                           placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                                    <small>Your Azure AD tenant ID (found in Azure Portal → Azure Active Directory)</small>
+                                </div>
+                            </div>
+
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary">
+                                    <span class="btn-icon">💾</span> Save Azure AD Config
+                                </button>
+                                {{if .AzureAD.ClientID}}
+                                <button type="button" class="btn btn-secondary" onclick="document.getElementById('azure_ad_client_id').value='';document.getElementById('azure_ad_client_secret').value='';document.getElementById('azure_ad_tenant_id').value='';htmx.trigger('#azure-ad-form','submit');">
+                                    <span class="btn-icon">✕</span> Disable Azure AD Login
+                                </button>
+                                {{end}}
+                            </div>
+                        </form>
+                    </div>
                 </div>
             </div>
 

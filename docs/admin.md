@@ -182,9 +182,21 @@ EasyLab can delegate student login to Azure AD (Microsoft Entra ID). When enable
 4. Note the **Application (client) ID** and **Directory (tenant) ID** from the Overview page.
 5. Under **API permissions**, ensure the following delegated permissions are granted: `openid`, `email`, `profile`.
 
-### Configuration — environment variables
+### Configuration — admin UI (recommended)
 
-Set the following three variables at startup (in your `.env` file or as Docker environment variables):
+The easiest way to configure Azure AD is through the admin interface:
+
+1. Go to **Provider → Azure** in the header (or navigate to `/admin/azure-options`).
+2. Select the **Credentials** tab.
+3. Scroll down to the **Azure AD — Student Login (OAuth)** section.
+4. Enter the **Application (Client) ID**, **Client Secret**, and **Directory (Tenant) ID**.
+5. Click **Save Azure AD Config**.
+
+The configuration is persisted to disk and takes effect immediately — no restart required. Click **Disable Azure AD Login** (visible when a client ID is saved) to clear the configuration.
+
+### Configuration — environment variables (alternative)
+
+You can also set the following three variables at startup (in your `.env` file or as Docker environment variables):
 
 | Variable | Description |
 |---|---|
@@ -192,10 +204,10 @@ Set the following three variables at startup (in your `.env` file or as Docker e
 | `AZURE_AD_CLIENT_SECRET` | Client secret value created in the app registration |
 | `AZURE_AD_TENANT_ID` | Directory (tenant) ID |
 
-If any of the three variables is absent, Azure AD login is disabled and only the password form is shown.
+If any of the three variables is absent and no UI configuration is saved, Azure AD login is disabled.
 
 !!! note
-    These are separate from the Azure infrastructure credentials (`AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` / `AZURE_TENANT_ID`) used for AKS provisioning. You may use a dedicated app registration for student SSO.
+    UI-saved configuration takes precedence over environment variables if both are present at startup. These are also separate from the Azure infrastructure credentials (`AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` / `AZURE_TENANT_ID`) used for AKS provisioning.
 
 ## Provider credentials
 

@@ -212,7 +212,14 @@ func main() {
 	// Initialize handler (depends on all components)
 	handlerStart := time.Now()
 	handler = server.NewHandler(jobManager, pulumiExec, credentialsManager, ovhOptionsManager, azureOptionsManager, feedbackStore)
+	handler.SetAzureADConfigurer(authHandler.ConfigureAzureAD)
 	log.Printf("[STARTUP] Handler initialization took %v", time.Since(handlerStart))
+
+	// Apply persisted Azure AD config (overrides env vars if set via UI)
+	if azureAD := azureOptionsManager.GetAzureADConfig(); azureAD.ClientID != "" && azureAD.ClientSecret != "" && azureAD.TenantID != "" {
+		authHandler.ConfigureAzureAD(azureAD.ClientID, azureAD.ClientSecret, azureAD.TenantID)
+		log.Printf("[STARTUP] Azure AD config loaded from persisted storage")
+	}
 
 	go handler.StartWorkspaceCleanup(appCtx)
 
@@ -306,6 +313,7 @@ func main() {
 	mux.HandleFunc("/api/azure-options/region-vm-sizes", authHandler.RequireAuth(handler.GetAzureOptionsRegionVMSizeHTML))
 	mux.HandleFunc("/api/azure-options", authHandler.RequireAuth(handler.SaveAzureOptions))
 	mux.HandleFunc("/api/azure-options/refresh", authHandler.RequireAuth(handler.RefreshAzureOptions))
+	mux.HandleFunc("/api/azure-ad-config", authHandler.RequireAuth(handler.SaveAzureADConfig))
 	mux.HandleFunc("/api/templates/detect-variables", authHandler.RequireAuth(handler.DetectTemplateVariables))
 	mux.HandleFunc("/api/labs", authHandler.RequireAuth(handler.CreateLab))
 	mux.HandleFunc("/api/labs/dry-run", authHandler.RequireAuth(handler.DryRunLab))

@@ -16,10 +16,18 @@ type AzureItemConfig struct {
 	Default string   `json:"default"`
 }
 
+// AzureADConfig holds Azure AD OAuth configuration for student login.
+type AzureADConfig struct {
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+	TenantID     string `json:"tenant_id"`
+}
+
 // AzureOptionsConfig is persisted admin preferences for Azure regions and VM sizes.
 type AzureOptionsConfig struct {
 	Regions  AzureItemConfig            `json:"regions"`
 	VMSizes  map[string]AzureItemConfig `json:"vm_sizes"`
+	AzureAD  AzureADConfig              `json:"azure_ad,omitempty"`
 }
 
 // AzureOptionsManager caches Azure locations and VM sizes and applies admin filtering.
@@ -101,6 +109,21 @@ func (m *AzureOptionsManager) SaveConfig() error {
 		return fmt.Errorf("failed to write azure-options config: %w", err)
 	}
 	return nil
+}
+
+// GetAzureADConfig returns the persisted Azure AD OAuth configuration.
+func (m *AzureOptionsManager) GetAzureADConfig() AzureADConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.config.AzureAD
+}
+
+// SetAzureADConfig updates the Azure AD OAuth configuration and persists it.
+func (m *AzureOptionsManager) SetAzureADConfig(cfg AzureADConfig) error {
+	m.mu.Lock()
+	m.config.AzureAD = cfg
+	m.mu.Unlock()
+	return m.SaveConfig()
 }
 
 // SetConfig replaces admin preferences (from the admin save handler).
