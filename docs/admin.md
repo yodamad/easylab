@@ -194,6 +194,8 @@ The easiest way to configure Azure AD is through the admin interface:
 
 The configuration is persisted to disk and takes effect immediately — no restart required. Click **Disable Azure AD Login** (visible when a client ID is saved) to clear the configuration.
 
+Once a client ID is saved, an additional option appears: **Disable password login for students**. When this checkbox is enabled, the student password form is hidden on the login page and students can only authenticate via Microsoft. Has no effect if Azure AD is not configured.
+
 ### Configuration — environment variables (alternative)
 
 You can also set the following three variables at startup (in your `.env` file or as Docker environment variables):

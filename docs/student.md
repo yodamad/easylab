@@ -25,6 +25,8 @@ If the workshop organiser has configured Azure AD authentication, a **Sign in wi
 
 After a successful Azure AD login, your Coder account is created automatically using your Microsoft email address, exactly as with the password-based flow.
 
+If the organiser has also enabled **Disable password login for students**, the password form is hidden entirely and only the Microsoft login button is shown.
+
 ## Request a new development environment
 
 The request a new development environment page is the main page of the student space. It allows you to request a new development environment.
@@ -62,6 +64,8 @@ Each card shows:
 * **Password** — your workspace password, encrypted or in clear text (with a copy button)
 * **Lab ID** — the lab this workspace belongs to
 * **Created at** — when the workspace was created
+
+An **Open Code Server** button is available on each card header. Click it to open your code-server directly in a new tab — EasyLab resolves the workspace URL automatically so you don't need to copy it manually.
 
 ### Encrypting and decrypting credentials
 
