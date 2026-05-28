@@ -731,6 +731,19 @@ function handleProviderChange() {
     }
 }
 
+// Show/hide DNS provider-specific credential fields when dns_provider changes.
+function handleDNSProviderChange() {
+    const select = document.getElementById('dns_provider');
+    if (!select) return;
+    const provider = select.value;
+
+    const zoneGroup = document.getElementById('dns_zone_group');
+    const ovhFields = document.getElementById('dns-ovh-fields');
+
+    if (zoneGroup) zoneGroup.style.display = provider ? '' : 'none';
+    if (ovhFields) ovhFields.style.display = provider === 'ovh' ? '' : 'none';
+}
+
 // Fetch Azure VM sizes for the selected location
 function loadAzureVMSizes() {
     const locationSelect = document.getElementById('azure_location');
@@ -948,6 +961,14 @@ document.addEventListener('DOMContentLoaded', function() {
         providerSelect.addEventListener('change', handleProviderChange);
         // Apply initial state
         handleProviderChange();
+    }
+
+    // Handle DNS provider selection change
+    const dnsProviderSelect = document.getElementById('dns_provider');
+    if (dnsProviderSelect) {
+        dnsProviderSelect.addEventListener('change', handleDNSProviderChange);
+        // Apply initial state (all DNS fields hidden by default)
+        handleDNSProviderChange();
     }
 
     // Reload flavors when region selection changes (OVH)

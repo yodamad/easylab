@@ -119,6 +119,18 @@ const CoderTemplateSource = "templateSource"
 const CoderTemplateGitRepo = "templateGitRepo"
 const CoderTemplateGitFolder = "templateGitFolder"
 const CoderTemplateGitBranch = "templateGitBranch"
+const CoderDomain = "domain"
+const CoderAcmeEmail = "acmeEmail"
+const CoderWildcardDomain = "wildcardDomain"
+
+// DNS provider config group
+const DNSGroup          = "dns"
+const DNSProviderKey    = "provider"
+const DNSZone           = "zone"
+const DNSOvhAppKey      = "ovhAppKey"
+const DNSOvhAppSecret   = "ovhAppSecret"
+const DNSOvhConsumerKey = "ovhConsumerKey"
+const DNSOvhEndpoint    = "ovhEndpoint"
 
 func CoderConfig(ctx *pulumi.Context, key string) string {
 	return getConfig(ctx, CoderGroup, key)
@@ -127,6 +139,11 @@ func CoderConfig(ctx *pulumi.Context, key string) string {
 // CoderConfigOptional returns an optional config value (empty string if not set)
 func CoderConfigOptional(ctx *pulumi.Context, key string) string {
 	return config.New(ctx, CoderGroup).Get(key)
+}
+
+// DNSConfigOptional returns an optional dns: config value (empty string if not set)
+func DNSConfigOptional(ctx *pulumi.Context, key string) string {
+	return config.New(ctx, DNSGroup).Get(key)
 }
 
 const CoderTemplatesKey = "templates"

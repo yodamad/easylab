@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"easylab/coder"
+	dnsregistry "easylab/internal/providers/dns"
+	_ "easylab/internal/providers/dns/ovh" // register OVH DNS provider
 	internalPulumi "easylab/internal/pulumi"
 	"easylab/utils"
 
@@ -1437,6 +1439,31 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 			log.Printf("Failed to marshal Coder templates: %v", err)
 		} else {
 			commands = append(commands, configCommand{"coder:templates", string(templatesJSON), false})
+		}
+	}
+
+	// HTTPS / ingress configuration
+	if config.CoderDomain != "" {
+		commands = append(commands,
+			configCommand{"coder:domain", config.CoderDomain, false},
+			configCommand{"coder:acmeEmail", config.CoderAcmeEmail, false},
+		)
+		if config.CoderWildcardDomain != "" {
+			commands = append(commands, configCommand{"coder:wildcardDomain", config.CoderWildcardDomain, false})
+		}
+	}
+
+	// DNS provider configuration (for A-record automation and DNS-01 cert issuance)
+	if config.DNSProvider != "" {
+		commands = append(commands,
+			configCommand{"dns:provider", config.DNSProvider, false},
+			configCommand{"dns:zone", config.DNSZone, false},
+		)
+		if dnsP, _ := dnsregistry.Get(config.DNSProvider); dnsP != nil {
+			for _, f := range dnsP.GetCredentialFields() {
+				val := config.DNSCredentials[f.Name]
+				commands = append(commands, configCommand{"dns:" + f.Name, val, f.IsSecret})
+			}
 		}
 	}
 

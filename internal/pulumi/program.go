@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 
+	_ "easylab/internal/providers/dns/ovh" // register OVH DNS provider
+
 	k8sPkg "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
@@ -38,6 +40,7 @@ func CreateLabProgram(jobDir string) pulumi.RunFunc {
 		useExisting := utils.K8sConfigOptional(ctx, utils.K8sUseExistingCluster)
 
 		var k8sProvider *k8sPkg.Provider
+		var kubeconfigOut pulumi.StringOutput
 
 		if useExisting == "true" {
 			utils.LogInfo(ctx, "Using existing Kubernetes cluster...")
@@ -52,6 +55,10 @@ func CreateLabProgram(jobDir string) pulumi.RunFunc {
 			k8sProvider, err = k8s.InitK8sProviderFromKubeconfig(ctx, absKubeconfigPath)
 			if err != nil {
 				return fmt.Errorf("failed to create Kubernetes provider from kubeconfig: %w", err)
+			}
+			kubeconfigOut, err = k8s.KubeconfigFromFile(absKubeconfigPath)
+			if err != nil {
+				return fmt.Errorf("failed to read kubeconfig: %w", err)
 			}
 		} else {
 			location := utils.AzureConfigOptional(ctx, utils.AzureLocation)
@@ -89,6 +96,7 @@ func CreateLabProgram(jobDir string) pulumi.RunFunc {
 				}
 
 				kubeconfig := azure.GetKubeconfig(ctx, cluster, rg)
+				kubeconfigOut = kubeconfig
 
 				k8sProvider, err = k8s.InitK8sProviderFromString(ctx, kubeconfig, []pulumi.Resource{cluster})
 				if err != nil {
@@ -118,6 +126,7 @@ func CreateLabProgram(jobDir string) pulumi.RunFunc {
 				if err != nil {
 					return fmt.Errorf("failed to create Kubernetes provider: %w", err)
 				}
+				kubeconfigOut = kubeCluster.Kubeconfig
 			}
 		}
 
@@ -132,13 +141,24 @@ func CreateLabProgram(jobDir string) pulumi.RunFunc {
 			return fmt.Errorf("failed to setup infrastructure: %w", err)
 		}
 
-		extIp, err := k8s.GetExternalIP(ctx, k8sProvider, infraResult.CoderRelease)
+		extIp, err := k8s.GetExternalIP(ctx, kubeconfigOut, infraResult.CoderRelease)
 		if err != nil {
 			return fmt.Errorf("failed to get external IP: %w", err)
 		}
 
-		ctx.Export("coderURL", pulumi.Sprintf("http://%s", extIp))
 		ctx.Export("externalIp", extIp)
+
+		domain := utils.CoderConfigOptional(ctx, utils.CoderDomain)
+		if domain != "" {
+			_, ingressIP, httpsErr := coder.SetupHTTPS(ctx, k8sProvider, ns, infraResult.CoderRelease, kubeconfigOut)
+			if httpsErr != nil {
+				return fmt.Errorf("failed to setup HTTPS ingress: %w", httpsErr)
+			}
+			ctx.Export("ingressIP", ingressIP)
+			ctx.Export("coderURL", pulumi.Sprintf("https://%s", domain))
+		} else {
+			ctx.Export("coderURL", pulumi.Sprintf("http://%s", extIp))
+		}
 
 		utils.LogInfo(ctx, "Infrastructure setup completed! Coder initialization continues after deployment.")
 		return nil

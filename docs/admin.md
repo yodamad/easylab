@@ -107,6 +107,38 @@ Use **Add Template** to define additional templates. For each template you can:
 
 At least one template is required. Students can request **one workspace per template** within a lab, so multiple templates let them get multiple workspaces in the same environment (e.g. one Docker workspace and one Go workspace).
 
+#### HTTPS Configuration (Optional)
+
+By default, Coder is exposed via a plain HTTP LoadBalancer IP. To expose it over HTTPS with a trusted TLS certificate, fill in the **HTTPS Configuration** section:
+
+* **Domain Name** — the FQDN you want Coder to be accessible at (e.g. `coder.example.com`). Leave blank to keep HTTP.
+* **ACME Email** — email address used for Let's Encrypt certificate notifications. Required when domain is set.
+* **Wildcard Domain** — optional, e.g. `*.coder.example.com`. Enables per-workspace URLs (requires a DNS provider configured below).
+
+When a domain is set, the following additional components are deployed into the cluster:
+
+* **ingress-nginx** — Kubernetes ingress controller (gets its own LoadBalancer IP, exported as `ingressIP`).
+* **cert-manager** — automates TLS certificate issuance from Let's Encrypt.
+
+After `pulumi up` completes, the stack output `ingressIP` is printed. **You must create a DNS A record** pointing `<domain> → <ingressIP>` in your DNS provider before the TLS certificate can be issued.
+
+#### DNS Provider (Optional)
+
+Select a DNS provider to automate A-record creation and unlock wildcard certificates (DNS-01 challenge):
+
+| Provider | Setup required |
+|----------|---------------|
+| **OVH DNS** | OVH application key, secret, and consumer key with `/domain/zone/*` permissions |
+
+When a DNS provider is configured:
+
+1. EasyLab automatically creates the A record `<domain> → <ingressIP>` during deployment.
+2. cert-manager uses DNS-01 (instead of HTTP-01) to prove domain ownership, which supports wildcard certificates.
+3. The wildcard A record `*.<domain>` is also created if a **Wildcard Domain** is set.
+
+!!! note "OVH DNS credentials"
+    The OVH credentials for DNS management may differ from your cloud project credentials. Create a separate OVH application at <https://www.ovh.com/auth/api/createApp> with access to the `/domain/zone/*` endpoints.
+
 ### Template Variables
 
 Coder templates can define Terraform `variable` blocks that need values at installation time. EasyLab supports setting these variables per template.

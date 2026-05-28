@@ -26,6 +26,8 @@ import (
 	"sync"
 	"time"
 
+	dnsregistry "easylab/internal/providers/dns"
+
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -328,6 +330,22 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 		CoderDbPassword:    r.FormValue("coder_db_password"),
 		CoderDbName:        r.FormValue("coder_db_name"),
 		CoderTemplates:     templates,
+
+		CoderDomain:         r.FormValue("coder_domain"),
+		CoderAcmeEmail:      r.FormValue("coder_acme_email"),
+		CoderWildcardDomain: r.FormValue("coder_wildcard_domain"),
+
+		DNSProvider: r.FormValue("dns_provider"),
+		DNSZone:     r.FormValue("dns_zone"),
+	}
+
+	if config.DNSProvider != "" {
+		if dnsP, _ := dnsregistry.Get(config.DNSProvider); dnsP != nil {
+			config.DNSCredentials = make(map[string]string)
+			for _, f := range dnsP.GetCredentialFields() {
+				config.DNSCredentials[f.Name] = r.FormValue("dns_cred_" + f.Name)
+			}
+		}
 	}
 
 	workspaceLifetime, _ := strconv.Atoi(r.FormValue("workspace_lifetime_hours"))

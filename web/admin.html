@@ -402,7 +402,65 @@
                                 </div>
                                 <small>Auto-delete workspaces after this duration. Leave 0 to disable.</small>
                             </div>
-                        </div>                        
+                        </div>
+
+                        <h3 class="subsection-title">HTTPS Configuration (Optional)</h3>
+                        <p class="section-description">Leave blank to use plain HTTP with the LoadBalancer IP. When a domain is set, cert-manager and ingress-nginx are deployed automatically.</p>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="coder_domain">Domain Name</label>
+                                <input type="text" id="coder_domain" name="coder_domain" placeholder="coder.example.com">
+                                <small>FQDN for Coder HTTPS. After deployment, point an A record to the printed <code>ingressIP</code>.</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="coder_acme_email">ACME Email</label>
+                                <input type="email" id="coder_acme_email" name="coder_acme_email" placeholder="you@example.com">
+                                <small>Required when domain is set. Used for Let's Encrypt certificate notifications.</small>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="coder_wildcard_domain">Wildcard Domain (Optional)</label>
+                            <input type="text" id="coder_wildcard_domain" name="coder_wildcard_domain" placeholder="*.coder.example.com">
+                            <small>Enables per-workspace URLs (e.g. <code>myworkspace.coder.example.com</code>). Requires a DNS provider configured below.</small>
+                        </div>
+
+                        <h3 class="subsection-title">DNS Provider (Optional)</h3>
+                        <p class="section-description">Automates DNS A-record creation and enables wildcard TLS certificates via DNS-01 challenge.</p>
+                        <div class="form-group">
+                            <label for="dns_provider">DNS Provider</label>
+                            <select id="dns_provider" name="dns_provider">
+                                <option value="">None (configure DNS manually)</option>
+                                <option value="ovh">OVH DNS</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="dns_zone_group" style="display:none">
+                            <label for="dns_zone">DNS Zone</label>
+                            <input type="text" id="dns_zone" name="dns_zone" placeholder="example.com">
+                            <small>The DNS zone that contains the domain above.</small>
+                        </div>
+                        <div id="dns-ovh-fields" style="display:none">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="dns_cred_ovhAppKey">OVH Application Key</label>
+                                    <input type="text" id="dns_cred_ovhAppKey" name="dns_cred_ovhAppKey" placeholder="your-app-key">
+                                </div>
+                                <div class="form-group">
+                                    <label for="dns_cred_ovhAppSecret">OVH Application Secret</label>
+                                    <input type="password" id="dns_cred_ovhAppSecret" name="dns_cred_ovhAppSecret">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="dns_cred_ovhConsumerKey">OVH Consumer Key</label>
+                                    <input type="password" id="dns_cred_ovhConsumerKey" name="dns_cred_ovhConsumerKey">
+                                </div>
+                                <div class="form-group">
+                                    <label for="dns_cred_ovhEndpoint">OVH Endpoint (Optional)</label>
+                                    <input type="text" id="dns_cred_ovhEndpoint" name="dns_cred_ovhEndpoint" placeholder="ovh-eu">
+                                </div>
+                            </div>
+                            <small>OVH application must have <code>/domain/zone/*</code> permissions. Enables wildcard TLS and automated A-record creation.</small>
+                        </div>
 
                         <div class="form-group">
                             <label>Coder Templates *</label>

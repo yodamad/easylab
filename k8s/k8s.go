@@ -1,8 +1,14 @@
 package k8s
 
 import (
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
+	"time"
 
 	"easylab/utils"
 
@@ -12,6 +18,7 @@ import (
 	"github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/helm/v3"
 	k8smeta "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/meta/v1"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
+	"gopkg.in/yaml.v3"
 )
 
 func InitK8sProvider(ctx *pulumi.Context, kubeCluster *cloudproject.Kube, nodePools []*cloudproject.KubeNodePool) (*k8s.Provider, error) {
@@ -63,6 +70,15 @@ func InitK8sProviderFromKubeconfig(ctx *pulumi.Context, kubeconfigPath string) (
 	return provider, nil
 }
 
+// KubeconfigFromFile reads a kubeconfig file and returns its content as a StringOutput.
+func KubeconfigFromFile(kubeconfigPath string) (pulumi.StringOutput, error) {
+	content, err := os.ReadFile(kubeconfigPath)
+	if err != nil {
+		return pulumi.StringOutput{}, fmt.Errorf("failed to read kubeconfig from %s: %w", kubeconfigPath, err)
+	}
+	return pulumi.String(string(content)).ToStringOutput(), nil
+}
+
 func InitNamespace(ctx *pulumi.Context, provider *k8s.Provider) (*k8score.Namespace, error) {
 	nsName := utils.CoderConfigOptional(ctx, utils.CoderNamespace)
 	if nsName == "" {
@@ -79,26 +95,176 @@ func InitNamespace(ctx *pulumi.Context, provider *k8s.Provider) (*k8score.Namesp
 	return namespace, nil
 }
 
-func GetExternalIP(ctx *pulumi.Context, provider *k8s.Provider, coderRelease *helm.Release) (pulumi.StringOutput, error) {
+// GetExternalIP returns the LoadBalancer IP assigned to the Coder service.
+// kubeconfigOut is the kubeconfig content as a StringOutput, used to call the
+// Kubernetes API directly — bypassing the Pulumi provider's pending-initialisation
+// await which blocks indefinitely when OVHcloud sets ipMode:VIP on LoadBalancer services.
+func GetExternalIP(ctx *pulumi.Context, kubeconfigOut pulumi.StringOutput, coderRelease *helm.Release) (pulumi.StringOutput, error) {
 	nsName := utils.CoderConfigOptional(ctx, utils.CoderNamespace)
 	if nsName == "" {
 		nsName = "coder"
 	}
-	serviceID := nsName + "/coder"
-	service, err := k8score.GetService(ctx, "coder", pulumi.ID(serviceID), nil, pulumi.Provider(provider), pulumi.DependsOn([]pulumi.Resource{coderRelease}))
-	if err != nil {
-		return pulumi.StringOutput{}, fmt.Errorf("failed to get coder service: %w", err)
+
+	externalIP := GetServiceIP(kubeconfigOut, coderRelease.ResourceNames, nsName, "coder")
+	ctx.Export("externalIP", externalIP)
+	return externalIP, nil
+}
+
+// GetServiceIP returns the LoadBalancer IP of a Kubernetes service by calling the
+// Kubernetes API directly, bypassing Pulumi's provider await machinery.
+// kubeconfigOut is the kubeconfig content as a StringOutput.
+// trigger is any Pulumi output whose resolution gates this lookup, ensuring the
+// service exists before the read (e.g. a Helm release's ResourceNames output).
+func GetServiceIP(kubeconfigOut pulumi.StringOutput, trigger interface{}, namespace, name string) pulumi.StringOutput {
+	return pulumi.All(kubeconfigOut, trigger).ApplyT(func(args []interface{}) (string, error) {
+		kubeconfig, _ := args[0].(string)
+		if kubeconfig == "" {
+			return "", fmt.Errorf("kubeconfig is empty")
+		}
+		return fetchServiceIP(kubeconfig, namespace, name)
+	}).(pulumi.StringOutput)
+}
+
+// kubeconfigYAML is a minimal struct for parsing the fields we need from a kubeconfig file.
+type kubeconfigYAML struct {
+	Clusters []struct {
+		Cluster struct {
+			Server                   string `yaml:"server"`
+			CertificateAuthorityData string `yaml:"certificate-authority-data"`
+		} `yaml:"cluster"`
+		Name string `yaml:"name"`
+	} `yaml:"clusters"`
+	Users []struct {
+		User struct {
+			ClientCertificateData string `yaml:"client-certificate-data"`
+			ClientKeyData         string `yaml:"client-key-data"`
+		} `yaml:"user"`
+		Name string `yaml:"name"`
+	} `yaml:"users"`
+	Contexts []struct {
+		Context struct {
+			Cluster string `yaml:"cluster"`
+			User    string `yaml:"user"`
+		} `yaml:"context"`
+		Name string `yaml:"name"`
+	} `yaml:"contexts"`
+	CurrentContext string `yaml:"current-context"`
+}
+
+// fetchServiceIP reads a service's LoadBalancer IP via a direct HTTPS call to the
+// Kubernetes API, using client-certificate credentials from the kubeconfig content.
+// It retries for up to 10 minutes to handle the race condition where the cloud
+// provider (e.g. OVHcloud) has not yet assigned the LoadBalancer IP.
+func fetchServiceIP(kubeconfigContent, namespace, serviceName string) (string, error) {
+	var kc kubeconfigYAML
+	if err := yaml.Unmarshal([]byte(kubeconfigContent), &kc); err != nil {
+		return "", fmt.Errorf("failed to parse kubeconfig: %w", err)
 	}
 
-	// Attendre que l'IP externe soit assignée et la retourner
-	externalIP := service.Status.LoadBalancer().Ingress().Index(pulumi.Int(0)).Ip().ApplyT(func(ip *string) string {
-		if ip != nil {
-			return *ip
+	var clusterName, userName string
+	for _, c := range kc.Contexts {
+		if c.Name == kc.CurrentContext {
+			clusterName = c.Context.Cluster
+			userName = c.Context.User
+			break
 		}
-		return ""
-	}).(pulumi.StringOutput)
+	}
 
-	ctx.Export("externalIP", externalIP)
+	var serverURL, caCertB64 string
+	for _, c := range kc.Clusters {
+		if c.Name == clusterName {
+			serverURL = c.Cluster.Server
+			caCertB64 = c.Cluster.CertificateAuthorityData
+			break
+		}
+	}
 
-	return externalIP, nil
+	var clientCertB64, clientKeyB64 string
+	for _, u := range kc.Users {
+		if u.Name == userName {
+			clientCertB64 = u.User.ClientCertificateData
+			clientKeyB64 = u.User.ClientKeyData
+			break
+		}
+	}
+
+	caCertPEM, err := base64.StdEncoding.DecodeString(caCertB64)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode CA cert: %w", err)
+	}
+	clientCertPEM, err := base64.StdEncoding.DecodeString(clientCertB64)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode client cert: %w", err)
+	}
+	clientKeyPEM, err := base64.StdEncoding.DecodeString(clientKeyB64)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode client key: %w", err)
+	}
+
+	cert, err := tls.X509KeyPair(clientCertPEM, clientKeyPEM)
+	if err != nil {
+		return "", fmt.Errorf("failed to build TLS key pair: %w", err)
+	}
+	caCertPool := x509.NewCertPool()
+	if !caCertPool.AppendCertsFromPEM(caCertPEM) {
+		return "", fmt.Errorf("failed to parse CA certificate")
+	}
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				Certificates: []tls.Certificate{cert},
+				RootCAs:      caCertPool,
+			},
+		},
+	}
+
+	apiURL := fmt.Sprintf("%s/api/v1/namespaces/%s/services/%s", serverURL, namespace, serviceName)
+
+	// Retry for up to 10 minutes (40 × 15 s). This handles two cases:
+	//   1. The cloud provider hasn't assigned the LoadBalancer IP yet.
+	//   2. The API server is temporarily unreachable (transient network blip).
+	var lastErr error
+	for attempt := 0; attempt < 40; attempt++ {
+		if attempt > 0 {
+			time.Sleep(15 * time.Second)
+		}
+
+		resp, reqErr := client.Get(apiURL)
+		if reqErr != nil {
+			lastErr = fmt.Errorf("attempt %d: failed to call Kubernetes API: %w", attempt+1, reqErr)
+			continue
+		}
+
+		if resp.StatusCode == http.StatusNotFound {
+			resp.Body.Close()
+			return "", fmt.Errorf("service %s/%s not found in cluster", namespace, serviceName)
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return "", fmt.Errorf("Kubernetes API returned status %d for service %s/%s", resp.StatusCode, namespace, serviceName)
+		}
+
+		var svcStatus struct {
+			Status struct {
+				LoadBalancer struct {
+					Ingress []struct {
+						IP string `json:"ip"`
+					} `json:"ingress"`
+				} `json:"loadBalancer"`
+			} `json:"status"`
+		}
+		if decodeErr := json.NewDecoder(resp.Body).Decode(&svcStatus); decodeErr != nil {
+			resp.Body.Close()
+			return "", fmt.Errorf("failed to decode Kubernetes API response: %w", decodeErr)
+		}
+		resp.Body.Close()
+
+		if len(svcStatus.Status.LoadBalancer.Ingress) > 0 && svcStatus.Status.LoadBalancer.Ingress[0].IP != "" {
+			return svcStatus.Status.LoadBalancer.Ingress[0].IP, nil
+		}
+		lastErr = fmt.Errorf("attempt %d: service %s/%s has no LoadBalancer IP yet", attempt+1, namespace, serviceName)
+	}
+	return "", fmt.Errorf("timed out waiting 10 min for LoadBalancer IP of service %s/%s: %w", namespace, serviceName, lastErr)
 }

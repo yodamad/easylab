@@ -156,20 +156,36 @@ func SetupInfrastructureParallel(ctx *pulumi.Context, k8sProvider *k8s.Provider,
 }
 
 func SetupCoder(ctx *pulumi.Context, k8sProvider *k8s.Provider, ns *k8score.Namespace) (*helmv3.Release, error) {
+	envVars := pulumi.Array{
+		pulumi.Map{
+			"name":  pulumi.String("CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS"),
+			"value": pulumi.String("false"),
+		},
+	}
+
+	if domain := utils.CoderConfigOptional(ctx, utils.CoderDomain); domain != "" {
+		envVars = append(envVars, pulumi.Map{
+			"name":  pulumi.String("CODER_ACCESS_URL"),
+			"value": pulumi.String("https://" + domain),
+		})
+		if wildcard := utils.CoderConfigOptional(ctx, utils.CoderWildcardDomain); wildcard != "" {
+			envVars = append(envVars, pulumi.Map{
+				"name":  pulumi.String("CODER_WILDCARD_ACCESS_URL"),
+				"value": pulumi.String(wildcard),
+			})
+		}
+	}
+
 	helmValues := internalK8s.HelmChartInfo{
 		Name:        "coder",
 		ChartName:   "coder",
 		Version:     utils.CoderConfig(ctx, utils.CoderVersion),
 		Url:         "https://helm.coder.com/v2",
-		ReleaseName: "coder", // Explicit name to avoid Pulumi-generated suffixes and Helm ownership conflicts
+		ReleaseName: "coder",
+		SkipAwait:   true, // Don't block on pod readiness — Coder runs DB migrations on first start which keeps the readiness probe failing for 20-30 min
 		Values: pulumi.Map{
 			"coder": pulumi.Map{
-				"env": pulumi.Array{
-					pulumi.Map{
-						"name":  pulumi.String("CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS"),
-						"value": pulumi.String("false"),
-					},
-				},
+				"env": envVars,
 			},
 		},
 	}

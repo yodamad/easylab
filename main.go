@@ -64,7 +64,7 @@ func main() {
 			return fmt.Errorf("failed to setup coder: %w", err)
 		}
 
-		extIp, err := k8s.GetExternalIP(ctx, k8sProvider, coderRelease)
+		extIp, err := k8s.GetExternalIP(ctx, kubeCluster.Kubeconfig, coderRelease)
 		if err != nil {
 			return fmt.Errorf("failed to get external IP: %w", err)
 		}

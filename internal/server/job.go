@@ -123,6 +123,16 @@ type LabConfig struct {
 	AzureTenantID       string `json:"azure_tenant_id,omitempty"`
 	AzureSubscriptionID string `json:"azure_subscription_id,omitempty"`
 	AzureLocation       string `json:"azure_location,omitempty"`
+
+	// HTTPS / ingress configuration
+	CoderDomain         string `json:"coder_domain,omitempty"`
+	CoderAcmeEmail      string `json:"coder_acme_email,omitempty"`
+	CoderWildcardDomain string `json:"coder_wildcard_domain,omitempty"`
+
+	// DNS provider for automated A-record creation and DNS-01 cert issuance
+	DNSProvider        string            `json:"dns_provider,omitempty"`
+	DNSZone            string            `json:"dns_zone,omitempty"`
+	DNSCredentials     map[string]string `json:"dns_credentials,omitempty"`
 }
 
 // GetCoderTemplates returns the list of Coder templates, migrating from legacy single-template fields if needed
