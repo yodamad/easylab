@@ -315,6 +315,8 @@ func main() {
 			handler.ListLabWorkspaces(w, r)
 		case strings.Contains(path, "/workspaces/") && strings.Contains(path, "delete") && r.Method == http.MethodPost:
 			handler.DeleteWorkspace(w, r)
+		case strings.HasSuffix(path, "/delete") && !strings.Contains(path, "/workspaces") && r.Method == http.MethodPost:
+			handler.DeleteLab(w, r)
 		case strings.HasSuffix(path, "/retry"):
 			handler.RetryJob(w, r)
 		case strings.HasSuffix(path, "/templates/upload") && r.Method == http.MethodPost:

@@ -3249,6 +3249,45 @@ func buildWorkspaceName(labName, labID string, templateName string) string {
 	return name
 }
 
+// DeleteLab removes a destroyed or failed lab from the list and its persisted file.
+func (h *Handler) DeleteLab(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract lab ID from path: /api/labs/{id}/delete or /api/jobs/{id}/delete
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 4 || pathParts[0] != "api" || (pathParts[1] != "labs" && pathParts[1] != "jobs") || pathParts[3] != "delete" {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	labID := pathParts[2]
+
+	job, exists := h.jobManager.GetJob(labID)
+	if !exists {
+		http.Error(w, "Lab not found", http.StatusNotFound)
+		return
+	}
+
+	job.mu.RLock()
+	status := job.Status
+	job.mu.RUnlock()
+
+	if status != JobStatusDestroyed && status != JobStatusFailed {
+		http.Error(w, "Lab can only be removed when destroyed or failed", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.jobManager.RemoveJob(labID); err != nil {
+		log.Printf("Failed to remove lab %s: %v", labID, err)
+		http.Error(w, fmt.Sprintf("Failed to remove lab: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, "/labs", http.StatusSeeOther)
+}
+
 // DetectTemplateVariables parses uploaded .tf/.zip files or clones a Git repo
 // to extract Terraform variable blocks from template source files.
 func (h *Handler) DetectTemplateVariables(w http.ResponseWriter, r *http.Request) {

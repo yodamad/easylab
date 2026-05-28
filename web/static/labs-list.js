@@ -44,6 +44,27 @@ function recreateLab(labId) {
     });
 }
 
+function removeLab(labId) {
+    if (!confirm('Remove this lab from the list? This action cannot be undone.')) return;
+    fetch('/api/labs/' + encodeURIComponent(labId) + '/delete', {
+        method: 'POST',
+    })
+    .then(response => {
+        if (response.redirected) {
+            window.location.href = response.url;
+        } else if (response.ok) {
+            window.location.reload();
+        } else {
+            response.text().then(text => {
+                alert('Failed to remove lab: ' + text);
+            });
+        }
+    })
+    .catch(error => {
+        alert('Error removing lab: ' + error.message);
+    });
+}
+
 function retryLab(labId) {
     // Send POST request to retry endpoint
     fetch('/api/labs/' + encodeURIComponent(labId) + '/retry', {
