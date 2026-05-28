@@ -169,44 +169,6 @@ docker-build-amd64:
         --build-arg TARGETARCH=amd64 \
         --customPlatform linux/amd64
 
-docker-build-arm64:
-  extends: .docker-kaniko-base
-  script:
-    - |
-      /kaniko/executor \
-        --context "${CI_PROJECT_DIR}" \
-        --dockerfile "${CI_PROJECT_DIR}/Dockerfile" \
-        --destination "${IMAGE_NAME}:${IMAGE_TAG}-arm64" \
-        --build-arg SKIP_BUILD=true \
-        --build-arg TARGETARCH=arm64 \
-        --customPlatform linux/arm64
-
-# Merge arch-specific images into a single multi-arch manifest list
-docker-manifest:
-  stage: package
-  image:
-    name: mplatform/manifest-tool:alpine
-    entrypoint: [""]
-  needs:
-    - job: docker-build-amd64
-      artifacts: false
-    - job: docker-build-arm64
-      artifacts: false
-  before_script:
-    - !reference [.image-tag, before_script]
-  script:
-    - |
-      manifest-tool \
-        --username "${DOCKER_REGISTRY_USER}" \
-        --password "${DOCKER_REGISTRY_PASSWORD}" \
-        push from-args \
-        --platforms linux/amd64,linux/arm64 \
-        --template "${IMAGE_NAME}:${IMAGE_TAG}-ARCH" \
-        --target "${IMAGE_NAME}:${IMAGE_TAG}"
-  only:
-    - branches
-    - tags
-
 # Package Helm chart (tags only — version derived from Git tag)
 helm-package:
   stage: package
