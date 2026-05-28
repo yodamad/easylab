@@ -27,7 +27,8 @@ nav = [
         "student.md"
     ]},
     { "Configuration" = [
-        "ovhcloud.md"
+        "ovhcloud.md",
+        "azure.md"
     ]},
     { "Deployment" = [
         "docker.md",
