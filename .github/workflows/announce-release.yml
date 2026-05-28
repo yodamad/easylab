@@ -22,8 +22,17 @@ jobs:
           timeout_minutes: 1
           max_attempts: 3
           command: |
-            BODY=$(gh api repos/${{ github.repository }}/releases/tags/${{ github.event.workflow_run.head_branch }} --jq '.body // ""')
+            TAG="${{ github.event.workflow_run.head_branch }}"
+            BODY=$(gh api repos/${{ github.repository }}/releases/tags/${TAG} --jq '.body // ""')
             SUMMARY=$(echo "$BODY" | head -n 6 | sed 's/\*\*//g' | sed 's/\* [a-f0-9]\{40\} /\* /g' | sed '/^$/d')
+            HEADER="🧪 EasyLab ${TAG} is out! 🚀"
+            FOOTER="🔗 https://github.com/yodamad/easylab/releases/tag/${TAG}
+            📦 docker.io/yodamad/easylab:${TAG}"
+            FIXED_LEN=$(( ${#HEADER} + 4 + ${#FOOTER} ))
+            MAX_SUMMARY=$(( 300 - FIXED_LEN ))
+            if [ ${#SUMMARY} -gt $MAX_SUMMARY ] && [ $MAX_SUMMARY -gt 0 ]; then
+              SUMMARY="${SUMMARY:0:$(( MAX_SUMMARY - 3 ))}..."
+            fi
             echo "summary<<EOF" >> "$GITHUB_OUTPUT"
             echo "$SUMMARY" >> "$GITHUB_OUTPUT"
             echo "EOF" >> "$GITHUB_OUTPUT"

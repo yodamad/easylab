@@ -21,8 +21,6 @@ builds:
       - GOFLAGS=-buildvcs=false
     flags:
       - -trimpath
-      - -a
-      - -installsuffix=cgo
 
 release:
   gitlab:

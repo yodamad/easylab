@@ -67,10 +67,16 @@ build:
     entrypoint: [""]
   variables:
     GOMODCACHE: ${CI_PROJECT_DIR}/.go-mod-cache
+    GOCACHE: ${CI_PROJECT_DIR}/.go-build-cache
   before_script:
     - go version
   script:
-    - goreleaser build --clean --snapshot -f .goreleaser.gitlab.yaml
+    - |
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        goreleaser build --clean -f .goreleaser.gitlab.yaml
+      else
+        goreleaser build --clean --snapshot -f .goreleaser.gitlab.yaml
+      fi
     - |
       mkdir -p docker-prebuild/linux_amd64 docker-prebuild/linux_arm64
       find dist -type f -name main | while IFS= read -r f; do
@@ -88,12 +94,14 @@ build:
   artifacts:
     paths:
       - docker-prebuild/
+      - dist/
       - web/
     expire_in: 1 hour
   cache:
-    key: go-modules-${CI_COMMIT_REF_SLUG}
+    key: go-${GO_VERSION}-${CI_COMMIT_REF_SLUG}
     paths:
       - .go-mod-cache/
+      - .go-build-cache/
     policy: pull-push
 
 # Run Go tests (starts immediately, parallel with build)
@@ -274,11 +282,14 @@ goreleaser:
     entrypoint: [""]
   only:
     - tags
+  needs:
+    - job: build
+      artifacts: true
   variables:
     GIT_DEPTH: 0
     GITLAB_TOKEN: ${CI_JOB_TOKEN}
   script:
-    - goreleaser release --clean -f .goreleaser.gitlab.yaml
+    - goreleaser release --skip=build -f .goreleaser.gitlab.yaml
 
 # Publish Helm chart to Docker Hub as OCI artifact
 helm-publish:
