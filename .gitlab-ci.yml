@@ -14,8 +14,8 @@
 #   - Tagged as "dev" for branch commits
 #   - Tagged with Git tag name for Git tag commits (e.g., v1.0.0)
 #   - Images are multi-platform (linux/amd64, linux/arm64). The build job runs GoReleaser (linux/amd64 + arm64)
-#     and stages binaries under docker-prebuild/; docker-build uses SKIP_BUILD=true to copy the matching
-#     prebuilt main per TARGETARCH (see docker-build job).
+#     and stages binaries under docker-prebuild/; docker-build-amd64/arm64 (Kaniko) use SKIP_BUILD=true to
+#     copy the matching prebuilt binary per arch, then docker-manifest merges them into a multi-arch manifest.
 #
 # Helm Chart Publishing (tags only):
 #   - Chart version derived from Git tag (v prefix stripped)
@@ -135,16 +135,13 @@ hadolint:
     - hadolint Dockerfile
   allow_failure: false
 
-# Multi-arch Docker image (linux/amd64 + linux/arm64), push manifest to registry.
-# SKIP_BUILD=true: copy prebuilt GoReleaser binaries from docker-prebuild/ (build job) per TARGETARCH.
-# Requires privileged job for QEMU/binfmt for arch-specific image layers (Pulumi plugins, apt, etc.).
-docker-build:
+# Reusable base for Kaniko image builds — no Docker daemon, no privileged pods required.
+# arm64 cross-build executes via QEMU binfmt if registered on the cluster nodes (standard on most managed k8s).
+.docker-kaniko-base:
   stage: package
-  image: docker:24
-  services:
-    - docker:24-dind
-  variables:
-    DOCKER_BUILDKIT: "1"
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
   needs:
     - job: build
       artifacts: true
@@ -154,22 +151,58 @@ docker-build:
       artifacts: false
   before_script:
     - !reference [.image-tag, before_script]
-    - echo "Building and pushing multi-arch image ${IMAGE_NAME}:${IMAGE_TAG}"
-    - docker context create ci-context
-    - docker buildx create --name ci-easylab-multiarch --driver docker-container --use ci-context
-    - docker run --privileged --rm tonistiigi/binfmt --install all
-    - docker buildx inspect --bootstrap
-    - echo "$DOCKER_REGISTRY_PASSWORD" | docker login -u "$DOCKER_REGISTRY_USER" --password-stdin
+    - mkdir -p /kaniko/.docker
+    - printf '{"auths":{"https://index.docker.io/v1/":{"auth":"%s"}}}' "$(printf '%s:%s' "${DOCKER_REGISTRY_USER}" "${DOCKER_REGISTRY_PASSWORD}" | base64 | tr -d '\n')" > /kaniko/.docker/config.json
+  only:
+    - branches
+    - tags
+
+docker-build-amd64:
+  extends: .docker-kaniko-base
   script:
     - |
-      docker buildx build \
-        --platform linux/amd64,linux/arm64 \
+      /kaniko/executor \
+        --context "${CI_PROJECT_DIR}" \
+        --dockerfile "${CI_PROJECT_DIR}/Dockerfile" \
+        --destination "${IMAGE_NAME}:${IMAGE_TAG}-amd64" \
         --build-arg SKIP_BUILD=true \
-        -t "${IMAGE_NAME}:${IMAGE_TAG}" \
-        --push \
-        .
-  after_script:
-    - docker logout || true
+        --build-arg TARGETARCH=amd64 \
+        --customPlatform linux/amd64
+
+docker-build-arm64:
+  extends: .docker-kaniko-base
+  script:
+    - |
+      /kaniko/executor \
+        --context "${CI_PROJECT_DIR}" \
+        --dockerfile "${CI_PROJECT_DIR}/Dockerfile" \
+        --destination "${IMAGE_NAME}:${IMAGE_TAG}-arm64" \
+        --build-arg SKIP_BUILD=true \
+        --build-arg TARGETARCH=arm64 \
+        --customPlatform linux/arm64
+
+# Merge arch-specific images into a single multi-arch manifest list
+docker-manifest:
+  stage: package
+  image:
+    name: mplatform/manifest-tool:alpine
+    entrypoint: [""]
+  needs:
+    - job: docker-build-amd64
+      artifacts: false
+    - job: docker-build-arm64
+      artifacts: false
+  before_script:
+    - !reference [.image-tag, before_script]
+  script:
+    - |
+      manifest-tool \
+        --username "${DOCKER_REGISTRY_USER}" \
+        --password "${DOCKER_REGISTRY_PASSWORD}" \
+        push from-args \
+        --platforms linux/amd64,linux/arm64 \
+        --template "${IMAGE_NAME}:${IMAGE_TAG}-ARCH" \
+        --target "${IMAGE_NAME}:${IMAGE_TAG}"
   only:
     - branches
     - tags
@@ -199,7 +232,7 @@ trivy-scan:
   stage: security
   image: aquasec/trivy:latest
   needs:
-    - job: docker-build
+    - job: docker-manifest
       artifacts: false
   variables:
     TRIVY_USERNAME: "${DOCKER_REGISTRY_USER}"

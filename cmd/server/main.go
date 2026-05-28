@@ -93,6 +93,10 @@ func loadEnvFile(envFile string) error {
 }
 
 func main() {
+	// Pulumi SDK v3.243+ calls slog.SetDefault(discardHandler{}) in its init(),
+	// which silently swallows all standard log.Printf output. Restore stderr.
+	log.SetOutput(os.Stderr)
+
 	startTime := time.Now()
 
 	var (
