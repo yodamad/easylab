@@ -194,7 +194,7 @@ trivy-scan:
   stage: security
   image: aquasec/trivy:latest
   needs:
-    - job: docker-manifest
+    - job: docker-build-amd64
       artifacts: false
   variables:
     TRIVY_USERNAME: "${DOCKER_REGISTRY_USER}"
