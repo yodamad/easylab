@@ -13,9 +13,8 @@
 # Image Tagging Strategy:
 #   - Tagged as "dev" for branch commits
 #   - Tagged with Git tag name for Git tag commits (e.g., v1.0.0)
-#   - Images are multi-platform (linux/amd64, linux/arm64). The build job runs GoReleaser (linux/amd64 + arm64)
-#     and stages binaries under docker-prebuild/; docker-build-amd64/arm64 (Kaniko) use SKIP_BUILD=true to
-#     copy the matching prebuilt binary per arch, then docker-manifest merges them into a multi-arch manifest.
+#   - linux/amd64 only. The build job runs GoReleaser and stages the binary under docker-prebuild/linux_amd64/;
+#     docker-build-amd64 (Kaniko) uses SKIP_BUILD=true to copy the prebuilt binary and push the final image.
 #
 # Helm Chart Publishing (tags only):
 #   - Chart version derived from Git tag (v prefix stripped)
@@ -157,14 +156,14 @@ hadolint:
     - branches
     - tags
 
-docker-build-amd64:
+docker-build:
   extends: .docker-kaniko-base
   script:
     - |
       /kaniko/executor \
         --context "${CI_PROJECT_DIR}" \
         --dockerfile "${CI_PROJECT_DIR}/Dockerfile" \
-        --destination "${IMAGE_NAME}:${IMAGE_TAG}-amd64" \
+        --destination "${IMAGE_NAME}:${IMAGE_TAG}" \
         --build-arg SKIP_BUILD=true \
         --build-arg TARGETARCH=amd64 \
         --customPlatform linux/amd64
@@ -195,7 +194,7 @@ trivy-scan:
   stage: security
   image: aquasec/trivy:latest
   needs:
-    - job: docker-build-amd64
+    - job: docker-build
       artifacts: false
   variables:
     TRIVY_USERNAME: "${DOCKER_REGISTRY_USER}"
