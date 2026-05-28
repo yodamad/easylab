@@ -431,6 +431,7 @@
                             <select id="dns_provider" name="dns_provider">
                                 <option value="">None (configure DNS manually)</option>
                                 <option value="ovh">OVH DNS</option>
+                                <option value="azure">Azure DNS</option>
                             </select>
                         </div>
                         <div class="form-group" id="dns_zone_group" style="display:none">
@@ -460,6 +461,34 @@
                                 </div>
                             </div>
                             <small>OVH application must have <code>/domain/zone/*</code> permissions. Enables wildcard TLS and automated A-record creation.</small>
+                        </div>
+
+                        <div id="dns-azure-fields" style="display:none">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="dns_cred_azureTenantId">Azure Tenant ID</label>
+                                    <input type="text" id="dns_cred_azureTenantId" name="dns_cred_azureTenantId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                                </div>
+                                <div class="form-group">
+                                    <label for="dns_cred_azureSubscriptionId">Azure Subscription ID</label>
+                                    <input type="text" id="dns_cred_azureSubscriptionId" name="dns_cred_azureSubscriptionId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="dns_cred_azureResourceGroup">Resource Group</label>
+                                    <input type="text" id="dns_cred_azureResourceGroup" name="dns_cred_azureResourceGroup" placeholder="my-dns-resource-group">
+                                </div>
+                                <div class="form-group">
+                                    <label for="dns_cred_azureClientId">Client ID (Service Principal)</label>
+                                    <input type="text" id="dns_cred_azureClientId" name="dns_cred_azureClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="dns_cred_azureClientSecret">Client Secret</label>
+                                <input type="password" id="dns_cred_azureClientSecret" name="dns_cred_azureClientSecret">
+                            </div>
+                            <small>Service principal must have <code>DNS Zone Contributor</code> role on the DNS zone resource group.</small>
                         </div>
 
                         <div class="form-group">

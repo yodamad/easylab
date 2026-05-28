@@ -739,9 +739,11 @@ function handleDNSProviderChange() {
 
     const zoneGroup = document.getElementById('dns_zone_group');
     const ovhFields = document.getElementById('dns-ovh-fields');
+    const azureFields = document.getElementById('dns-azure-fields');
 
     if (zoneGroup) zoneGroup.style.display = provider ? '' : 'none';
     if (ovhFields) ovhFields.style.display = provider === 'ovh' ? '' : 'none';
+    if (azureFields) azureFields.style.display = provider === 'azure' ? '' : 'none';
 }
 
 // Fetch Azure VM sizes for the selected location

@@ -129,6 +129,7 @@ Select a DNS provider to automate A-record creation and unlock wildcard certific
 | Provider | Setup required |
 |----------|---------------|
 | **OVH DNS** | OVH application key, secret, and consumer key with `/domain/zone/*` permissions |
+| **Azure DNS** | Azure service principal with `DNS Zone Contributor` role on the DNS zone resource group |
 
 When a DNS provider is configured:
 
@@ -138,6 +139,9 @@ When a DNS provider is configured:
 
 !!! note "OVH DNS credentials"
     The OVH credentials for DNS management may differ from your cloud project credentials. Create a separate OVH application at <https://www.ovh.com/auth/api/createApp> with access to the `/domain/zone/*` endpoints.
+
+!!! note "Azure DNS credentials"
+    Create a service principal (`az ad sp create-for-rbac`) and assign it the `DNS Zone Contributor` role on the resource group that contains your Azure DNS zone. Azure DNS uses cert-manager's native solver — no additional webhook is required.
 
 ### Template Variables
 

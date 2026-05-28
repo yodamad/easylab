@@ -10,7 +10,8 @@ import (
 	"os"
 	"path/filepath"
 
-	_ "easylab/internal/providers/dns/ovh" // register OVH DNS provider
+	_ "easylab/internal/providers/dns/azure" // register Azure DNS provider
+	_ "easylab/internal/providers/dns/ovh"   // register OVH DNS provider
 
 	k8sPkg "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"

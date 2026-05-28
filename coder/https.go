@@ -339,6 +339,13 @@ func createDNSCredentialSecret(
 		}
 	}
 
+	// Map Azure client secret to the key expected by cert-manager native Azure DNS solver
+	if providerName == "azure" {
+		if clientSecret := utils.DNSConfigOptional(ctx, utils.DNSAzureClientSecret); clientSecret != "" {
+			secretData["client-secret"] = pulumi.String(clientSecret)
+		}
+	}
+
 	_, err := k8score.NewSecret(ctx, "dns-credentials-secret", &k8score.SecretArgs{
 		Metadata: &metav1.ObjectMetaArgs{
 			Name:      pulumi.String(secretName),

@@ -13,7 +13,8 @@ import (
 
 	"easylab/coder"
 	dnsregistry "easylab/internal/providers/dns"
-	_ "easylab/internal/providers/dns/ovh" // register OVH DNS provider
+	_ "easylab/internal/providers/dns/azure" // register Azure DNS provider
+	_ "easylab/internal/providers/dns/ovh"   // register OVH DNS provider
 	internalPulumi "easylab/internal/pulumi"
 	"easylab/utils"
 

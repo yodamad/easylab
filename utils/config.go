@@ -132,6 +132,12 @@ const DNSOvhAppSecret   = "ovhAppSecret"
 const DNSOvhConsumerKey = "ovhConsumerKey"
 const DNSOvhEndpoint    = "ovhEndpoint"
 
+const DNSAzureTenantId       = "azureTenantId"
+const DNSAzureSubscriptionId = "azureSubscriptionId"
+const DNSAzureResourceGroup  = "azureResourceGroup"
+const DNSAzureClientId       = "azureClientId"
+const DNSAzureClientSecret   = "azureClientSecret"
+
 func CoderConfig(ctx *pulumi.Context, key string) string {
 	return getConfig(ctx, CoderGroup, key)
 }
