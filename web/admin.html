@@ -405,7 +405,23 @@
                         </div>
 
                         <h3 class="subsection-title">HTTPS Configuration (Optional)</h3>
-                        <p class="section-description">Leave blank to use plain HTTP with the LoadBalancer IP. When a domain is set, cert-manager and ingress-nginx are deployed automatically.</p>
+                        <p class="section-description">Leave blank to use plain HTTP with the LoadBalancer IP. When a domain is set, TLS is configured via Let's Encrypt.</p>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="install_nginx_ingress" value="true" checked>
+                                    Install ingress-nginx controller
+                                </label>
+                                <small>Uncheck if your cluster already has an ingress controller installed.</small>
+                            </div>
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="install_cert_manager" value="true" checked>
+                                    Install cert-manager
+                                </label>
+                                <small>Uncheck if cert-manager is already installed on your cluster.</small>
+                            </div>
+                        </div>
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="coder_domain">Domain Name</label>

@@ -180,6 +180,7 @@ helm-package:
     - export VERSION="${CI_COMMIT_TAG#v}"
     - echo "Packaging Helm chart version ${VERSION}"
   script:
+    - helm dependency update helm/easylab
     - helm lint helm/easylab
     - helm package helm/easylab --version "${VERSION}" --app-version "${VERSION}"
   artifacts:

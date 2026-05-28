@@ -136,6 +136,12 @@ type LabConfig struct {
 	CoderAcmeEmail      string `json:"coder_acme_email,omitempty"`
 	CoderWildcardDomain string `json:"coder_wildcard_domain,omitempty"`
 
+	// Controls whether nginx-ingress / cert-manager are installed as part of the lab.
+	// nil means "install" (default, preserves backward compat for persisted jobs).
+	// &false means "skip" (cluster already has it installed).
+	InstallNginxIngress *bool `json:"install_nginx_ingress,omitempty"`
+	InstallCertManager  *bool `json:"install_cert_manager,omitempty"`
+
 	// DNS provider for automated A-record creation and DNS-01 cert issuance
 	DNSProvider        string            `json:"dns_provider,omitempty"`
 	DNSZone            string            `json:"dns_zone,omitempty"`

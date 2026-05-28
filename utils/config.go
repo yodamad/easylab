@@ -122,6 +122,8 @@ const CoderTemplateGitBranch = "templateGitBranch"
 const CoderDomain = "domain"
 const CoderAcmeEmail = "acmeEmail"
 const CoderWildcardDomain = "wildcardDomain"
+const CoderInstallNginxIngress = "installNginxIngress"
+const CoderInstallCertManager = "installCertManager"
 
 // DNS provider config group
 const DNSGroup          = "dns"

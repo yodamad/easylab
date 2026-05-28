@@ -1462,6 +1462,13 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 		if config.CoderWildcardDomain != "" {
 			commands = append(commands, configCommand{"coder:wildcardDomain", config.CoderWildcardDomain, false})
 		}
+		// Only emit when false (skip install). Absent = install (backward compat with old jobs).
+		if config.InstallNginxIngress != nil && !*config.InstallNginxIngress {
+			commands = append(commands, configCommand{"coder:installNginxIngress", "false", false})
+		}
+		if config.InstallCertManager != nil && !*config.InstallCertManager {
+			commands = append(commands, configCommand{"coder:installCertManager", "false", false})
+		}
 	}
 
 	// DNS provider configuration (for A-record automation and DNS-01 cert issuance)

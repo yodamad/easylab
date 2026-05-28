@@ -97,10 +97,43 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 | `ingress.host` | Ingress hostname | `easylab.example.com` |
 | `ingress.tls.enabled` | Enable TLS | `false` |
 | `ingress.tls.secretName` | TLS secret name | `easylab-tls` |
+| `ingress-nginx.enabled` | Install ingress-nginx controller as part of this chart | `false` |
+| `cert-manager.enabled` | Install cert-manager as part of this chart | `false` |
+| `cert-manager.crds.enabled` | Install cert-manager CRDs (required on first install) | `true` |
 | `resources.requests.memory` | Memory request | `1024Mi` |
 | `resources.requests.cpu` | CPU request | `500m` |
 | `resources.limits.memory` | Memory limit | `4096Mi` |
 | `resources.limits.cpu` | CPU limit | `3000m` |
+
+### Optional infrastructure components
+
+By default, the chart assumes nginx-ingress and cert-manager are **already installed** in your cluster. If they are not, you can let the chart install them:
+
+```yaml
+# Install nginx-ingress controller alongside EasyLab
+ingress-nginx:
+  enabled: true
+
+# Install cert-manager alongside EasyLab (CRDs included)
+cert-manager:
+  enabled: true
+  crds:
+    enabled: true
+```
+
+Or via `--set` flags:
+
+```bash
+helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
+  --version __VERSION__ \
+  --set ingress-nginx.enabled=true \
+  --set cert-manager.enabled=true \
+  --set secrets.adminPassword="SuperAdmin"
+```
+
+If your cluster already has these installed, leave both at `false` (default) and configure `ingress.className` to match your existing controller.
+
+All ingress-nginx and cert-manager values can be passed under their respective keys — see the [ingress-nginx chart values](https://kubernetes.github.io/ingress-nginx/) and [cert-manager chart values](https://cert-manager.io/docs/installation/helm/) for the full list.
 
 ### Exposing with Traefik
 
@@ -178,6 +211,23 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
   --set ingress.host="easylab.example.com" \
   --set ingress.tls.enabled=true \
   --set ingress.className=nginx \
+  --set ingress.annotations."cert-manager\.io/cluster-issuer"=letsencrypt
+```
+
+### Fresh cluster (with nginx-ingress and cert-manager)
+
+For a cluster that does not have an ingress controller or cert-manager yet:
+
+```bash
+helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
+  --version __VERSION__ \
+  --set secrets.adminPassword="SuperAdmin" \
+  --set ingress-nginx.enabled=true \
+  --set cert-manager.enabled=true \
+  --set ingress.enabled=true \
+  --set ingress.host="easylab.example.com" \
+  --set ingress.className=nginx \
+  --set ingress.tls.enabled=true \
   --set ingress.annotations."cert-manager\.io/cluster-issuer"=letsencrypt
 ```
 

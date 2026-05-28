@@ -4,6 +4,16 @@ description: A Helm chart for deploying EasyLab — a lab-as-code platform that 
 type: application
 version: 0.0.0-dev
 appVersion: "0.0.0-dev"
+dependencies:
+  - name: ingress-nginx
+    version: "4.12.1"
+    repository: https://kubernetes.github.io/ingress-nginx
+    condition: ingress-nginx.enabled
+  - name: cert-manager
+    version: "v1.17.2"
+    repository: https://charts.jetstack.io
+    condition: cert-manager.enabled
+
 maintainers:
   - name: yodamad
 keywords:

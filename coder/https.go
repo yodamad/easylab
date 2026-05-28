@@ -39,54 +39,67 @@ func SetupHTTPS(
 
 	acmeEmail := utils.CoderConfigOptional(ctx, utils.CoderAcmeEmail)
 
-	// ── cert-manager ────────────────────────────────────────────────────────
-	certManagerNs, err := k8score.NewNamespace(ctx, "cert-manager-ns", &k8score.NamespaceArgs{
-		Metadata: &metav1.ObjectMetaArgs{Name: pulumi.String("cert-manager")},
-	}, pulumi.Provider(k8sProvider))
-	if err != nil {
-		return nil, pulumi.StringOutput{}, fmt.Errorf("failed to create cert-manager namespace: %w", err)
-	}
+	// Absent config key means "install" (default). Explicit "false" means skip (pre-installed).
+	installCertManager := utils.CoderConfigOptional(ctx, utils.CoderInstallCertManager) != "false"
+	installNginxIngress := utils.CoderConfigOptional(ctx, utils.CoderInstallNginxIngress) != "false"
 
-	certManagerRelease, err := internalK8s.InitHelm(ctx, k8sProvider, internalK8s.HelmChartInfo{
-		Name:        "cert-manager",
-		ChartName:   "cert-manager",
-		Url:         "https://charts.jetstack.io",
-		ReleaseName: "cert-manager",
-		Values:      pulumi.Map{"installCRDs": pulumi.Bool(true)},
-	}, certManagerNs)
-	if err != nil {
-		return nil, pulumi.StringOutput{}, fmt.Errorf("failed to install cert-manager: %w", err)
+	// ── cert-manager ────────────────────────────────────────────────────────
+	// certManagerNs is declared here so the DNS-01 RBAC branch can reference it.
+	var certManagerNs *k8score.Namespace
+	var certManagerRelease *helmv3.Release
+	if installCertManager {
+		var err error
+		certManagerNs, err = k8score.NewNamespace(ctx, "cert-manager-ns", &k8score.NamespaceArgs{
+			Metadata: &metav1.ObjectMetaArgs{Name: pulumi.String("cert-manager")},
+		}, pulumi.Provider(k8sProvider))
+		if err != nil {
+			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to create cert-manager namespace: %w", err)
+		}
+
+		certManagerRelease, err = internalK8s.InitHelm(ctx, k8sProvider, internalK8s.HelmChartInfo{
+			Name:        "cert-manager",
+			ChartName:   "cert-manager",
+			Url:         "https://charts.jetstack.io",
+			ReleaseName: "cert-manager",
+			Values:      pulumi.Map{"installCRDs": pulumi.Bool(true)},
+		}, certManagerNs)
+		if err != nil {
+			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to install cert-manager: %w", err)
+		}
 	}
 
 	// ── ingress-nginx ────────────────────────────────────────────────────────
-	ingressNs, err := k8score.NewNamespace(ctx, "ingress-nginx-ns", &k8score.NamespaceArgs{
-		Metadata: &metav1.ObjectMetaArgs{Name: pulumi.String("ingress-nginx")},
-	}, pulumi.Provider(k8sProvider))
-	if err != nil {
-		return nil, pulumi.StringOutput{}, fmt.Errorf("failed to create ingress-nginx namespace: %w", err)
-	}
+	var ingressRelease *helmv3.Release
+	if installNginxIngress {
+		ingressNs, err := k8score.NewNamespace(ctx, "ingress-nginx-ns", &k8score.NamespaceArgs{
+			Metadata: &metav1.ObjectMetaArgs{Name: pulumi.String("ingress-nginx")},
+		}, pulumi.Provider(k8sProvider))
+		if err != nil {
+			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to create ingress-nginx namespace: %w", err)
+		}
 
-	ingressRelease, err := internalK8s.InitHelm(ctx, k8sProvider, internalK8s.HelmChartInfo{
-		Name:        "ingress-nginx",
-		ChartName:   "ingress-nginx",
-		Url:         "https://kubernetes.github.io/ingress-nginx",
-		ReleaseName: "ingress-nginx",
-		// OVHcloud sets ipMode:VIP on LoadBalancer services, which causes the Pulumi
-		// Kubernetes provider's GetService await to block indefinitely. Adding the
-		// skipAwait annotation to the controller service tells the provider to skip
-		// the readiness check when reading it.
-		Values: pulumi.Map{
-			"controller": pulumi.Map{
-				"service": pulumi.Map{
-					"annotations": pulumi.StringMap{
-						"pulumi.kubernetes.io/skipAwait": pulumi.String("true"),
+		ingressRelease, err = internalK8s.InitHelm(ctx, k8sProvider, internalK8s.HelmChartInfo{
+			Name:        "ingress-nginx",
+			ChartName:   "ingress-nginx",
+			Url:         "https://kubernetes.github.io/ingress-nginx",
+			ReleaseName: "ingress-nginx",
+			// OVHcloud sets ipMode:VIP on LoadBalancer services, which causes the Pulumi
+			// Kubernetes provider's GetService await to block indefinitely. Adding the
+			// skipAwait annotation to the controller service tells the provider to skip
+			// the readiness check when reading it.
+			Values: pulumi.Map{
+				"controller": pulumi.Map{
+					"service": pulumi.Map{
+						"annotations": pulumi.StringMap{
+							"pulumi.kubernetes.io/skipAwait": pulumi.String("true"),
+						},
 					},
 				},
 			},
-		},
-	}, ingressNs)
-	if err != nil {
-		return nil, pulumi.StringOutput{}, fmt.Errorf("failed to install ingress-nginx: %w", err)
+		}, ingressNs)
+		if err != nil {
+			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to install ingress-nginx: %w", err)
+		}
 	}
 
 	// ── ClusterIssuer (Let's Encrypt) ────────────────────────────────────────
@@ -99,7 +112,10 @@ func SetupHTTPS(
 	ingressIPResolved := false
 
 	dnsProviderName := utils.DNSConfigOptional(ctx, utils.DNSProviderKey)
-	certDeps := []pulumi.Resource{certManagerRelease}
+	certDeps := []pulumi.Resource{}
+	if certManagerRelease != nil {
+		certDeps = append(certDeps, certManagerRelease)
+	}
 
 	if dnsProviderName != "" {
 		dnsProvider, lookupErr := dnsregistry.Get(dnsProviderName)
@@ -204,7 +220,7 @@ func SetupHTTPS(
 		}
 	}
 
-	_, err = apiextensions.NewCustomResource(ctx, "letsencrypt-prod-issuer", &apiextensions.CustomResourceArgs{
+	_, err := apiextensions.NewCustomResource(ctx, "letsencrypt-prod-issuer", &apiextensions.CustomResourceArgs{
 		ApiVersion: pulumi.String("cert-manager.io/v1"),
 		Kind:       pulumi.String("ClusterIssuer"),
 		Metadata: &metav1.ObjectMetaArgs{
@@ -228,7 +244,13 @@ func SetupHTTPS(
 	}
 
 	// ── Ingress for Coder ────────────────────────────────────────────────────
-	ingressDeps := []pulumi.Resource{certManagerRelease, ingressRelease, coderRelease}
+	ingressDeps := []pulumi.Resource{coderRelease}
+	if certManagerRelease != nil {
+		ingressDeps = append(ingressDeps, certManagerRelease)
+	}
+	if ingressRelease != nil {
+		ingressDeps = append(ingressDeps, ingressRelease)
+	}
 
 	tls := k8snetv1.IngressTLSArray{
 		&k8snetv1.IngressTLSArgs{
@@ -305,8 +327,15 @@ func SetupHTTPS(
 // It uses a direct Kubernetes API call instead of GetService to avoid the Pulumi provider's
 // pending-initialisation await, which blocks indefinitely on OVHcloud clusters because
 // OVHcloud sets ipMode:VIP on LoadBalancer services (not recognised as ready by the provider).
+// ingressRelease may be nil when ingress-nginx is pre-installed on the cluster.
 func GetIngressIP(kubeconfigOut pulumi.StringOutput, ingressRelease *helmv3.Release) (pulumi.StringOutput, error) {
-	return internalK8s.GetServiceIP(kubeconfigOut, ingressRelease.ResourceNames, "ingress-nginx", "ingress-nginx-controller"), nil
+	var trigger interface{}
+	if ingressRelease != nil {
+		trigger = ingressRelease.ResourceNames
+	} else {
+		trigger = pulumi.String("") // no-op: service is already present
+	}
+	return internalK8s.GetServiceIP(kubeconfigOut, trigger, "ingress-nginx", "ingress-nginx-controller"), nil
 }
 
 // createDNSCredentialSecret stores DNS provider API credentials in a Kubernetes Secret

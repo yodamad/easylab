@@ -66,3 +66,16 @@ securityContext:
   runAsUser: 1000
   runAsGroup: 1000
   fsGroup: 1000
+
+# Set enabled: true to install ingress-nginx as part of this chart.
+# Leave false (default) if your cluster already has an ingress controller.
+ingress-nginx:
+  enabled: false
+
+# Set enabled: true to install cert-manager as part of this chart.
+# Leave false (default) if your cluster already has cert-manager.
+# crds.enabled installs the cert-manager CRDs (required on first install).
+cert-manager:
+  enabled: false
+  crds:
+    enabled: true

@@ -339,6 +339,11 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 		DNSZone:     r.FormValue("dns_zone"),
 	}
 
+	installNginx := r.FormValue("install_nginx_ingress") == "true"
+	config.InstallNginxIngress = &installNginx
+	installCertM := r.FormValue("install_cert_manager") == "true"
+	config.InstallCertManager = &installCertM
+
 	if config.DNSProvider != "" {
 		if dnsP, _ := dnsregistry.Get(config.DNSProvider); dnsP != nil {
 			config.DNSCredentials = make(map[string]string)
