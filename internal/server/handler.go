@@ -1029,6 +1029,10 @@ func (h *Handler) GetCoderCredentials(w http.ResponseWriter, r *http.Request) {
 	coderURL := job.CoderURL
 	coderAdminEmail := job.CoderAdminEmail
 	coderAdminPassword := job.CoderAdminPassword
+	coderDomain := ""
+	if job.Config != nil {
+		coderDomain = job.Config.CoderDomain
+	}
 	job.mu.RUnlock()
 
 	if status != JobStatusCompleted {
@@ -1039,6 +1043,12 @@ func (h *Handler) GetCoderCredentials(w http.ResponseWriter, r *http.Request) {
 	coderURL = extractStringFromConfigValue(coderURL)
 	coderAdminEmail = extractStringFromConfigValue(coderAdminEmail)
 	coderAdminPassword = extractStringFromConfigValue(coderAdminPassword)
+
+	// When DNS is configured, always serve the HTTPS domain URL regardless of what
+	// was persisted in CoderURL (handles old jobs stored with the raw IP address).
+	if coderDomain != "" {
+		coderURL = "https://" + coderDomain
+	}
 
 	if coderURL == "" || coderAdminEmail == "" || coderAdminPassword == "" {
 		http.Error(w, "Coder configuration not available for this lab", http.StatusInternalServerError)

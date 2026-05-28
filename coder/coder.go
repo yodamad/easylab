@@ -352,10 +352,11 @@ func waitForCoderReachableStandalone(baseURL string, logFunc func(string)) error
 // InitCoderStandalone initializes Coder outside of the Pulumi engine.
 // It waits for Coder to be reachable, creates the first user if needed,
 // and returns the client configuration.
-func InitCoderStandalone(externalIp, email, password string, logFunc func(string)) (CoderClientConfig, error) {
-	serverURL := &url.URL{
-		Scheme: "http",
-		Host:   externalIp,
+// serverURLStr must be a full URL (e.g. "https://coder.example.com" or "http://1.2.3.4").
+func InitCoderStandalone(serverURLStr, email, password string, logFunc func(string)) (CoderClientConfig, error) {
+	serverURL, err := url.Parse(serverURLStr)
+	if err != nil {
+		return CoderClientConfig{}, fmt.Errorf("failed to parse server URL: %w", err)
 	}
 	baseURL := serverURL.String()
 

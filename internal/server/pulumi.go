@@ -1223,13 +1223,23 @@ func (pe *PulumiExecutor) initCoderAndTemplates(jobID string, outputs auto.Outpu
 		return nil
 	}
 
+	// Use the exported coderURL when available: it is "https://<domain>" when DNS is
+	// configured, or "http://<ip>" otherwise. Falling back to http://<ip> handles
+	// stacks deployed before the coderURL export was added.
+	coderServerURL := fmt.Sprintf("http://%s", externalIP)
+	if urlVal, ok := outputs["coderURL"]; ok {
+		if u := pe.outputValueToString(urlVal); u != "" {
+			coderServerURL = u
+		}
+	}
+
 	logFunc := func(msg string) {
 		pe.jobManager.AppendOutput(jobID, msg)
 	}
 
 	// Initialize Coder: wait for reachability, create first user, login
 	pe.jobManager.AppendOutput(jobID, "Initializing Coder server...")
-	coderCfg, err := coder.InitCoderStandalone(externalIP, config.CoderAdminEmail, config.CoderAdminPassword, logFunc)
+	coderCfg, err := coder.InitCoderStandalone(coderServerURL, config.CoderAdminEmail, config.CoderAdminPassword, logFunc)
 	if err != nil {
 		return fmt.Errorf("failed to initialize Coder: %w", err)
 	}
