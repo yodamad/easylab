@@ -341,8 +341,15 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 
 	installNginx := r.FormValue("install_nginx_ingress") == "true"
 	config.InstallNginxIngress = &installNginx
+	if !installNginx {
+		config.NginxIngressNamespace = r.FormValue("nginx_ingress_namespace")
+		config.NginxIngressServiceName = r.FormValue("nginx_ingress_service_name")
+	}
 	installCertM := r.FormValue("install_cert_manager") == "true"
 	config.InstallCertManager = &installCertM
+	if !installCertM {
+		config.CertManagerNamespace = r.FormValue("cert_manager_namespace")
+	}
 
 	if config.DNSProvider != "" {
 		if dnsP, _ := dnsregistry.Get(config.DNSProvider); dnsP != nil {

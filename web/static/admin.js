@@ -3,8 +3,8 @@ const wizard = {
     currentStep: 1,
     useExistingCluster: false,
     clusterModeSelected: false,
-    allSteps: [1, 2, 3, 4, 5, 6],
-    byokSteps: [1, 2, 6],
+    allSteps: [1, 2, 3, 4, 5, 6, 7],
+    byokSteps: [1, 2, 6, 7],
 
     getActiveSteps() {
         return this.useExistingCluster ? this.byokSteps : this.allSteps;
@@ -26,6 +26,7 @@ const wizard = {
     init() {
         this.bindEvents();
         this.bindClusterModeEvents();
+        this.bindIngressCertManagerEvents();
         this.updateUI();
     },
 
@@ -68,6 +69,46 @@ const wizard = {
 
         newBtn.addEventListener('click', () => this.setClusterMode(false));
         existingBtn.addEventListener('click', () => this.setClusterMode(true));
+    },
+
+    bindIngressCertManagerEvents() {
+        const ingressInstall = document.getElementById('ingress-install-btn');
+        const ingressExisting = document.getElementById('ingress-existing-btn');
+        if (ingressInstall && ingressExisting) {
+            ingressInstall.addEventListener('click', () => this.setIngressMode('install'));
+            ingressExisting.addEventListener('click', () => this.setIngressMode('existing'));
+        }
+
+        const certInstall = document.getElementById('certmanager-install-btn');
+        const certExisting = document.getElementById('certmanager-existing-btn');
+        if (certInstall && certExisting) {
+            certInstall.addEventListener('click', () => this.setCertManagerMode('install'));
+            certExisting.addEventListener('click', () => this.setCertManagerMode('existing'));
+        }
+    },
+
+    setIngressMode(mode) {
+        const installBtn = document.getElementById('ingress-install-btn');
+        const existingBtn = document.getElementById('ingress-existing-btn');
+        const fields = document.getElementById('ingress-existing-fields');
+        const hidden = document.getElementById('install_nginx_ingress');
+
+        installBtn.classList.toggle('active', mode === 'install');
+        existingBtn.classList.toggle('active', mode === 'existing');
+        fields.style.display = mode === 'existing' ? '' : 'none';
+        hidden.value = mode === 'install' ? 'true' : 'false';
+    },
+
+    setCertManagerMode(mode) {
+        const installBtn = document.getElementById('certmanager-install-btn');
+        const existingBtn = document.getElementById('certmanager-existing-btn');
+        const fields = document.getElementById('certmanager-existing-fields');
+        const hidden = document.getElementById('install_cert_manager');
+
+        installBtn.classList.toggle('active', mode === 'install');
+        existingBtn.classList.toggle('active', mode === 'existing');
+        fields.style.display = mode === 'existing' ? '' : 'none';
+        hidden.value = mode === 'install' ? 'true' : 'false';
     },
 
     setClusterMode(useExisting) {
@@ -303,8 +344,8 @@ const wizard = {
                 loadOVHFlavors();
             }
         }
-        // Fetch Coder versions when entering step 6 for the first time
-        if (this.currentStep === 6 && !this._coderVersionsLoaded) {
+        // Fetch Coder versions when entering step 7 for the first time
+        if (this.currentStep === 7 && !this._coderVersionsLoaded) {
             this._coderVersionsLoaded = true;
             loadCoderVersions();
         }

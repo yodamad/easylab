@@ -68,6 +68,10 @@
                 </div>
                 <div class="progress-step" data-step="6">
                     <span class="step-number">6</span>
+                    <span class="step-label">DNS & HTTPS</span>
+                </div>
+                <div class="progress-step" data-step="7">
+                    <span class="step-number">7</span>
                     <span class="step-label">Coder</span>
                 </div>
             </div>
@@ -353,75 +357,79 @@
                     </div>
                 </section>
 
-                <!-- Step 6: Coder Configuration -->
+                <!-- Step 6: DNS & HTTPS Configuration -->
                 <section class="wizard-step" data-step="6">
                     <div class="step-header">
-                        <h2>Coder Configuration</h2>
-                        <p class="section-description">Configure the Coder IDE platform</p>
+                        <h2>DNS &amp; HTTPS Configuration</h2>
+                        <p class="section-description">Configure TLS, ingress controller, and DNS automation</p>
                     </div>
                     <div class="step-content">
-                        <div class="form-group">
-                            <label for="coder_admin_email">Admin Email *</label>
-                            <input type="email" id="coder_admin_email" name="coder_admin_email" value="admin@coder.com" required>
-                        </div>
 
                         <div class="form-group">
-                            <label for="coder_admin_password">Admin Password *</label>
-                            <div class="input-with-action">
-                                <input type="password" id="coder_admin_password" name="coder_admin_password" required>
-                                <button type="button" class="btn btn-secondary btn-generate-password btn-generate-password-coder" data-target="coder_admin_password" title="Generate secure password">
-                                    Generate
+                            <label>Ingress Controller</label>
+                            <div class="button-group">
+                                <button type="button" class="source-button active" id="ingress-install-btn" data-ingress-mode="install">
+                                    <span class="source-icon">&#9729;</span>
+                                    <div class="source-content">
+                                        <span class="source-title">Install ingress-nginx</span>
+                                        <span class="source-description">Deploy a new ingress-nginx controller</span>
+                                    </div>
+                                </button>
+                                <button type="button" class="source-button" id="ingress-existing-btn" data-ingress-mode="existing">
+                                    <span class="source-icon">&#9881;</span>
+                                    <div class="source-content">
+                                        <span class="source-title">Use existing controller</span>
+                                        <span class="source-description">Ingress controller is already installed</span>
+                                    </div>
                                 </button>
                             </div>
-                            <small>Strong password required</small>
+                            <input type="hidden" id="install_nginx_ingress" name="install_nginx_ingress" value="true">
+                        </div>
+                        <div id="ingress-existing-fields" style="display: none;">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="nginx_ingress_namespace">Ingress Namespace</label>
+                                    <input type="text" id="nginx_ingress_namespace" name="nginx_ingress_namespace" placeholder="ingress-nginx">
+                                    <small>Namespace where the ingress controller is installed. Defaults to <code>ingress-nginx</code>.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="nginx_ingress_service_name">Controller Service Name</label>
+                                    <input type="text" id="nginx_ingress_service_name" name="nginx_ingress_service_name" placeholder="ingress-nginx-controller">
+                                    <small>Service name of the ingress controller. Defaults to <code>ingress-nginx-controller</code>.</small>
+                                </div>
+                            </div>
                         </div>
 
                         <div class="form-group">
-                            <label for="coder_version_select">Coder Version *</label>
-                            <select id="coder_version_select">
-                                <option value="">Loading versions…</option>
-                            </select>
-                            <input type="text" id="coder_version" name="coder_version" placeholder="e.g. 2.29.1" required style="display: none;">
-                            <small id="coder_version_custom_hint" style="display: none;">Enter a specific version (e.g. 2.29.1)</small>
+                            <label>cert-manager</label>
+                            <div class="button-group">
+                                <button type="button" class="source-button active" id="certmanager-install-btn" data-certmanager-mode="install">
+                                    <span class="source-icon">&#128274;</span>
+                                    <div class="source-content">
+                                        <span class="source-title">Install cert-manager</span>
+                                        <span class="source-description">Deploy cert-manager for automated TLS certificates</span>
+                                    </div>
+                                </button>
+                                <button type="button" class="source-button" id="certmanager-existing-btn" data-certmanager-mode="existing">
+                                    <span class="source-icon">&#9881;</span>
+                                    <div class="source-content">
+                                        <span class="source-title">Use existing cert-manager</span>
+                                        <span class="source-description">cert-manager is already installed</span>
+                                    </div>
+                                </button>
+                            </div>
+                            <input type="hidden" id="install_cert_manager" name="install_cert_manager" value="true">
                         </div>
-
-                        <div class="form-row">
+                        <div id="certmanager-existing-fields" style="display: none;">
                             <div class="form-group">
-                                <label for="coder_namespace">Coder Namespace (Optional)</label>
-                                <input type="text" id="coder_namespace" name="coder_namespace" value="coder" placeholder="coder">
-                                <small>Kubernetes namespace for Coder. Defaults to "coder".</small>
-                            </div>                            
-                            <div class="form-group">
-                                <label for="workspace_lifetime_hours">Workspace Lifetime (Optional)</label>
-                                <div class="lifetime-input">
-                                    <input type="number" id="workspace_lifetime_hours" name="workspace_lifetime_hours" min="0" placeholder="0">
-                                    <select id="workspace_lifetime_unit" name="workspace_lifetime_unit">
-                                        <option value="hours">Hours</option>
-                                        <option value="days">Days</option>
-                                    </select>
-                                </div>
-                                <small>Auto-delete workspaces after this duration. Leave 0 to disable.</small>
+                                <label for="cert_manager_namespace">cert-manager Namespace</label>
+                                <input type="text" id="cert_manager_namespace" name="cert_manager_namespace" placeholder="cert-manager">
+                                <small>Namespace where cert-manager is installed. Defaults to <code>cert-manager</code>.</small>
                             </div>
                         </div>
 
-                        <h3 class="subsection-title">HTTPS Configuration (Optional)</h3>
+                        <h3 class="subsection-title">HTTPS (Optional)</h3>
                         <p class="section-description">Leave blank to use plain HTTP with the LoadBalancer IP. When a domain is set, TLS is configured via Let's Encrypt.</p>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label class="checkbox-label">
-                                    <input type="checkbox" name="install_nginx_ingress" value="true" checked>
-                                    Install ingress-nginx controller
-                                </label>
-                                <small>Uncheck if your cluster already has an ingress controller installed.</small>
-                            </div>
-                            <div class="form-group">
-                                <label class="checkbox-label">
-                                    <input type="checkbox" name="install_cert_manager" value="true" checked>
-                                    Install cert-manager
-                                </label>
-                                <small>Uncheck if cert-manager is already installed on your cluster.</small>
-                            </div>
-                        </div>
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="coder_domain">Domain Name</label>
@@ -505,6 +513,59 @@
                                 <input type="password" id="dns_cred_azureClientSecret" name="dns_cred_azureClientSecret">
                             </div>
                             <small>Service principal must have <code>DNS Zone Contributor</code> role on the DNS zone resource group.</small>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Step 7: Coder Configuration -->
+                <section class="wizard-step" data-step="7">
+                    <div class="step-header">
+                        <h2>Coder Configuration</h2>
+                        <p class="section-description">Configure the Coder IDE platform</p>
+                    </div>
+                    <div class="step-content">
+                        <div class="form-group">
+                            <label for="coder_admin_email">Admin Email *</label>
+                            <input type="email" id="coder_admin_email" name="coder_admin_email" value="admin@coder.com" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="coder_admin_password">Admin Password *</label>
+                            <div class="input-with-action">
+                                <input type="password" id="coder_admin_password" name="coder_admin_password" required>
+                                <button type="button" class="btn btn-secondary btn-generate-password btn-generate-password-coder" data-target="coder_admin_password" title="Generate secure password">
+                                    Generate
+                                </button>
+                            </div>
+                            <small>Strong password required</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="coder_version_select">Coder Version *</label>
+                            <select id="coder_version_select">
+                                <option value="">Loading versions…</option>
+                            </select>
+                            <input type="text" id="coder_version" name="coder_version" placeholder="e.g. 2.29.1" required style="display: none;">
+                            <small id="coder_version_custom_hint" style="display: none;">Enter a specific version (e.g. 2.29.1)</small>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="coder_namespace">Coder Namespace (Optional)</label>
+                                <input type="text" id="coder_namespace" name="coder_namespace" value="coder" placeholder="coder">
+                                <small>Kubernetes namespace for Coder. Defaults to "coder".</small>
+                            </div>                            
+                            <div class="form-group">
+                                <label for="workspace_lifetime_hours">Workspace Lifetime (Optional)</label>
+                                <div class="lifetime-input">
+                                    <input type="number" id="workspace_lifetime_hours" name="workspace_lifetime_hours" min="0" placeholder="0">
+                                    <select id="workspace_lifetime_unit" name="workspace_lifetime_unit">
+                                        <option value="hours">Hours</option>
+                                        <option value="days">Days</option>
+                                    </select>
+                                </div>
+                                <small>Auto-delete workspaces after this duration. Leave 0 to disable.</small>
+                            </div>
                         </div>
 
                         <div class="form-group">

@@ -1465,9 +1465,18 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 		// Only emit when false (skip install). Absent = install (backward compat with old jobs).
 		if config.InstallNginxIngress != nil && !*config.InstallNginxIngress {
 			commands = append(commands, configCommand{"coder:installNginxIngress", "false", false})
+			if config.NginxIngressNamespace != "" {
+				commands = append(commands, configCommand{"coder:nginxIngressNamespace", config.NginxIngressNamespace, false})
+			}
+			if config.NginxIngressServiceName != "" {
+				commands = append(commands, configCommand{"coder:nginxIngressServiceName", config.NginxIngressServiceName, false})
+			}
 		}
 		if config.InstallCertManager != nil && !*config.InstallCertManager {
 			commands = append(commands, configCommand{"coder:installCertManager", "false", false})
+			if config.CertManagerNamespace != "" {
+				commands = append(commands, configCommand{"coder:certManagerNamespace", config.CertManagerNamespace, false})
+			}
 		}
 	}
 

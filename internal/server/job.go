@@ -139,8 +139,11 @@ type LabConfig struct {
 	// Controls whether nginx-ingress / cert-manager are installed as part of the lab.
 	// nil means "install" (default, preserves backward compat for persisted jobs).
 	// &false means "skip" (cluster already has it installed).
-	InstallNginxIngress *bool `json:"install_nginx_ingress,omitempty"`
-	InstallCertManager  *bool `json:"install_cert_manager,omitempty"`
+	InstallNginxIngress    *bool  `json:"install_nginx_ingress,omitempty"`
+	NginxIngressNamespace  string `json:"nginx_ingress_namespace,omitempty"`
+	NginxIngressServiceName string `json:"nginx_ingress_service_name,omitempty"`
+	InstallCertManager     *bool  `json:"install_cert_manager,omitempty"`
+	CertManagerNamespace   string `json:"cert_manager_namespace,omitempty"`
 
 	// DNS provider for automated A-record creation and DNS-01 cert issuance
 	DNSProvider        string            `json:"dns_provider,omitempty"`

@@ -124,6 +124,9 @@ const CoderAcmeEmail = "acmeEmail"
 const CoderWildcardDomain = "wildcardDomain"
 const CoderInstallNginxIngress = "installNginxIngress"
 const CoderInstallCertManager = "installCertManager"
+const CoderNginxIngressNamespace   = "nginxIngressNamespace"
+const CoderNginxIngressServiceName = "nginxIngressServiceName"
+const CoderCertManagerNamespace    = "certManagerNamespace"
 
 // DNS provider config group
 const DNSGroup          = "dns"

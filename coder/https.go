@@ -43,14 +43,25 @@ func SetupHTTPS(
 	installCertManager := utils.CoderConfigOptional(ctx, utils.CoderInstallCertManager) != "false"
 	installNginxIngress := utils.CoderConfigOptional(ctx, utils.CoderInstallNginxIngress) != "false"
 
+	// Configurable namespace / service names (fall back to well-known defaults).
+	certManagerNsName := utils.CoderConfigOptional(ctx, utils.CoderCertManagerNamespace)
+	if certManagerNsName == "" {
+		certManagerNsName = "cert-manager"
+	}
+	nginxNsName := utils.CoderConfigOptional(ctx, utils.CoderNginxIngressNamespace)
+	if nginxNsName == "" {
+		nginxNsName = "ingress-nginx"
+	}
+	nginxServiceName := utils.CoderConfigOptional(ctx, utils.CoderNginxIngressServiceName)
+	if nginxServiceName == "" {
+		nginxServiceName = "ingress-nginx-controller"
+	}
+
 	// ── cert-manager ────────────────────────────────────────────────────────
-	// certManagerNs is declared here so the DNS-01 RBAC branch can reference it.
-	var certManagerNs *k8score.Namespace
 	var certManagerRelease *helmv3.Release
 	if installCertManager {
-		var err error
-		certManagerNs, err = k8score.NewNamespace(ctx, "cert-manager-ns", &k8score.NamespaceArgs{
-			Metadata: &metav1.ObjectMetaArgs{Name: pulumi.String("cert-manager")},
+		certManagerNs, err := k8score.NewNamespace(ctx, "cert-manager-ns", &k8score.NamespaceArgs{
+			Metadata: &metav1.ObjectMetaArgs{Name: pulumi.String(certManagerNsName)},
 		}, pulumi.Provider(k8sProvider))
 		if err != nil {
 			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to create cert-manager namespace: %w", err)
@@ -72,7 +83,7 @@ func SetupHTTPS(
 	var ingressRelease *helmv3.Release
 	if installNginxIngress {
 		ingressNs, err := k8score.NewNamespace(ctx, "ingress-nginx-ns", &k8score.NamespaceArgs{
-			Metadata: &metav1.ObjectMetaArgs{Name: pulumi.String("ingress-nginx")},
+			Metadata: &metav1.ObjectMetaArgs{Name: pulumi.String(nginxNsName)},
 		}, pulumi.Provider(k8sProvider))
 		if err != nil {
 			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to create ingress-nginx namespace: %w", err)
@@ -124,7 +135,7 @@ func SetupHTTPS(
 		}
 
 		// Store DNS credentials in a Kubernetes Secret for cert-manager webhook
-		credSecret, secretErr := createDNSCredentialSecret(ctx, k8sProvider, certManagerNs, dnsProviderName, dnsProvider)
+		credSecret, secretErr := createDNSCredentialSecret(ctx, k8sProvider, certManagerNsName, dnsProviderName, dnsProvider)
 		if secretErr != nil {
 			return nil, pulumi.StringOutput{}, secretErr
 		}
@@ -147,7 +158,7 @@ func SetupHTTPS(
 		webhookRole, rbacErr := rbacv1.NewRole(ctx, "cert-manager-webhook-ovh-secret-reader", &rbacv1.RoleArgs{
 			Metadata: &metav1.ObjectMetaArgs{
 				Name:      pulumi.String("cert-manager-webhook-ovh-secret-reader"),
-				Namespace: certManagerNs.Metadata.Name(),
+				Namespace: pulumi.String(certManagerNsName),
 			},
 			Rules: rbacv1.PolicyRuleArray{
 				&rbacv1.PolicyRuleArgs{
@@ -164,7 +175,7 @@ func SetupHTTPS(
 		_, rbacErr = rbacv1.NewRoleBinding(ctx, "cert-manager-webhook-ovh-secret-reader", &rbacv1.RoleBindingArgs{
 			Metadata: &metav1.ObjectMetaArgs{
 				Name:      pulumi.String("cert-manager-webhook-ovh-secret-reader"),
-				Namespace: certManagerNs.Metadata.Name(),
+				Namespace: pulumi.String(certManagerNsName),
 			},
 			RoleRef: &rbacv1.RoleRefArgs{
 				ApiGroup: pulumi.String("rbac.authorization.k8s.io"),
@@ -189,7 +200,7 @@ func SetupHTTPS(
 		// Resolve the LoadBalancer IP here — after the webhook Helm install, which
 		// takes several minutes and gives the cloud provider time to assign the IP.
 		var ipErr error
-		ingressIP, ipErr = GetIngressIP(kubeconfigOut, ingressRelease)
+		ingressIP, ipErr = GetIngressIP(kubeconfigOut, ingressRelease, nginxNsName, nginxServiceName)
 		if ipErr != nil {
 			return nil, pulumi.StringOutput{}, ipErr
 		}
@@ -314,7 +325,7 @@ func SetupHTTPS(
 	// time to assign the LoadBalancer IP during the cert-manager/ingress install.
 	if !ingressIPResolved {
 		var ipErr error
-		ingressIP, ipErr = GetIngressIP(kubeconfigOut, ingressRelease)
+		ingressIP, ipErr = GetIngressIP(kubeconfigOut, ingressRelease, nginxNsName, nginxServiceName)
 		if ipErr != nil {
 			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to get ingress-nginx IP: %w", ipErr)
 		}
@@ -328,22 +339,22 @@ func SetupHTTPS(
 // pending-initialisation await, which blocks indefinitely on OVHcloud clusters because
 // OVHcloud sets ipMode:VIP on LoadBalancer services (not recognised as ready by the provider).
 // ingressRelease may be nil when ingress-nginx is pre-installed on the cluster.
-func GetIngressIP(kubeconfigOut pulumi.StringOutput, ingressRelease *helmv3.Release) (pulumi.StringOutput, error) {
+func GetIngressIP(kubeconfigOut pulumi.StringOutput, ingressRelease *helmv3.Release, namespace, serviceName string) (pulumi.StringOutput, error) {
 	var trigger interface{}
 	if ingressRelease != nil {
 		trigger = ingressRelease.ResourceNames
 	} else {
 		trigger = pulumi.String("") // no-op: service is already present
 	}
-	return internalK8s.GetServiceIP(kubeconfigOut, trigger, "ingress-nginx", "ingress-nginx-controller"), nil
+	return internalK8s.GetServiceIP(kubeconfigOut, trigger, namespace, serviceName), nil
 }
 
 // createDNSCredentialSecret stores DNS provider API credentials in a Kubernetes Secret
-// in the Coder namespace so cert-manager webhooks can access them.
+// in the cert-manager namespace so cert-manager webhooks can access them.
 func createDNSCredentialSecret(
 	ctx *pulumi.Context,
 	k8sProvider *k8s.Provider,
-	ns *k8score.Namespace,
+	nsName string,
 	providerName string,
 	dnsProvider dnsregistry.Provider,
 ) (string, error) {
@@ -378,7 +389,7 @@ func createDNSCredentialSecret(
 	_, err := k8score.NewSecret(ctx, "dns-credentials-secret", &k8score.SecretArgs{
 		Metadata: &metav1.ObjectMetaArgs{
 			Name:      pulumi.String(secretName),
-			Namespace: ns.Metadata.Name(),
+			Namespace: pulumi.String(nsName),
 		},
 		StringData: secretData,
 	}, pulumi.Provider(k8sProvider))
