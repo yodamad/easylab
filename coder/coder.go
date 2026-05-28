@@ -225,9 +225,10 @@ func waitForCoderReachable(ctx *pulumi.Context, baseURL string) error {
 			utils.LogInfo(ctx, fmt.Sprintf("Coder is ready (attempt %d)", attempt))
 			return nil
 		}
-		// Any response means the server is up
-		utils.LogInfo(ctx, fmt.Sprintf("Coder is ready (attempt %d, status %d)", attempt, resp.StatusCode))
-		return nil
+		utils.LogInfo(ctx, fmt.Sprintf("Coder not ready yet (attempt %d/%d): status %d", attempt, maxAttempts, resp.StatusCode))
+		if attempt < maxAttempts {
+			time.Sleep(interval)
+		}
 	}
 	return fmt.Errorf("Coder did not become reachable after %d attempts", maxAttempts)
 }
@@ -343,8 +344,14 @@ func waitForCoderReachableStandalone(baseURL string, logFunc func(string)) error
 			continue
 		}
 		resp.Body.Close()
-		logFunc(fmt.Sprintf("Coder is ready (attempt %d, status %d)", attempt, resp.StatusCode))
-		return nil
+		if resp.StatusCode == http.StatusOK {
+			logFunc(fmt.Sprintf("Coder is ready (attempt %d)", attempt))
+			return nil
+		}
+		logFunc(fmt.Sprintf("Coder not ready yet (attempt %d/%d): status %d", attempt, maxAttempts, resp.StatusCode))
+		if attempt < maxAttempts {
+			time.Sleep(interval)
+		}
 	}
 	return fmt.Errorf("Coder did not become reachable after %d attempts", maxAttempts)
 }
