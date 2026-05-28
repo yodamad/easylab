@@ -284,7 +284,7 @@ goreleaser:
     GIT_DEPTH: 0
     GITLAB_TOKEN: ${CI_JOB_TOKEN}
   script:
-    - goreleaser release --skip=build -f .goreleaser.gitlab.yaml
+    - goreleaser release --clean -f .goreleaser.gitlab.yaml
 
 # Publish Helm chart to Docker Hub as OCI artifact
 helm-publish:
