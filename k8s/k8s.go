@@ -138,6 +138,7 @@ type kubeconfigYAML struct {
 		User struct {
 			ClientCertificateData string `yaml:"client-certificate-data"`
 			ClientKeyData         string `yaml:"client-key-data"`
+			Token                 string `yaml:"token"`
 		} `yaml:"user"`
 		Name string `yaml:"name"`
 	} `yaml:"users"`
@@ -179,11 +180,12 @@ func fetchServiceIP(kubeconfigContent, namespace, serviceName string) (string, e
 		}
 	}
 
-	var clientCertB64, clientKeyB64 string
+	var clientCertB64, clientKeyB64, token string
 	for _, u := range kc.Users {
 		if u.Name == userName {
 			clientCertB64 = u.User.ClientCertificateData
 			clientKeyB64 = u.User.ClientKeyData
+			token = u.User.Token
 			break
 		}
 	}
@@ -192,32 +194,38 @@ func fetchServiceIP(kubeconfigContent, namespace, serviceName string) (string, e
 	if err != nil {
 		return "", fmt.Errorf("failed to decode CA cert: %w", err)
 	}
-	clientCertPEM, err := base64.StdEncoding.DecodeString(clientCertB64)
-	if err != nil {
-		return "", fmt.Errorf("failed to decode client cert: %w", err)
-	}
-	clientKeyPEM, err := base64.StdEncoding.DecodeString(clientKeyB64)
-	if err != nil {
-		return "", fmt.Errorf("failed to decode client key: %w", err)
-	}
 
-	cert, err := tls.X509KeyPair(clientCertPEM, clientKeyPEM)
-	if err != nil {
-		return "", fmt.Errorf("failed to build TLS key pair: %w", err)
-	}
 	caCertPool := x509.NewCertPool()
 	if !caCertPool.AppendCertsFromPEM(caCertPEM) {
 		return "", fmt.Errorf("failed to parse CA certificate")
 	}
 
+	tlsCfg := &tls.Config{RootCAs: caCertPool}
+
+	// Client certificate auth (OVH, AKS local accounts).
+	// Token auth (AKS with Azure AD / managed identity): skip cert setup.
+	if clientCertB64 != "" && clientKeyB64 != "" {
+		clientCertPEM, decErr := base64.StdEncoding.DecodeString(clientCertB64)
+		if decErr != nil {
+			return "", fmt.Errorf("failed to decode client cert: %w", decErr)
+		}
+		clientKeyPEM, decErr := base64.StdEncoding.DecodeString(clientKeyB64)
+		if decErr != nil {
+			return "", fmt.Errorf("failed to decode client key: %w", decErr)
+		}
+		cert, keyErr := tls.X509KeyPair(clientCertPEM, clientKeyPEM)
+		if keyErr != nil {
+			return "", fmt.Errorf("failed to build TLS key pair: %w", keyErr)
+		}
+		tlsCfg.Certificates = []tls.Certificate{cert}
+	} else if token == "" {
+		return "", fmt.Errorf("kubeconfig for user %q has no client certificate and no token", userName)
+	}
+
+	transport := &http.Transport{TLSClientConfig: tlsCfg}
 	client := &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				Certificates: []tls.Certificate{cert},
-				RootCAs:      caCertPool,
-			},
-		},
+		Timeout:   30 * time.Second,
+		Transport: transport,
 	}
 
 	apiURL := fmt.Sprintf("%s/api/v1/namespaces/%s/services/%s", serverURL, namespace, serviceName)
@@ -231,7 +239,14 @@ func fetchServiceIP(kubeconfigContent, namespace, serviceName string) (string, e
 			time.Sleep(15 * time.Second)
 		}
 
-		resp, reqErr := client.Get(apiURL)
+		req, reqErr := http.NewRequest(http.MethodGet, apiURL, nil)
+		if reqErr != nil {
+			return "", fmt.Errorf("failed to build API request: %w", reqErr)
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, reqErr := client.Do(req)
 		if reqErr != nil {
 			lastErr = fmt.Errorf("attempt %d: failed to call Kubernetes API: %w", attempt+1, reqErr)
 			continue
