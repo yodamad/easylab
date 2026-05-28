@@ -109,11 +109,14 @@ function renderWorkspaceCard(info, labId) {
     const safeEmail = escapeHtml(info.email);
     const safeName = escapeHtml(info.workspace_name);
 
+    const ownerID = info.email.split('@')[0].toLowerCase().replace(/\./g, '-');
+
     return `
         <div class="workspace-card collapsible-card collapsed" id="workspace-card-${safeLab}">
             <div class="workspace-card-header" onclick="toggleWorkspaceCard('${safeLab}')">
                 <h3>${safeName}</h3>
                 <div class="workspace-card-actions">
+                    <button onclick="event.stopPropagation(); openCodeServer('${safeLab}', '${escapeHtml(info.workspace_name)}', '${escapeHtml(ownerID)}')" class="student-btn student-btn-small" title="Open code-server">Open Code Server</button>
                     ${isEncrypted ? '' : `<button onclick="event.stopPropagation(); encryptSingleWorkspace('${safeLab}')" class="student-btn student-btn-small" title="Encrypt password">Encrypt</button>`}
                     <button onclick="event.stopPropagation(); clearWorkspaceInfo('${safeLab}')" class="student-btn student-btn-danger student-btn-small" title="Remove">Clear</button>
                     <button class="collapsible-toggle" type="button" aria-label="Toggle workspace details">
@@ -173,6 +176,26 @@ function renderWorkspaceCard(info, labId) {
             </div>
         </div>
     `;
+}
+
+async function openCodeServer(labId, workspaceName, ownerID) {
+    const statusUrl = `/api/student/workspace/status?lab_id=${encodeURIComponent(labId)}&workspace_name=${encodeURIComponent(workspaceName)}&owner_id=${encodeURIComponent(ownerID)}`;
+    try {
+        const resp = await fetch(statusUrl, { credentials: 'same-origin' });
+        if (!resp.ok) throw new Error('Failed to fetch workspace status');
+        const html = await resp.text();
+        const tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        const link = tmp.querySelector('a.btn-workspace-connect');
+        if (link) {
+            window.open(link.href, '_blank');
+        } else {
+            alert('Workspace is not ready yet. Please wait for it to start and try again.');
+        }
+    } catch (e) {
+        console.error('Failed to open code-server:', e);
+        alert('Failed to check workspace status. Please try again.');
+    }
 }
 
 async function decryptAndShowPassword(labId) {

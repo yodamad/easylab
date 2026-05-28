@@ -1325,6 +1325,10 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	coderAdminEmail := job.CoderAdminEmail
 	coderAdminPassword := job.CoderAdminPassword
 	stackName := job.Config.StackName
+	coderDomain := ""
+	if job.Config != nil {
+		coderDomain = job.Config.CoderDomain
+	}
 	job.mu.RUnlock()
 
 	if status != JobStatusCompleted {
@@ -1338,6 +1342,10 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
 	coderAdminEmail = extractStringFromConfigValue(coderAdminEmail)
 	coderAdminPassword = extractStringFromConfigValue(coderAdminPassword)
+
+	if coderDomain != "" {
+		coderURL = "https://" + coderDomain
+	}
 
 	if coderURL == "" || coderSessionToken == "" || coderOrganizationID == "" {
 		http.Error(w, "Coder configuration not available for this lab", http.StatusInternalServerError)
@@ -1668,7 +1676,15 @@ func (h *Handler) WorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 	if coderAdminPassword == "" && job.Config != nil {
 		coderAdminPassword = job.Config.CoderAdminPassword
 	}
+	wsCoderDomain := ""
+	if job.Config != nil {
+		wsCoderDomain = job.Config.CoderDomain
+	}
 	job.mu.RUnlock()
+
+	if wsCoderDomain != "" {
+		coderURL = "https://" + wsCoderDomain
+	}
 
 	log.Printf("[debug] WorkspaceStatus: coderURL=%q hasToken=%v hasAdminEmail=%v hasAdminPassword=%v orgID=%q",
 		coderURL, coderSessionToken != "", coderAdminEmail != "", coderAdminPassword != "", coderOrganizationID)
