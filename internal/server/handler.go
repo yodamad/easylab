@@ -44,8 +44,10 @@ type Handler struct {
 	ovhOptionsManager    *OVHOptionsManager
 	azureOptionsManager  *AzureOptionsManager
 	feedbackStore        *FeedbackStore
-	azureADConfigurer          func(clientID, clientSecret, tenantID string)
-	classicLoginConfigurer     func(disabled bool)
+	azureADConfigurer            func(clientID, clientSecret, tenantID string)
+	classicLoginConfigurer       func(disabled bool)
+	adminGroupIDConfigurer       func(groupID string)
+	classicAdminLoginConfigurer  func(disabled bool)
 }
 
 // SetAzureADConfigurer wires a callback so the handler can update Azure AD OAuth config at runtime.
@@ -56,6 +58,16 @@ func (h *Handler) SetAzureADConfigurer(fn func(clientID, clientSecret, tenantID 
 // SetClassicLoginConfigurer wires a callback to enable/disable password-based student login at runtime.
 func (h *Handler) SetClassicLoginConfigurer(fn func(disabled bool)) {
 	h.classicLoginConfigurer = fn
+}
+
+// SetAdminGroupIDConfigurer wires a callback so the handler can update the admin Azure AD group ID at runtime.
+func (h *Handler) SetAdminGroupIDConfigurer(fn func(groupID string)) {
+	h.adminGroupIDConfigurer = fn
+}
+
+// SetClassicAdminLoginConfigurer wires a callback to enable/disable password-based admin login at runtime.
+func (h *Handler) SetClassicAdminLoginConfigurer(fn func(disabled bool)) {
+	h.classicAdminLoginConfigurer = fn
 }
 
 // emailRegex is a simple email validation regex
@@ -2351,7 +2363,9 @@ func (h *Handler) SaveAzureADConfig(w http.ResponseWriter, r *http.Request) {
 	clientID := strings.TrimSpace(r.FormValue("azure_ad_client_id"))
 	clientSecret := strings.TrimSpace(r.FormValue("azure_ad_client_secret"))
 	tenantID := strings.TrimSpace(r.FormValue("azure_ad_tenant_id"))
+	adminGroupID := strings.TrimSpace(r.FormValue("azure_ad_admin_group_id"))
 	disableClassic := r.FormValue("azure_ad_disable_classic_login") == "on"
+	disableClassicAdmin := r.FormValue("azure_ad_disable_classic_admin_login") == "on"
 
 	// Preserve existing secret when the field is left blank (password fields submit empty on re-display)
 	if clientSecret == "" && h.azureOptionsManager != nil && clientID != "" {
@@ -2359,16 +2373,23 @@ func (h *Handler) SaveAzureADConfig(w http.ResponseWriter, r *http.Request) {
 		clientSecret = existing.ClientSecret
 	}
 
-	// Classic login can only be disabled when Azure AD credentials are provided
+	// Classic login flags can only be active when their prerequisites are met
 	if clientID == "" {
 		disableClassic = false
+		adminGroupID = ""
+		disableClassicAdmin = false
+	}
+	if adminGroupID == "" {
+		disableClassicAdmin = false
 	}
 
 	cfg := AzureADConfig{
-		ClientID:            clientID,
-		ClientSecret:        clientSecret,
-		TenantID:            tenantID,
-		DisableClassicLogin: disableClassic,
+		ClientID:                 clientID,
+		ClientSecret:             clientSecret,
+		TenantID:                 tenantID,
+		DisableClassicLogin:      disableClassic,
+		AdminGroupID:             adminGroupID,
+		DisableClassicAdminLogin: disableClassicAdmin,
 	}
 
 	if h.azureOptionsManager != nil {
@@ -2385,6 +2406,12 @@ func (h *Handler) SaveAzureADConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.classicLoginConfigurer != nil {
 		h.classicLoginConfigurer(disableClassic)
+	}
+	if h.adminGroupIDConfigurer != nil {
+		h.adminGroupIDConfigurer(adminGroupID)
+	}
+	if h.classicAdminLoginConfigurer != nil {
+		h.classicAdminLoginConfigurer(disableClassicAdmin)
 	}
 
 	if r.Header.Get("HX-Request") == "true" {

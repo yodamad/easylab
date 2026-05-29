@@ -167,14 +167,32 @@
                                     <small>Your Azure AD tenant ID (found in Azure Portal → Azure Active Directory)</small>
                                 </div>
 
-                                {{if .AzureAD.ClientID}}
                                 <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" name="azure_ad_disable_classic_login" id="azure_ad_disable_classic_login"
-                                               {{if .AzureAD.DisableClassicLogin}}checked{{end}}>
-                                        Disable password login for students
-                                    </label>
-                                    <small>When checked, the student password form is hidden and only Microsoft login is available. Has no effect if Azure AD is not configured.</small>
+                                    <label for="azure_ad_admin_group_id">Admin Group ID (Object ID)</label>
+                                    <input type="text" id="azure_ad_admin_group_id" name="azure_ad_admin_group_id"
+                                           value="{{.AzureAD.AdminGroupID}}"
+                                           placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                                    <small>Optional. When set, enables a "Sign in with Microsoft" button on the admin login page. Only direct members of this Azure AD group (by Object ID) can log in as admin. Requires the app registration to have <strong>User.Read</strong> delegated permission and the user's account to be part of the group.</small>
+                                </div>
+
+                                {{if .AzureAD.ClientID}}
+                                <div class="form-checkboxes">
+                                    <span>Login restrictions</span>
+                                    <div class="checkbox-stack">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" name="azure_ad_disable_classic_login" id="azure_ad_disable_classic_login"
+                                                   {{if .AzureAD.DisableClassicLogin}}checked{{end}}>
+                                            Disable password login for students
+                                        </label>
+                                        {{if .AzureAD.AdminGroupID}}
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" name="azure_ad_disable_classic_admin_login" id="azure_ad_disable_classic_admin_login"
+                                                   {{if .AzureAD.DisableClassicAdminLogin}}checked{{end}}>
+                                            Disable password login for admins
+                                        </label>
+                                        {{end}}
+                                    </div>
+                                    <small>When checked, the corresponding password form is hidden and only Microsoft login is available.</small>
                                 </div>
                                 {{end}}
                             </div>

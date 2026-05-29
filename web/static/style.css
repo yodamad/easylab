@@ -1540,6 +1540,10 @@ body.student-login-page {
     padding: 2rem 2rem 0;
 }
 
+.login-social-only {
+    padding-bottom: 2rem;
+}
+
 .login-divider {
     display: flex;
     align-items: center;
@@ -2556,6 +2560,31 @@ body.student-dashboard-page {
     gap: 0.5rem;
     cursor: pointer;
     font-weight: 500;
+}
+
+.form-checkboxes {
+    margin-bottom: 1.5rem;
+}
+
+.form-checkboxes > span {
+    display: block;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+    color: var(--text);
+    font-size: 0.875rem;
+}
+
+.form-checkboxes .checkbox-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.form-checkboxes small {
+    display: block;
+    margin-top: 0.5rem;
+    color: var(--text-light);
+    font-size: 0.8rem;
 }
 
 .workspace-status-badge {

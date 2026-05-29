@@ -16,12 +16,16 @@ type AzureItemConfig struct {
 	Default string   `json:"default"`
 }
 
-// AzureADConfig holds Azure AD OAuth configuration for student login.
+// AzureADConfig holds Azure AD OAuth configuration for student and admin login.
 type AzureADConfig struct {
-	ClientID             string `json:"client_id"`
-	ClientSecret         string `json:"client_secret"`
-	TenantID             string `json:"tenant_id"`
-	DisableClassicLogin  bool   `json:"disable_classic_login,omitempty"`
+	ClientID            string `json:"client_id"`
+	ClientSecret        string `json:"client_secret"`
+	TenantID            string `json:"tenant_id"`
+	DisableClassicLogin bool   `json:"disable_classic_login,omitempty"`
+	// AdminGroupID, when set, enables Azure AD login for admins restricted to direct members of this group.
+	AdminGroupID string `json:"admin_group_id,omitempty"`
+	// DisableClassicAdminLogin hides the password form on the admin login page (only when AdminGroupID is set).
+	DisableClassicAdminLogin bool `json:"disable_classic_admin_login,omitempty"`
 }
 
 // AzureOptionsConfig is persisted admin preferences for Azure regions and VM sizes.

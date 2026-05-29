@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"math/big"
 	"net/http"
@@ -31,6 +32,8 @@ const (
 	EnvAzureADClientID     = "AZURE_AD_CLIENT_ID"
 	EnvAzureADClientSecret = "AZURE_AD_CLIENT_SECRET"
 	EnvAzureADTenantID     = "AZURE_AD_TENANT_ID"
+	// EnvAzureADAdminGroupID restricts admin Azure AD login to direct members of this group.
+	EnvAzureADAdminGroupID = "AZURE_AD_ADMIN_GROUP_ID"
 	// Cookie name for session
 	SessionCookieName = "lab_session"
 	// Cookie name for student session
@@ -63,7 +66,9 @@ type AuthHandler struct {
 	azureADEnabled       bool
 	azureADConfig        *oauth2.Config
 	azureOAuthStates     map[string]time.Time
-	classicLoginDisabled bool
+	classicLoginDisabled      bool
+	adminGroupID              string
+	classicAdminLoginDisabled bool
 	templates            map[string]*template.Template
 	templatesMu          sync.RWMutex
 	mu                   sync.RWMutex
@@ -133,6 +138,11 @@ func NewAuthHandler() (*AuthHandler, error) {
 		log.Printf("Azure AD student login enabled (tenant: %s)", azureTenantID)
 	}
 
+	adminGroupID := os.Getenv(EnvAzureADAdminGroupID)
+	if adminGroupID != "" && azureADEnabled {
+		log.Printf("Azure AD admin login enabled (group: %s)", adminGroupID)
+	}
+
 	ah := &AuthHandler{
 		passwordHash:        passwordHash,
 		studentPasswordHash: studentPasswordHash,
@@ -141,6 +151,7 @@ func NewAuthHandler() (*AuthHandler, error) {
 		azureADEnabled:      azureADEnabled,
 		azureADConfig:       azureADConfig,
 		azureOAuthStates:    make(map[string]time.Time),
+		adminGroupID:        adminGroupID,
 		templates:           make(map[string]*template.Template),
 	}
 
@@ -207,6 +218,34 @@ func (ah *AuthHandler) SetClassicLoginDisabled(disabled bool) {
 	ah.mu.Lock()
 	defer ah.mu.Unlock()
 	ah.classicLoginDisabled = disabled
+}
+
+// SetAdminGroupID sets the Azure AD group ID that admin users must directly belong to.
+// Passing an empty string disables admin Azure AD login.
+func (ah *AuthHandler) SetAdminGroupID(groupID string) {
+	ah.mu.Lock()
+	defer ah.mu.Unlock()
+	ah.adminGroupID = groupID
+	if groupID != "" {
+		log.Printf("Azure AD admin login configured (group: %s)", groupID)
+	} else {
+		log.Printf("Azure AD admin login disabled (group ID cleared)")
+	}
+}
+
+// AdminAzureADEnabled reports whether admin Azure AD login is currently configured.
+func (ah *AuthHandler) AdminAzureADEnabled() bool {
+	ah.mu.RLock()
+	defer ah.mu.RUnlock()
+	return ah.azureADEnabled && ah.adminGroupID != ""
+}
+
+// SetClassicAdminLoginDisabled enables or disables the password-based admin login form.
+// Only takes effect when AdminAzureADEnabled() is true; the flag is ignored otherwise.
+func (ah *AuthHandler) SetClassicAdminLoginDisabled(disabled bool) {
+	ah.mu.Lock()
+	defer ah.mu.Unlock()
+	ah.classicAdminLoginDisabled = disabled
 }
 
 // generateToken creates a secure random token
@@ -323,8 +362,15 @@ func (ah *AuthHandler) ServeLogin(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Expires", "0")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
+	ah.mu.RLock()
+	azureAdminEnabled := ah.azureADEnabled && ah.adminGroupID != ""
+	classicAdminDisabled := ah.classicAdminLoginDisabled && azureAdminEnabled
+	ah.mu.RUnlock()
+
 	data := map[string]interface{}{
-		"Error": r.URL.Query().Get("error"),
+		"Error":                r.URL.Query().Get("error"),
+		"AzureADAdminEnabled":  azureAdminEnabled,
+		"ClassicLoginDisabled": classicAdminDisabled,
 	}
 
 	if err := tmpl.ExecuteTemplate(w, "base", data); err != nil {
@@ -336,6 +382,15 @@ func (ah *AuthHandler) ServeLogin(w http.ResponseWriter, r *http.Request) {
 func (ah *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	ah.mu.RLock()
+	classicAdminDisabled := ah.classicAdminLoginDisabled && ah.azureADEnabled && ah.adminGroupID != ""
+	ah.mu.RUnlock()
+
+	if classicAdminDisabled {
+		http.Redirect(w, r, "/login?error=Password+login+is+disabled%2C+please+use+Microsoft+login", http.StatusSeeOther)
 		return
 	}
 
@@ -719,6 +774,166 @@ func (ah *AuthHandler) HandleAzureADCallback(w http.ResponseWriter, r *http.Requ
 
 	log.Printf("Successful Azure AD student login")
 	http.Redirect(w, r, "/student/dashboard", http.StatusSeeOther)
+}
+
+// HandleAdminAzureADLogin initiates the Azure AD OAuth 2.0 flow for admin login.
+// The resulting access token must be usable against the Microsoft Graph API to verify group membership.
+func (ah *AuthHandler) HandleAdminAzureADLogin(w http.ResponseWriter, r *http.Request) {
+	if !ah.AdminAzureADEnabled() {
+		http.Redirect(w, r, "/login?error=Azure+AD+admin+login+not+configured", http.StatusSeeOther)
+		return
+	}
+
+	state := generateToken()
+	ah.mu.Lock()
+	ah.azureOAuthStates[state] = time.Now().Add(azureOAuthStateExpiry)
+	ah.mu.Unlock()
+
+	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	scheme := "http"
+	if isSecure {
+		scheme = "https"
+	}
+	redirectURI := scheme + "://" + r.Host + "/admin/auth/azure/callback"
+
+	// Request Graph API User.Read scope so the access token can be used for group membership check.
+	authURL := ah.azureADConfig.AuthCodeURL(state,
+		oauth2.SetAuthURLParam("redirect_uri", redirectURI),
+		oauth2.SetAuthURLParam("scope", "openid email profile https://graph.microsoft.com/User.Read"),
+	)
+	http.Redirect(w, r, authURL, http.StatusFound)
+}
+
+// HandleAdminAzureADCallback handles the OAuth 2.0 callback for admin login.
+// It verifies the user is a direct member of the required Azure AD group before creating an admin session.
+func (ah *AuthHandler) HandleAdminAzureADCallback(w http.ResponseWriter, r *http.Request) {
+	if !ah.AdminAzureADEnabled() {
+		http.Redirect(w, r, "/login?error=Azure+AD+admin+login+not+configured", http.StatusSeeOther)
+		return
+	}
+
+	if errParam := r.URL.Query().Get("error"); errParam != "" {
+		log.Printf("Azure AD admin OAuth error: %s", errParam)
+		http.Redirect(w, r, "/login?error=Azure+AD+authentication+failed", http.StatusSeeOther)
+		return
+	}
+
+	state := r.URL.Query().Get("state")
+	code := r.URL.Query().Get("code")
+
+	ah.mu.Lock()
+	expiry, valid := ah.azureOAuthStates[state]
+	if valid {
+		delete(ah.azureOAuthStates, state)
+	}
+	ah.mu.Unlock()
+
+	if !valid || time.Now().After(expiry) {
+		log.Printf("Azure AD admin callback: invalid or expired state")
+		http.Redirect(w, r, "/login?error=Invalid+authentication+state", http.StatusSeeOther)
+		return
+	}
+
+	if code == "" {
+		http.Redirect(w, r, "/login?error=Missing+authorization+code", http.StatusSeeOther)
+		return
+	}
+
+	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	scheme := "http"
+	if isSecure {
+		scheme = "https"
+	}
+	redirectURI := scheme + "://" + r.Host + "/admin/auth/azure/callback"
+
+	token, err := ah.azureADConfig.Exchange(r.Context(), code, oauth2.SetAuthURLParam("redirect_uri", redirectURI))
+	if err != nil {
+		log.Printf("Azure AD admin token exchange failed: %v", err)
+		http.Redirect(w, r, "/login?error=Authentication+failed", http.StatusSeeOther)
+		return
+	}
+
+	email, err := extractEmailFromIDToken(token)
+	if err != nil {
+		log.Printf("Azure AD admin: failed to extract email: %v", err)
+		http.Redirect(w, r, "/login?error=Could+not+retrieve+email+from+Azure+AD", http.StatusSeeOther)
+		return
+	}
+
+	ah.mu.RLock()
+	groupID := ah.adminGroupID
+	ah.mu.RUnlock()
+
+	member, err := checkDirectGroupMembership(token.AccessToken, groupID)
+	if err != nil {
+		log.Printf("Azure AD admin: group membership check failed for %s: %v", email, err)
+		http.Redirect(w, r, "/login?error=Could+not+verify+group+membership", http.StatusSeeOther)
+		return
+	}
+	if !member {
+		log.Printf("Azure AD admin: user %s is not a member of group %s — access denied", email, groupID)
+		http.Redirect(w, r, "/login?error=Not+authorized%3A+you+are+not+a+member+of+the+required+admin+group", http.StatusSeeOther)
+		return
+	}
+
+	sessionToken := ah.createSession()
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     SessionCookieName,
+		Value:    sessionToken,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   isSecure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(SessionExpiry.Seconds()),
+	})
+
+	log.Printf("Successful Azure AD admin login: %s", email)
+	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+}
+
+// checkDirectGroupMembership calls the Microsoft Graph API to verify that the signed-in user
+// is a direct member of the given group ID. It returns true only if the group is found in /me/memberOf.
+func checkDirectGroupMembership(accessToken, groupID string) (bool, error) {
+	req, err := http.NewRequest(http.MethodGet,
+		"https://graph.microsoft.com/v1.0/me/memberOf?$select=id&$top=999",
+		nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to build Graph API request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("Graph API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, fmt.Errorf("failed to read Graph API response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("Graph API returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Value []struct {
+			ID string `json:"id"`
+		} `json:"value"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return false, fmt.Errorf("failed to parse Graph API response: %w", err)
+	}
+
+	for _, g := range result.Value {
+		if strings.EqualFold(g.ID, groupID) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // extractEmailFromIDToken decodes the JWT id_token and returns the student's email.

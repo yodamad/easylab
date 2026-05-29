@@ -164,23 +164,50 @@ Before creating a lab, you can run a **dry run** to preview what Pulumi would do
 
 Dry-run jobs do not create any cloud or Kubernetes resources; only real runs do.
 
-## Azure AD student authentication (optional)
+## Azure AD authentication (optional)
 
-EasyLab can delegate student login to Azure AD (Microsoft Entra ID). When enabled, a **Sign in with Microsoft** button appears at the top of the student login page. Any account in the configured tenant is accepted — no allow-list is required.
+EasyLab can delegate login to Azure AD (Microsoft Entra ID) for both **students** and **admins**.
 
-### How it works
+---
+
+### Student authentication
+
+When enabled, a **Sign in with Microsoft** button appears on the student login page. Any account in the configured tenant is accepted — no allow-list is required.
+
+#### How it works
 
 1. The student clicks **Sign in with Microsoft** and is redirected to Microsoft's login page.
 2. After a successful Microsoft login, EasyLab creates a local session using the student's email address.
 3. When the student first requests a workspace, a Coder account is provisioned automatically using that email address and a server-generated password — identical to the password-based flow. Azure AD is never configured on Coder itself.
 
+---
+
+### Admin authentication
+
+When an **Admin Group ID** is configured, a **Sign in with Microsoft** button also appears on the admin login page (`/login`). Only users who are **direct members** of the specified Azure AD group are granted admin access.
+
+#### How it works
+
+1. The admin clicks **Sign in with Microsoft** and is redirected to Microsoft's login page.
+2. After the Microsoft login, EasyLab calls the Microsoft Graph API (`/me/memberOf`) using the access token to verify the user is a direct member of the required group.
+3. If the user is in the group, a normal admin session is created and the user is redirected to `/admin`. Otherwise, login is rejected with an error.
+
+The admin password login remains available alongside Microsoft login — both methods work simultaneously.
+
+---
+
 ### Setup — Azure App Registration
 
+The same Azure AD app registration is used for both student and admin login.
+
 1. In the [Azure portal](https://portal.azure.com), go to **Microsoft Entra ID → App registrations → New registration**.
-2. Set **Redirect URI** to `https://<your-easylab-host>/student/auth/azure/callback` (Web platform).
+2. Add **Redirect URIs** for both student and admin callbacks (Web platform):
+    - `https://<your-easylab-host>/student/auth/azure/callback`
+    - `https://<your-easylab-host>/admin/auth/azure/callback`
 3. Under **Certificates & secrets**, create a new client secret and copy its value immediately.
 4. Note the **Application (client) ID** and **Directory (tenant) ID** from the Overview page.
-5. Under **API permissions**, ensure the following delegated permissions are granted: `openid`, `email`, `profile`.
+5. Under **API permissions**, ensure the following delegated permissions are granted: `openid`, `email`, `profile`, `User.Read`.
+6. To enable admin login, find the **Object ID** of the Azure AD group whose members should be admins (under **Microsoft Entra ID → Groups → your group → Overview**).
 
 ### Configuration — admin UI (recommended)
 
@@ -190,7 +217,8 @@ The easiest way to configure Azure AD is through the admin interface:
 2. Select the **Credentials** tab.
 3. Scroll down to the **Azure AD — Student Login (OAuth)** section.
 4. Enter the **Application (Client) ID**, **Client Secret**, and **Directory (Tenant) ID**.
-5. Click **Save Azure AD Config**.
+5. Optionally, enter the **Admin Group ID** (Azure AD group Object ID) to enable admin Microsoft login.
+6. Click **Save Azure AD Config**.
 
 The configuration is persisted to disk and takes effect immediately — no restart required. Click **Disable Azure AD Login** (visible when a client ID is saved) to clear the configuration.
 
@@ -198,15 +226,16 @@ Once a client ID is saved, an additional option appears: **Disable password logi
 
 ### Configuration — environment variables (alternative)
 
-You can also set the following three variables at startup (in your `.env` file or as Docker environment variables):
+You can also set the following variables at startup (in your `.env` file or as Docker environment variables):
 
 | Variable | Description |
 |---|---|
 | `AZURE_AD_CLIENT_ID` | Application (client) ID of the app registration |
 | `AZURE_AD_CLIENT_SECRET` | Client secret value created in the app registration |
 | `AZURE_AD_TENANT_ID` | Directory (tenant) ID |
+| `AZURE_AD_ADMIN_GROUP_ID` | Azure AD group Object ID whose direct members are allowed as admins (optional) |
 
-If any of the three variables is absent and no UI configuration is saved, Azure AD login is disabled.
+If any of the first three variables is absent and no UI configuration is saved, Azure AD login is disabled for both students and admins.
 
 !!! note
     UI-saved configuration takes precedence over environment variables if both are present at startup. These are also separate from the Azure infrastructure credentials (`AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` / `AZURE_TENANT_ID`) used for AKS provisioning.

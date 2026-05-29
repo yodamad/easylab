@@ -214,12 +214,18 @@ func main() {
 	handler = server.NewHandler(jobManager, pulumiExec, credentialsManager, ovhOptionsManager, azureOptionsManager, feedbackStore)
 	handler.SetAzureADConfigurer(authHandler.ConfigureAzureAD)
 	handler.SetClassicLoginConfigurer(authHandler.SetClassicLoginDisabled)
+	handler.SetAdminGroupIDConfigurer(authHandler.SetAdminGroupID)
+	handler.SetClassicAdminLoginConfigurer(authHandler.SetClassicAdminLoginDisabled)
 	log.Printf("[STARTUP] Handler initialization took %v", time.Since(handlerStart))
 
 	// Apply persisted Azure AD config (overrides env vars if set via UI)
 	if azureAD := azureOptionsManager.GetAzureADConfig(); azureAD.ClientID != "" && azureAD.ClientSecret != "" && azureAD.TenantID != "" {
 		authHandler.ConfigureAzureAD(azureAD.ClientID, azureAD.ClientSecret, azureAD.TenantID)
 		authHandler.SetClassicLoginDisabled(azureAD.DisableClassicLogin)
+		if azureAD.AdminGroupID != "" {
+			authHandler.SetAdminGroupID(azureAD.AdminGroupID)
+		}
+		authHandler.SetClassicAdminLoginDisabled(azureAD.DisableClassicAdminLogin)
 		log.Printf("[STARTUP] Azure AD config loaded from persisted storage")
 	}
 
@@ -253,6 +259,10 @@ func main() {
 	})
 	mux.HandleFunc("/student/auth/azure/login", authHandler.HandleAzureADLogin)
 	mux.HandleFunc("/student/auth/azure/callback", authHandler.HandleAzureADCallback)
+
+	// Admin Azure AD login routes (public — redirect to /admin on success)
+	mux.HandleFunc("/admin/auth/azure/login", authHandler.HandleAdminAzureADLogin)
+	mux.HandleFunc("/admin/auth/azure/callback", authHandler.HandleAdminAzureADCallback)
 	mux.HandleFunc("/student/logout", authHandler.HandleStudentLogout)
 	mux.HandleFunc("/student/dashboard", authHandler.RequireStudentAuth(handler.ServeStudentDashboard))
 	mux.HandleFunc("/student/feedback", authHandler.RequireStudentAuth(handler.ServeFeedback))
