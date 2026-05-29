@@ -139,16 +139,16 @@ type LabConfig struct {
 	// Controls whether nginx-ingress / cert-manager are installed as part of the lab.
 	// nil means "install" (default, preserves backward compat for persisted jobs).
 	// &false means "skip" (cluster already has it installed).
-	InstallNginxIngress    *bool  `json:"install_nginx_ingress,omitempty"`
-	NginxIngressNamespace  string `json:"nginx_ingress_namespace,omitempty"`
+	InstallNginxIngress     *bool  `json:"install_nginx_ingress,omitempty"`
+	NginxIngressNamespace   string `json:"nginx_ingress_namespace,omitempty"`
 	NginxIngressServiceName string `json:"nginx_ingress_service_name,omitempty"`
-	InstallCertManager     *bool  `json:"install_cert_manager,omitempty"`
-	CertManagerNamespace   string `json:"cert_manager_namespace,omitempty"`
+	InstallCertManager      *bool  `json:"install_cert_manager,omitempty"`
+	CertManagerNamespace    string `json:"cert_manager_namespace,omitempty"`
 
 	// DNS provider for automated A-record creation and DNS-01 cert issuance
-	DNSProvider        string            `json:"dns_provider,omitempty"`
-	DNSZone            string            `json:"dns_zone,omitempty"`
-	DNSCredentials     map[string]string `json:"dns_credentials,omitempty"`
+	DNSProvider    string            `json:"dns_provider,omitempty"`
+	DNSZone        string            `json:"dns_zone,omitempty"`
+	DNSCredentials map[string]string `json:"dns_credentials,omitempty"`
 }
 
 // GetCoderTemplates returns the list of Coder templates, migrating from legacy single-template fields if needed

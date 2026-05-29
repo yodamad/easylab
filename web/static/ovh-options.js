@@ -22,12 +22,14 @@ function toggleFlavorFiltersSection() {
     var body = document.getElementById('ovh-flavor-filters-body');
     var toggle = document.getElementById('ovh-flavor-filters-toggle');
     if (!body || !toggle) return;
-    if (body.style.display === 'none') {
-        body.style.display = 'block';
-        toggle.style.transform = 'rotate(180deg)';
+    var hidden = body.classList.contains('is-hidden') || body.style.display === 'none';
+    if (hidden) {
+        body.style.display = '';
+        body.classList.remove('is-hidden');
+        toggle.classList.add('rotate-up');
     } else {
-        body.style.display = 'none';
-        toggle.style.transform = 'rotate(0deg)';
+        body.classList.add('is-hidden');
+        toggle.classList.remove('rotate-up');
     }
 }
 
@@ -46,12 +48,14 @@ function toggleFlavors(region) {
     const toggle = document.getElementById('toggle-' + region);
     if (!body || !toggle) return;
 
-    if (body.style.display === 'none') {
-        body.style.display = 'block';
-        toggle.style.transform = 'rotate(180deg)';
+    var hidden = body.classList.contains('is-hidden') || body.style.display === 'none';
+    if (hidden) {
+        body.style.display = '';
+        body.classList.remove('is-hidden');
+        toggle.classList.add('rotate-up');
     } else {
-        body.style.display = 'none';
-        toggle.style.transform = 'rotate(0deg)';
+        body.classList.add('is-hidden');
+        toggle.classList.remove('rotate-up');
     }
 }
 

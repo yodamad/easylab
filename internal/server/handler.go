@@ -36,18 +36,18 @@ import (
 
 // Handler handles HTTP requests
 type Handler struct {
-	jobManager           *JobManager
-	pulumiExec           *PulumiExecutor
-	templates            map[string]*template.Template
-	templatesMu          sync.RWMutex
-	credentialsManager   *CredentialsManager
-	ovhOptionsManager    *OVHOptionsManager
-	azureOptionsManager  *AzureOptionsManager
-	feedbackStore        *FeedbackStore
-	azureADConfigurer            func(clientID, clientSecret, tenantID string)
-	classicLoginConfigurer       func(disabled bool)
-	adminGroupIDConfigurer       func(groupID string)
-	classicAdminLoginConfigurer  func(disabled bool)
+	jobManager                  *JobManager
+	pulumiExec                  *PulumiExecutor
+	templates                   map[string]*template.Template
+	templatesMu                 sync.RWMutex
+	credentialsManager          *CredentialsManager
+	ovhOptionsManager           *OVHOptionsManager
+	azureOptionsManager         *AzureOptionsManager
+	feedbackStore               *FeedbackStore
+	azureADConfigurer           func(clientID, clientSecret, tenantID string)
+	classicLoginConfigurer      func(disabled bool)
+	adminGroupIDConfigurer      func(groupID string)
+	classicAdminLoginConfigurer func(disabled bool)
 }
 
 // SetAzureADConfigurer wires a callback so the handler can update Azure AD OAuth config at runtime.

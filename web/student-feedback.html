@@ -4,38 +4,6 @@
 
 {{define "head-extra"}}
 <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.0/dist/htmx.min.js" integrity="sha384-LAnQFtNXh8s0hn9mOc8bezfn16i4Zo4y3i4dMT8PtV9yip8jGehR3RxCJrmHV11d" crossorigin="anonymous"></script>
-<style>
-    .star-rating { display: flex; flex-direction: row-reverse; justify-content: flex-end; gap: 0.25rem; }
-    .star-rating input { display: none; }
-    .star-rating label { font-size: 2rem; cursor: pointer; color: #ccc; transition: color 0.15s; }
-    .star-rating input:checked ~ label,
-    .star-rating label:hover,
-    .star-rating label:hover ~ label { color: #f59e0b; }
-    .difficulty-group { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-    .difficulty-option { flex: 1; min-width: 80px; }
-    .difficulty-option input { display: none; }
-    .difficulty-option label {
-        display: block; text-align: center; padding: 0.6rem 0.4rem;
-        border: 2px solid #d1d5db; border-radius: 8px; cursor: pointer;
-        font-size: 0.85rem; transition: all 0.15s;
-    }
-    .difficulty-option input:checked + label { border-color: #6366f1; background: #eef2ff; color: #4338ca; font-weight: 600; }
-    .difficulty-option label:hover { border-color: #6366f1; }
-    @keyframes toastIn  { from { opacity:0; transform:translateY(-12px); } to { opacity:1; transform:translateY(0); } }
-    @keyframes toastOut { 0%,70% { opacity:1; } 100% { opacity:0; pointer-events:none; } }
-    .toast {
-        position: fixed; top: 1.5rem; right: 1.5rem; z-index: 9999;
-        min-width: 280px; max-width: 380px;
-        border-radius: 10px; padding: 1rem 1.25rem;
-        box-shadow: 0 8px 24px rgba(0,0,0,.15);
-        display: flex; align-items: center; gap: 0.75rem;
-        font-size: 0.95rem; font-weight: 500;
-        animation: toastIn .25s ease, toastOut 3.5s .5s forwards;
-    }
-    .toast-success { background: #d1fae5; border: 1px solid #6ee7b7; color: #065f46; }
-    .toast-error   { background: #fee2e2; border: 1px solid #fca5a5; color: #991b1b; }
-    .toast-icon    { font-size: 1.4rem; flex-shrink: 0; }
-</style>
 {{end}}
 
 {{define "body"}}
@@ -49,8 +17,8 @@
                         <p class="subtitle">Share your feedback</p>
                     </div>
                 </div>
-                <div style="display: flex; gap: 0.75rem; align-items: center;">
-                    <a href="/student/dashboard" class="student-btn" style="text-decoration: none;">← Dashboard</a>
+                <div class="header-actions">
+                    <a href="/student/dashboard" class="student-btn">← Dashboard</a>
                     <a href="/student/logout" class="student-logout-btn" title="Logout">
                         <span>🚪</span>
                         <span>Logout</span>
@@ -63,14 +31,14 @@
             <div class="student-card">
                 <h2>Lab Feedback</h2>
                 {{if .Email}}<p class="feedback-submitter-email">Submitting as: <strong>{{.Email}}</strong></p>{{end}}
-                <p style="color: #6b7280; margin-bottom: 1.5rem;">Help us improve by sharing your experience with this lab session.</p>
+                <p class="section-description">Help us improve by sharing your experience with this lab session.</p>
 
                 {{if .Success}}
-                <div class="toast toast-success" style="position:static;animation:none;margin-bottom:1rem;">
+                <div class="toast toast-success toast--inline">
                     <span class="toast-icon">✅</span><span>Thank you! Your feedback has been saved.</span>
                 </div>
                 {{else if .Error}}
-                <div class="toast toast-error" style="position:static;animation:none;margin-bottom:1rem;">
+                <div class="toast toast-error toast--inline">
                     <span class="toast-icon">❌</span><span>{{.Error}}</span>
                 </div>
                 {{end}}

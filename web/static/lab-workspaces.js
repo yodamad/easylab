@@ -129,14 +129,13 @@ function updateDeleteButton() {
     const allCheckboxes = document.querySelectorAll('.workspace-checkbox');
     
     if (checkboxes.length > 0) {
-        deleteBtn.style.display = 'inline-flex';
-        // Update tooltip text
+        deleteBtn.classList.remove('is-hidden');
         const tooltip = deleteBtn.querySelector('.tooltip');
         if (tooltip) {
             tooltip.textContent = `Delete Selected (${checkboxes.length})`;
         }
     } else {
-        deleteBtn.style.display = 'none';
+        deleteBtn.classList.add('is-hidden');
     }
 
     // Update select all checkbox and icon state

@@ -32,13 +32,14 @@ function switchProvider() {
     
     // Hide all provider sections
     document.querySelectorAll('.provider-section').forEach(section => {
-        section.style.display = 'none';
+        section.classList.add('is-hidden');
     });
-    
+
     // Show selected provider section
     const selectedSection = document.getElementById(`provider-section-${newProvider}`);
     if (selectedSection) {
-        selectedSection.style.display = 'block';
+        selectedSection.classList.remove('is-hidden');
+        selectedSection.style.display = '';
     }
     
     currentProvider = newProvider;
@@ -148,7 +149,7 @@ function loadCurrentCredentials(provider) {
                 if (formSection && !formSection.querySelector('.existing-creds-info')) {
                     const existingInfo = document.createElement('div');
                     existingInfo.className = 'info-box existing-creds-info';
-                    existingInfo.style.marginBottom = '1.5rem';
+                    existingInfo.classList.add('credentials-info--populated');
 
                     let infoHTML = `<h3>📝 Update Existing Credentials</h3>
                         <p>Credentials are currently configured. Fill in the fields below to update them.</p>`;

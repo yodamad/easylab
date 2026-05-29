@@ -283,11 +283,11 @@ func SetupHTTPS(
 		Metadata: &metav1.ObjectMetaArgs{
 			Namespace: coderNs.Metadata.Name(),
 			Annotations: pulumi.StringMap{
-				"cert-manager.io/cluster-issuer":                  pulumi.String("letsencrypt-prod"),
-				"nginx.ingress.kubernetes.io/proxy-read-timeout":  pulumi.String("3600"),
-				"nginx.ingress.kubernetes.io/proxy-send-timeout":  pulumi.String("3600"),
-				"nginx.ingress.kubernetes.io/proxy-body-size":     pulumi.String("0"),
-				"nginx.ingress.kubernetes.io/proxy-http-version":  pulumi.String("1.1"),
+				"cert-manager.io/cluster-issuer":                 pulumi.String("letsencrypt-prod"),
+				"nginx.ingress.kubernetes.io/proxy-read-timeout": pulumi.String("3600"),
+				"nginx.ingress.kubernetes.io/proxy-send-timeout": pulumi.String("3600"),
+				"nginx.ingress.kubernetes.io/proxy-body-size":    pulumi.String("0"),
+				"nginx.ingress.kubernetes.io/proxy-http-version": pulumi.String("1.1"),
 			},
 		},
 		Spec: &k8snetv1.IngressSpecArgs{

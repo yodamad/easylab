@@ -30,9 +30,9 @@ type AzureADConfig struct {
 
 // AzureOptionsConfig is persisted admin preferences for Azure regions and VM sizes.
 type AzureOptionsConfig struct {
-	Regions  AzureItemConfig            `json:"regions"`
-	VMSizes  map[string]AzureItemConfig `json:"vm_sizes"`
-	AzureAD  AzureADConfig              `json:"azure_ad,omitempty"`
+	Regions AzureItemConfig            `json:"regions"`
+	VMSizes map[string]AzureItemConfig `json:"vm_sizes"`
+	AzureAD AzureADConfig              `json:"azure_ad,omitempty"`
 }
 
 // AzureOptionsManager caches Azure locations and VM sizes and applies admin filtering.
@@ -47,16 +47,16 @@ type AzureOptionsManager struct {
 }
 
 type azureVMSize struct {
-	Name   string
-	VCPUs  int
-	RAMGB  int
+	Name  string
+	VCPUs int
+	RAMGB int
 }
 
 // NewAzureOptionsManager creates a manager and loads persisted config from disk.
 func NewAzureOptionsManager(dataDir string, credsMgr *CredentialsManager) *AzureOptionsManager {
 	m := &AzureOptionsManager{
 		cachedRegionDisplay: make(map[string]string),
-		cachedVMSizes:     make(map[string][]azureVMSize),
+		cachedVMSizes:       make(map[string][]azureVMSize),
 		config: AzureOptionsConfig{
 			VMSizes: make(map[string]AzureItemConfig),
 		},

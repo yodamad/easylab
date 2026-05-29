@@ -59,19 +59,19 @@ type Session struct {
 
 // AuthHandler handles authentication
 type AuthHandler struct {
-	passwordHash         string
-	studentPasswordHash  string
-	sessions             map[string]*Session
-	studentSessions      map[string]*Session
-	azureADEnabled       bool
-	azureADConfig        *oauth2.Config
-	azureOAuthStates     map[string]time.Time
+	passwordHash              string
+	studentPasswordHash       string
+	sessions                  map[string]*Session
+	studentSessions           map[string]*Session
+	azureADEnabled            bool
+	azureADConfig             *oauth2.Config
+	azureOAuthStates          map[string]time.Time
 	classicLoginDisabled      bool
 	adminGroupID              string
 	classicAdminLoginDisabled bool
-	templates            map[string]*template.Template
-	templatesMu          sync.RWMutex
-	mu                   sync.RWMutex
+	templates                 map[string]*template.Template
+	templatesMu               sync.RWMutex
+	mu                        sync.RWMutex
 }
 
 // hashPassword creates a bcrypt hash of the password

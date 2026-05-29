@@ -74,8 +74,7 @@ function loadCurrentCredentials() {
                 const formSection = document.querySelector('.form-section');
                 if (formSection) {
                     const existingInfo = document.createElement('div');
-                    existingInfo.className = 'info-box';
-                    existingInfo.style.marginBottom = '1.5rem';
+                    existingInfo.className = 'info-box credentials-info--populated';
                     existingInfo.innerHTML = `
                         <h3>📝 Update Existing Credentials</h3>
                         <p>Credentials are currently configured. Fill in the fields below to update them.</p>
