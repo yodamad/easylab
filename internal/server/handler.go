@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -3590,7 +3591,8 @@ func (h *Handler) ServeAdminStats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetProjectStats returns time-series JSON for created/destroyed labs in a project.
+// GetProjectStats returns KPI totals and time-series JSON for deployed labs.
+// Accepts project=<stackName> or project=__all__ for aggregated view.
 // Route: GET /api/admin/stats?project=<stackName>
 func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
@@ -3600,13 +3602,39 @@ func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type monthBucket struct {
-		created int
-		deleted int
+		succeeded int
+		failed    int
+		destroyed int
+		cleaned   int
+	}
+
+	type projectSummary struct {
+		Name   string `json:"name"`
+		Total  int    `json:"total"`
+		Active int    `json:"active"`
+		Failed int    `json:"failed"`
+	}
+
+	type statsResponse struct {
+		TotalWorkspaces int              `json:"total_workspaces"`
+		TotalActive     int              `json:"total_active"`
+		TotalFailed     int              `json:"total_failed"`
+		TotalCleaned    int              `json:"total_cleaned"`
+		Labels          []string         `json:"labels"`
+		Succeeded       []int            `json:"succeeded"`
+		Failed          []int            `json:"failed"`
+		Destroyed       []int            `json:"destroyed"`
+		Cleaned         []int            `json:"cleaned"`
+		Projects        []projectSummary `json:"projects,omitempty"`
+	}
+
+	// isRealDeployment returns true for completed, failed, or destroyed jobs (excludes dry-runs and in-progress).
+	isRealDeployment := func(job *Job) bool {
+		return job.Status == JobStatusCompleted || job.Status == JobStatusFailed || job.Status == JobStatusDestroyed
 	}
 
 	buckets := make(map[string]*monthBucket)
 	var orderedMonths []string
-
 	addMonth := func(month string) {
 		if _, ok := buckets[month]; !ok {
 			buckets[month] = &monthBucket{}
@@ -3614,43 +3642,103 @@ func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Per-project KPI tallies for the __all__ summary table.
+	perProject := make(map[string]*projectSummary)
+
+	var resp statsResponse
+
 	jobs := h.jobManager.GetAllJobs()
-	// GetAllJobs returns newest-first; iterate in reverse for chronological order
+	// GetAllJobs returns newest-first; iterate in reverse for chronological order.
 	for i := len(jobs) - 1; i >= 0; i-- {
 		job := jobs[i]
-		if job.Config == nil || job.Config.StackName != project {
+		if job.Config == nil {
 			continue
 		}
-		// Count completed and destroyed jobs both as "created" (they were deployed)
-		if job.Status == JobStatusCompleted || job.Status == JobStatusDestroyed {
-			month := job.CreatedAt.Format("2006-01")
-			addMonth(month)
-			buckets[month].created++
+		if !isRealDeployment(job) {
+			continue
 		}
-		// Count auto-cleanup events as "deleted"
+
+		stackName := job.Config.StackName
+
+		// Per-project summary used for __all__ table.
+		if _, ok := perProject[stackName]; !ok {
+			perProject[stackName] = &projectSummary{Name: stackName}
+		}
+		ps := perProject[stackName]
+		ps.Total++
+		if job.Status == JobStatusCompleted {
+			ps.Active++
+		}
+		if job.Status == JobStatusFailed {
+			ps.Failed++
+		}
+
+		// KPIs and time-series are scoped to the selected project (or all).
+		if project != "__all__" && stackName != project {
+			continue
+		}
+
+		if job.Status == JobStatusCompleted {
+			resp.TotalActive++
+		}
+		if job.Status == JobStatusFailed {
+			resp.TotalFailed++
+		}
+
+		month := job.CreatedAt.Format("2006-01")
+		addMonth(month)
+		switch job.Status {
+		case JobStatusCompleted:
+			buckets[month].succeeded++
+		case JobStatusFailed:
+			buckets[month].failed++
+		case JobStatusDestroyed:
+			buckets[month].destroyed++
+		}
+
+		// Cleanup events — bucketed by the event timestamp, not job creation.
+		// Also accumulate total workspaces: latest snapshot (current count) + all cleaned.
 		job.mu.RLock()
+		latestSnapshot := 0
+		for _, snap := range job.WorkspaceSnapshots {
+			if snap.Count > latestSnapshot {
+				latestSnapshot = snap.Count
+			}
+		}
+		jobCleaned := 0
 		for _, evt := range job.CleanupEvents {
-			month := evt.At.Format("2006-01")
-			addMonth(month)
-			buckets[month].deleted += evt.Count
+			jobCleaned += evt.Count
+			evtMonth := evt.At.Format("2006-01")
+			addMonth(evtMonth)
+			buckets[evtMonth].cleaned += evt.Count
 		}
 		job.mu.RUnlock()
+		resp.TotalCleaned += jobCleaned
+		// Total workspaces ever used for this job = current (latest snapshot) + already cleaned.
+		resp.TotalWorkspaces += latestSnapshot + jobCleaned
 	}
 
-	type statsResponse struct {
-		Labels  []string `json:"labels"`
-		Created []int    `json:"created"`
-		Deleted []int    `json:"deleted"`
-	}
-
-	resp := statsResponse{
-		Labels:  orderedMonths,
-		Created: make([]int, len(orderedMonths)),
-		Deleted: make([]int, len(orderedMonths)),
-	}
+	// Build time-series arrays in chronological order.
+	resp.Labels = orderedMonths
+	resp.Succeeded = make([]int, len(orderedMonths))
+	resp.Failed = make([]int, len(orderedMonths))
+	resp.Destroyed = make([]int, len(orderedMonths))
+	resp.Cleaned = make([]int, len(orderedMonths))
 	for i, m := range orderedMonths {
-		resp.Created[i] = buckets[m].created
-		resp.Deleted[i] = buckets[m].deleted
+		resp.Succeeded[i] = buckets[m].succeeded
+		resp.Failed[i] = buckets[m].failed
+		resp.Destroyed[i] = buckets[m].destroyed
+		resp.Cleaned[i] = buckets[m].cleaned
+	}
+
+	// Build projects summary slice for __all__ view, sorted by total descending.
+	if project == "__all__" {
+		for _, ps := range perProject {
+			resp.Projects = append(resp.Projects, *ps)
+		}
+		sort.Slice(resp.Projects, func(i, j int) bool {
+			return resp.Projects[i].Total > resp.Projects[j].Total
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")

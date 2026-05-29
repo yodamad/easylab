@@ -73,6 +73,11 @@ func (h *Handler) cleanupExpiredWorkspaces() {
 			log.Printf("[cleanup] failed to list workspaces for job %s: %v", job.ID, err)
 			continue
 		}
+		// Record current workspace count before any deletions.
+		if err := h.jobManager.RecordWorkspaceSnapshot(job.ID, len(workspaces)); err != nil {
+			log.Printf("[cleanup] failed to record workspace snapshot for job %s: %v", job.ID, err)
+		}
+
 		deleted := 0
 		for _, ws := range workspaces {
 			if time.Since(ws.CreatedAt) > lifetime {

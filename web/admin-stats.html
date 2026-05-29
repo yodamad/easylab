@@ -41,7 +41,7 @@
             <div>
                 <label for="project_input">Select a Project</label>
                 <select id="project_input" name="project">
-                    <option value="">— choose a project —</option>
+                    <option value="__all__" {{if or (eq $.SelectedProject "") (eq $.SelectedProject "__all__")}}selected{{end}}>All Projects</option>
                     {{range .Projects}}
                     <option value="{{.}}" {{if eq . $.SelectedProject}}selected{{end}}>{{.}}</option>
                     {{end}}
@@ -50,50 +50,164 @@
             <button type="submit">View Stats</button>
         </form>
 
+        <div class="stats-kpi-grid" id="kpi-grid" style="display:none">
+            <div class="stats-kpi-card stats-kpi-deployed">
+                <span class="stats-kpi-value" id="kpi-deployed">–</span>
+                <span class="stats-kpi-label">Workspaces Used</span>
+            </div>
+            <div class="stats-kpi-card stats-kpi-active">
+                <span class="stats-kpi-value" id="kpi-active">–</span>
+                <span class="stats-kpi-label">Currently Active</span>
+            </div>
+            <div class="stats-kpi-card stats-kpi-failed">
+                <span class="stats-kpi-value" id="kpi-failed">–</span>
+                <span class="stats-kpi-label">Failed</span>
+            </div>
+            <div class="stats-kpi-card stats-kpi-cleaned">
+                <span class="stats-kpi-value" id="kpi-cleaned">–</span>
+                <span class="stats-kpi-label">Workspaces Auto-cleaned</span>
+            </div>
+        </div>
+
         {{if .SelectedProject}}
-        <div class="chart-card">
-            <div class="chart-title">Workspace activity for <strong>{{.SelectedProject}}</strong></div>
+        <div class="chart-card" id="chart-card">
+            <div class="chart-title" id="chart-title">
+                {{if eq .SelectedProject "__all__"}}Workspace activity — All Projects{{else}}Workspace activity for <strong>{{.SelectedProject}}</strong>{{end}}
+            </div>
             <canvas id="statsChart" data-project="{{.SelectedProject}}"></canvas>
         </div>
+        <div id="projects-table-container" style="display:none">
+            <div class="chart-title">Per-project breakdown</div>
+            <table class="stats-summary-table">
+                <thead>
+                    <tr>
+                        <th>Project</th>
+                        <th class="col-num">Total</th>
+                        <th class="col-active">Active</th>
+                        <th class="col-failed">Failed</th>
+                    </tr>
+                </thead>
+                <tbody id="projects-table-body"></tbody>
+            </table>
+        </div>
         {{else}}
-        <div class="empty-state">
-            <span class="empty-state-icon">📊</span>
-            <p>Select a project above to view its stats.</p>
+        <div class="chart-card" id="chart-card">
+            <div class="chart-title">Workspace activity — All Projects</div>
+            <canvas id="statsChart" data-project="__all__"></canvas>
+        </div>
+        <div id="projects-table-container" style="display:none">
+            <div class="chart-title">Per-project breakdown</div>
+            <table class="stats-summary-table">
+                <thead>
+                    <tr>
+                        <th>Project</th>
+                        <th class="col-num">Total</th>
+                        <th class="col-active">Active</th>
+                        <th class="col-failed">Failed</th>
+                    </tr>
+                </thead>
+                <tbody id="projects-table-body"></tbody>
+            </table>
         </div>
         {{end}}
     </main>
 </div>
 
-{{if .SelectedProject}}
 <script>
 (function() {
     var canvas = document.getElementById('statsChart');
     var project = canvas.dataset.project;
+
+    function escapeHTML(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function renderSummaryTable(projects) {
+        if (!projects || projects.length === 0) return;
+        var tbody = document.getElementById('projects-table-body');
+        tbody.innerHTML = '';
+        projects.forEach(function(p) {
+            var tr = document.createElement('tr');
+            tr.innerHTML =
+                '<td>' + escapeHTML(p.name) + '</td>' +
+                '<td class="col-num">' + p.total + '</td>' +
+                '<td class="col-active">' + p.active + '</td>' +
+                '<td class="col-failed">' + p.failed + '</td>';
+            tbody.appendChild(tr);
+        });
+        document.getElementById('projects-table-container').style.display = '';
+    }
+
+    function integerTicks(value) {
+        return Number.isInteger(value) ? value : '';
+    }
+
     fetch('/api/admin/stats?project=' + encodeURIComponent(project))
         .then(function(r) { return r.json(); })
         .then(function(data) {
+            // Populate KPI cards.
+            document.getElementById('kpi-deployed').textContent = data.total_workspaces;
+            document.getElementById('kpi-active').textContent   = data.total_active;
+            document.getElementById('kpi-failed').textContent   = data.total_failed;
+            document.getElementById('kpi-cleaned').textContent  = data.total_cleaned;
+            document.getElementById('kpi-grid').style.display   = 'grid';
+
             if (!data.labels || data.labels.length === 0) {
-                canvas.parentElement.innerHTML = '<div class="empty-state"><span class="empty-state-icon">📊</span><p>No completed or destroyed labs found for this project.</p></div>';
+                document.getElementById('chart-card').innerHTML =
+                    '<div class="empty-state"><span class="empty-state-icon">📊</span>' +
+                    '<p>No deployment history found yet.</p></div>';
+                if (data.projects && data.projects.length > 0) {
+                    renderSummaryTable(data.projects);
+                }
                 return;
             }
+
             new Chart(canvas.getContext('2d'), {
                 type: 'bar',
                 data: {
                     labels: data.labels,
                     datasets: [
                         {
-                            label: 'Created',
-                            data: data.created,
-                            backgroundColor: 'rgba(79, 70, 229, 0.7)',
-                            borderColor: 'rgba(79, 70, 229, 1)',
-                            borderWidth: 1
+                            label: 'Succeeded',
+                            data: data.succeeded,
+                            backgroundColor: 'rgba(34, 197, 94, 0.75)',
+                            borderColor: 'rgba(34, 197, 94, 1)',
+                            borderWidth: 1,
+                            stack: 'labs',
+                            yAxisID: 'y'
                         },
                         {
-                            label: 'Auto-cleaned',
-                            data: data.deleted,
+                            label: 'Failed',
+                            data: data.failed,
                             backgroundColor: 'rgba(239, 68, 68, 0.7)',
                             borderColor: 'rgba(239, 68, 68, 1)',
-                            borderWidth: 1
+                            borderWidth: 1,
+                            stack: 'labs',
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'Destroyed',
+                            data: data.destroyed,
+                            backgroundColor: 'rgba(156, 163, 175, 0.7)',
+                            borderColor: 'rgba(156, 163, 175, 1)',
+                            borderWidth: 1,
+                            stack: 'labs',
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'Workspaces auto-cleaned',
+                            data: data.cleaned,
+                            type: 'line',
+                            borderColor: 'rgba(249, 115, 22, 1)',
+                            backgroundColor: 'rgba(249, 115, 22, 0.15)',
+                            borderWidth: 2,
+                            pointRadius: 4,
+                            fill: false,
+                            yAxisID: 'y2'
                         }
                     ]
                 },
@@ -103,16 +217,35 @@
                         legend: { position: 'top' }
                     },
                     scales: {
+                        x: { stacked: true },
                         y: {
+                            stacked: true,
                             beginAtZero: true,
-                            ticks: { stepSize: 1 }
+                            title: { display: true, text: 'Labs' },
+                            ticks: { callback: integerTicks, stepSize: 1 }
+                        },
+                        y2: {
+                            beginAtZero: true,
+                            position: 'right',
+                            title: { display: true, text: 'Workspaces cleaned' },
+                            ticks: { callback: integerTicks, stepSize: 1 },
+                            grid: { drawOnChartArea: false }
                         }
                     }
                 }
             });
+
+            if (data.projects && data.projects.length > 0) {
+                renderSummaryTable(data.projects);
+            }
+        })
+        .catch(function(err) {
+            console.error('Failed to load stats:', err);
+            document.getElementById('chart-card').innerHTML =
+                '<div class="empty-state"><span class="empty-state-icon">⚠️</span>' +
+                '<p>Failed to load stats data.</p></div>';
         });
 })();
 </script>
-{{end}}
 
 {{end}}

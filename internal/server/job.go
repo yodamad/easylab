@@ -31,6 +31,12 @@ type CleanupEvent struct {
 	Count int       `json:"count"`
 }
 
+// WorkspaceSnapshot records the total workspace count observed at a point in time.
+type WorkspaceSnapshot struct {
+	At    time.Time `json:"at"`
+	Count int       `json:"count"`
+}
+
 // Job represents a Pulumi execution job
 type Job struct {
 	ID         string     `json:"id"`
@@ -42,13 +48,14 @@ type Job struct {
 	Config     *LabConfig `json:"config,omitempty"`
 	Kubeconfig string     `json:"kubeconfig,omitempty"`
 	// Coder configuration stored after deployment
-	CoderURL            string         `json:"coder_url,omitempty"`
-	CoderAdminEmail     string         `json:"coder_admin_email,omitempty"`
-	CoderAdminPassword  string         `json:"coder_admin_password,omitempty"`
-	CoderSessionToken   string         `json:"coder_session_token,omitempty"`
-	CoderOrganizationID string         `json:"coder_organization_id,omitempty"`
-	CleanupEvents       []CleanupEvent `json:"cleanup_events,omitempty"`
-	mu                  sync.RWMutex   `json:"-"`
+	CoderURL            string              `json:"coder_url,omitempty"`
+	CoderAdminEmail     string              `json:"coder_admin_email,omitempty"`
+	CoderAdminPassword  string              `json:"coder_admin_password,omitempty"`
+	CoderSessionToken   string              `json:"coder_session_token,omitempty"`
+	CoderOrganizationID string              `json:"coder_organization_id,omitempty"`
+	CleanupEvents       []CleanupEvent      `json:"cleanup_events,omitempty"`
+	WorkspaceSnapshots  []WorkspaceSnapshot `json:"workspace_snapshots,omitempty"`
+	mu                  sync.RWMutex        `json:"-"`
 }
 
 // CoderTemplate defines a single Coder template (upload or git source)
@@ -340,6 +347,20 @@ func (jm *JobManager) RecordCleanupEvent(id string, count int) error {
 	job.mu.Lock()
 	job.CleanupEvents = append(job.CleanupEvents, CleanupEvent{At: time.Now(), Count: count})
 	job.UpdatedAt = time.Now()
+	job.mu.Unlock()
+	return nil
+}
+
+// RecordWorkspaceSnapshot appends the observed workspace count for a job.
+func (jm *JobManager) RecordWorkspaceSnapshot(id string, count int) error {
+	jm.mu.RLock()
+	job, exists := jm.jobs[id]
+	jm.mu.RUnlock()
+	if !exists {
+		return fmt.Errorf("job %s not found", id)
+	}
+	job.mu.Lock()
+	job.WorkspaceSnapshots = append(job.WorkspaceSnapshots, WorkspaceSnapshot{At: time.Now(), Count: count})
 	job.mu.Unlock()
 	return nil
 }
