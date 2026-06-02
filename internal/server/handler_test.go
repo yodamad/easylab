@@ -1,11 +1,15 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetFormKeys(t *testing.T) {
@@ -53,6 +57,7 @@ func TestGetFormKeys(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			r := &http.Request{
 				PostForm: tt.postForm,
 				Form:     tt.form,
@@ -700,5 +705,698 @@ func TestHandler_RenderHTMLError_WithLink(t *testing.T) {
 	body := w.Body.String()
 	if !strings.Contains(body, "Test Link") {
 		t.Error("renderHTMLError() missing optional link")
+	}
+}
+
+func TestValidateEmail(t *testing.T) {
+	tests := []struct {
+		name  string
+		email string
+		want  bool
+	}{
+		{"valid simple", "user@example.com", true},
+		{"valid subdomain", "u@sub.domain.io", true},
+		{"valid plus", "user+tag@example.com", true},
+		{"empty", "", false},
+		{"no at sign", "userexample.com", false},
+		{"no domain", "user@", false},
+		{"no tld", "user@example", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := validateEmail(tt.email); got != tt.want {
+				t.Errorf("validateEmail(%q) = %v, want %v", tt.email, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateURL(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{"valid http", "http://example.com", true},
+		{"valid https", "https://example.com/path", true},
+		{"valid with port", "https://host:8080/api", true},
+		{"empty", "", false},
+		{"no scheme", "example.com", false},
+		{"no host", "https://", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := validateURL(tt.url); got != tt.want {
+				t.Errorf("validateURL(%q) = %v, want %v", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAtoiForm(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  int
+	}{
+		{"valid int", "42", 42},
+		{"zero", "0", 0},
+		{"negative", "-5", -5},
+		{"empty", "", 0},
+		{"non-numeric", "abc", 0},
+		{"float", "3.14", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := atoiForm(tt.input); got != tt.want {
+				t.Errorf("atoiForm(%q) = %d, want %d", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetFormValue(t *testing.T) {
+	tests := []struct {
+		name      string
+		postForm  url.Values
+		form      url.Values
+		key       string
+		want      string
+	}{
+		{
+			name:     "postForm wins",
+			postForm: url.Values{"key": []string{"post-value"}},
+			form:     url.Values{"key": []string{"form-value"}},
+			key:      "key",
+			want:     "post-value",
+		},
+		{
+			name:     "falls back to form",
+			postForm: url.Values{},
+			form:     url.Values{"key": []string{"form-value"}},
+			key:      "key",
+			want:     "form-value",
+		},
+		{
+			name:     "missing key returns empty",
+			postForm: url.Values{},
+			form:     url.Values{},
+			key:      "missing",
+			want:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := &http.Request{
+				PostForm: tt.postForm,
+				Form:     tt.form,
+			}
+			if got := getFormValue(r, tt.key); got != tt.want {
+				t.Errorf("getFormValue(%q) = %q, want %q", tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDeriveEncryptionKey(t *testing.T) {
+	key := deriveEncryptionKey("user@example.com", "password123")
+	if len(key) != 32 {
+		t.Errorf("deriveEncryptionKey() key length = %d, want 32", len(key))
+	}
+
+	key2 := deriveEncryptionKey("user@example.com", "password123")
+	for i := range key {
+		if key[i] != key2[i] {
+			t.Error("deriveEncryptionKey() is not deterministic")
+			break
+		}
+	}
+
+	keyDiff := deriveEncryptionKey("other@example.com", "password123")
+	same := true
+	for i := range key {
+		if key[i] != keyDiff[i] {
+			same = false
+			break
+		}
+	}
+	if same {
+		t.Error("deriveEncryptionKey() same key for different emails")
+	}
+}
+
+func TestEncryptWorkspacePassword(t *testing.T) {
+	plaintext := "secret-workspace-pw"
+	email := "user@example.com"
+	studentPw := "student-pw-123"
+
+	ciphertext, err := encryptWorkspacePassword(plaintext, email, studentPw)
+	if err != nil {
+		t.Fatalf("encryptWorkspacePassword() error = %v", err)
+	}
+	if ciphertext == "" {
+		t.Error("encryptWorkspacePassword() returned empty ciphertext")
+	}
+	if ciphertext == plaintext {
+		t.Error("encryptWorkspacePassword() ciphertext equals plaintext")
+	}
+
+	// Two encryptions of the same value should differ (GCM uses random nonce)
+	ciphertext2, err := encryptWorkspacePassword(plaintext, email, studentPw)
+	if err != nil {
+		t.Fatalf("encryptWorkspacePassword() second call error = %v", err)
+	}
+	if ciphertext == ciphertext2 {
+		t.Error("encryptWorkspacePassword() should produce different ciphertexts (random nonce)")
+	}
+}
+
+func TestHandler_LaunchLab_DryRunCompleted(t *testing.T) {
+	jm := NewJobManager(t.TempDir())
+	pe := NewPulumiExecutor(jm, t.TempDir())
+	id := jm.CreateJob(&LabConfig{StackName: "test"})
+	jm.UpdateJobStatus(id, JobStatusDryRunCompleted)
+
+	h := NewHandler(jm, pe, NewCredentialsManager(), nil, nil, nil)
+	form := url.Values{}
+	form.Set("job_id", id)
+	req := httptest.NewRequest("POST", "/api/labs/launch", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	h.LaunchLab(w, req)
+	assert.Contains(t, w.Body.String(), "Deployment Launched")
+}
+
+func TestHandler_RequestWorkspace_NoEmail(t *testing.T) {
+	// POST but no email in context → 401
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	form := url.Values{}
+	form.Set("lab_id", "some-lab")
+	req := httptest.NewRequest("POST", "/api/workspace/request", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	h.RequestWorkspace(w, req)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestHandler_RequestWorkspace_NoLabID(t *testing.T) {
+	// POST with email in context but no lab_id → 400
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("POST", "/api/workspace/request", strings.NewReader(""))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// Inject student email into context using the auth package's context key (same package)
+	ctx := context.WithValue(req.Context(), studentEmailContextKey, "student@example.com")
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+	h.RequestWorkspace(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHandler_RecreateLab_NotDestroyed(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test"})
+	// Status is pending, not destroyed
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	form := url.Values{}
+	form.Set("job_id", id)
+	req := httptest.NewRequest("POST", "/api/labs/recreate", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	h.RecreateLab(w, req)
+	assert.Contains(t, w.Body.String(), "not destroyed")
+}
+
+func TestHandler_ServeLabsList(t *testing.T) {
+	jm := NewJobManager("")
+	jm.CreateJob(&LabConfig{StackName: "lab-a"})
+	jobID := jm.CreateJob(&LabConfig{StackName: "lab-b", WorkspaceLifetimeHours: 4})
+	jm.UpdateJobStatus(jobID, JobStatusCompleted)
+	jm.CreateJob(&LabConfig{StackName: "lab-c"})
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("GET", "/admin/labs", nil)
+	w := httptest.NewRecorder()
+
+	h.ServeLabsList(w, req)
+	// Template loading will fail in tests (no web/ dir), but the data-building code is exercised.
+}
+
+func TestHandler_ServeUI_Root(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("GET", "/", nil)
+	w := httptest.NewRecorder()
+
+	h.ServeUI(w, req)
+	// Template will fail to load (no web/ dir), but the root-path branch is covered.
+}
+
+func TestHandler_SetAzureADConfigurer(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	called := false
+	h.SetAzureADConfigurer(func(clientID, clientSecret, tenantID string) {
+		called = true
+	})
+	if h.azureADConfigurer == nil {
+		t.Error("SetAzureADConfigurer() azureADConfigurer is nil")
+	}
+	h.azureADConfigurer("id", "secret", "tenant")
+	if !called {
+		t.Error("azureADConfigurer callback was not called")
+	}
+}
+
+func TestHandler_SetClassicLoginConfigurer(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	called := false
+	h.SetClassicLoginConfigurer(func(disabled bool) {
+		called = true
+	})
+	if h.classicLoginConfigurer == nil {
+		t.Error("SetClassicLoginConfigurer() classicLoginConfigurer is nil")
+	}
+	h.classicLoginConfigurer(true)
+	if !called {
+		t.Error("classicLoginConfigurer callback was not called")
+	}
+}
+
+func TestHandler_SetAdminGroupIDConfigurer(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	called := false
+	h.SetAdminGroupIDConfigurer(func(groupID string) {
+		called = true
+	})
+	if h.adminGroupIDConfigurer == nil {
+		t.Error("SetAdminGroupIDConfigurer() adminGroupIDConfigurer is nil")
+	}
+	h.adminGroupIDConfigurer("group-123")
+	if !called {
+		t.Error("adminGroupIDConfigurer callback was not called")
+	}
+}
+
+func TestGetOVHCredentials_NotConfigured(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	w := httptest.NewRecorder()
+	creds, err := h.getOVHCredentials(w)
+	if err == nil {
+		t.Error("getOVHCredentials() should error when not configured")
+	}
+	if creds != nil {
+		t.Error("getOVHCredentials() should return nil creds when not configured")
+	}
+	// Should have rendered HTML error
+	if !strings.Contains(w.Body.String(), "error-message") {
+		t.Error("getOVHCredentials() should render HTML error")
+	}
+}
+
+func TestGetOVHCredentials_Configured(t *testing.T) {
+	cm := NewCredentialsManager()
+	cm.SetCredentials(&OVHCredentials{
+		ApplicationKey:    "key",
+		ApplicationSecret: "secret",
+		ConsumerKey:       "consumer",
+		ServiceName:       "service",
+		Endpoint:          "ovh-eu",
+	})
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, cm, nil, nil, nil)
+	w := httptest.NewRecorder()
+	creds, err := h.getOVHCredentials(w)
+	if err != nil {
+		t.Fatalf("getOVHCredentials() error = %v", err)
+	}
+	if creds == nil {
+		t.Fatal("getOVHCredentials() returned nil creds")
+	}
+	if creds.ApplicationKey != "key" {
+		t.Errorf("ApplicationKey = %q, want key", creds.ApplicationKey)
+	}
+}
+
+func TestCreateLabConfigFromForm_BasicOVH(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"stack_name":         {"my-stack"},
+		"template_0_name":    {"my-template"},
+		"template_0_source":  {"git"},
+		"coder_admin_email":  {"admin@example.com"},
+		"provider":           {"ovh"},
+		"network_region":     {"GRA7"},
+	}
+	creds := &OVHCredentials{
+		ApplicationKey:    "key",
+		ApplicationSecret: "secret",
+		ConsumerKey:       "consumer",
+		ServiceName:       "service",
+		Endpoint:          "ovh-eu",
+	}
+	cfg := h.createLabConfigFromForm(req, creds, nil)
+	if cfg.StackName != "my-stack" {
+		t.Errorf("StackName = %q, want my-stack", cfg.StackName)
+	}
+	if cfg.OvhApplicationKey != "key" {
+		t.Errorf("OvhApplicationKey = %q, want key", cfg.OvhApplicationKey)
+	}
+}
+
+func TestCreateLabConfigFromForm_BYOK(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"stack_name":           {"byok-stack"},
+		"use_existing_cluster": {"true"},
+		"template_0_name":      {"tmpl"},
+	}
+	cfg := h.createLabConfigFromForm(req, nil, nil)
+	if !cfg.UseExistingCluster {
+		t.Error("UseExistingCluster should be true for BYOK")
+	}
+}
+
+func TestCreateLabConfigFromForm_AzureProvider(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"stack_name":        {"azure-stack"},
+		"provider":          {"azure"},
+		"azure_location":    {"eastus"},
+		"template_0_name":   {"tmpl"},
+	}
+	creds := &AzureCredentials{
+		ClientID:       "client",
+		ClientSecret:   "secret",
+		TenantID:       "tenant",
+		SubscriptionID: "sub",
+	}
+	cfg := h.createLabConfigFromForm(req, creds, nil)
+	if cfg.AzureClientID != "client" {
+		t.Errorf("AzureClientID = %q, want client", cfg.AzureClientID)
+	}
+	if cfg.AzureLocation != "eastus" {
+		t.Errorf("AzureLocation = %q, want eastus", cfg.AzureLocation)
+	}
+}
+
+func TestCreateLabConfigFromForm_DefaultStackName(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"template_0_name": {"tmpl"},
+	}
+	cfg := h.createLabConfigFromForm(req, nil, nil)
+	if cfg.StackName != "dev" {
+		t.Errorf("default StackName = %q, want dev", cfg.StackName)
+	}
+}
+
+func TestCreateLabConfigFromForm_WorkspaceLifetimeDays(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"stack_name":               {"s"},
+		"template_0_name":          {"tmpl"},
+		"workspace_lifetime_hours": {"3"},
+		"workspace_lifetime_unit":  {"days"},
+	}
+	cfg := h.createLabConfigFromForm(req, nil, nil)
+	if cfg.WorkspaceLifetimeHours != 72 {
+		t.Errorf("WorkspaceLifetimeHours = %d, want 72 (3 days)", cfg.WorkspaceLifetimeHours)
+	}
+}
+
+func TestCreateLabConfigFromForm_LabDeletionDate_Valid(t *testing.T) {
+	t.Parallel()
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"stack_name":        {"s"},
+		"template_0_name":   {"tmpl"},
+		"lab_deletion_date": {"2030-12-31"},
+	}
+	cfg := h.createLabConfigFromForm(req, nil, nil)
+	require.NotNil(t, cfg.LabDeletionDate, "LabDeletionDate should be set for a valid date")
+	assert.Equal(t, 2030, cfg.LabDeletionDate.Year())
+	assert.Equal(t, 12, int(cfg.LabDeletionDate.Month()))
+	assert.Equal(t, 31, cfg.LabDeletionDate.Day())
+	// Should be set to end of day
+	assert.Equal(t, 23, cfg.LabDeletionDate.Hour())
+	assert.Equal(t, 59, cfg.LabDeletionDate.Minute())
+}
+
+func TestCreateLabConfigFromForm_LabDeletionDate_Empty(t *testing.T) {
+	t.Parallel()
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"stack_name":      {"s"},
+		"template_0_name": {"tmpl"},
+	}
+	cfg := h.createLabConfigFromForm(req, nil, nil)
+	assert.Nil(t, cfg.LabDeletionDate, "LabDeletionDate should be nil when field is absent")
+}
+
+func TestCreateLabConfigFromForm_LabDeletionDate_Invalid(t *testing.T) {
+	t.Parallel()
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"stack_name":        {"s"},
+		"template_0_name":   {"tmpl"},
+		"lab_deletion_date": {"not-a-date"},
+	}
+	cfg := h.createLabConfigFromForm(req, nil, nil)
+	assert.Nil(t, cfg.LabDeletionDate, "LabDeletionDate should be nil when date is invalid")
+}
+
+func TestParseCoderTemplatesFromForm_NoTemplates(t *testing.T) {
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Form = make(map[string][]string)
+	templates := parseCoderTemplatesFromForm(req, nil)
+	assert.Empty(t, templates)
+}
+
+func TestParseCoderTemplatesFromForm_OneTemplate_Git(t *testing.T) {
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"template_0_name":       {"my-template"},
+		"template_0_source":     {"git"},
+		"template_0_git_repo":   {"https://github.com/example/repo"},
+		"template_0_git_folder": {"coder/"},
+		"template_0_git_branch": {"main"},
+	}
+	templates := parseCoderTemplatesFromForm(req, nil)
+	assert.Len(t, templates, 1)
+	assert.Equal(t, "my-template", templates[0].Name)
+	assert.Equal(t, "git", templates[0].Source)
+	assert.Equal(t, "https://github.com/example/repo", templates[0].GitRepo)
+}
+
+func TestParseCoderTemplatesFromForm_DefaultBranch(t *testing.T) {
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"template_0_name":   {"tmpl"},
+		"template_0_source": {"git"},
+	}
+	templates := parseCoderTemplatesFromForm(req, nil)
+	assert.Len(t, templates, 1)
+	assert.Equal(t, "main", templates[0].GitBranch)
+}
+
+func TestParseCoderTemplatesFromForm_DefaultSourceGit(t *testing.T) {
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"template_0_name": {"tmpl"},
+	}
+	templates := parseCoderTemplatesFromForm(req, nil)
+	assert.Len(t, templates, 1)
+	assert.Equal(t, "git", templates[0].Source)
+}
+
+func TestParseCoderTemplatesFromForm_UploadWithFilePath(t *testing.T) {
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"template_0_name":   {"tmpl"},
+		"template_0_source": {"upload"},
+	}
+	templates := parseCoderTemplatesFromForm(req, []string{"path/to/template.zip"})
+	assert.Len(t, templates, 1)
+	assert.Equal(t, "path/to/template.zip", templates[0].FilePath)
+}
+
+func TestParseCoderTemplatesFromForm_WithVariables(t *testing.T) {
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"template_0_name":       {"tmpl"},
+		"template_0_source":     {"git"},
+		"template_0_var_name":   {"key1", "key2"},
+		"template_0_var_value":  {"val1", "val2"},
+	}
+	templates := parseCoderTemplatesFromForm(req, nil)
+	assert.Len(t, templates, 1)
+	assert.Equal(t, "val1", templates[0].Variables["key1"])
+	assert.Equal(t, "val2", templates[0].Variables["key2"])
+}
+
+func TestParseCoderTemplatesFromForm_MultipleTemplates(t *testing.T) {
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"template_0_name":   {"tmpl-a"},
+		"template_0_source": {"git"},
+		"template_1_name":   {"tmpl-b"},
+		"template_1_source": {"upload"},
+	}
+	templates := parseCoderTemplatesFromForm(req, []string{"", "file.zip"})
+	assert.Len(t, templates, 2)
+}
+
+func TestGetPostFormKeys(t *testing.T) {
+	tests := []struct {
+		name     string
+		postForm url.Values
+		want     int // number of expected keys
+	}{
+		{"empty", url.Values{}, 0},
+		{"one key", url.Values{"key1": []string{"v1"}}, 1},
+		{"two keys", url.Values{"k1": []string{"v1"}, "k2": []string{"v2"}}, 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := &http.Request{PostForm: tt.postForm}
+			got := getPostFormKeys(r)
+			if len(got) != tt.want {
+				t.Errorf("getPostFormKeys() len = %d, want %d", len(got), tt.want)
+			}
+		})
+	}
+}
+
+func TestHandler_GetProjectStats_MissingParam(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("GET", "/api/admin/stats", nil)
+	w := httptest.NewRecorder()
+	h.GetProjectStats(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("GetProjectStats() missing param status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandler_GetProjectStats_WithData(t *testing.T) {
+	jm := NewJobManager("")
+	id1 := jm.CreateJob(&LabConfig{StackName: "project-a"})
+	jm.UpdateJobStatus(id1, JobStatusCompleted)
+	id2 := jm.CreateJob(&LabConfig{StackName: "project-a"})
+	jm.UpdateJobStatus(id2, JobStatusFailed)
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("GET", "/api/admin/stats?project=project-a", nil)
+	w := httptest.NewRecorder()
+	h.GetProjectStats(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("GetProjectStats() status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if w.Header().Get("Content-Type") != "application/json" {
+		t.Error("GetProjectStats() should return application/json")
+	}
+}
+
+func TestHandler_GetProjectStats_AllProjects(t *testing.T) {
+	jm := NewJobManager("")
+	id1 := jm.CreateJob(&LabConfig{StackName: "proj-a"})
+	jm.UpdateJobStatus(id1, JobStatusCompleted)
+	id2 := jm.CreateJob(&LabConfig{StackName: "proj-b"})
+	jm.UpdateJobStatus(id2, JobStatusDestroyed)
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("GET", "/api/admin/stats?project=__all__", nil)
+	w := httptest.NewRecorder()
+	h.GetProjectStats(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("GetProjectStats(__all__) status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestHandler_ServeAdminStats(t *testing.T) {
+	jm := NewJobManager("")
+	jm.CreateJob(&LabConfig{StackName: "my-stack"})
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("GET", "/admin/stats", nil)
+	w := httptest.NewRecorder()
+	h.ServeAdminStats(w, req)
+	// Template will fail (no web/ dir in tests), but the project-list building is exercised.
+}
+
+func TestHandler_UpdateJobConfig(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "original"})
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	h.updateJobConfig(id, func(cfg *LabConfig) {
+		cfg.StackName = "updated"
+	})
+
+	job, exists := jm.GetJob(id)
+	if !exists {
+		t.Fatal("job not found after updateJobConfig")
+	}
+	job.mu.RLock()
+	got := job.Config.StackName
+	job.mu.RUnlock()
+	if got != "updated" {
+		t.Errorf("updateJobConfig() StackName = %q, want %q", got, "updated")
+	}
+}
+
+func TestHandler_UpdateJobConfig_NotFound(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	// Should not panic for non-existent job
+	h.updateJobConfig("nonexistent", func(cfg *LabConfig) {
+		cfg.StackName = "updated"
+	})
+}
+
+func TestHandler_ReadKubeconfigFromForm_TextArea(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("POST", "/", strings.NewReader(url.Values{
+		"kubeconfig_content": []string{"apiVersion: v1"},
+	}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.ParseForm()
+
+	content, err := h.readKubeconfigFromForm(req)
+	if err != nil {
+		t.Fatalf("readKubeconfigFromForm() error = %v", err)
+	}
+	if content != "apiVersion: v1" {
+		t.Errorf("readKubeconfigFromForm() = %q, want %q", content, "apiVersion: v1")
+	}
+}
+
+func TestHandler_SetClassicAdminLoginConfigurer(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	called := false
+	h.SetClassicAdminLoginConfigurer(func(disabled bool) {
+		called = true
+	})
+	if h.classicAdminLoginConfigurer == nil {
+		t.Error("SetClassicAdminLoginConfigurer() classicAdminLoginConfigurer is nil")
+	}
+	h.classicAdminLoginConfigurer(false)
+	if !called {
+		t.Error("classicAdminLoginConfigurer callback was not called")
 	}
 }

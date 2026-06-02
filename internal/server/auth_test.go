@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"strings"
 	"testing"
@@ -42,6 +43,7 @@ func TestHashPassword(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := hashPassword(tt.password)
 			if err != nil {
 				t.Errorf("hashPassword() error = %v", err)
@@ -305,6 +307,7 @@ func TestConstants(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if tt.got != tt.want {
 				t.Errorf("%s = %s, want %s", tt.name, tt.got, tt.want)
 			}
@@ -1289,4 +1292,399 @@ func buildFakeIDToken(claims map[string]string) *oauth2.Token {
 	return (&oauth2.Token{}).WithExtra(map[string]interface{}{
 		"id_token": idToken,
 	})
+}
+
+// ---- AuthHandler getters/setters tests ----
+
+func TestAuthHandler_ConfigureAzureAD_Enable(t *testing.T) {
+	ah := createTestAuthHandler()
+	ah.ConfigureAzureAD("client-id", "client-secret", "tenant-id")
+	if !ah.AzureADEnabled() {
+		t.Error("AzureADEnabled() = false after ConfigureAzureAD with valid params")
+	}
+}
+
+func TestAuthHandler_ConfigureAzureAD_Disable(t *testing.T) {
+	ah := createTestAuthHandlerWithAzureAD()
+	ah.ConfigureAzureAD("", "", "")
+	if ah.AzureADEnabled() {
+		t.Error("AzureADEnabled() = true after ConfigureAzureAD with empty params")
+	}
+}
+
+func TestAuthHandler_SetClassicLoginDisabled(t *testing.T) {
+	ah := createTestAuthHandler()
+	ah.SetClassicLoginDisabled(true)
+	ah.mu.RLock()
+	got := ah.classicLoginDisabled
+	ah.mu.RUnlock()
+	if !got {
+		t.Error("classicLoginDisabled should be true after SetClassicLoginDisabled(true)")
+	}
+
+	ah.SetClassicLoginDisabled(false)
+	ah.mu.RLock()
+	got = ah.classicLoginDisabled
+	ah.mu.RUnlock()
+	if got {
+		t.Error("classicLoginDisabled should be false after SetClassicLoginDisabled(false)")
+	}
+}
+
+func TestAuthHandler_SetAdminGroupID(t *testing.T) {
+	ah := createTestAuthHandlerWithAzureAD()
+	ah.SetAdminGroupID("group-123")
+	if !ah.AdminAzureADEnabled() {
+		t.Error("AdminAzureADEnabled() = false after SetAdminGroupID with valid group")
+	}
+
+	ah.SetAdminGroupID("")
+	if ah.AdminAzureADEnabled() {
+		t.Error("AdminAzureADEnabled() = true after SetAdminGroupID with empty group")
+	}
+}
+
+func TestAuthHandler_AdminAzureADEnabled_RequiresBothAzureAndGroup(t *testing.T) {
+	ah := createTestAuthHandler() // azureADEnabled = false
+	ah.SetAdminGroupID("group-xyz")
+	if ah.AdminAzureADEnabled() {
+		t.Error("AdminAzureADEnabled() should be false when Azure AD is not enabled")
+	}
+}
+
+func TestAuthHandler_SetClassicAdminLoginDisabled(t *testing.T) {
+	ah := createTestAuthHandler()
+	ah.SetClassicAdminLoginDisabled(true)
+	ah.mu.RLock()
+	got := ah.classicAdminLoginDisabled
+	ah.mu.RUnlock()
+	if !got {
+		t.Error("classicAdminLoginDisabled should be true")
+	}
+}
+
+// ---- HandleLogin tests ----
+
+func TestHandleLogin_WrongMethod(t *testing.T) {
+	ah := createTestAuthHandler()
+	req := httptest.NewRequest("GET", "/login", nil)
+	w := httptest.NewRecorder()
+
+	ah.HandleLogin(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("HandleLogin GET status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+}
+
+func TestHandleLogin_EmptyPassword(t *testing.T) {
+	ah := createTestAuthHandler()
+	form := url.Values{}
+	req := httptest.NewRequest("POST", "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	ah.HandleLogin(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("HandleLogin empty password status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	if !strings.Contains(w.Header().Get("Location"), "error") {
+		t.Error("HandleLogin empty password should redirect with error")
+	}
+}
+
+func TestHandleLogin_WrongPassword(t *testing.T) {
+	ah := createTestAuthHandler()
+	form := url.Values{}
+	form.Set("password_hash", "wronghash")
+	req := httptest.NewRequest("POST", "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	ah.HandleLogin(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("HandleLogin wrong password status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	if !strings.Contains(w.Header().Get("Location"), "error") {
+		t.Error("HandleLogin wrong password should redirect with error")
+	}
+}
+
+func TestHandleLogin_ClassicLoginDisabled(t *testing.T) {
+	ah := createTestAuthHandlerWithAzureAD()
+	ah.SetAdminGroupID("group-123")
+	ah.SetClassicAdminLoginDisabled(true)
+
+	form := url.Values{}
+	form.Set("password_hash", "anyhash")
+	req := httptest.NewRequest("POST", "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	ah.HandleLogin(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("HandleLogin disabled status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	if !strings.Contains(w.Header().Get("Location"), "disabled") {
+		t.Error("HandleLogin disabled should redirect with 'disabled' message")
+	}
+}
+
+// ---- HandleLogout tests ----
+
+func TestHandleLogout(t *testing.T) {
+	ah := createTestAuthHandler()
+	req := createAuthenticatedRequest("GET", "/logout", ah)
+	w := httptest.NewRecorder()
+
+	ah.HandleLogout(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("HandleLogout status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+}
+
+func TestHandleLogout_NoCookie(t *testing.T) {
+	ah := createTestAuthHandler()
+	req := httptest.NewRequest("GET", "/logout", nil)
+	w := httptest.NewRecorder()
+
+	ah.HandleLogout(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("HandleLogout no-cookie status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+}
+
+// ---- HandleStudentLogin tests ----
+
+func TestHandleStudentLogin_WrongMethod(t *testing.T) {
+	ah := createTestAuthHandler()
+	req := httptest.NewRequest("GET", "/student/login", nil)
+	w := httptest.NewRecorder()
+
+	ah.HandleStudentLogin(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("HandleStudentLogin GET status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+}
+
+func TestHandleStudentLogin_EmptyEmail(t *testing.T) {
+	ah := createTestAuthHandler()
+	form := url.Values{}
+	form.Set("password_hash", "some-hash")
+	req := httptest.NewRequest("POST", "/student/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	ah.HandleStudentLogin(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("HandleStudentLogin empty email status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+}
+
+// ---- HandleStudentLogout tests ----
+
+func TestHandleStudentLogout(t *testing.T) {
+	ah := createTestAuthHandler()
+	req := createStudentAuthenticatedRequest("GET", "/student/logout", ah)
+	w := httptest.NewRecorder()
+
+	ah.HandleStudentLogout(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("HandleStudentLogout status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+}
+
+func TestHandleStudentLogout_NoCookie(t *testing.T) {
+	ah := createTestAuthHandler()
+	req := httptest.NewRequest("GET", "/student/logout", nil)
+	w := httptest.NewRecorder()
+
+	ah.HandleStudentLogout(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("HandleStudentLogout no-cookie status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+}
+
+// ---- More HandleStudentLogin cases ----
+
+func TestHandleStudentLogin_NoStudentPassword(t *testing.T) {
+	ah := &AuthHandler{
+		passwordHash:        "hash",
+		studentPasswordHash: "",
+		sessions:            make(map[string]*Session),
+		studentSessions:     make(map[string]*Session),
+		azureOAuthStates:    make(map[string]time.Time),
+		templates:           make(map[string]*template.Template),
+	}
+	form := url.Values{}
+	form.Set("password_hash", "some-hash")
+	form.Set("email", "student@example.com")
+	req := httptest.NewRequest("POST", "/student/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	ah.HandleStudentLogin(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("HandleStudentLogin no-password status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	if !strings.Contains(w.Header().Get("Location"), "disabled") {
+		t.Errorf("HandleStudentLogin disabled should mention 'disabled', got: %s", w.Header().Get("Location"))
+	}
+}
+
+func TestHandleStudentLogin_ClassicLoginDisabled(t *testing.T) {
+	ah := createTestAuthHandlerWithAzureAD()
+	ah.SetClassicLoginDisabled(true)
+
+	form := url.Values{}
+	form.Set("password_hash", "any-hash")
+	req := httptest.NewRequest("POST", "/student/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	ah.HandleStudentLogin(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("HandleStudentLogin classic-disabled status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	if !strings.Contains(w.Header().Get("Location"), "disabled") {
+		t.Errorf("HandleStudentLogin classic disabled should redirect with 'disabled': %s", w.Header().Get("Location"))
+	}
+}
+
+func TestHandleStudentLogin_WrongPassword(t *testing.T) {
+	ah := createTestAuthHandler()
+	form := url.Values{}
+	form.Set("password_hash", "wrong-hash")
+	form.Set("email", "student@example.com")
+	req := httptest.NewRequest("POST", "/student/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	ah.HandleStudentLogin(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("HandleStudentLogin wrong-password status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	if !strings.Contains(w.Header().Get("Location"), "error") {
+		t.Error("HandleStudentLogin wrong password should redirect with error")
+	}
+}
+
+// ---- HandleAdminAzureADLogin tests ----
+
+func TestHandleAdminAzureADLogin_NotEnabled(t *testing.T) {
+	ah := createTestAuthHandler() // azureADEnabled=false
+	req := httptest.NewRequest("GET", "/admin/auth/azure/login", nil)
+	w := httptest.NewRecorder()
+
+	ah.HandleAdminAzureADLogin(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("HandleAdminAzureADLogin not-enabled status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	if !strings.Contains(w.Header().Get("Location"), "not+configured") {
+		t.Errorf("HandleAdminAzureADLogin not-enabled redirect missing error: %s", w.Header().Get("Location"))
+	}
+}
+
+func TestHandleAdminAzureADLogin_Enabled(t *testing.T) {
+	ah := createTestAuthHandlerWithAzureAD()
+	ah.SetAdminGroupID("group-123")
+	req := httptest.NewRequest("GET", "/admin/auth/azure/login", nil)
+	w := httptest.NewRecorder()
+
+	ah.HandleAdminAzureADLogin(w, req)
+	// Should redirect to Azure AD authorization URL
+	if w.Code != http.StatusFound {
+		t.Errorf("HandleAdminAzureADLogin enabled status = %d, want %d", w.Code, http.StatusFound)
+	}
+}
+
+// ---- HandleAdminAzureADCallback tests ----
+
+func TestHandleAdminAzureADCallback_NotEnabled(t *testing.T) {
+	ah := createTestAuthHandler() // azureADEnabled=false
+	req := httptest.NewRequest("GET", "/admin/auth/azure/callback?code=xxx&state=yyy", nil)
+	w := httptest.NewRecorder()
+
+	ah.HandleAdminAzureADCallback(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("HandleAdminAzureADCallback not-enabled status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+}
+
+func TestHandleAdminAzureADCallback_InvalidState(t *testing.T) {
+	ah := createTestAuthHandlerWithAzureAD()
+	ah.SetAdminGroupID("group-123")
+	req := httptest.NewRequest("GET", "/admin/auth/azure/callback?code=xxx&state=invalid-state", nil)
+	w := httptest.NewRecorder()
+
+	ah.HandleAdminAzureADCallback(w, req)
+	// Invalid state → redirect with error
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("HandleAdminAzureADCallback invalid state status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+}
+
+func TestHandleLogin_Success(t *testing.T) {
+	ah := createTestAuthHandler()
+
+	// Simulate client sending hex(SHA-256("test-admin"))
+	sha := sha256.Sum256([]byte("test-admin"))
+	passwordHash := hex.EncodeToString(sha[:])
+
+	form := url.Values{}
+	form.Set("password_hash", passwordHash)
+	req := httptest.NewRequest("POST", "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	ah.HandleLogin(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("HandleLogin success status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	if strings.Contains(w.Header().Get("Location"), "error") {
+		t.Errorf("HandleLogin success should not redirect with error: %s", w.Header().Get("Location"))
+	}
+}
+
+func TestHandleStudentLogin_Success(t *testing.T) {
+	ah := createTestAuthHandler()
+
+	// Simulate client sending hex(SHA-256("test-student"))
+	sha := sha256.Sum256([]byte("test-student"))
+	passwordHash := hex.EncodeToString(sha[:])
+
+	form := url.Values{}
+	form.Set("password_hash", passwordHash)
+	form.Set("email", "student@example.com")
+	req := httptest.NewRequest("POST", "/student/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	ah.HandleStudentLogin(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("HandleStudentLogin success status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	if strings.Contains(w.Header().Get("Location"), "error") {
+		t.Errorf("HandleStudentLogin success should redirect to dashboard: %s", w.Header().Get("Location"))
+	}
+}
+
+func TestHandleStudentLogin_InvalidEmail(t *testing.T) {
+	ah := createTestAuthHandler()
+	sha := sha256.Sum256([]byte("test-student"))
+	passwordHash := hex.EncodeToString(sha[:])
+
+	form := url.Values{}
+	form.Set("password_hash", passwordHash)
+	form.Set("email", "not-an-email")
+	req := httptest.NewRequest("POST", "/student/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	ah.HandleStudentLogin(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Errorf("HandleStudentLogin invalid-email status = %d, want %d", w.Code, http.StatusSeeOther)
+	}
+	if !strings.Contains(w.Header().Get("Location"), "error") {
+		t.Error("HandleStudentLogin invalid email should redirect with error")
+	}
 }

@@ -553,3 +553,180 @@ func TestJobManager_ConcurrentAccess(t *testing.T) {
 		t.Error("Expected at least some jobs to be created")
 	}
 }
+
+// --- GetCoderTemplates tests ---
+
+func TestLabConfig_GetCoderTemplates_MultiTemplate(t *testing.T) {
+	c := &LabConfig{
+		CoderTemplates: []CoderTemplate{
+			{Name: "t1", Source: "git"},
+			{Name: "t2", Source: "upload"},
+		},
+	}
+	got := c.GetCoderTemplates()
+	if len(got) != 2 {
+		t.Errorf("GetCoderTemplates() len = %d, want 2", len(got))
+	}
+}
+
+func TestLabConfig_GetCoderTemplates_LegacyFallback_Upload(t *testing.T) {
+	c := &LabConfig{
+		CoderTemplateName: "my-template",
+		TemplateFilePath:  "/path/to/file.zip",
+	}
+	got := c.GetCoderTemplates()
+	if len(got) != 1 {
+		t.Fatalf("GetCoderTemplates() len = %d, want 1", len(got))
+	}
+	if got[0].Name != "my-template" {
+		t.Errorf("GetCoderTemplates() name = %q, want %q", got[0].Name, "my-template")
+	}
+	if got[0].Source != "upload" {
+		t.Errorf("GetCoderTemplates() source = %q, want upload", got[0].Source)
+	}
+}
+
+func TestLabConfig_GetCoderTemplates_LegacyFallback_Git(t *testing.T) {
+	c := &LabConfig{
+		CoderTemplateName: "my-template",
+		TemplateGitRepo:   "https://github.com/example/repo",
+	}
+	got := c.GetCoderTemplates()
+	if len(got) != 1 {
+		t.Fatalf("GetCoderTemplates() len = %d, want 1", len(got))
+	}
+	if got[0].Source != "git" {
+		t.Errorf("GetCoderTemplates() source = %q, want git", got[0].Source)
+	}
+}
+
+func TestLabConfig_GetCoderTemplates_LegacyFallback_ExplicitSource(t *testing.T) {
+	c := &LabConfig{
+		CoderTemplateName: "my-template",
+		TemplateSource:    "custom-source",
+	}
+	got := c.GetCoderTemplates()
+	if len(got) != 1 {
+		t.Fatalf("GetCoderTemplates() len = %d, want 1", len(got))
+	}
+	if got[0].Source != "custom-source" {
+		t.Errorf("GetCoderTemplates() source = %q, want custom-source", got[0].Source)
+	}
+}
+
+func TestLabConfig_GetCoderTemplates_NilWhenEmpty(t *testing.T) {
+	c := &LabConfig{}
+	got := c.GetCoderTemplates()
+	if got != nil {
+		t.Errorf("GetCoderTemplates() = %v, want nil", got)
+	}
+}
+
+// --- RecordCleanupEvent tests ---
+
+func TestJobManager_RecordCleanupEvent_Success(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test"})
+
+	err := jm.RecordCleanupEvent(id, 3)
+	if err != nil {
+		t.Fatalf("RecordCleanupEvent() error = %v", err)
+	}
+
+	job, _ := jm.GetJob(id)
+	job.mu.RLock()
+	events := job.CleanupEvents
+	job.mu.RUnlock()
+
+	if len(events) != 1 {
+		t.Errorf("CleanupEvents len = %d, want 1", len(events))
+	}
+	if events[0].Count != 3 {
+		t.Errorf("CleanupEvents[0].Count = %d, want 3", events[0].Count)
+	}
+}
+
+func TestJobManager_RecordCleanupEvent_NotFound(t *testing.T) {
+	jm := NewJobManager("")
+	err := jm.RecordCleanupEvent("nonexistent", 1)
+	if err == nil {
+		t.Error("RecordCleanupEvent() should error for nonexistent job")
+	}
+}
+
+// --- RecordWorkspaceSnapshot tests ---
+
+func TestJobManager_RecordWorkspaceSnapshot_Success(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test"})
+
+	err := jm.RecordWorkspaceSnapshot(id, 5)
+	if err != nil {
+		t.Fatalf("RecordWorkspaceSnapshot() error = %v", err)
+	}
+
+	job, _ := jm.GetJob(id)
+	job.mu.RLock()
+	snapshots := job.WorkspaceSnapshots
+	job.mu.RUnlock()
+
+	if len(snapshots) != 1 {
+		t.Errorf("WorkspaceSnapshots len = %d, want 1", len(snapshots))
+	}
+	if snapshots[0].Count != 5 {
+		t.Errorf("WorkspaceSnapshots[0].Count = %d, want 5", snapshots[0].Count)
+	}
+}
+
+func TestJobManager_RecordWorkspaceSnapshot_NotFound(t *testing.T) {
+	jm := NewJobManager("")
+	err := jm.RecordWorkspaceSnapshot("nonexistent", 1)
+	if err == nil {
+		t.Error("RecordWorkspaceSnapshot() should error for nonexistent job")
+	}
+}
+
+// --- ResetJobForRetry tests ---
+
+func TestJobManager_ResetJobForRetry_Success(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test"})
+	jm.UpdateJobStatus(id, JobStatusFailed)
+
+	err := jm.ResetJobForRetry(id)
+	if err != nil {
+		t.Fatalf("ResetJobForRetry() error = %v", err)
+	}
+
+	job, _ := jm.GetJob(id)
+	job.mu.RLock()
+	status := job.Status
+	errMsg := job.Error
+	job.mu.RUnlock()
+
+	if status != JobStatusPending {
+		t.Errorf("ResetJobForRetry() status = %v, want %v", status, JobStatusPending)
+	}
+	if errMsg != "" {
+		t.Errorf("ResetJobForRetry() error should be cleared, got %q", errMsg)
+	}
+}
+
+func TestJobManager_ResetJobForRetry_NotFailed(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test"})
+	// Status is pending, not failed
+
+	err := jm.ResetJobForRetry(id)
+	if err == nil {
+		t.Error("ResetJobForRetry() should error for non-failed job")
+	}
+}
+
+func TestJobManager_ResetJobForRetry_NotFound(t *testing.T) {
+	jm := NewJobManager("")
+	err := jm.ResetJobForRetry("nonexistent")
+	if err == nil {
+		t.Error("ResetJobForRetry() should error for nonexistent job")
+	}
+}

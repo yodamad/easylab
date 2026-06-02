@@ -150,6 +150,7 @@ func TestCredentialsManager_SetCredentials_Validation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			cm := NewCredentialsManager()
 			err := cm.SetCredentials(tt.creds)
 			if (err != nil) != tt.wantErr {
@@ -356,4 +357,44 @@ func TestCredentialsManager_ConcurrentAccess(t *testing.T) {
 	<-done
 	<-done
 	<-done
+}
+
+func TestAzureCredentials_GetProviderName(t *testing.T) {
+	c := &AzureCredentials{ClientID: "id"}
+	if got := c.GetProviderName(); got != "azure" {
+		t.Errorf("GetProviderName() = %q, want azure", got)
+	}
+}
+
+func TestCredentialsManager_GetOVHCredentials_NotConfigured(t *testing.T) {
+	cm := NewCredentialsManager()
+	_, err := cm.GetOVHCredentials()
+	if err == nil {
+		t.Error("GetOVHCredentials() should error when not configured")
+	}
+}
+
+func TestCredentialsManager_GetAzureCredentials_NotConfigured(t *testing.T) {
+	cm := NewCredentialsManager()
+	_, err := cm.GetAzureCredentials()
+	if err == nil {
+		t.Error("GetAzureCredentials() should error when not configured")
+	}
+}
+
+func TestCredentialsManager_GetAzureCredentials_Configured(t *testing.T) {
+	cm := NewCredentialsManager()
+	cm.SetCredentials(&AzureCredentials{
+		ClientID:       "client",
+		ClientSecret:   "secret",
+		TenantID:       "tenant",
+		SubscriptionID: "sub",
+	})
+	got, err := cm.GetAzureCredentials()
+	if err != nil {
+		t.Fatalf("GetAzureCredentials() error = %v", err)
+	}
+	if got.ClientID != "client" {
+		t.Errorf("GetAzureCredentials() ClientID = %q, want client", got.ClientID)
+	}
 }
