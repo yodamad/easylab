@@ -5,12 +5,23 @@ import (
 	"easylab/coder"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-const workspaceCleanupInterval = 5 * time.Minute
+// cleanupInterval returns the workspace cleanup interval, configurable via CLEANUP_INTERVAL_MINUTES env var.
+// Defaults to 5 minutes.
+func cleanupInterval() time.Duration {
+	if v := os.Getenv("CLEANUP_INTERVAL_MINUTES"); v != "" {
+		if mins, err := strconv.Atoi(v); err == nil && mins > 0 {
+			return time.Duration(mins) * time.Minute
+		}
+	}
+	return 5 * time.Minute
+}
 
 // coderReachabilityTimeout is the maximum time to wait when probing Coder before skipping cleanup for a job.
 const coderReachabilityTimeout = 5 * time.Second
@@ -33,9 +44,12 @@ func isCoderReachable(coderURL string) bool {
 }
 
 // StartWorkspaceCleanup starts a background goroutine that periodically deletes
-// workspaces that have exceeded their configured lifetime.
+// workspaces that have exceeded their configured lifetime and destroys labs past
+// their scheduled deletion date.
 func (h *Handler) StartWorkspaceCleanup(ctx context.Context) {
-	ticker := time.NewTicker(workspaceCleanupInterval)
+	interval := cleanupInterval()
+	log.Printf("[cleanup] cleanup batch interval: %v (set CLEANUP_INTERVAL_MINUTES to override)", interval)
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -43,6 +57,7 @@ func (h *Handler) StartWorkspaceCleanup(ctx context.Context) {
 			return
 		case <-ticker.C:
 			h.cleanupExpiredWorkspaces()
+			h.cleanupExpiredLabs()
 		}
 	}
 }
@@ -96,5 +111,34 @@ func (h *Handler) cleanupExpiredWorkspaces() {
 				log.Printf("[cleanup] failed to persist cleanup event for job %s: %v", job.ID, err)
 			}
 		}
+	}
+}
+
+// cleanupExpiredLabs iterates all completed jobs and destroys those that have passed
+// their configured LabDeletionDate.
+func (h *Handler) cleanupExpiredLabs() {
+	jobs := h.jobManager.GetAllJobs()
+	for _, job := range jobs {
+		if job.Status != JobStatusCompleted {
+			continue
+		}
+		if job.Config == nil || job.Config.LabDeletionDate == nil {
+			continue
+		}
+		if !time.Now().After(*job.Config.LabDeletionDate) {
+			continue
+		}
+		jobID := job.ID
+		log.Printf("[cleanup] scheduling automatic lab deletion for job %s (deletion date: %s)", jobID, job.Config.LabDeletionDate.Format("2006-01-02"))
+		// Mark as running immediately to prevent duplicate destroy on the next tick.
+		if err := h.jobManager.UpdateJobStatus(jobID, JobStatusRunning); err != nil {
+			log.Printf("[cleanup] failed to mark job %s as running before deletion: %v", jobID, err)
+			continue
+		}
+		go func(id string) {
+			if err := h.pulumiExec.Destroy(id); err != nil {
+				log.Printf("[cleanup] automatic lab deletion failed for job %s: %v", id, err)
+			}
+		}(jobID)
 	}
 }

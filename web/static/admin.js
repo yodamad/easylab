@@ -3,8 +3,8 @@ const wizard = {
     currentStep: 1,
     useExistingCluster: false,
     clusterModeSelected: false,
-    allSteps: [1, 2, 3, 4, 5, 6, 7],
-    byokSteps: [1, 2, 6, 7],
+    allSteps: [1, 2, 3, 4, 5, 6, 7, 8],
+    byokSteps: [1, 2, 6, 7, 8],
 
     getActiveSteps() {
         return this.useExistingCluster ? this.byokSteps : this.allSteps;

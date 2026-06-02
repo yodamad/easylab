@@ -1148,9 +1148,58 @@ func TestCreateLabConfigFromForm_LabDeletionDate_Valid(t *testing.T) {
 	assert.Equal(t, 2030, cfg.LabDeletionDate.Year())
 	assert.Equal(t, 12, int(cfg.LabDeletionDate.Month()))
 	assert.Equal(t, 31, cfg.LabDeletionDate.Day())
-	// Should be set to end of day
+	// No time provided: defaults to 23:59
 	assert.Equal(t, 23, cfg.LabDeletionDate.Hour())
 	assert.Equal(t, 59, cfg.LabDeletionDate.Minute())
+}
+
+func TestCreateLabConfigFromForm_LabDeletionDate_WithTime(t *testing.T) {
+	t.Parallel()
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"stack_name":        {"s"},
+		"template_0_name":   {"tmpl"},
+		"lab_deletion_date": {"2030-06-15"},
+		"lab_deletion_time": {"14:30"},
+	}
+	cfg := h.createLabConfigFromForm(req, nil, nil)
+	require.NotNil(t, cfg.LabDeletionDate)
+	assert.Equal(t, 2030, cfg.LabDeletionDate.Year())
+	assert.Equal(t, 6, int(cfg.LabDeletionDate.Month()))
+	assert.Equal(t, 15, cfg.LabDeletionDate.Day())
+	assert.Equal(t, 14, cfg.LabDeletionDate.Hour())
+	assert.Equal(t, 30, cfg.LabDeletionDate.Minute())
+}
+
+func TestCreateLabConfigFromForm_LabDeletionDate_InvalidTime(t *testing.T) {
+	t.Parallel()
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"stack_name":        {"s"},
+		"template_0_name":   {"tmpl"},
+		"lab_deletion_date": {"2030-06-15"},
+		"lab_deletion_time": {"not-a-time"},
+	}
+	cfg := h.createLabConfigFromForm(req, nil, nil)
+	require.NotNil(t, cfg.LabDeletionDate, "LabDeletionDate should still be set when only time is invalid")
+	// Falls back to end-of-day default
+	assert.Equal(t, 23, cfg.LabDeletionDate.Hour())
+	assert.Equal(t, 59, cfg.LabDeletionDate.Minute())
+}
+
+func TestCreateLabConfigFromForm_LabDeletionDate_TimeWithoutDate(t *testing.T) {
+	t.Parallel()
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"stack_name":        {"s"},
+		"template_0_name":   {"tmpl"},
+		"lab_deletion_time": {"09:00"},
+	}
+	cfg := h.createLabConfigFromForm(req, nil, nil)
+	assert.Nil(t, cfg.LabDeletionDate, "LabDeletionDate should be nil when date is absent even if time is set")
 }
 
 func TestCreateLabConfigFromForm_LabDeletionDate_Empty(t *testing.T) {

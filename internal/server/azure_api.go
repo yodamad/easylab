@@ -160,15 +160,15 @@ func azureListVMSizes(token, subscriptionID, location string) ([]azureVMSize, er
 func (h *Handler) azureWriteLocationOptionsLive(w http.ResponseWriter) error {
 	creds, err := h.credentialsManager.GetAzureCredentials()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get Azure credentials: %w", err)
 	}
 	token, err := azureAcquireToken(creds.TenantID, creds.ClientID, creds.ClientSecret)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to acquire Azure token: %w", err)
 	}
 	names, _, err := azureListSubscriptionLocations(token, creds.SubscriptionID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to list Azure locations: %w", err)
 	}
 	sort.Strings(names)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -185,15 +185,15 @@ func (h *Handler) azureWriteLocationOptionsLive(w http.ResponseWriter) error {
 func (h *Handler) azureWriteVMSizesOptionsLive(w http.ResponseWriter, location string, minVcpus, maxVcpus, minRam, maxRam int) error {
 	creds, err := h.credentialsManager.GetAzureCredentials()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get Azure credentials: %w", err)
 	}
 	token, err := azureAcquireToken(creds.TenantID, creds.ClientID, creds.ClientSecret)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to acquire Azure token: %w", err)
 	}
 	sizes, err := azureListVMSizes(token, creds.SubscriptionID, location)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to list Azure VM sizes: %w", err)
 	}
 	sizes = filterAzureVMSizesByCPURAM(sizes, minVcpus, maxVcpus, minRam, maxRam)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -263,7 +263,7 @@ func (h *Handler) GetAzureLocations(w http.ResponseWriter, r *http.Request) {
 	if err := h.azureWriteLocationOptionsLive(w); err != nil {
 		log.Printf("GetAzureLocations: %v", err)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, `<option value="" disabled selected>Error: %s</option>`, escapeHTML(err.Error()))
+		fmt.Fprint(w, `<option value="" disabled selected>Failed to load locations</option>`)
 	}
 }
 
@@ -288,7 +288,7 @@ func (h *Handler) GetAzureVMSizes(w http.ResponseWriter, r *http.Request) {
 		if err := h.azureOptionsManager.EnsureVMSizesCached(location); err != nil {
 			log.Printf("GetAzureVMSizes: %v", err)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			fmt.Fprintf(w, `<option value="" disabled selected>Error: %s</option>`, escapeHTML(err.Error()))
+			fmt.Fprint(w, `<option value="" disabled selected>Failed to load VM sizes</option>`)
 			return
 		}
 		sizes, defaultSize := h.azureOptionsManager.GetVMSizesForForm(location)
@@ -312,7 +312,7 @@ func (h *Handler) GetAzureVMSizes(w http.ResponseWriter, r *http.Request) {
 	if err := h.azureWriteVMSizesOptionsLive(w, location, minVcpus, maxVcpus, minRam, maxRam); err != nil {
 		log.Printf("GetAzureVMSizes: %v", err)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, `<option value="" disabled selected>Error: %s</option>`, escapeHTML(err.Error()))
+		fmt.Fprint(w, `<option value="" disabled selected>Failed to load VM sizes</option>`)
 	}
 }
 
@@ -335,7 +335,7 @@ func (h *Handler) GetAzureOptionsRegionVMSizeHTML(w http.ResponseWriter, r *http
 	if err := h.azureOptionsManager.EnsureVMSizesCached(region); err != nil {
 		log.Printf("GetAzureOptionsRegionVMSizeHTML: %v", err)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, `<p class="section-description">Failed to load VM sizes: %s</p>`, escapeHTML(err.Error()))
+		fmt.Fprint(w, `<p class="section-description">Failed to load VM sizes, please try again.</p>`)
 		return
 	}
 

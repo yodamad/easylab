@@ -48,7 +48,7 @@ func (fs *FeedbackStore) Add(f Feedback) error {
 
 	entries, err := fs.readUnsafe(f.LabID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to read feedback for lab %s: %w", f.LabID, err)
 	}
 	entries = append(entries, f)
 	return fs.writeUnsafe(f.LabID, entries)

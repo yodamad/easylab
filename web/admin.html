@@ -74,10 +74,14 @@
                     <span class="step-number">7</span>
                     <span class="step-label">Coder</span>
                 </div>
+                <div class="progress-step" data-step="8">
+                    <span class="step-number">8</span>
+                    <span class="step-label">Cleaning</span>
+                </div>
             </div>
 
             <!-- Provider Credentials Notice -->
-            <div id="provider-credentials-notice" class="info-box" style="margin-bottom: 2rem; display: none;">
+            <div id="provider-credentials-notice" class="info-box" style="display: none;">
                 <h3>🔐 Provider Credentials Required</h3>
                 <p>Before creating a lab, please configure your cloud provider API credentials. These credentials will be stored in memory and reused for all lab deployments.</p>
                 <a href="/credentials" class="btn btn-primary">
@@ -320,7 +324,7 @@
                                         <input type="number" id="flavor_filter_max_ram" name="flavor_filter_max_ram" min="0" value="{{.FlavorMaxRAM}}" placeholder="0" title="0 = no maximum (GB)" class="input-narrow">
                                     </div>
                                     <div class="form-group form-group--inline">
-                                        <label class="label-sm" style="visibility: hidden;">Actions</label>
+                                        <label class="label-sm label-invisible">Actions</label>
                                         <button type="button" id="flavor_filter_clear_btn" class="btn btn-secondary btn-sm">Clear</button>
                                     </div>
                                 </div>
@@ -549,23 +553,10 @@
                             <small id="coder_version_custom_hint" style="display: none;">Enter a specific version (e.g. 2.29.1)</small>
                         </div>
 
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="coder_namespace">Coder Namespace (Optional)</label>
-                                <input type="text" id="coder_namespace" name="coder_namespace" value="coder" placeholder="coder">
-                                <small>Kubernetes namespace for Coder. Defaults to "coder".</small>
-                            </div>                            
-                            <div class="form-group">
-                                <label for="workspace_lifetime_hours">Workspace Lifetime (Optional)</label>
-                                <div class="lifetime-input">
-                                    <input type="number" id="workspace_lifetime_hours" name="workspace_lifetime_hours" min="0" placeholder="0">
-                                    <select id="workspace_lifetime_unit" name="workspace_lifetime_unit">
-                                        <option value="hours">Hours</option>
-                                        <option value="days">Days</option>
-                                    </select>
-                                </div>
-                                <small>Auto-delete workspaces after this duration. Leave 0 to disable.</small>
-                            </div>
+                        <div class="form-group">
+                            <label for="coder_namespace">Coder Namespace (Optional)</label>
+                            <input type="text" id="coder_namespace" name="coder_namespace" value="coder" placeholder="coder">
+                            <small>Kubernetes namespace for Coder. Defaults to "coder".</small>
                         </div>
 
                         <div class="form-group">
@@ -756,6 +747,42 @@
                         <div class="form-group">
                             <label for="coder_db_name">Database Name *</label>
                             <input type="text" id="coder_db_name" name="coder_db_name" value="coderdb" required>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Step 8: Cleaning Configuration -->
+                <section class="wizard-step" data-step="8">
+                    <div class="step-header">
+                        <h2>Cleaning Configuration</h2>
+                        <p class="section-description">Configure automatic workspace and lab deletion policies</p>
+                    </div>
+                    <div class="step-content">
+                        <div class="form-group">
+                            <label for="workspace_lifetime_hours">Workspace Lifetime (Optional)</label>
+                            <div class="lifetime-input">
+                                <input type="number" id="workspace_lifetime_hours" name="workspace_lifetime_hours" min="0" placeholder="0">
+                                <select id="workspace_lifetime_unit" name="workspace_lifetime_unit">
+                                    <option value="hours">Hours</option>
+                                    <option value="days">Days</option>
+                                </select>
+                            </div>
+                            <small>Auto-delete workspaces after this duration. Leave 0 to disable.</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Lab Deletion (Optional)</label>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="lab_deletion_date">Date</label>
+                                    <input type="date" id="lab_deletion_date" name="lab_deletion_date">
+                                </div>
+                                <div class="form-group">
+                                    <label for="lab_deletion_time">Time</label>
+                                    <input type="time" id="lab_deletion_time" name="lab_deletion_time" placeholder="23:59">
+                                </div>
+                            </div>
+                            <small>Automatically destroy the entire lab at the specified date and time. Time defaults to end of day (23:59) if not set. Leave date empty to disable.</small>
                         </div>
                     </div>
                 </section>

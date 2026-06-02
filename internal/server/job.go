@@ -115,7 +115,8 @@ type LabConfig struct {
 	CoderDbUser            string `json:"coder_db_user"`
 	CoderDbPassword        string `json:"coder_db_password"`
 	CoderDbName            string `json:"coder_db_name"`
-	WorkspaceLifetimeHours int    `json:"workspace_lifetime_hours,omitempty"`
+	WorkspaceLifetimeHours int        `json:"workspace_lifetime_hours,omitempty"`
+	LabDeletionDate        *time.Time `json:"lab_deletion_date,omitempty"`
 
 	// Coder Templates (multiple templates per lab)
 	CoderTemplates []CoderTemplate `json:"coder_templates,omitempty"`

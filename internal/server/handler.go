@@ -172,7 +172,7 @@ func (h *Handler) parseForm(w http.ResponseWriter, r *http.Request, maxSize int6
 	if strings.HasPrefix(contentType, "multipart/form-data") {
 		if err := r.ParseMultipartForm(maxSize); err != nil {
 			log.Printf("Failed to parse multipart form: %v", err)
-			return err
+			return fmt.Errorf("failed to parse multipart form: %w", err)
 		}
 		log.Printf("Form parsed successfully (multipart)")
 		return nil
@@ -183,7 +183,7 @@ func (h *Handler) parseForm(w http.ResponseWriter, r *http.Request, maxSize int6
 	// by detecting the form data in the request body
 	if err := r.ParseForm(); err != nil {
 		log.Printf("Failed to parse form: %v", err)
-		return err
+		return fmt.Errorf("failed to parse form: %w", err)
 	}
 	log.Printf("Form parsed successfully (urlencoded or auto-detected)")
 	return nil
@@ -391,6 +391,19 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 	}
 	config.WorkspaceLifetimeHours = workspaceLifetime
 
+	if labDeletionDateStr := r.FormValue("lab_deletion_date"); labDeletionDateStr != "" {
+		if d, err := time.Parse("2006-01-02", labDeletionDateStr); err == nil {
+			hour, minute := 23, 59
+			if labDeletionTimeStr := r.FormValue("lab_deletion_time"); labDeletionTimeStr != "" {
+				if t, err := time.Parse("15:04", labDeletionTimeStr); err == nil {
+					hour, minute = t.Hour(), t.Minute()
+				}
+			}
+			deletion := time.Date(d.Year(), d.Month(), d.Day(), hour, minute, 0, 0, time.Local)
+			config.LabDeletionDate = &deletion
+		}
+	}
+
 	if !useExistingCluster {
 		// Parse integer fields only for new infrastructure
 		desiredNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_desired_node_count"))
@@ -507,7 +520,8 @@ func (h *Handler) serveTemplate(w http.ResponseWriter, templateName string, data
 	// Use cached template
 	tmpl, err := h.getTemplate(templateName)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to load template: %v", err), http.StatusInternalServerError)
+		log.Printf("Failed to load template %s: %v", templateName, err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return err
 	}
 
@@ -519,7 +533,8 @@ func (h *Handler) serveTemplate(w http.ResponseWriter, templateName string, data
 
 	// Execute the base template which includes all page-specific blocks
 	if err := tmpl.ExecuteTemplate(w, "base", data); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to execute template: %v", err), http.StatusInternalServerError)
+		log.Printf("Failed to execute template %s: %v", templateName, err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return err
 	}
 
@@ -629,7 +644,7 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 	// Parse form data - handle both multipart and urlencoded (50MB for template files)
 	if err := h.parseForm(w, r, 50<<20); err != nil {
 		log.Printf("Failed to parse form: %v", err)
-		h.renderHTMLError(w, "Form Parse Error", fmt.Sprintf("Failed to parse form: %v", err))
+		h.renderHTMLError(w, "Form Parse Error", "Failed to parse form data, please try again.")
 		return
 	}
 
@@ -664,7 +679,7 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 	jobDir := filepath.Join(h.pulumiExec.GetWorkDir(), jobID)
 	if err := os.MkdirAll(jobDir, 0755); err != nil {
 		log.Printf("Failed to create job directory: %v", err)
-		h.renderHTMLError(w, "Job Creation Error", fmt.Sprintf("Failed to create job directory: %v", err))
+		h.renderHTMLError(w, "Job Creation Error", "Failed to initialize job, please try again.")
 		return
 	}
 
@@ -672,7 +687,7 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 	templateFilePaths, err := h.saveUploadedTemplateFiles(r, jobDir, len(templates))
 	if err != nil {
 		log.Printf("Failed to save template files: %v", err)
-		h.renderHTMLError(w, "Template Upload Error", fmt.Sprintf("Failed to save template files: %v", err))
+		h.renderHTMLError(w, "Template Upload Error", "Failed to save uploaded files, please try again.")
 		return
 	}
 
@@ -704,7 +719,7 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 		kubeconfigContent, err := h.readKubeconfigFromForm(r)
 		if err != nil {
 			log.Printf("Failed to read kubeconfig: %v", err)
-			h.renderHTMLError(w, "Kubeconfig Error", fmt.Sprintf("Failed to read kubeconfig: %v", err))
+			h.renderHTMLError(w, "Kubeconfig Error", "Failed to read kubeconfig, please check the file and try again.")
 			return
 		}
 		if kubeconfigContent == "" {
@@ -714,7 +729,7 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 		kubeconfigPath := filepath.Join(jobDir, "external-kubeconfig.yaml")
 		if err := os.WriteFile(kubeconfigPath, []byte(kubeconfigContent), 0600); err != nil {
 			log.Printf("Failed to write kubeconfig: %v", err)
-			h.renderHTMLError(w, "Kubeconfig Error", fmt.Sprintf("Failed to save kubeconfig: %v", err))
+			h.renderHTMLError(w, "Kubeconfig Error", "Failed to save kubeconfig, please try again.")
 			return
 		}
 		h.updateJobConfig(jobID, func(config *LabConfig) {
@@ -799,7 +814,7 @@ func (h *Handler) LaunchLab(w http.ResponseWriter, r *http.Request) {
 	// Parse form data
 	if err := r.ParseForm(); err != nil {
 		log.Printf("Failed to parse form: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
+		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
 		return
 	}
 
@@ -1159,7 +1174,7 @@ func (h *Handler) ListLabTemplates(w http.ResponseWriter, r *http.Request) {
 	templates, err := coder.GetTemplatesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword)
 	if err != nil {
 		log.Printf("Failed to get templates for lab %s: %v", labID, err)
-		http.Error(w, fmt.Sprintf("Failed to get templates: %s", err.Error()), http.StatusInternalServerError)
+		http.Error(w, "Failed to fetch templates", http.StatusInternalServerError)
 		return
 	}
 
@@ -1222,7 +1237,8 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := r.ParseMultipartForm(50 << 20); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
+		log.Printf("Failed to parse multipart form: %v", err)
+		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
 		return
 	}
 
@@ -1234,7 +1250,8 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 
 	file, header, err := r.FormFile("template_file")
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to get template file: %v", err), http.StatusBadRequest)
+		log.Printf("Failed to get template file: %v", err)
+		http.Error(w, "Failed to read uploaded file", http.StatusBadRequest)
 		return
 	}
 	defer file.Close()
@@ -1246,7 +1263,8 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 
 	jobDir := filepath.Join(h.pulumiExec.GetWorkDir(), jobID)
 	if err := os.MkdirAll(jobDir, 0755); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to create job directory: %v", err), http.StatusInternalServerError)
+		log.Printf("Failed to create job directory for %s: %v", jobID, err)
+		http.Error(w, "Failed to initialize job directory", http.StatusInternalServerError)
 		return
 	}
 	// Sanitize template name to avoid path traversal
@@ -1259,12 +1277,14 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 
 	dst, err := os.Create(zipPath)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to save file: %v", err), http.StatusInternalServerError)
+		log.Printf("Failed to save uploaded file: %v", err)
+		http.Error(w, "Failed to save uploaded file", http.StatusInternalServerError)
 		return
 	}
 	if _, err := io.Copy(dst, file); err != nil {
 		dst.Close()
-		http.Error(w, fmt.Sprintf("Failed to write file: %v", err), http.StatusInternalServerError)
+		log.Printf("Failed to write uploaded file: %v", err)
+		http.Error(w, "Failed to write uploaded file", http.StatusInternalServerError)
 		return
 	}
 	dst.Close()
@@ -1279,7 +1299,7 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[UploadTemplate][%s] %s", jobID, msg)
 	}); err != nil {
 		log.Printf("Failed to create template for lab %s: %v", jobID, err)
-		http.Error(w, fmt.Sprintf("Failed to create template: %v", err), http.StatusInternalServerError)
+		http.Error(w, "Failed to create template", http.StatusInternalServerError)
 		return
 	}
 
@@ -2702,7 +2722,7 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 	templates, err := coder.GetTemplatesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword)
 	if err != nil {
 		log.Printf("Failed to get templates: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to get templates: %s", err.Error()), http.StatusInternalServerError)
+		http.Error(w, "Failed to fetch templates", http.StatusInternalServerError)
 		return
 	}
 
@@ -2837,7 +2857,7 @@ func (h *Handler) ListLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 	templates, err := coder.GetTemplatesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword)
 	if err != nil {
 		log.Printf("Failed to get templates: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to get templates: %s", err.Error()), http.StatusInternalServerError)
+		http.Error(w, "Failed to fetch templates", http.StatusInternalServerError)
 		return
 	}
 
@@ -3051,7 +3071,7 @@ func (h *Handler) DestroyStack(w http.ResponseWriter, r *http.Request) {
 	// Parse form data
 	if err := r.ParseForm(); err != nil {
 		log.Printf("Failed to parse form: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
+		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
 		return
 	}
 
@@ -3126,7 +3146,7 @@ func (h *Handler) RecreateLab(w http.ResponseWriter, r *http.Request) {
 	// Parse form data
 	if err := r.ParseForm(); err != nil {
 		log.Printf("Failed to parse form: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to parse form: %v", err), http.StatusBadRequest)
+		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
 		return
 	}
 

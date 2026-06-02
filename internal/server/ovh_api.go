@@ -57,7 +57,7 @@ func (h *Handler) GetOVHRegions(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("GetOVHRegions: %v", err)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, `<option value="" disabled selected>Error: %s</option>`, escapeHTML(err.Error()))
+		fmt.Fprint(w, `<option value="" disabled selected>Failed to load regions</option>`)
 		return
 	}
 
@@ -125,7 +125,7 @@ func (h *Handler) GetOVHFlavors(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("GetOVHFlavors: %v", err)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, `<option value="" disabled selected>Error: %s</option>`, escapeHTML(err.Error()))
+		fmt.Fprint(w, `<option value="" disabled selected>Failed to load flavors</option>`)
 		return
 	}
 

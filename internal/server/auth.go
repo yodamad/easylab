@@ -352,7 +352,8 @@ func (ah *AuthHandler) ServeLogin(w http.ResponseWriter, r *http.Request) {
 	// Use cached template (lazy loaded)
 	tmpl, err := ah.getTemplate("login.html")
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to load login template: %v", err), http.StatusInternalServerError)
+		log.Printf("Failed to load login template: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -374,7 +375,8 @@ func (ah *AuthHandler) ServeLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := tmpl.ExecuteTemplate(w, "base", data); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to execute template: %v", err), http.StatusInternalServerError)
+		log.Printf("Failed to execute login template: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}
 }
 
@@ -400,7 +402,7 @@ func (ah *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get password hash from form (client-side SHA-256 hashed)
-	passwordHash := r.FormValue("password_hash")
+	passwordHash := getFormValue(r, "password_hash")
 	if passwordHash == "" {
 		log.Printf("Failed login attempt: empty password hash")
 		http.Redirect(w, r, "/login?error=Invalid+password", http.StatusSeeOther)
@@ -537,7 +539,8 @@ func (ah *AuthHandler) ServeStudentLogin(w http.ResponseWriter, r *http.Request)
 	// Use cached template (lazy loaded)
 	tmpl, err := ah.getTemplate("student-login.html")
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to load student login template: %v", err), http.StatusInternalServerError)
+		log.Printf("Failed to load student login template: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -559,7 +562,8 @@ func (ah *AuthHandler) ServeStudentLogin(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := tmpl.ExecuteTemplate(w, "base", data); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to execute template: %v", err), http.StatusInternalServerError)
+		log.Printf("Failed to execute student login template: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}
 }
 
@@ -590,7 +594,7 @@ func (ah *AuthHandler) HandleStudentLogin(w http.ResponseWriter, r *http.Request
 	}
 
 	// Get password hash from form (client-side SHA-256 hashed)
-	passwordHash := r.FormValue("password_hash")
+	passwordHash := getFormValue(r, "password_hash")
 	if passwordHash == "" {
 		log.Printf("Failed student login attempt: empty password hash")
 		http.Redirect(w, r, "/student/login?error=Invalid+password", http.StatusSeeOther)
@@ -605,7 +609,7 @@ func (ah *AuthHandler) HandleStudentLogin(w http.ResponseWriter, r *http.Request
 	}
 
 	// Get and validate email from form
-	email := r.FormValue("email")
+	email := getFormValue(r, "email")
 	if email == "" || !strings.Contains(email, "@") {
 		http.Redirect(w, r, "/student/login?error=Invalid+email", http.StatusSeeOther)
 		return

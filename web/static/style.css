@@ -4010,3 +4010,11 @@ details.credentials-box > :last-child {
     font-size: 1.4rem;
     flex-shrink: 0;
 }
+
+/* ============================================
+   UTILITY
+   ============================================ */
+
+.label-invisible {
+    visibility: hidden;
+}
