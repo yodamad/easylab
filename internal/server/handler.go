@@ -1116,7 +1116,15 @@ func (h *Handler) GetCoderCredentials(w http.ResponseWriter, r *http.Request) {
 // ServeStudentDashboard serves the student dashboard page
 func (h *Handler) ServeStudentDashboard(w http.ResponseWriter, r *http.Request) {
 	email := studentEmailFromContext(r)
-	h.serveTemplate(w, "student-dashboard.html", map[string]interface{}{"Email": email})
+	initial := "?"
+	if len(email) > 0 {
+		initial = strings.ToUpper(string(email[0]))
+	}
+	h.serveTemplate(w, "student-dashboard.html", map[string]interface{}{
+		"Email":           email,
+		"Initial":         initial,
+		"FeedbackSuccess": r.URL.Query().Get("feedback") == "1",
+	})
 }
 
 // ListLabTemplates returns the list of Coder templates available for a lab

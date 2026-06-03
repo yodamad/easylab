@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -90,10 +91,16 @@ func (fs *FeedbackStore) writeUnsafe(labID string, entries []Feedback) error {
 
 // ServeFeedback serves the student feedback form page
 func (h *Handler) ServeFeedback(w http.ResponseWriter, r *http.Request) {
+	email := studentEmailFromContext(r)
+	initial := "?"
+	if len(email) > 0 {
+		initial = strings.ToUpper(string(email[0]))
+	}
 	data := map[string]interface{}{
 		"Success": r.URL.Query().Get("success") == "1",
 		"Error":   r.URL.Query().Get("error"),
-		"Email":   studentEmailFromContext(r),
+		"Email":   email,
+		"Initial": initial,
 	}
 	h.serveTemplate(w, "student-feedback.html", data)
 }

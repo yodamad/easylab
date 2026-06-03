@@ -2,7 +2,30 @@ document.addEventListener('DOMContentLoaded', function() {
     loadLabs();
     loadAllWorkspaceInfos();
     setupLabTemplateHandlers();
+
+    document.addEventListener('htmx:afterRequest', function(evt) {
+        if (evt.detail.elt && evt.detail.elt.id === 'workspace-request-form' && evt.detail.successful) {
+            advanceStep(3);
+        }
+    });
 });
+
+function advanceStep(stepNum) {
+    for (var i = 1; i <= 3; i++) {
+        var step = document.getElementById('step-' + i);
+        var divider = document.getElementById('step-divider-' + i);
+        if (!step) continue;
+        step.classList.remove('active', 'completed');
+        if (i < stepNum) {
+            step.classList.add('completed');
+            if (divider) divider.classList.add('completed');
+        } else if (i === stepNum) {
+            step.classList.add('active');
+        } else {
+            if (divider) divider.classList.remove('completed');
+        }
+    }
+}
 
 // Cookie utility functions
 function getCookie(name) {
@@ -496,7 +519,7 @@ function setupLabTemplateHandlers() {
     labSelect.addEventListener('change', function() {
         const labId = this.value;
         templateSelect.innerHTML = '<option value="">Loading templates...</option>';
-        templateGroup.style.display = 'none';
+        templateGroup.classList.add('template-group-hidden');
         templateSelect.removeAttribute('required');
 
         if (!labId) {
@@ -535,8 +558,9 @@ function setupLabTemplateHandlers() {
                     });
                 }
 
-                templateGroup.style.display = 'block';
+                templateGroup.classList.remove('template-group-hidden');
                 templateSelect.setAttribute('required', 'required');
+                advanceStep(2);
             })
             .catch(error => {
                 console.error('Error loading templates:', error);
@@ -550,6 +574,7 @@ function loadLabs() {
         .then(response => response.json())
         .then(data => {
             const select = document.getElementById('lab_id');
+            select.classList.remove('loading');
 
             if (data.length === 0) {
                 select.innerHTML = '<option value="">No labs available</option>';
@@ -568,6 +593,7 @@ function loadLabs() {
             console.error('Error loading labs:', error);
             const select = document.getElementById('lab_id');
             if (select) {
+                select.classList.remove('loading');
                 select.innerHTML = '<option value="">Error loading labs</option>';
             }
         });

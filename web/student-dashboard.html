@@ -10,23 +10,58 @@
     <div class="student-dashboard-container" data-current-email="{{.Email}}">
         <header class="student-dashboard-header">
             <div class="header-content">
-                <div class="header-title">
+                <div class="header-brand">
                     <img src="/static/logo.png" alt="EasyLab Logo" class="header-logo">
-                    <div class="student-dashboard-header-title">
-                        <h1>🎓 Student Portal</h1>
-                        <p class="subtitle">Request your workspace</p>
-                    </div>
+                    <span class="header-app-name">Student Portal</span>
                 </div>
-                <a href="/student/feedback" class="student-btn" title="Submit feedback">
-                    <span>💬</span>
-                    <span>Feedback</span>
-                </a>
-                <a href="/student/logout" class="student-logout-btn" title="Logout">
-                    <span>🚪</span>
-                    <span>Logout</span>
-                </a>
+                <div class="header-user-actions">
+                    <div class="student-user-chip">
+                        <span class="student-avatar">{{.Initial}}</span>
+                        <span class="student-user-email">{{.Email}}</span>
+                    </div>
+                    <a href="/student/feedback" class="student-header-btn" title="Share your feedback">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="student-header-icon" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" />
+                        </svg>
+                        <span>Feedback</span>
+                    </a>
+                    <a href="/student/logout" class="student-header-icon-btn" aria-label="Sign out" title="Sign out">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="student-header-icon" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 9V5.25A2.25 2.25 0 0 1 10.5 3h6a2.25 2.25 0 0 1 2.25 2.25v13.5A2.25 2.25 0 0 1 16.5 21h-6a2.25 2.25 0 0 1-2.25-2.25V15m-3 0-3-3m0 0 3-3m-3 3H15" />
+                        </svg>
+                    </a>
+                </div>
             </div>
         </header>
+
+        {{if .FeedbackSuccess}}
+        <div class="toast toast-success toast--inline" id="feedback-success-toast">
+            <span class="toast-icon">✅</span><span>Thank you! Your feedback has been saved.</span>
+        </div>
+        <script>
+            setTimeout(function() {
+                var t = document.getElementById('feedback-success-toast');
+                if (t) t.remove();
+            }, 5000);
+        </script>
+        {{end}}
+
+        <div class="workspace-steps" id="workspace-steps">
+            <div class="workspace-step active" id="step-1">
+                <span class="step-num">1</span>
+                <span class="step-label">Select Lab</span>
+            </div>
+            <div class="workspace-step-divider" id="step-divider-1"></div>
+            <div class="workspace-step" id="step-2">
+                <span class="step-num">2</span>
+                <span class="step-label">Request Workspace</span>
+            </div>
+            <div class="workspace-step-divider" id="step-divider-2"></div>
+            <div class="workspace-step" id="step-3">
+                <span class="step-num">3</span>
+                <span class="step-label">Access Environment</span>
+            </div>
+        </div>
 
         <main>
             <!-- Saved Workspaces List -->
@@ -53,21 +88,17 @@
             <div class="student-card">
                 <h2>Request Workspace</h2>
                 <form id="workspace-request-form" method="POST" action="/api/student/workspace/request" enctype="application/x-www-form-urlencoded" hx-post="/api/student/workspace/request" hx-target="#workspace-response" hx-swap="innerHTML">
-                    <div class="student-form-group">
-                        <label>Email Address</label>
-                        <p class="form-value-display">{{.Email}}</p>
-                        <input type="hidden" name="email" value="{{.Email}}">
-                    </div>
+                    <input type="hidden" name="email" value="{{.Email}}">
 
                     <div class="student-form-group">
                         <label for="lab_id">Select Environment *</label>
-                        <select id="lab_id" name="lab_id" required>
-                            <option value="">Loading labs...</option>
+                        <select id="lab_id" name="lab_id" required class="loading">
+                            <option value="">Loading environments...</option>
                         </select>
                         <small>Choose the lab environment for your workspace</small>
                     </div>
 
-                    <div class="student-form-group" id="template-select-group" style="display: none;">
+                    <div class="student-form-group template-group-hidden" id="template-select-group">
                         <label for="template_id">Select Template *</label>
                         <select id="template_id" name="template_id" required>
                             <option value="">Select a lab first...</option>

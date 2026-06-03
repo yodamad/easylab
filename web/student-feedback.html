@@ -10,18 +10,25 @@
     <div class="student-dashboard-container">
         <header class="student-dashboard-header">
             <div class="header-content">
-                <div class="header-title">
+                <div class="header-brand">
                     <img src="/static/logo.png" alt="EasyLab Logo" class="header-logo">
-                    <div class="student-dashboard-header-title">
-                        <h1>🎓 Student Portal</h1>
-                        <p class="subtitle">Share your feedback</p>
-                    </div>
+                    <span class="header-app-name">Student Portal</span>
                 </div>
-                <div class="header-actions">
-                    <a href="/student/dashboard" class="student-btn">← Dashboard</a>
-                    <a href="/student/logout" class="student-logout-btn" title="Logout">
-                        <span>🚪</span>
-                        <span>Logout</span>
+                <div class="header-user-actions">
+                    <div class="student-user-chip">
+                        <span class="student-avatar">{{.Initial}}</span>
+                        <span class="student-user-email">{{.Email}}</span>
+                    </div>
+                    <a href="/student/dashboard" class="student-header-btn" title="Back to dashboard">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="student-header-icon" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
+                        </svg>
+                        <span>Dashboard</span>
+                    </a>
+                    <a href="/student/logout" class="student-header-icon-btn" aria-label="Sign out" title="Sign out">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="student-header-icon" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 9V5.25A2.25 2.25 0 0 1 10.5 3h6a2.25 2.25 0 0 1 2.25 2.25v13.5A2.25 2.25 0 0 1 16.5 21h-6a2.25 2.25 0 0 1-2.25-2.25V15m-3 0-3-3m0 0 3-3m-3 3H15" />
+                        </svg>
                     </a>
                 </div>
             </div>
@@ -49,7 +56,7 @@
                       hx-target="#toast-container"
                       hx-swap="innerHTML"
                       hx-indicator="#submit-indicator"
-                      hx-on:htmx:after-request="if(event.detail.successful) this.reset()">
+                      hx-on:htmx:after-request="if(event.detail.successful) setTimeout(function(){ window.location='/student/dashboard?feedback=1'; }, 600);">
 
                     <div class="student-form-group">
                         <label for="lab_id">Select Lab *</label>
@@ -61,19 +68,21 @@
 
                     <div class="student-form-group">
                         <label>Overall Rating *</label>
-                        <div class="star-rating">
-                            <input type="radio" id="star5" name="rating" value="5" required>
-                            <label for="star5" title="5 - Excellent">★</label>
-                            <input type="radio" id="star4" name="rating" value="4">
-                            <label for="star4" title="4 - Good">★</label>
-                            <input type="radio" id="star3" name="rating" value="3">
-                            <label for="star3" title="3 - Average">★</label>
-                            <input type="radio" id="star2" name="rating" value="2">
-                            <label for="star2" title="2 - Poor">★</label>
-                            <input type="radio" id="star1" name="rating" value="1">
-                            <label for="star1" title="1 - Very Poor">★</label>
+                        <div class="star-rating-wrapper">
+                            <div class="star-rating">
+                                <input type="radio" id="star5" name="rating" value="5" required>
+                                <label for="star5" title="5 - Excellent">★</label>
+                                <input type="radio" id="star4" name="rating" value="4">
+                                <label for="star4" title="4 - Good">★</label>
+                                <input type="radio" id="star3" name="rating" value="3">
+                                <label for="star3" title="3 - Average">★</label>
+                                <input type="radio" id="star2" name="rating" value="2">
+                                <label for="star2" title="2 - Poor">★</label>
+                                <input type="radio" id="star1" name="rating" value="1">
+                                <label for="star1" title="1 - Very Poor">★</label>
+                            </div>
+                            <div class="star-rating-label" id="star-label">Click to rate</div>
                         </div>
-                        <small>1 = Very Poor, 5 = Excellent</small>
                     </div>
 
                     <div class="student-form-group">
@@ -140,6 +149,25 @@
 
     <script>
     (function () {
+        // Star rating label
+        const starLabels = { '5': 'Excellent', '4': 'Good', '3': 'Average', '2': 'Poor', '1': 'Very Poor' };
+        const starLabelEl = document.getElementById('star-label');
+        document.querySelectorAll('.star-rating input[name="rating"]').forEach(function(input) {
+            input.addEventListener('change', function() {
+                if (starLabelEl) starLabelEl.textContent = starLabels[this.value] || 'Click to rate';
+            });
+        });
+        document.querySelectorAll('.star-rating label').forEach(function(label) {
+            label.addEventListener('mouseenter', function() {
+                const val = this.getAttribute('for').replace('star', '');
+                if (starLabelEl) starLabelEl.textContent = starLabels[val] || '';
+            });
+            label.addEventListener('mouseleave', function() {
+                const checked = document.querySelector('.star-rating input[name="rating"]:checked');
+                if (starLabelEl) starLabelEl.textContent = checked ? (starLabels[checked.value] || '') : 'Click to rate';
+            });
+        });
+
         // Character counter for comment textarea
         const textarea = document.getElementById('comment');
         const counter = document.getElementById('char-count');
