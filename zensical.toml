@@ -24,11 +24,14 @@ nav = [
     "index.md",
     { "Spaces" = [
         "admin.md",
-        "student.md"
+        "student.md",
+        "feedbacks.md",
+        "stats.md"
     ]},
     { "Configuration" = [
         "ovhcloud.md",
-        "azure.md"
+        "azure.md",
+        "azure-ad.md"
     ]},
     { "Deployment" = [
         "docker.md",
