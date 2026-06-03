@@ -337,6 +337,22 @@ func (jm *JobManager) SetCoderConfig(id string, coderURL, coderAdminEmail, coder
 	return nil
 }
 
+// coderCredentials returns the effective Coder admin email and password.
+// Falls back to Config fields for jobs where the top-level fields are empty
+// (e.g. jobs loaded from disk that predate the SetCoderConfig call).
+// Must be called with j.mu at least read-locked.
+func (j *Job) coderCredentials() (email, password string) {
+	email = extractStringFromConfigValue(j.CoderAdminEmail)
+	password = extractStringFromConfigValue(j.CoderAdminPassword)
+	if email == "" && j.Config != nil {
+		email = j.Config.CoderAdminEmail
+	}
+	if password == "" && j.Config != nil {
+		password = j.Config.CoderAdminPassword
+	}
+	return
+}
+
 // RecordCleanupEvent appends an auto-cleanup event to a job.
 func (jm *JobManager) RecordCleanupEvent(id string, count int) error {
 	jm.mu.RLock()

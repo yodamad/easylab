@@ -83,7 +83,8 @@ func (h *Handler) cleanupExpiredWorkspaces() {
 			SessionToken:   job.CoderSessionToken,
 			OrganizationID: job.CoderOrganizationID,
 		}
-		workspaces, _, err := coder.ListWorkspacesWithRetry(coderConfig, job.CoderAdminEmail, job.CoderAdminPassword, uuid.Nil, "")
+		adminEmail, adminPassword := job.coderCredentials()
+		workspaces, _, err := coder.ListWorkspacesWithRetry(coderConfig, adminEmail, adminPassword, uuid.Nil, "")
 		if err != nil {
 			log.Printf("[cleanup] failed to list workspaces for job %s: %v", job.ID, err)
 			continue
@@ -97,7 +98,7 @@ func (h *Handler) cleanupExpiredWorkspaces() {
 		for _, ws := range workspaces {
 			if time.Since(ws.CreatedAt) > lifetime {
 				log.Printf("[cleanup] deleting workspace %s (%s) in job %s: exceeded %dh lifetime", ws.Name, ws.ID, job.ID, job.Config.WorkspaceLifetimeHours)
-				if _, err := coder.DeleteWorkspaceWithRetry(coderConfig, job.CoderAdminEmail, job.CoderAdminPassword, ws.ID); err != nil {
+				if _, err := coder.DeleteWorkspaceWithRetry(coderConfig, adminEmail, adminPassword, ws.ID); err != nil {
 					log.Printf("[cleanup] failed to delete workspace %s: %v", ws.ID, err)
 				} else {
 					deleted++

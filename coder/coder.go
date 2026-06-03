@@ -904,7 +904,7 @@ func RefreshToken(config CoderClientConfig, adminEmail, adminPassword string) (C
 		Password: adminPassword,
 	})
 	if err != nil {
-		return CoderClientConfig{}, fmt.Errorf("failed to refresh token: %w", err)
+		return CoderClientConfig{}, fmt.Errorf("login with admin credentials failed: %w", err)
 	}
 
 	// Return updated config with new token

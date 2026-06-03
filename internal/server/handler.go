@@ -1080,8 +1080,7 @@ func (h *Handler) GetCoderCredentials(w http.ResponseWriter, r *http.Request) {
 	job.mu.RLock()
 	status := job.Status
 	coderURL := job.CoderURL
-	coderAdminEmail := job.CoderAdminEmail
-	coderAdminPassword := job.CoderAdminPassword
+	coderAdminEmail, coderAdminPassword := job.coderCredentials()
 	coderDomain := ""
 	if job.Config != nil {
 		coderDomain = job.Config.CoderDomain
@@ -1094,8 +1093,6 @@ func (h *Handler) GetCoderCredentials(w http.ResponseWriter, r *http.Request) {
 	}
 
 	coderURL = extractStringFromConfigValue(coderURL)
-	coderAdminEmail = extractStringFromConfigValue(coderAdminEmail)
-	coderAdminPassword = extractStringFromConfigValue(coderAdminPassword)
 
 	// When DNS is configured, always serve the HTTPS domain URL regardless of what
 	// was persisted in CoderURL (handles old jobs stored with the raw IP address).
@@ -1145,8 +1142,7 @@ func (h *Handler) ListLabTemplates(w http.ResponseWriter, r *http.Request) {
 	coderURL := job.CoderURL
 	coderSessionToken := job.CoderSessionToken
 	coderOrganizationID := job.CoderOrganizationID
-	coderAdminEmail := job.CoderAdminEmail
-	coderAdminPassword := job.CoderAdminPassword
+	coderAdminEmail, coderAdminPassword := job.coderCredentials()
 	job.mu.RUnlock()
 
 	if status != JobStatusCompleted {
@@ -1157,8 +1153,6 @@ func (h *Handler) ListLabTemplates(w http.ResponseWriter, r *http.Request) {
 	coderURL = extractStringFromConfigValue(coderURL)
 	coderSessionToken = extractStringFromConfigValue(coderSessionToken)
 	coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
-	coderAdminEmail = extractStringFromConfigValue(coderAdminEmail)
-	coderAdminPassword = extractStringFromConfigValue(coderAdminPassword)
 
 	if coderURL == "" || coderSessionToken == "" || coderOrganizationID == "" || coderAdminEmail == "" || coderAdminPassword == "" {
 		http.Error(w, "Coder configuration not available for this lab", http.StatusInternalServerError)
@@ -1216,8 +1210,7 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 	coderURL := job.CoderURL
 	coderSessionToken := job.CoderSessionToken
 	coderOrganizationID := job.CoderOrganizationID
-	coderAdminEmail := job.CoderAdminEmail
-	coderAdminPassword := job.CoderAdminPassword
+	coderAdminEmail, coderAdminPassword := job.coderCredentials()
 	job.mu.RUnlock()
 
 	if status != JobStatusCompleted {
@@ -1228,8 +1221,6 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 	coderURL = extractStringFromConfigValue(coderURL)
 	coderSessionToken = extractStringFromConfigValue(coderSessionToken)
 	coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
-	coderAdminEmail = extractStringFromConfigValue(coderAdminEmail)
-	coderAdminPassword = extractStringFromConfigValue(coderAdminPassword)
 
 	if coderURL == "" || coderSessionToken == "" || coderOrganizationID == "" || coderAdminEmail == "" || coderAdminPassword == "" {
 		http.Error(w, "Coder configuration not available for this lab", http.StatusInternalServerError)
@@ -1367,8 +1358,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	coderURL := job.CoderURL
 	coderSessionToken := job.CoderSessionToken
 	coderOrganizationID := job.CoderOrganizationID
-	coderAdminEmail := job.CoderAdminEmail
-	coderAdminPassword := job.CoderAdminPassword
+	coderAdminEmail, coderAdminPassword := job.coderCredentials()
 	stackName := job.Config.StackName
 	coderDomain := ""
 	if job.Config != nil {
@@ -1385,8 +1375,6 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	coderURL = extractStringFromConfigValue(coderURL)
 	coderSessionToken = extractStringFromConfigValue(coderSessionToken)
 	coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
-	coderAdminEmail = extractStringFromConfigValue(coderAdminEmail)
-	coderAdminPassword = extractStringFromConfigValue(coderAdminPassword)
 
 	if coderDomain != "" {
 		coderURL = "https://" + coderDomain
@@ -2677,8 +2665,7 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 	coderURL := job.CoderURL
 	coderSessionToken := job.CoderSessionToken
 	coderOrganizationID := job.CoderOrganizationID
-	coderAdminEmail := job.CoderAdminEmail
-	coderAdminPassword := job.CoderAdminPassword
+	coderAdminEmail, coderAdminPassword := job.coderCredentials()
 	templateName := ""
 	if job.Config != nil {
 		templates := job.Config.GetCoderTemplates()
@@ -2704,8 +2691,6 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 	coderURL = extractStringFromConfigValue(coderURL)
 	coderSessionToken = extractStringFromConfigValue(coderSessionToken)
 	coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
-	coderAdminEmail = extractStringFromConfigValue(coderAdminEmail)
-	coderAdminPassword = extractStringFromConfigValue(coderAdminPassword)
 
 	if coderURL == "" || coderSessionToken == "" || coderOrganizationID == "" {
 		http.Error(w, "Lab Coder configuration not available", http.StatusInternalServerError)
@@ -2816,8 +2801,7 @@ func (h *Handler) ListLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 	coderURL := job.CoderURL
 	coderSessionToken := job.CoderSessionToken
 	coderOrganizationID := job.CoderOrganizationID
-	coderAdminEmail := job.CoderAdminEmail
-	coderAdminPassword := job.CoderAdminPassword
+	coderAdminEmail, coderAdminPassword := job.coderCredentials()
 	templateName := ""
 	if job.Config != nil {
 		templates := job.Config.GetCoderTemplates()
@@ -2839,8 +2823,6 @@ func (h *Handler) ListLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 	coderURL = extractStringFromConfigValue(coderURL)
 	coderSessionToken = extractStringFromConfigValue(coderSessionToken)
 	coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
-	coderAdminEmail = extractStringFromConfigValue(coderAdminEmail)
-	coderAdminPassword = extractStringFromConfigValue(coderAdminPassword)
 
 	if coderURL == "" || coderSessionToken == "" || coderOrganizationID == "" {
 		http.Error(w, "Lab Coder configuration not available", http.StatusInternalServerError)
@@ -2939,16 +2921,13 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		coderURL := job.CoderURL
 		coderSessionToken := job.CoderSessionToken
 		coderOrganizationID := job.CoderOrganizationID
-		coderAdminEmail := job.CoderAdminEmail
-		coderAdminPassword := job.CoderAdminPassword
+		coderAdminEmail, coderAdminPassword := job.coderCredentials()
 		job.mu.RUnlock()
 
 		// Clean up any malformed ConfigValue JSON strings
 		coderURL = extractStringFromConfigValue(coderURL)
 		coderSessionToken = extractStringFromConfigValue(coderSessionToken)
 		coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
-		coderAdminEmail = extractStringFromConfigValue(coderAdminEmail)
-		coderAdminPassword = extractStringFromConfigValue(coderAdminPassword)
 
 		coderConfig := coder.CoderClientConfig{
 			ServerURL:      coderURL,
@@ -3030,16 +3009,13 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	coderURL := job.CoderURL
 	coderSessionToken := job.CoderSessionToken
 	coderOrganizationID := job.CoderOrganizationID
-	coderAdminEmail := job.CoderAdminEmail
-	coderAdminPassword := job.CoderAdminPassword
+	coderAdminEmail, coderAdminPassword := job.coderCredentials()
 	job.mu.RUnlock()
 
 	// Clean up any malformed ConfigValue JSON strings
 	coderURL = extractStringFromConfigValue(coderURL)
 	coderSessionToken = extractStringFromConfigValue(coderSessionToken)
 	coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
-	coderAdminEmail = extractStringFromConfigValue(coderAdminEmail)
-	coderAdminPassword = extractStringFromConfigValue(coderAdminPassword)
 
 	coderConfig := coder.CoderClientConfig{
 		ServerURL:      coderURL,
