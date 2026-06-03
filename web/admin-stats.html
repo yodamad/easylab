@@ -1,42 +1,18 @@
 {{define "title"}}Stats{{end}}
-{{define "body-class"}}{{end}}
+{{define "body-class"}}admin-page{{end}}
 {{define "head-extra"}}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 {{end}}
 
 {{define "body"}}
-<div class="container stats-page-container">
-    <header>
-        <div class="header-content">
-            <div class="header-title">
-                <img src="/static/logo.png" alt="EasyLab Logo" class="header-logo">
-                <div>
-                    <h1>EasyLab</h1>
-                    <p class="subtitle">Lab Stats</p>
-                </div>
-            </div>
-            <div class="header-actions">
-                <a href="/labs" class="header-btn" title="Labs History">
-                    <span class="btn-icon">📋</span>
-                    <span class="btn-text">Labs</span>
-                </a>
-                <a href="/admin" class="header-btn" title="Create Lab">
-                    <span class="btn-icon">➕</span>
-                    <span class="btn-text">New Lab</span>
-                </a>
-                <a href="/admin/feedback" class="header-btn" title="Feedbacks">
-                    <span class="btn-icon">💬</span>
-                    <span class="btn-text">Feedbacks</span>
-                </a>
-                <a href="/logout" class="logout-btn" title="Logout">
-                    <span class="logout-icon">🚪</span>
-                    <span class="logout-text">Logout</span>
-                </a>
-            </div>
+<div class="admin-layout">
+    {{template "admin-sidebar" .}}
+    <div class="admin-main">
+        <div class="admin-page-header">
+            <h1>Lab Stats</h1>
         </div>
-    </header>
-
-    <main>
+        <div class="admin-page-body">
+        <div class="admin-content-narrow">
         <form class="project-selector-form" method="GET" action="/admin/stats">
             <div>
                 <label for="project_input">Select a Project</label>
@@ -110,7 +86,9 @@
             </table>
         </div>
         {{end}}
-    </main>
+        </div>
+        </div>
+    </div>
 </div>
 
 <script>

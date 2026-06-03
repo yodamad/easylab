@@ -1,49 +1,20 @@
 {{define "title"}}OVH Configuration{{end}}
-{{define "body-class"}}{{end}}
+{{define "body-class"}}admin-page{{end}}
 {{define "head-extra"}}
 <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.0/dist/htmx.min.js" integrity="sha384-LAnQFtNXh8s0hn9mOc8bezfn16i4Zo4y3i4dMT8PtV9yip8jGehR3RxCJrmHV11d" crossorigin="anonymous"></script>
 {{end}}
 
 {{define "body"}}
-    <div class="container">
-        <header>
-            <div class="header-content">
-                <div class="header-title">
-                    <img src="/static/logo.png" alt="EasyLab Logo" class="header-logo">
-                    <div>
-                        <h1>OVH Configuration</h1>
-                        <p class="subtitle">Manage credentials and options for OVHcloud</p>
-                    </div>
-                </div>
-                <div class="header-actions">
-                    <a href="/admin" class="header-btn" title="Create Lab">
-                        <span class="btn-icon">➕</span>
-                        <span class="btn-text">New Lab</span>
-                    </a>
-                    <a href="/labs" class="header-btn" title="Labs History">
-                        <span class="btn-icon">📋</span>
-                        <span class="btn-text">Labs</span>
-                    </a>
-                    <div class="header-dropdown">
-                        <button type="button" class="header-dropdown-toggle" title="Provider Configuration">
-                            <span class="btn-icon">☁️</span>
-                            <span class="btn-text">Provider</span>
-                            <span class="dropdown-arrow">▾</span>
-                        </button>
-                        <div class="header-dropdown-menu">
-                            <a href="/admin/ovh-options" class="header-dropdown-item active">OVH</a>
-                            <a href="/admin/azure-options" class="header-dropdown-item">Azure</a>
-                        </div>
-                    </div>
-                    <a href="/logout" class="logout-btn" title="Logout">
-                        <span class="logout-icon">🚪</span>
-                        <span class="logout-text">Logout</span>
-                    </a>
-                </div>
-            </div>
-        </header>
+<div class="admin-layout">
+    {{template "admin-sidebar" .}}
+    <div class="admin-main">
+        <div class="admin-page-header">
+            <h1>OVH Configuration</h1>
+        </div>
+        <div class="admin-page-body">
+        <div class="admin-content-narrow">
 
-        <main>
+        <div>
             <div class="provider-tabs">
                 <button class="provider-tab active" data-tab="credentials" onclick="switchProviderTab('credentials')">
                     🔐 Credentials
@@ -299,8 +270,11 @@
                 </form>
                 {{end}}
             </div>
-        </main>
+        </div>
+        </div>
+        </div>
     </div>
+</div>
 
     <script src="/static/header-provider.js"></script>
     <script src="/static/credentials.js"></script>

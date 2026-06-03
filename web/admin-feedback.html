@@ -1,36 +1,16 @@
 {{define "title"}}Feedback - {{if .LabID}}Lab {{.LabID}}{{else}}Select a Lab{{end}}{{end}}
-{{define "body-class"}}{{end}}
+{{define "body-class"}}admin-page{{end}}
 {{define "head-extra"}}{{end}}
 
 {{define "body"}}
-    <div class="container feedback-page-container">
-        <header>
-            <div class="header-content">
-                <div class="header-title">
-                    <img src="/static/logo.png" alt="EasyLab Logo" class="header-logo">
-                    <div>
-                        <h1>EasyLab</h1>
-                        <p class="subtitle">Student Feedback</p>
-                    </div>
-                </div>
-                <div class="header-actions">
-                    <a href="/labs" class="header-btn" title="Labs History">
-                        <span class="btn-icon">📋</span>
-                        <span class="btn-text">Labs</span>
-                    </a>
-                    <a href="/admin" class="header-btn" title="Create Lab">
-                        <span class="btn-icon">➕</span>
-                        <span class="btn-text">New Lab</span>
-                    </a>
-                    <a href="/logout" class="logout-btn" title="Logout">
-                        <span class="logout-icon">🚪</span>
-                        <span class="logout-text">Logout</span>
-                    </a>
-                </div>
-            </div>
-        </header>
-
-        <main>
+<div class="admin-layout">
+    {{template "admin-sidebar" .}}
+    <div class="admin-main">
+        <div class="admin-page-header">
+            <h1>Student Feedback</h1>
+        </div>
+        <div class="admin-page-body">
+        <div class="admin-content-narrow">
             <!-- Lab selector (server-side rendered) -->
             <form class="lab-selector-form" method="GET" action="/admin/feedback">
                 <div>
@@ -97,7 +77,9 @@
                     <p>Select a lab above to view its feedback.</p>
                 </div>
             {{end}}
-        </main>
+        </div>
+        </div>
     </div>
+</div>
 
 {{end}}

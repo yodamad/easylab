@@ -1,34 +1,23 @@
 {{define "title"}}Lab Workspaces{{end}}
-{{define "body-class"}}{{end}}
+{{define "body-class"}}admin-page{{end}}
 {{define "head-extra"}}
 <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.0/dist/htmx.min.js" integrity="sha384-LAnQFtNXh8s0hn9mOc8bezfn16i4Zo4y3i4dMT8PtV9yip8jGehR3RxCJrmHV11d" crossorigin="anonymous"></script>
 {{end}}
 
 {{define "body"}}
-    <div class="container workspaces-page-container">
-        <header>
-            <div class="header-content">
-                <div class="header-title">
-                    <img src="/static/logo.png" alt="EasyLab Logo" class="header-logo">
-                    <div>
-                        <h1>EasyLab</h1>
-                        <p class="subtitle">Workspaces for Lab: {{.LabID}}{{if .StackName}} ({{.StackName}}){{end}}</p>
-                    </div>
-                </div>
-                <div class="header-actions">
-                    <a href="/labs" class="header-btn" title="Back to Labs">
-                        <span class="btn-icon">←</span>
-                        <span class="btn-text">Back to Labs</span>
-                    </a>
-                    <a href="/logout" class="logout-btn" title="Logout">
-                        <span class="logout-icon">🚪</span>
-                        <span class="logout-text">Logout</span>
-                    </a>
-                </div>
+<div class="admin-layout">
+    {{template "admin-sidebar" .}}
+    <div class="admin-main">
+        <div class="admin-page-header">
+            <h1>Workspaces{{if .StackName}} — {{.StackName}}{{end}}</h1>
+            <div class="admin-page-header-actions">
+                <a href="/labs" class="btn btn-secondary btn-sm">← Back to Labs</a>
             </div>
-        </header>
+        </div>
+        <div class="admin-page-body">
+        <div class="workspaces-page-container">
 
-        <main>
+        <div>
             {{if .Workspaces}}
             <div class="stats-bar">
                 <div class="stats-item">
@@ -119,8 +108,11 @@
             {{end}}
 
             <div id="message-container" class="message-container"></div>
-        </main>
+        </div>
+        </div>
+        </div>
     </div>
+</div>
 
     <script src="/static/lab-workspaces.js"></script>
     <script>

@@ -17,3 +17,57 @@
 </body>
 </html>
 {{end}}
+
+{{define "admin-sidebar"}}
+<aside class="admin-sidebar">
+    <a href="/labs" class="admin-sidebar-brand">
+        <img src="/static/logo.png" alt="EasyLab" class="admin-sidebar-logo">
+        <span class="admin-sidebar-name">EasyLab</span>
+    </a>
+    <nav class="admin-sidebar-nav">
+        <a href="/labs" class="admin-nav-item" data-matchprefix="/labs">
+            <span class="admin-nav-icon">🧪</span>
+            <span class="admin-nav-label">Labs</span>
+        </a>
+        <div class="admin-nav-divider"></div>
+        <a href="/admin/stats" class="admin-nav-item" data-matchexact="/admin/stats">
+            <span class="admin-nav-icon">📊</span>
+            <span class="admin-nav-label">Stats</span>
+        </a>
+        <a href="/admin/feedback" class="admin-nav-item" data-matchexact="/admin/feedback">
+            <span class="admin-nav-icon">💬</span>
+            <span class="admin-nav-label">Feedback</span>
+        </a>
+        <div class="admin-nav-divider"></div>
+        <a href="/credentials" class="admin-nav-item" data-matchprefix="/credentials,/admin/ovh-options,/admin/azure-options">
+            <span class="admin-nav-icon">☁️</span>
+            <span class="admin-nav-label">Provider</span>
+        </a>
+    </nav>
+    <div class="admin-sidebar-footer">
+        <a href="/logout" class="admin-nav-item">
+            <span class="admin-nav-icon">🚪</span>
+            <span class="admin-nav-label">Logout</span>
+        </a>
+    </div>
+</aside>
+<script>
+(function() {
+    var path = window.location.pathname;
+    document.querySelectorAll('.admin-nav-item').forEach(function(el) {
+        var exact = el.dataset.matchexact;
+        var prefix = el.dataset.matchprefix;
+        if (exact && path === exact) { el.classList.add('active'); return; }
+        if (prefix) {
+            var parts = prefix.split(',');
+            for (var i = 0; i < parts.length; i++) {
+                if (path === parts[i] || path.startsWith(parts[i] + '/')) {
+                    el.classList.add('active');
+                    return;
+                }
+            }
+        }
+    });
+})();
+</script>
+{{end}}
