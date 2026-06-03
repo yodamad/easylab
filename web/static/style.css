@@ -1550,96 +1550,149 @@ body.home-page {
 }
 
 /* ============================================
-   LOGIN PAGE STYLES
+   LOGIN PAGE STYLES — Mission Control
    ============================================ */
 
 body.login-page {
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    background: #080d14;
+    overflow: hidden;
+    --login-accent: #f59e0b;
+    --login-glow: rgba(245, 158, 11, 0.18);
+}
+
+body.student-login-page {
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    background: #080d14;
+    overflow: auto;
+    --login-accent: #00dcc8;
+    --login-glow: rgba(0, 220, 200, 0.18);
+}
+
+.login-scene {
+    position: relative;
+    z-index: 1;
+    min-height: 100vh;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    min-height: 100vh;
-    padding: 1rem;
-    background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%);
+    padding: 2rem 1.5rem;
+    gap: 2rem;
+    animation: home-scene-in 0.8s ease both;
 }
 
 .login-container {
-    max-width: 400px;
     width: 100%;
-    background: var(--background);
-    border-radius: var(--radius);
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-    overflow: hidden;
+    max-width: 420px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 14px;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 0 50px -10px var(--login-glow), 0 20px 60px -15px rgba(0, 0, 0, 0.5);
+    overflow: visible;
+    animation: home-fade-up 0.7s 0.25s ease both;
 }
 
-.login-header {
-    background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
-    color: white;
-    padding: 2rem;
-    text-align: center;
-}
-
-.login-header h1 {
-    font-size: 1.75rem;
+.login-context-label {
+    font-family: 'Syne', sans-serif;
+    font-size: 1.1rem;
     font-weight: 700;
-    margin-bottom: 0.5rem;
+    color: var(--login-accent);
+    padding: 1.5rem 1.75rem 0;
+    letter-spacing: -0.01em;
 }
 
-.login-logo {
-    height: 3rem;
-    width: auto;
-    margin-bottom: 1rem;
-    object-fit: contain;
+.login-context-sub {
+    font-size: 0.8rem;
+    color: #4a7a90;
+    padding: 0.3rem 1.75rem 0;
+    line-height: 1.5;
+}
+
+.login-context {
+    margin-bottom: 0.25rem;
 }
 
 .login-form {
-    padding: 2rem;
+    padding: 1.25rem 1.75rem 1.75rem;
 }
 
 .login-form .form-group {
-    margin-bottom: 1.5rem;
+    margin-bottom: 1.25rem;
 }
 
 .login-form label {
     display: block;
+    font-size: 0.8rem;
     font-weight: 500;
-    margin-bottom: 0.5rem;
-    color: var(--text);
+    margin-bottom: 0.4rem;
+    color: #7a9ab0;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
 }
 
-.login-form input[type="password"] {
+.login-form input[type="password"],
+.login-form input[type="email"] {
     width: 100%;
-    padding: 0.875rem;
-    border: 2px solid var(--border);
-    border-radius: var(--radius);
-    font-size: 1rem;
-    transition: all 0.2s;
+    padding: 0.8rem 1rem;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    font-size: 0.9375rem;
+    font-family: inherit;
+    color: #ddeaf0;
+    transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-.login-form input[type="password"]:focus {
+.login-form input[type="password"]::placeholder,
+.login-form input[type="email"]::placeholder {
+    color: #2e4a58;
+}
+
+.login-form input[type="password"]:focus,
+.login-form input[type="email"]:focus {
     outline: none;
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    border-color: var(--login-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--login-accent) 15%, transparent);
 }
 
 .login-form .btn {
     width: 100%;
-    padding: 1rem;
-    font-size: 1rem;
+    padding: 0.875rem;
+    font-size: 0.9375rem;
     font-weight: 600;
+    background: var(--login-accent);
+    color: #080d14;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.15s;
+}
+
+.login-form .btn:hover {
+    opacity: 0.88;
+    transform: translateY(-1px);
 }
 
 .login-form .btn:disabled {
-    opacity: 0.7;
+    opacity: 0.5;
     cursor: not-allowed;
+    transform: none;
 }
 
 .error-alert {
-    background: #fee2e2;
-    border: 1px solid #fecaca;
-    color: #991b1b;
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #fca5a5;
     padding: 0.75rem 1rem;
-    border-radius: var(--radius);
-    margin-bottom: 1.5rem;
+    border-radius: 8px;
+    margin-bottom: 1.25rem;
     font-size: 0.875rem;
     display: flex;
     align-items: center;
@@ -1652,86 +1705,53 @@ body.login-page {
 
 .login-footer {
     text-align: center;
-    padding: 1rem 2rem 2rem;
-    color: var(--text-light);
-    font-size: 0.875rem;
+    padding: 0.75rem 1.75rem 1.5rem;
+    color: #2e4a58;
+    font-size: 0.8rem;
 }
 
 .secure-badge {
     display: inline-flex;
     align-items: center;
     gap: 0.25rem;
-    font-size: 0.75rem;
-    color: var(--success);
-    margin-top: 0.5rem;
+    font-size: 0.72rem;
+    color: #2a6a5a;
+    margin-top: 0.4rem;
 }
 
-/* ============================================
-   STUDENT LOGIN PAGE STYLES
-   ============================================ */
-
-body.student-login-page {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 100vh;
-    padding: 1rem;
-    background: linear-gradient(160deg, #f0fdf4 0%, #dcfce7 40%, #ecfdf5 100%);
-}
-
-.student-login-header {
-    background: linear-gradient(135deg, var(--student-color) 0%, var(--student-hover) 100%);
-    color: white;
-    padding: 2rem;
-    text-align: center;
-}
-
-.student-login-header h1 {
-    font-size: 1.75rem;
-    font-weight: 700;
-    margin-bottom: 0.5rem;
-}
-
-.student-login-form input[type="password"]:focus {
-    outline: none;
-    border-color: var(--student-color);
-    box-shadow: 0 0 0 3px rgba(72, 187, 120, 0.1);
+/* student-login-form uses .login-form styles via shared class */
+.student-login-form input[type="password"]:focus,
+.student-login-form input[type="email"]:focus {
+    border-color: var(--login-accent);
 }
 
 .student-login-form .btn {
-    width: 100%;
-    padding: 1rem;
-    font-size: 1rem;
-    font-weight: 600;
-    background: var(--student-color);
-}
-
-.student-login-form .btn:hover {
-    background: var(--student-hover);
+    background: var(--login-accent);
+    color: #080d14;
 }
 
 .login-social {
-    padding: 2rem 2rem 0;
+    padding: 1.25rem 1.75rem 0;
 }
 
 .login-social-only {
-    padding-bottom: 2rem;
+    padding-bottom: 1.75rem;
 }
 
 .login-divider {
     display: flex;
     align-items: center;
     text-align: center;
-    margin-top: 1.5rem;
-    color: #a0aec0;
-    font-size: 0.8125rem;
+    margin-top: 1.25rem;
+    color: #2e4a58;
+    font-size: 0.75rem;
 }
 
 .login-divider::before,
 .login-divider::after {
     content: '';
     flex: 1;
-    border-bottom: 1px solid #e2e8f0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .login-divider span {
@@ -1756,7 +1776,7 @@ body.student-login-page {
 }
 
 .btn-azure:hover {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
     opacity: 0.92;
 }
 
@@ -1766,21 +1786,20 @@ body.student-login-page {
     align-items: center;
     justify-content: center;
     gap: 0.75rem;
-    padding: 0.875rem 1rem;
-    border: 2px solid var(--border);
-    border-radius: var(--radius);
-    background: white;
+    padding: 0.8rem 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
     font-size: 0.9375rem;
     font-weight: 500;
-    color: #374151;
+    color: #c0d8e0;
     text-decoration: none;
     transition: all 0.2s;
 }
 
 .btn-azure-full:hover {
-    border-color: #2563eb;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    background: #fafafa;
+    border-color: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.1);
 }
 
 .btn-azure-full svg {
