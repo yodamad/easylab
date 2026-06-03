@@ -19,6 +19,8 @@ As an admin (trainer, speaker, ...), you have access to the admin space to manag
     * [x] Delete workspaces (one by one or in bulk)
     * [x] Retry a failing lab installation
 * [x] View student feedback per lab (rating, difficulty, comments)
+* [x] View deployment statistics (KPIs, monthly chart, per-project breakdown)
+* [x] Configure automatic workspace and lab deletion (cleaning policies)
 
 ![Admin header](screens/admin.png)
 
@@ -86,12 +88,6 @@ You need to setup the secrets for the Coder instance:
     * `Coder Db Name`: The name of the coder database
     * `Coder Template Name`: The name of the coder template
 
-#### Workspace Lifetime
-
-Set **Workspace Lifetime (hours)** to automatically delete student workspaces after a given duration. The server checks every 5 minutes and deletes any workspace whose creation time exceeds the configured limit.
-
-Leave the field empty or set it to `0` to disable automatic cleanup (workspaces persist until deleted manually).
-
 Then, you need to define **one or more** [Coder templates](https://coder.com/docs/admin/templates){target="_blank"} for the lab. Each template is a different workspace type (e.g. Docker, Go, Node) that students can choose when requesting a workspace.
 
 ![Coder template selection](screens/templates.png)
@@ -115,10 +111,14 @@ By default, Coder is exposed via a plain HTTP LoadBalancer IP. To expose it over
 * **ACME Email** — email address used for Let's Encrypt certificate notifications. Required when domain is set.
 * **Wildcard Domain** — optional, e.g. `*.coder.example.com`. Enables per-workspace URLs (requires a DNS provider configured below).
 
+![DNS configuration](screens/dns-config.png)
+
 When a domain is set, the following additional components are deployed into the cluster:
 
 * **ingress-nginx** — Kubernetes ingress controller (gets its own LoadBalancer IP, exported as `ingressIP`).
 * **cert-manager** — automates TLS certificate issuance from Let's Encrypt.
+
+![DNS configuration](screens/dns.png)
 
 After `pulumi up` completes, the stack output `ingressIP` is printed. **You must create a DNS A record** pointing `<domain> → <ingressIP>` in your DNS provider before the TLS certificate can be issued.
 
@@ -151,7 +151,31 @@ Coder templates can define Terraform `variable` blocks that need values at insta
 
 **Manual entry** — Click **+ Add Variable** to manually add a variable name and value. This is useful when you already know the variables your template expects.
 
+![Template variables](screens/variables.png)
+
 Required variables (those without a default value in the `.tf` source) must be given a value before the template can be installed successfully. If a required variable is left empty, Coder will reject the template version during provisioning.
+
+### Cleaning Configuration (Step 8)
+
+The last step of the wizard lets you configure automatic cleanup policies for both workspaces and the entire lab.
+
+![Cleaning configuration step](screens/cleaning-config.png){width=700}
+
+#### Workspace Lifetime
+
+Set **Workspace Lifetime** (with a unit of Hours or Days) to automatically delete student workspaces after a given duration. The cleanup service checks at a regular interval (default 5 minutes, configurable via `CLEANUP_INTERVAL_MINUTES`) and deletes any workspace whose creation time exceeds the limit.
+
+Leave the field at `0` or leave it empty to disable automatic workspace cleanup.
+
+#### Lab Deletion
+
+Set a **Date** (and optionally a **Time**) for the entire lab to be automatically destroyed. When the scheduled date/time is reached, EasyLab runs `pulumi destroy` on the lab without any manual action.
+
+* If only a date is set, the lab is destroyed at 23:59 that day.
+* Leave the date empty to disable scheduled lab deletion.
+
+!!! note
+    The cleanup service also runs scheduled lab deletion checks at the same interval as workspace cleanup. Set `CLEANUP_INTERVAL_MINUTES` to a lower value if you need finer-grained precision (default is 5 minutes).
 
 ## Dry run (preview before create)
 
@@ -180,6 +204,8 @@ When enabled, a **Sign in with Microsoft** button appears on the student login p
 2. After a successful Microsoft login, EasyLab creates a local session using the student's email address.
 3. When the student first requests a workspace, a Coder account is provisioned automatically using that email address and a server-generated password — identical to the password-based flow. Azure AD is never configured on Coder itself.
 
+![Student Microsoft login](screens/student-login-microsoft.png){ width=300 }
+
 ---
 
 ### Admin authentication
@@ -193,6 +219,10 @@ When an **Admin Group ID** is configured, a **Sign in with Microsoft** button al
 3. If the user is in the group, a normal admin session is created and the user is redirected to `/admin`. Otherwise, login is rejected with an error.
 
 The admin password login remains available alongside Microsoft login — both methods work simultaneously.
+
+![Admin Microsoft login](screens/admin-login-microsoft.png){ width=300 }
+
+Once an **Admin Group ID** is saved, an additional option appears: **Disable password login for admins**. When this checkbox is enabled, the admin password form is hidden and admins can only log in via Microsoft. Has no effect if the Admin Group ID is not set.
 
 ---
 
@@ -222,7 +252,14 @@ The easiest way to configure Azure AD is through the admin interface:
 
 The configuration is persisted to disk and takes effect immediately — no restart required. Click **Disable Azure AD Login** (visible when a client ID is saved) to clear the configuration.
 
-Once a client ID is saved, an additional option appears: **Disable password login for students**. When this checkbox is enabled, the student password form is hidden on the login page and students can only authenticate via Microsoft. Has no effect if Azure AD is not configured.
+![Azure AD configuration form](screens/azure-ad-config.png){width=700}
+
+Once a client ID is saved, two additional options appear under **Login restrictions**:
+
+* **Disable password login for students** — hides the student password form; students can only authenticate via Microsoft.
+* **Disable password login for admins** — hides the admin password form on `/login`; only visible when an Admin Group ID is also set. Admins can only log in via Microsoft.
+
+Neither option has any effect if Azure AD is not configured.
 
 ### Configuration — environment variables (alternative)
 
@@ -270,6 +307,7 @@ You can see all the labs you have created with following information:
 * **Retrieve Coder credentials** — For completed labs, a **Coder admin credentials** button opens a modal with the Coder URL, admin email, and admin password. You can copy each value or show/hide the password. Use these to sign in to the Coder instance for that lab.
 * **Actions** — Destroy a lab; **Recreate** a destroyed lab with the same configuration (same Coder template, options, etc.)
 * **List of workspaces** created for this lab — delete workspaces one by one or in bulk
+* **Cleanup** - Display the cleanup policy for the lab (*i.e. after how many hours/days the workspaces will be deleted*)
 
 ![Lab Workspaces](screens/list-workspaces.png){width=350}
 
@@ -294,3 +332,34 @@ The page shows:
 If no feedback has been submitted yet, an empty state is displayed.
 
 ![Admin feedback](screens/feedbacks.png){width=45%}
+
+## Stats Dashboard
+
+Navigate to **Stats** (accessible from the header or `/admin/stats`) to see aggregated deployment metrics.
+
+### Project selector
+
+Use the **Select a Project** dropdown to scope the view to a single lab stack name, or choose **All Projects** for a combined view.
+
+### KPI cards
+
+Four summary cards are shown at the top of the page:
+
+![Stats KPI cards](screens/stats-kpi.png){width=700}
+
+| Card | Description |
+|------|-------------|
+| **Workspaces Used** | Total number of workspaces ever provisioned across all tracked jobs |
+| **Currently Active** | Number of completed (live) labs at the time of the last check |
+| **Failed** | Number of labs that ended in a failed state |
+| **Workspaces Auto-cleaned** | Cumulative count of workspaces deleted by the automatic cleanup service |
+
+### Activity chart
+
+A stacked bar chart shows the monthly breakdown of lab deployments (Succeeded / Failed / Destroyed) on the left axis, overlaid with a line showing the number of workspaces auto-cleaned that month on the right axis.
+
+### Per-project breakdown
+
+When **All Projects** is selected, a summary table is shown below the chart listing each project with its total, active, and failed lab counts.
+
+![Per-project stats breakdown](screens/stats-projects.png){width=700}

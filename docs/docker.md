@@ -54,6 +54,7 @@ The application can be configured using the following environment variables:
 - `PORT`: Port to run the application on (default: 8080)
 - `WORK_DIR`: Directory for job workspaces (default: /app/jobs)
 - `DATA_DIR`: Directory for persisting job data (default: /app/data)
+- `CLEANUP_INTERVAL_MINUTES`: How often (in minutes) the cleanup service checks for expired workspaces and scheduled lab deletions (default: 5)
 
 **Azure AD student login** (optional — all three required to enable):
 
