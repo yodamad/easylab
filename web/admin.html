@@ -10,47 +10,41 @@
     <div class="admin-main">
         <div class="admin-page-header">
             <h1>New Lab</h1>
+            <div class="wizard-progress">
+                <div class="progress-step active" data-step="1">
+                    <span class="step-number">1</span>
+                    <span class="step-label">Setup</span>
+                </div>
+                <div class="progress-step" data-step="2">
+                    <span class="step-number">2</span>
+                    <span class="step-label">Network</span>
+                </div>
+                <div class="progress-step" data-step="3">
+                    <span class="step-number">3</span>
+                    <span class="step-label">Compute</span>
+                </div>
+                <div class="progress-step" data-step="4">
+                    <span class="step-number">4</span>
+                    <span class="step-label">DNS &amp; HTTPS</span>
+                </div>
+                <div class="progress-step" data-step="5">
+                    <span class="step-number">5</span>
+                    <span class="step-label">Coder</span>
+                </div>
+                <div class="progress-step" data-step="6">
+                    <span class="step-number">6</span>
+                    <span class="step-label">Templates</span>
+                </div>
+                <div class="progress-step" data-step="7">
+                    <span class="step-number">7</span>
+                    <span class="step-label">Lifecycle</span>
+                </div>
+            </div>
         </div>
         <div class="admin-page-body">
         <div class="container">
 
         <main>
-            <!-- Progress Indicator -->
-            <div class="wizard-progress">
-                <div class="progress-step active" data-step="1">
-                    <span class="step-number">1</span>
-                    <span class="step-label">Provider</span>
-                </div>
-                <div class="progress-step" data-step="2">
-                    <span class="step-number">2</span>
-                    <span class="step-label">Pulumi</span>
-                </div>
-                <div class="progress-step" data-step="3">
-                    <span class="step-number">3</span>
-                    <span class="step-label">Network</span>
-                </div>
-                <div class="progress-step" data-step="4">
-                    <span class="step-number">4</span>
-                    <span class="step-label">Kubernetes</span>
-                </div>
-                <div class="progress-step" data-step="5">
-                    <span class="step-number">5</span>
-                    <span class="step-label">Node Pool</span>
-                </div>
-                <div class="progress-step" data-step="6">
-                    <span class="step-number">6</span>
-                    <span class="step-label">DNS & HTTPS</span>
-                </div>
-                <div class="progress-step" data-step="7">
-                    <span class="step-number">7</span>
-                    <span class="step-label">Coder</span>
-                </div>
-                <div class="progress-step" data-step="8">
-                    <span class="step-number">8</span>
-                    <span class="step-label">Cleaning</span>
-                </div>
-            </div>
-
             <!-- Provider Credentials Notice -->
             <div id="provider-credentials-notice" class="info-box" style="display: none;">
                 <h3>🔐 Provider Credentials Required</h3>
@@ -68,26 +62,34 @@
                     <p>Submitting...</p>
                 </div>
 
-                <!-- Step 1: Infrastructure Mode -->
+                <!-- Step 1: Lab Setup (lab name + cluster mode + provider) -->
                 <section class="wizard-step active" data-step="1">
                     <div class="step-header">
-                        <h2>Infrastructure</h2>
-                        <p class="section-description">Choose how to provide the Kubernetes cluster</p>
+                        <h2>Lab Setup</h2>
+                        <p class="section-description">Name your lab, then choose your infrastructure mode</p>
                     </div>
                     <div class="step-content">
                         <input type="hidden" id="use_existing_cluster" name="use_existing_cluster" value="false">
 
+                        <!-- Lab name comes first -->
+                        <div class="form-group">
+                            <label for="stack_name">Lab Name *</label>
+                            <input type="text" id="stack_name" name="stack_name" value="dev" required pattern="[a-zA-Z0-9_\-]+" title="Only letters, numbers, hyphens and underscores allowed">
+                            <small>Unique name for this deployment — used as a prefix for all cloud resources (e.g. dev, prod, workshop-2025)</small>
+                            <small class="name-preview">Resource prefix: <span id="stack-name-preview" class="preview-value">dev</span></small>
+                        </div>
+
                         <div class="form-group">
                             <label>Cluster Mode *</label>
                             <div class="button-group">
-                                <button type="button" class="source-button" data-cluster-mode="new" id="cluster-mode-new">
+                                <button type="button" class="source-button" data-cluster-mode="new" id="cluster-mode-new" onclick="wizard.setClusterMode(false)">
                                     <span class="source-icon">&#9729;</span>
                                     <div class="source-content">
                                         <span class="source-title">Create New Infrastructure</span>
                                         <span class="source-description">Provision a new Kubernetes cluster on a cloud provider</span>
                                     </div>
                                 </button>
-                                <button type="button" class="source-button" data-cluster-mode="existing" id="cluster-mode-existing">
+                                <button type="button" class="source-button" data-cluster-mode="existing" id="cluster-mode-existing" onclick="wizard.setClusterMode(true)">
                                     <span class="source-icon">&#9881;</span>
                                     <div class="source-content">
                                         <span class="source-title">Use Existing Cluster</span>
@@ -155,26 +157,12 @@
                                 </div>
                             </div>
                         </div>
+
                     </div>
                 </section>
 
-                <!-- Step 2: Pulumi Configuration -->
+                <!-- Step 2: Network Configuration (new infra only) -->
                 <section class="wizard-step" data-step="2">
-                    <div class="step-header">
-                        <h2>Pulumi Configuration</h2>
-                        <p class="section-description">Configure your Pulumi stack settings</p>
-                    </div>
-                    <div class="step-content">
-                        <div class="form-group">
-                            <label for="stack_name">Stack Name *</label>
-                            <input type="text" id="stack_name" name="stack_name" value="dev" required pattern="[a-zA-Z0-9_\-]+" title="Only letters, numbers, hyphens and underscores allowed">
-                            <small>Unique name for this deployment (e.g., dev, prod, test-lab-1)</small>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Step 3: Network Configuration -->
-                <section class="wizard-step" data-step="3">
                     <div class="step-header">
                         <h2 id="network-step-title">Network Configuration</h2>
                         <p class="section-description" id="network-step-desc">Configure private network and gateway settings</p>
@@ -244,27 +232,18 @@
                     </div>
                 </section>
 
-                <!-- Step 4: Kubernetes Configuration -->
-                <section class="wizard-step" data-step="4">
+                <!-- Step 3: Compute (cluster name + node pool) — new infra only -->
+                <section class="wizard-step" data-step="3">
                     <div class="step-header">
-                        <h2>Kubernetes Configuration</h2>
-                        <p class="section-description">Configure your managed Kubernetes cluster</p>
+                        <h2>Compute Configuration</h2>
+                        <p class="section-description">Configure your Kubernetes cluster and node pool</p>
                     </div>
                     <div class="step-content">
                         <div class="form-group">
                             <label for="k8s_cluster_name">Cluster Name *</label>
                             <input type="text" id="k8s_cluster_name" name="k8s_cluster_name" value="dev-cluster" required data-base-name="cluster">
                         </div>
-                    </div>
-                </section>
 
-                <!-- Step 5: Node Pool Configuration -->
-                <section class="wizard-step" data-step="5">
-                    <div class="step-header">
-                        <h2>Node Pool Configuration</h2>
-                        <p class="section-description">Configure Kubernetes node pool settings</p>
-                    </div>
-                    <div class="step-content">
                         <div class="form-group">
                             <label for="nodepool_name">Node Pool Name *</label>
                             <input type="text" id="nodepool_name" name="nodepool_name" value="dev-nodepool" required data-base-name="nodepool">
@@ -310,7 +289,6 @@
                             <div id="flavor-filter-hint" class="hint-text" style="display: none;">No flavors match your filters. Set min/max to 0 for no limit or adjust the values above.</div>
                         </div>
 
-                        <!-- Flavor filters are OVH-only -->
                         <div id="ovh-flavor-filters-wrapper"></div>
 
                         <div class="form-row">
@@ -332,8 +310,8 @@
                     </div>
                 </section>
 
-                <!-- Step 6: DNS & HTTPS Configuration -->
-                <section class="wizard-step" data-step="6">
+                <!-- Step 4: DNS & HTTPS Configuration -->
+                <section class="wizard-step" data-step="4">
                     <div class="step-header">
                         <h2>DNS &amp; HTTPS Configuration</h2>
                         <p class="section-description">Configure TLS, ingress controller, and DNS automation</p>
@@ -343,7 +321,7 @@
                         <div class="form-group">
                             <label>Ingress Controller</label>
                             <div class="button-group">
-                                <button type="button" class="source-button active" id="ingress-install-btn" data-ingress-mode="install">
+                                <button type="button" class="source-button selected" id="ingress-install-btn" data-ingress-mode="install">
                                     <span class="source-icon">&#9729;</span>
                                     <div class="source-content">
                                         <span class="source-title">Install ingress-nginx</span>
@@ -378,7 +356,7 @@
                         <div class="form-group">
                             <label>cert-manager</label>
                             <div class="button-group">
-                                <button type="button" class="source-button active" id="certmanager-install-btn" data-certmanager-mode="install">
+                                <button type="button" class="source-button selected" id="certmanager-install-btn" data-certmanager-mode="install">
                                     <span class="source-icon">&#128274;</span>
                                     <div class="source-content">
                                         <span class="source-title">Install cert-manager</span>
@@ -492,8 +470,8 @@
                     </div>
                 </section>
 
-                <!-- Step 7: Coder Configuration -->
-                <section class="wizard-step" data-step="7">
+                <!-- Step 5: Coder Configuration (credentials + version + DB) -->
+                <section class="wizard-step" data-step="5">
                     <div class="step-header">
                         <h2>Coder Configuration</h2>
                         <p class="section-description">Configure the Coder IDE platform</p>
@@ -530,9 +508,42 @@
                             <small>Kubernetes namespace for Coder. Defaults to "coder".</small>
                         </div>
 
+                        <!-- Database config — collapsed by default, DB password auto-generated -->
+                        <details class="advanced-section">
+                            <summary>Advanced: Database Configuration</summary>
+                            <div class="advanced-section-body">
+                                <div class="form-group">
+                                    <label for="coder_db_user">Database User *</label>
+                                    <input type="text" id="coder_db_user" name="coder_db_user" value="coder" required>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="coder_db_password">Database Password *</label>
+                                    <div class="input-with-action">
+                                        <input type="password" id="coder_db_password" name="coder_db_password" required>
+                                        <button type="button" class="btn btn-secondary btn-generate-password btn-generate-password-db" data-target="coder_db_password" title="Generate secure password">
+                                            Generate
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="coder_db_name">Database Name *</label>
+                                    <input type="text" id="coder_db_name" name="coder_db_name" value="coderdb" required>
+                                </div>
+                            </div>
+                        </details>
+                    </div>
+                </section>
+
+                <!-- Step 6: Templates -->
+                <section class="wizard-step" data-step="6">
+                    <div class="step-header">
+                        <h2>Coder Templates</h2>
+                        <p class="section-description">Define one or more Coder templates. Each can use an uploaded file or a Git repository.</p>
+                    </div>
+                    <div class="step-content">
                         <div class="form-group">
-                            <label>Coder Templates *</label>
-                            <p class="section-description">Define one or more Coder templates. Each can use an uploaded file or a Git repository.</p>
                             <input type="hidden" id="template_count" name="template_count" value="1">
                             <div id="coder-templates-container">
                                 <!-- First row - additional rows added by JS -->
@@ -618,7 +629,7 @@
                             </button>
                         </div>
 
-                        <!-- Template row template (hidden, cloned by JS for Add Template) -->
+                        <!-- Template row template (hidden, cloned by JS) -->
                         <template id="template-row-tmpl">
                             <div class="template-row" data-template-index="0">
                                 <div class="template-row-header">
@@ -697,35 +708,13 @@
                                 </div>
                             </div>
                         </template>
-
-                        <h3 class="subsection-title">Database Configuration</h3>
-                        
-                        <div class="form-group">
-                            <label for="coder_db_user">Database User *</label>
-                            <input type="text" id="coder_db_user" name="coder_db_user" value="coder" required>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="coder_db_password">Database Password *</label>
-                            <div class="input-with-action">
-                                <input type="password" id="coder_db_password" name="coder_db_password" required>
-                                <button type="button" class="btn btn-secondary btn-generate-password btn-generate-password-db" data-target="coder_db_password" title="Generate secure password">
-                                    Generate
-                                </button>
-                            </div>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="coder_db_name">Database Name *</label>
-                            <input type="text" id="coder_db_name" name="coder_db_name" value="coderdb" required>
-                        </div>
                     </div>
                 </section>
 
-                <!-- Step 8: Cleaning Configuration -->
-                <section class="wizard-step" data-step="8">
+                <!-- Step 7: Lifecycle (cleanup + deletion scheduling) -->
+                <section class="wizard-step" data-step="7">
                     <div class="step-header">
-                        <h2>Cleaning Configuration</h2>
+                        <h2>Lifecycle</h2>
                         <p class="section-description">Configure automatic workspace and lab deletion policies</p>
                     </div>
                     <div class="step-content">
@@ -766,7 +755,7 @@
                         <span class="btn-icon">←</span> Previous
                     </button>
                     <div class="step-indicator">
-                        Step <span id="current-step-num">1</span> of <span id="total-steps">6</span>
+                        Step <span id="current-step-num">1</span> of <span id="total-steps">7</span>
                     </div>
                     <button type="button" id="btn-next" class="btn btn-primary">
                         Next <span class="btn-icon">→</span>
@@ -791,4 +780,3 @@
     <script src="/static/header-provider.js"></script>
     <script src="/static/admin.js"></script>
 {{end}}
-

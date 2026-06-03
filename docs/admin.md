@@ -4,6 +4,8 @@ icon: lucide/shield-check
 
 # Admin Space
 
+![Admin header](screens/admin.png){ width=200 }
+
 As an admin (trainer, speaker, ...), you have access to the admin space to manage your labs:
 
 * [x] Create a new lab
@@ -22,9 +24,9 @@ As an admin (trainer, speaker, ...), you have access to the admin space to manag
 * [x] View deployment statistics (KPIs, monthly chart, per-project breakdown)
 * [x] Configure automatic workspace and lab deletion (cleaning policies)
 
-![Admin header](screens/admin.png)
-
 ## Create a new lab
+
+![Steps](screens/steps.png)
 
 First you need to choose how to provide the Kubernetes cluster:
 
@@ -206,7 +208,7 @@ For OVHcloud-specific setup, see [OVHcloud configuration](ovhcloud.md). For Azur
 
 Clicking on the `Labs` button in the header will redirect you to the labs list page. The **Provider** dropdown is available on every admin page and navigates directly to the OVH or Azure configuration page.
 
-![Lab Info](screens/lab-info.png){width=350}
+![Lab Info](screens/lab-info.png){width=850}
 
 You can see all the labs you have created with following information:
 

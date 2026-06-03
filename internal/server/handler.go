@@ -2603,6 +2603,8 @@ func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
 		HasKubeconfig          bool
 		IsDestroyed            bool
 		WorkspaceLifetimeHours int
+		LabDeletionDate        string
+		HasDeletionDate        bool
 	}
 
 	labsDisplay := make([]LabDisplay, 0, len(allJobs))
@@ -2624,6 +2626,12 @@ func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
 		if job.Config != nil {
 			workspaceLifetimeHours = job.Config.WorkspaceLifetimeHours
 		}
+		labDeletionDate := ""
+		hasLabDeletionDate := false
+		if job.Config != nil && job.Config.LabDeletionDate != nil {
+			labDeletionDate = job.Config.LabDeletionDate.Format("Jan 02, 2006 at 15:04")
+			hasLabDeletionDate = true
+		}
 		job.mu.RUnlock()
 
 		labsDisplay = append(labsDisplay, LabDisplay{
@@ -2639,6 +2647,8 @@ func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
 			HasKubeconfig:          hasKubeconfig,
 			IsDestroyed:            isDestroyed,
 			WorkspaceLifetimeHours: workspaceLifetimeHours,
+			LabDeletionDate:        labDeletionDate,
+			HasDeletionDate:        hasLabDeletionDate,
 		})
 	}
 

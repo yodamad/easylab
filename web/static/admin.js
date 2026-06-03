@@ -3,8 +3,8 @@ const wizard = {
     currentStep: 1,
     useExistingCluster: false,
     clusterModeSelected: false,
-    allSteps: [1, 2, 3, 4, 5, 6, 7, 8],
-    byokSteps: [1, 2, 6, 7, 8],
+    allSteps: [1, 2, 3, 4, 5, 6, 7],
+    byokSteps: [1, 4, 5, 6, 7],
 
     getActiveSteps() {
         return this.useExistingCluster ? this.byokSteps : this.allSteps;
@@ -93,8 +93,8 @@ const wizard = {
         const fields = document.getElementById('ingress-existing-fields');
         const hidden = document.getElementById('install_nginx_ingress');
 
-        installBtn.classList.toggle('active', mode === 'install');
-        existingBtn.classList.toggle('active', mode === 'existing');
+        installBtn.classList.toggle('selected', mode === 'install');
+        existingBtn.classList.toggle('selected', mode === 'existing');
         fields.style.display = mode === 'existing' ? '' : 'none';
         hidden.value = mode === 'install' ? 'true' : 'false';
     },
@@ -105,8 +105,8 @@ const wizard = {
         const fields = document.getElementById('certmanager-existing-fields');
         const hidden = document.getElementById('install_cert_manager');
 
-        installBtn.classList.toggle('active', mode === 'install');
-        existingBtn.classList.toggle('active', mode === 'existing');
+        installBtn.classList.toggle('selected', mode === 'install');
+        existingBtn.classList.toggle('selected', mode === 'existing');
         fields.style.display = mode === 'existing' ? '' : 'none';
         hidden.value = mode === 'install' ? 'true' : 'false';
     },
@@ -214,6 +214,12 @@ const wizard = {
                 alert('Please provide your kubeconfig content.');
                 return false;
             }
+            // Also validate stack name (now on step 1 for all modes)
+            const stackNameInput = document.getElementById('stack_name');
+            if (stackNameInput && !stackNameInput.checkValidity()) {
+                stackNameInput.reportValidity();
+                return false;
+            }
             return true;
         }
 
@@ -314,11 +320,11 @@ const wizard = {
             dryRunBtn.style.display = 'none';
         }
 
-        document.querySelector('.wizard-progress').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const progressEl = document.querySelector('.wizard-progress');
+        if (progressEl) progressEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-        // Fetch cloud regions when entering step 3 for the first time (provider-specific).
-        // Avoid calling OVH APIs when Azure is selected — that only produced GetOVHRegions noise and errors.
-        if (this.currentStep === 3) {
+        // Fetch cloud regions when entering step 2 (Network) for the first time.
+        if (this.currentStep === 2) {
             const providerSelect = document.getElementById('provider');
             const isAzure = providerSelect && providerSelect.value === 'azure';
             if (isAzure) {
@@ -331,8 +337,8 @@ const wizard = {
                 loadOVHRegions();
             }
         }
-        // Node pool sizes: OVH flavors vs Azure VM sizes
-        if (this.currentStep === 5) {
+        // Node pool sizes: OVH flavors vs Azure VM sizes (step 3: Compute)
+        if (this.currentStep === 3) {
             const providerSelect = document.getElementById('provider');
             const isAzure = providerSelect && providerSelect.value === 'azure';
             if (isAzure) {
@@ -344,13 +350,16 @@ const wizard = {
                 loadOVHFlavors();
             }
         }
-        // Fetch Coder versions when entering step 7 for the first time
-        if (this.currentStep === 7 && !this._coderVersionsLoaded) {
+        // Fetch Coder versions when entering step 5 (Coder) for the first time
+        if (this.currentStep === 5 && !this._coderVersionsLoaded) {
             this._coderVersionsLoaded = true;
             loadCoderVersions();
         }
     }
 };
+
+// Expose wizard globally so inline onclick handlers can reach it
+window.wizard = wizard;
 
 // Function to hide wizard and show only job status
 function hideWizardShowStatus() {
@@ -758,7 +767,7 @@ function handleProviderChange() {
             const flavorSelect = document.getElementById('nodepool_flavor');
             if (flavorSelect) flavorSelect.innerHTML = '<option value="">Select a region first…</option>';
         }
-    } else if (!isAzure && wizard.currentStep === 3) {
+    } else if (!isAzure && wizard.currentStep === 2) {
         wizard._ovhRegionsLoaded = false;
         loadOVHRegions();
     }
@@ -977,6 +986,23 @@ function startPolling() {
 document.addEventListener('DOMContentLoaded', function() {
     wizard.init();
 
+    // Auto-generate DB password on load so users don't need to touch the Advanced section
+    const dbPasswordInput = document.getElementById('coder_db_password');
+    if (dbPasswordInput && !dbPasswordInput.value) {
+        dbPasswordInput.value = generateSecurePassword(16);
+    }
+
+    // Live stack name preview
+    const stackNameInput = document.getElementById('stack_name');
+    const stackNamePreview = document.getElementById('stack-name-preview');
+    if (stackNameInput && stackNamePreview) {
+        const updatePreview = function() {
+            stackNamePreview.textContent = stackNameInput.value || 'dev';
+        };
+        stackNameInput.addEventListener('input', updatePreview);
+        updatePreview();
+    }
+
     // Bind Generate password buttons
     document.querySelectorAll('.btn-generate-password-db').forEach(function(btn) {
         btn.addEventListener('click', function() {
@@ -1061,7 +1087,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const form = document.getElementById('lab-form');
     
     // Set up resource name updates
-    const stackNameInput = document.getElementById('stack_name');
     const resourceInputs = [
         document.getElementById('network_gateway_name'),
         document.getElementById('network_private_network_name'),
@@ -1154,6 +1179,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (kubeconfigPasteBtn) {
         kubeconfigPasteBtn.addEventListener('click', () => setKubeconfigMode('paste'));
     }
+    setKubeconfigMode('upload');
 
     // Kubeconfig file upload: read contents into textarea
     const kubeconfigFileInput = document.getElementById('kubeconfig_file');
