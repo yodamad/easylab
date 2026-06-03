@@ -583,6 +583,7 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 		"ovh-credentials.html":   "web/ovh-credentials.html", // Keep for backward compatibility
 		"ovh-options.html":       "web/ovh-options.html",
 		"azure-options.html":     "web/azure-options.html",
+		"azure-ad.html":          "web/azure-ad.html",
 		"labs-list.html":         "web/labs-list.html",
 		"lab-workspaces.html":    "web/lab-workspaces.html",
 		"admin-stats.html":       "web/admin-stats.html",
@@ -2350,18 +2351,22 @@ func (h *Handler) ServeAzureOptions(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	azureAD := AzureADConfig{}
-	if h.azureOptionsManager != nil {
-		azureAD = h.azureOptionsManager.GetAzureADConfig()
-	}
-
 	data := map[string]interface{}{
 		"HasCache": hasCache,
 		"Regions":  regionsData,
 		"Config":   cfg,
-		"AzureAD":  azureAD,
 	}
 	h.serveTemplate(w, "azure-options.html", data)
+}
+
+// ServeAzureAD serves the Azure AD OAuth configuration admin page.
+func (h *Handler) ServeAzureAD(w http.ResponseWriter, r *http.Request) {
+	if h.azureOptionsManager == nil {
+		http.Error(w, "Azure options not available", http.StatusServiceUnavailable)
+		return
+	}
+	azureAD := h.azureOptionsManager.GetAzureADConfig()
+	h.serveTemplate(w, "azure-ad.html", azureAD)
 }
 
 // SaveAzureADConfig handles saving Azure AD OAuth configuration from the admin page.
@@ -2432,11 +2437,11 @@ func (h *Handler) SaveAzureADConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Header.Get("HX-Request") == "true" {
-		w.Header().Set("HX-Redirect", "/admin/azure-options#credentials")
+		w.Header().Set("HX-Redirect", "/admin/azure-ad")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, `<div class="success-message"><p>Azure AD configuration saved</p></div>`)
 	} else {
-		http.Redirect(w, r, "/admin/azure-options#credentials", http.StatusSeeOther)
+		http.Redirect(w, r, "/admin/azure-ad", http.StatusSeeOther)
 	}
 }
 

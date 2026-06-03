@@ -1,4 +1,4 @@
-{{define "title"}}Azure Configuration{{end}}
+{{define "title"}}Azure Options{{end}}
 {{define "body-class"}}admin-page{{end}}
 {{define "head-extra"}}
 <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.0/dist/htmx.min.js" integrity="sha384-LAnQFtNXh8s0hn9mOc8bezfn16i4Zo4y3i4dMT8PtV9yip8jGehR3RxCJrmHV11d" crossorigin="anonymous"></script>
@@ -9,310 +9,124 @@
     {{template "admin-sidebar" .}}
     <div class="admin-main">
         <div class="admin-page-header">
-            <h1>Azure Configuration</h1>
+            <h1>Azure Options</h1>
         </div>
         <div class="admin-page-body">
         <div class="admin-content-narrow">
 
-        <div>
-            <div class="provider-tabs">
-                <button class="provider-tab active" data-tab="credentials" onclick="switchProviderTab('credentials')">
-                    🔐 Credentials
-                </button>
-                <button class="provider-tab" data-tab="options" onclick="switchProviderTab('options')">
-                    ⚙️ Options
-                </button>
-            </div>
+        <div id="save-response"></div>
 
-            <!-- Credentials Tab -->
-            <div id="tab-credentials" class="provider-tab-panel active">
-                <div class="credentials-container">
-                    <div class="info-box">
-                        <h3>ℹ️ About Azure Credentials</h3>
-                        <p>These credentials will be stored in memory and used for all lab deployments. They will be cleared when the application restarts.</p>
-                        <p><strong>Note:</strong> Credentials are not persisted to disk for security reasons.</p>
-                    </div>
-
-                    <div id="provider-section-azure" class="provider-section">
-                        <form id="credentials-form-azure" action="/api/credentials" method="POST" enctype="application/x-www-form-urlencoded" hx-post="/api/credentials" hx-target="#form-response-azure" hx-swap="innerHTML" hx-indicator="#loading-azure" hx-boost="false">
-                            <input type="hidden" name="provider" value="azure">
-                            <div id="form-response-azure"></div>
-                            <div id="loading-azure" class="htmx-indicator">
-                                <div class="spinner"></div>
-                                <p>Saving credentials...</p>
-                            </div>
-
-                            <div class="form-section">
-                                <h2>Azure Service Principal Credentials</h2>
-
-                                <div class="form-group">
-                                    <label for="azure_client_id">Client ID *</label>
-                                    <input type="password" id="azure_client_id" name="azure_client_id" required>
-                                    <small>The Application (client) ID of your Azure Service Principal</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="azure_client_secret">Client Secret *</label>
-                                    <input type="password" id="azure_client_secret" name="azure_client_secret" required>
-                                    <small>The client secret value for your Azure Service Principal</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="azure_tenant_id">Tenant ID *</label>
-                                    <input type="text" id="azure_tenant_id" name="azure_tenant_id" required>
-                                    <small>Your Azure Active Directory Tenant ID</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="azure_subscription_id">Subscription ID *</label>
-                                    <input type="text" id="azure_subscription_id" name="azure_subscription_id" required>
-                                    <small>The Azure Subscription ID where resources will be created</small>
-                                </div>
-                            </div>
-
-                            <div class="form-actions">
-                                <button type="submit" class="btn btn-primary">
-                                    <span class="btn-icon">💾</span> Save Credentials
-                                </button>
-                                <button type="button" id="btn-check-azure" class="btn btn-secondary" onclick="checkCredentials('azure')">
-                                    <span class="btn-icon">✓</span> Check Status
-                                </button>
-                            </div>
-                        </form>
-
-                        <div id="status-container-azure" class="status-container" style="display: none;">
-                            <h3>Current Status</h3>
-                            <div id="status-content-azure"></div>
-                        </div>
-                    </div>
-
-                    <!-- Azure AD Configuration -->
-                    <div class="provider-section">
-                        <form id="azure-ad-form"
-                              method="POST"
-                              action="/api/azure-ad-config"
-                              hx-post="/api/azure-ad-config"
-                              hx-target="#save-response"
-                              hx-swap="innerHTML"
-                              hx-indicator="#azure-ad-loading"
-                              hx-boost="false">
-                            <div id="azure-ad-loading" class="htmx-indicator">
-                                <div class="spinner"></div>
-                                <p>Saving Azure AD configuration...</p>
-                            </div>
-
-                            <div class="form-section">
-                                <h2>Azure AD — Student Login (OAuth)</h2>
-                                <p class="section-description">Configure Azure AD (Entra ID) to allow students to log in with their Microsoft account. Leave all fields empty to disable.</p>
-
-                                {{if .AzureAD.ClientID}}
-                                <div class="info-box">
-                                    <p>Azure AD login is currently <strong>enabled</strong> (client ID configured).</p>
-                                </div>
-                                {{else}}
-                                <div class="info-box">
-                                    <p>Azure AD login is currently <strong>disabled</strong>. Fill in the fields below to enable it.</p>
-                                </div>
-                                {{end}}
-
-                                <div class="form-group">
-                                    <label for="azure_ad_client_id">Application (Client) ID</label>
-                                    <input type="text" id="azure_ad_client_id" name="azure_ad_client_id"
-                                           value="{{.AzureAD.ClientID}}"
-                                           placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
-                                    <small>The Application (client) ID of your Azure AD app registration</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="azure_ad_client_secret">Client Secret</label>
-                                    <input type="password" id="azure_ad_client_secret" name="azure_ad_client_secret"
-                                           {{if .AzureAD.ClientSecret}}placeholder="(saved — enter new value to change)"{{end}}>
-                                    <small>The client secret for your Azure AD app registration</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="azure_ad_tenant_id">Directory (Tenant) ID</label>
-                                    <input type="text" id="azure_ad_tenant_id" name="azure_ad_tenant_id"
-                                           value="{{.AzureAD.TenantID}}"
-                                           placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
-                                    <small>Your Azure AD tenant ID (found in Azure Portal → Azure Active Directory)</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="azure_ad_admin_group_id">Admin Group ID (Object ID)</label>
-                                    <input type="text" id="azure_ad_admin_group_id" name="azure_ad_admin_group_id"
-                                           value="{{.AzureAD.AdminGroupID}}"
-                                           placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
-                                    <small>Optional. When set, enables a "Sign in with Microsoft" button on the admin login page. Only direct members of this Azure AD group (by Object ID) can log in as admin. Requires the app registration to have <strong>User.Read</strong> delegated permission and the user's account to be part of the group.</small>
-                                </div>
-
-                                {{if .AzureAD.ClientID}}
-                                <div class="form-checkboxes">
-                                    <span>Login restrictions</span>
-                                    <div class="checkbox-stack">
-                                        <label class="checkbox-label">
-                                            <input type="checkbox" name="azure_ad_disable_classic_login" id="azure_ad_disable_classic_login"
-                                                   {{if .AzureAD.DisableClassicLogin}}checked{{end}}>
-                                            Disable password login for students
-                                        </label>
-                                        {{if .AzureAD.AdminGroupID}}
-                                        <label class="checkbox-label">
-                                            <input type="checkbox" name="azure_ad_disable_classic_admin_login" id="azure_ad_disable_classic_admin_login"
-                                                   {{if .AzureAD.DisableClassicAdminLogin}}checked{{end}}>
-                                            Disable password login for admins
-                                        </label>
-                                        {{end}}
-                                    </div>
-                                    <small>When checked, the corresponding password form is hidden and only Microsoft login is available.</small>
-                                </div>
-                                {{end}}
-                            </div>
-
-                            <div class="form-actions">
-                                <button type="submit" class="btn btn-primary">
-                                    <span class="btn-icon">💾</span> Save Azure AD Config
-                                </button>
-                                {{if .AzureAD.ClientID}}
-                                <button type="button" class="btn btn-secondary" onclick="document.getElementById('azure_ad_client_id').value='';document.getElementById('azure_ad_client_secret').value='';document.getElementById('azure_ad_tenant_id').value='';htmx.trigger('#azure-ad-form','submit');">
-                                    <span class="btn-icon">✕</span> Disable Azure AD Login
-                                </button>
-                                {{end}}
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Options Tab -->
-            <div id="tab-options" class="provider-tab-panel">
-                <div id="save-response"></div>
-
-                {{if not .HasCache}}
-                <div class="info-box">
-                    <h3>No cached data available</h3>
-                    <p>No regions are cached yet. Make sure your Azure credentials are configured, then click "Refresh from Azure" to load available regions.</p>
-                    <div class="info-box-actions">
-                        <a href="/admin/azure-options#credentials" class="btn btn-secondary">
-                            <span class="btn-icon">🔐</span> Configure Credentials
-                        </a>
-                        <span class="btn btn-primary btn-with-spinner"
-                              hx-post="/api/azure-options/refresh"
-                              hx-target="#save-response"
-                              hx-swap="innerHTML">
-                            <span class="btn-icon">🔄</span> Refresh from Azure
-                            <div id="refresh-loading" class="htmx-indicator">
-                                <div class="spinner spinner-sm"></div>
-                            </div>
-                        </span>
-                    </div>
-                </div>
-                {{else}}
-                <div class="action-toolbar">
-                    <span class="btn btn-primary btn-with-spinner"
-                          hx-post="/api/azure-options/refresh"
-                          hx-target="#save-response"
-                          hx-swap="innerHTML">
-                        <span class="btn-icon">🔄</span> Refresh from Azure
-                        <div class="htmx-indicator">
-                            <div class="spinner spinner-sm"></div>
-                        </div>
-                    </span>
-                    <span class="hint-text">Loads region list from Azure. VM sizes load when you expand a region below.</span>
-                </div>
-
-                <form id="azure-options-form"
-                      method="POST"
-                      action="/api/azure-options"
-                      hx-post="/api/azure-options"
+        {{if not .HasCache}}
+        <div class="info-box">
+            <h3>No cached data available</h3>
+            <p>No regions are cached yet. Make sure your Azure credentials are configured, then click "Refresh from Azure" to load available regions.</p>
+            <div class="info-box-actions">
+                <a href="/credentials?provider=azure" class="btn btn-secondary">
+                    <span class="btn-icon">🔐</span> Configure Credentials
+                </a>
+                <span class="btn btn-primary btn-with-spinner"
+                      hx-post="/api/azure-options/refresh"
                       hx-target="#save-response"
-                      hx-swap="innerHTML"
-                      hx-indicator="#save-loading">
-
-                    <!-- Regions Section -->
-                    <div class="form-section">
-                        <div class="section-header-row">
-                            <h2>Regions</h2>
-                            <button type="button" class="btn btn-secondary btn-sm" onclick="invertCheckboxes('region_enabled')">Invert Selection</button>
-                        </div>
-                        <p class="section-description">Select which regions should be available in the lab creation form. Unchecked regions will be hidden. If none are checked, all regions are shown.</p>
-
-                        <table class="options-table">
-                            <thead>
-                                <tr>
-                                    <th>Region</th>
-                                    <th>Display Name</th>
-                                    <th class="col-center">Enabled</th>
-                                    <th class="col-center">Default</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {{range .Regions}}
-                                <tr>
-                                    <td class="col-name-mono">{{.Name}}</td>
-                                    <td>{{.DisplayName}}</td>
-                                    <td class="col-center">
-                                        <input type="checkbox" name="region_enabled" value="{{.Name}}" {{if .Enabled}}checked{{end}}>
-                                    </td>
-                                    <td class="col-center">
-                                        <input type="radio" name="region_default" value="{{.Name}}" {{if .Default}}checked{{end}}>
-                                    </td>
-                                </tr>
-                                {{end}}
-                            </tbody>
-                        </table>
+                      hx-swap="innerHTML">
+                    <span class="btn-icon">🔄</span> Refresh from Azure
+                    <div id="refresh-loading" class="htmx-indicator">
+                        <div class="spinner spinner-sm"></div>
                     </div>
-
-                    <!-- VM Sizes Section -->
-                    <div class="form-section">
-                        <h2>VM Sizes</h2>
-                        <p class="section-description">For each region, expand the section once to fetch VM sizes from Azure, then select which VM sizes should be available. If none are checked for a region, all VM sizes are shown.</p>
-
-                        {{range .Regions}}
-                        <div class="region-flavors-section">
-                            <div class="region-flavors-header">
-                                <span class="region-flavors-header-label" onclick="toggleVMSizes('{{.Name}}')">{{.Name}}{{if .DisplayName}} — {{.DisplayName}}{{end}}</span>
-                                <button type="button" class="btn btn-secondary btn-xs" onclick="invertCheckboxes('vmsize_enabled_{{.Name}}')">Invert</button>
-                                <span class="flavor-toggle region-flavors-toggle" id="toggle-{{.Name}}" onclick="toggleVMSizes('{{.Name}}')">&#9660;</span>
-                            </div>
-                            <div class="region-flavors-body" id="vmsizes-{{.Name}}" style="display: none;">
-                                <p class="hint-text">Expand this section to load VM sizes for {{.Name}} from Azure.</p>
-                            </div>
-                        </div>
-                        {{end}}
-                    </div>
-
-                    <div class="form-actions">
-                        <button type="submit" class="btn btn-primary">
-                            <span class="btn-icon">💾</span> Save Options
-                        </button>
-                        <div id="save-loading" class="htmx-indicator">
-                            <div class="spinner spinner-sm"></div>
-                        </div>
-                    </div>
-                </form>
-                {{end}}
+                </span>
             </div>
         </div>
+        {{else}}
+        <div class="action-toolbar">
+            <span class="btn btn-primary btn-with-spinner"
+                  hx-post="/api/azure-options/refresh"
+                  hx-target="#save-response"
+                  hx-swap="innerHTML">
+                <span class="btn-icon">🔄</span> Refresh from Azure
+                <div class="htmx-indicator">
+                    <div class="spinner spinner-sm"></div>
+                </div>
+            </span>
+            <span class="hint-text">Loads region list from Azure. VM sizes load when you expand a region below.</span>
+        </div>
+
+        <form id="azure-options-form"
+              method="POST"
+              action="/api/azure-options"
+              hx-post="/api/azure-options"
+              hx-target="#save-response"
+              hx-swap="innerHTML"
+              hx-indicator="#save-loading">
+
+            <!-- Regions Section -->
+            <div class="form-section">
+                <div class="section-header-row">
+                    <h2>Regions</h2>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="invertCheckboxes('region_enabled')">Invert Selection</button>
+                </div>
+                <p class="section-description">Select which regions should be available in the lab creation form. Unchecked regions will be hidden. If none are checked, all regions are shown.</p>
+
+                <table class="options-table">
+                    <thead>
+                        <tr>
+                            <th>Region</th>
+                            <th>Display Name</th>
+                            <th class="col-center">Enabled</th>
+                            <th class="col-center">Default</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .Regions}}
+                        <tr>
+                            <td class="col-name-mono">{{.Name}}</td>
+                            <td>{{.DisplayName}}</td>
+                            <td class="col-center">
+                                <input type="checkbox" name="region_enabled" value="{{.Name}}" {{if .Enabled}}checked{{end}}>
+                            </td>
+                            <td class="col-center">
+                                <input type="radio" name="region_default" value="{{.Name}}" {{if .Default}}checked{{end}}>
+                            </td>
+                        </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- VM Sizes Section -->
+            <div class="form-section">
+                <h2>VM Sizes</h2>
+                <p class="section-description">For each region, expand the section once to fetch VM sizes from Azure, then select which VM sizes should be available. If none are checked for a region, all VM sizes are shown.</p>
+
+                {{range .Regions}}
+                <div class="region-flavors-section">
+                    <div class="region-flavors-header">
+                        <span class="region-flavors-header-label" onclick="toggleVMSizes('{{.Name}}')">{{.Name}}{{if .DisplayName}} — {{.DisplayName}}{{end}}</span>
+                        <button type="button" class="btn btn-secondary btn-xs" onclick="invertCheckboxes('vmsize_enabled_{{.Name}}')">Invert</button>
+                        <span class="flavor-toggle region-flavors-toggle" id="toggle-{{.Name}}" onclick="toggleVMSizes('{{.Name}}')">&#9660;</span>
+                    </div>
+                    <div class="region-flavors-body" id="vmsizes-{{.Name}}" style="display: none;">
+                        <p class="hint-text">Expand this section to load VM sizes for {{.Name}} from Azure.</p>
+                    </div>
+                </div>
+                {{end}}
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">
+                    <span class="btn-icon">💾</span> Save Options
+                </button>
+                <div id="save-loading" class="htmx-indicator">
+                    <div class="spinner spinner-sm"></div>
+                </div>
+            </div>
+        </form>
+        {{end}}
+
         </div>
         </div>
     </div>
 </div>
 
-    <script src="/static/header-provider.js"></script>
-    <script src="/static/credentials.js"></script>
     <script>
-    function switchProviderTab(tabName) {
-        document.querySelectorAll('.provider-tab').forEach(function(t) {
-            t.classList.toggle('active', t.dataset.tab === tabName);
-        });
-        document.querySelectorAll('.provider-tab-panel').forEach(function(p) {
-            p.classList.toggle('active', p.id === 'tab-' + tabName);
-        });
-        if (history.replaceState) {
-            history.replaceState(null, '', '#' + tabName);
-        }
-    }
-
     function toggleVMSizes(region) {
         var body = document.getElementById('vmsizes-' + region);
         var toggle = document.getElementById('toggle-' + region);
@@ -343,11 +157,6 @@
     }
 
     document.addEventListener('DOMContentLoaded', function() {
-        var hash = window.location.hash.replace('#', '');
-        if (hash === 'options' || hash === 'credentials') {
-            switchProviderTab(hash);
-        }
-
         document.body.addEventListener('htmx:afterSwap', function(evt) {
             if (evt.detail.target && evt.detail.target.id === 'save-response') {
                 setTimeout(function() {

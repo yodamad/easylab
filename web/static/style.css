@@ -1117,6 +1117,12 @@ a.btn {
     border: 1px solid var(--border);
 }
 
+.provider-section-link {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+}
+
 .status-container h3 {
     margin-top: 0;
     margin-bottom: 1rem;

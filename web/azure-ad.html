@@ -1,0 +1,115 @@
+{{define "title"}}Azure AD Configuration{{end}}
+{{define "body-class"}}admin-page{{end}}
+{{define "head-extra"}}
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.0/dist/htmx.min.js" integrity="sha384-LAnQFtNXh8s0hn9mOc8bezfn16i4Zo4y3i4dMT8PtV9yip8jGehR3RxCJrmHV11d" crossorigin="anonymous"></script>
+{{end}}
+
+{{define "body"}}
+<div class="admin-layout">
+    {{template "admin-sidebar" .}}
+    <div class="admin-main">
+        <div class="admin-page-header">
+            <h1>Azure AD Configuration</h1>
+        </div>
+        <div class="admin-page-body">
+        <div class="admin-content-narrow">
+
+        <form id="azure-ad-form"
+              method="POST"
+              action="/api/azure-ad-config"
+              hx-post="/api/azure-ad-config"
+              hx-target="#save-response"
+              hx-swap="innerHTML"
+              hx-indicator="#azure-ad-loading"
+              hx-boost="false">
+            <div id="azure-ad-loading" class="htmx-indicator">
+                <div class="spinner"></div>
+                <p>Saving Azure AD configuration...</p>
+            </div>
+
+            <div id="save-response"></div>
+
+            <div class="form-section">
+                <h2>Azure AD — Student Login (OAuth)</h2>
+                <p class="section-description">Configure Azure AD (Entra ID) to allow students to log in with their Microsoft account. Leave all fields empty to disable.</p>
+
+                {{if .ClientID}}
+                <div class="info-box">
+                    <p>Azure AD login is currently <strong>enabled</strong> (client ID configured).</p>
+                </div>
+                {{else}}
+                <div class="info-box">
+                    <p>Azure AD login is currently <strong>disabled</strong>. Fill in the fields below to enable it.</p>
+                </div>
+                {{end}}
+
+                <div class="form-group">
+                    <label for="azure_ad_client_id">Application (Client) ID</label>
+                    <input type="text" id="azure_ad_client_id" name="azure_ad_client_id"
+                           value="{{.ClientID}}"
+                           placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                    <small>The Application (client) ID of your Azure AD app registration</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="azure_ad_client_secret">Client Secret</label>
+                    <input type="password" id="azure_ad_client_secret" name="azure_ad_client_secret"
+                           {{if .ClientSecret}}placeholder="(saved — enter new value to change)"{{end}}>
+                    <small>The client secret for your Azure AD app registration</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="azure_ad_tenant_id">Directory (Tenant) ID</label>
+                    <input type="text" id="azure_ad_tenant_id" name="azure_ad_tenant_id"
+                           value="{{.TenantID}}"
+                           placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                    <small>Your Azure AD tenant ID (found in Azure Portal → Azure Active Directory)</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="azure_ad_admin_group_id">Admin Group ID (Object ID)</label>
+                    <input type="text" id="azure_ad_admin_group_id" name="azure_ad_admin_group_id"
+                           value="{{.AdminGroupID}}"
+                           placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                    <small>Optional. When set, enables a "Sign in with Microsoft" button on the admin login page. Only direct members of this Azure AD group (by Object ID) can log in as admin. Requires the app registration to have <strong>User.Read</strong> delegated permission and the user's account to be part of the group.</small>
+                </div>
+
+                {{if .ClientID}}
+                <div class="form-checkboxes">
+                    <span>Login restrictions</span>
+                    <div class="checkbox-stack">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="azure_ad_disable_classic_login" id="azure_ad_disable_classic_login"
+                                   {{if .DisableClassicLogin}}checked{{end}}>
+                            Disable password login for students
+                        </label>
+                        {{if .AdminGroupID}}
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="azure_ad_disable_classic_admin_login" id="azure_ad_disable_classic_admin_login"
+                                   {{if .DisableClassicAdminLogin}}checked{{end}}>
+                            Disable password login for admins
+                        </label>
+                        {{end}}
+                    </div>
+                    <small>When checked, the corresponding password form is hidden and only Microsoft login is available.</small>
+                </div>
+                {{end}}
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">
+                    <span class="btn-icon">💾</span> Save Azure AD Config
+                </button>
+                {{if .ClientID}}
+                <button type="button" class="btn btn-secondary" onclick="document.getElementById('azure_ad_client_id').value='';document.getElementById('azure_ad_client_secret').value='';document.getElementById('azure_ad_tenant_id').value='';htmx.trigger('#azure-ad-form','submit');">
+                    <span class="btn-icon">✕</span> Disable Azure AD Login
+                </button>
+                {{end}}
+            </div>
+        </form>
+
+        </div>
+        </div>
+    </div>
+</div>
+{{end}}
