@@ -1,33 +1,145 @@
 {{define "title"}}Home{{end}}
 
+{{define "head-extra"}}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+{{end}}
+
 {{define "body-class"}}home-page{{end}}
 
 {{define "body"}}
-<div class="home-container">
-    <div class="home-header">
-        <img src="/static/logo.png" alt="EasyLab Logo" class="home-logo">
-        <h1>EasyLab</h1>
-        <p>Welcome to the EasyLab platform</p>
-    </div>
+<canvas class="home-canvas" id="nodeCanvas"></canvas>
 
-    <div class="home-content">
-        <p class="home-content-intro">
-            Choose your space to get started
-        </p>
-
-        <div class="options-grid">
-            <a href="/student/login" class="option-card student">
-                <div class="card-icon">🎓</div>
-                <h2>Student Space</h2>
-                <p>Access your workspace and request a new development environment</p>
-            </a>
-
-            <a href="/login" class="option-card admin">
-                <div class="card-icon">⚙️</div>
-                <h2>Admin Space</h2>
-                <p>Create and manage lab environments, configure infrastructure</p>
-            </a>
+<div class="home-scene">
+    <div class="home-brand">
+        <img src="/static/logo.png" alt="EasyLab" class="home-brand-logo">
+        <div class="home-brand-text">
+            <span class="home-wordmark">EasyLab</span>
+            <span class="home-tagline">Cloud Lab Infrastructure Platform</span>
         </div>
     </div>
+
+    <div class="home-cards">
+        <a href="/student/login" class="home-card home-card--student">
+            <div class="home-card-glow"></div>
+            <div class="home-card-icon">
+                <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="24" cy="14" r="6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+                    <path d="M8 38c0-8.837 7.163-16 16-16s16 7.163 16 16" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+                    <path d="M24 28l-4 4 4 4 4-4-4-4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                    <circle cx="36" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+                    <path d="M36 9V6M39 10l2-2M40 13h3M39 16l2 2M36 15v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+            </div>
+            <div class="home-card-body">
+                <h2 class="home-card-title">Student Space</h2>
+                <p class="home-card-desc">Access your workspace and launch a cloud development environment</p>
+            </div>
+            <div class="home-card-arrow">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </div>
+        </a>
+
+        <a href="/login" class="home-card home-card--admin">
+            <div class="home-card-glow"></div>
+            <div class="home-card-icon">
+                <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="8" y="10" width="32" height="8" rx="2" stroke="currentColor" stroke-width="2.5"/>
+                    <rect x="8" y="22" width="32" height="8" rx="2" stroke="currentColor" stroke-width="2.5"/>
+                    <rect x="8" y="34" width="32" height="8" rx="2" stroke="currentColor" stroke-width="2.5"/>
+                    <circle cx="36" cy="14" r="2" fill="currentColor"/>
+                    <circle cx="36" cy="26" r="2" fill="currentColor"/>
+                    <circle cx="36" cy="38" r="2" fill="currentColor"/>
+                    <circle cx="30" cy="14" r="2" fill="currentColor"/>
+                </svg>
+            </div>
+            <div class="home-card-body">
+                <h2 class="home-card-title">Admin Space</h2>
+                <p class="home-card-desc">Provision lab environments, manage infrastructure and configure clusters</p>
+            </div>
+            <div class="home-card-arrow">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </div>
+        </a>
+    </div>
+
+    <div class="home-footer-credits">
+        <span>Powered by</span>
+        <span class="home-credit-pill">Pulumi</span>
+        <span class="home-credit-sep">·</span>
+        <span class="home-credit-pill">OVHcloud</span>
+        <span class="home-credit-sep">·</span>
+        <span class="home-credit-pill">Coder</span>
+    </div>
 </div>
+
+<script>
+(function() {
+    var canvas = document.getElementById('nodeCanvas');
+    var ctx = canvas.getContext('2d');
+    var nodes = [];
+    var NODE_COUNT = 55;
+    var MAX_DIST = 160;
+
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+
+    function init() {
+        nodes = [];
+        for (var i = 0; i < NODE_COUNT; i++) {
+            nodes.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                vx: (Math.random() - 0.5) * 0.35,
+                vy: (Math.random() - 0.5) * 0.35,
+                r: Math.random() * 2 + 1.2
+            });
+        }
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        for (var i = 0; i < nodes.length; i++) {
+            var n = nodes[i];
+            n.x += n.vx;
+            n.y += n.vy;
+            if (n.x < 0 || n.x > canvas.width) n.vx *= -1;
+            if (n.y < 0 || n.y > canvas.height) n.vy *= -1;
+
+            for (var j = i + 1; j < nodes.length; j++) {
+                var m = nodes[j];
+                var dx = n.x - m.x, dy = n.y - m.y;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < MAX_DIST) {
+                    var alpha = (1 - dist / MAX_DIST) * 0.18;
+                    ctx.beginPath();
+                    ctx.strokeStyle = 'rgba(0, 200, 200, ' + alpha + ')';
+                    ctx.lineWidth = 0.8;
+                    ctx.moveTo(n.x, n.y);
+                    ctx.lineTo(m.x, m.y);
+                    ctx.stroke();
+                }
+            }
+
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(0, 220, 210, 0.55)';
+            ctx.fill();
+        }
+        requestAnimationFrame(draw);
+    }
+
+    resize();
+    init();
+    draw();
+    window.addEventListener('resize', function() { resize(); init(); });
+})();
+</script>
 {{end}}
