@@ -344,7 +344,7 @@ func (ah *AuthHandler) ServeLogin(w http.ResponseWriter, r *http.Request) {
 	// Check if already logged in
 	if cookie, err := r.Cookie(SessionCookieName); err == nil {
 		if ah.validateSession(cookie.Value) {
-			http.Redirect(w, r, "/admin", http.StatusSeeOther)
+			http.Redirect(w, r, "/labs", http.StatusSeeOther)
 			return
 		}
 	}
@@ -434,7 +434,7 @@ func (ah *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 
 	log.Printf("Successful login")
-	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+	http.Redirect(w, r, "/labs", http.StatusSeeOther)
 }
 
 // HandleLogout logs out the user
@@ -893,7 +893,7 @@ func (ah *AuthHandler) HandleAdminAzureADCallback(w http.ResponseWriter, r *http
 	})
 
 	log.Printf("Successful Azure AD admin login: %s", email)
-	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+	http.Redirect(w, r, "/labs", http.StatusSeeOther)
 }
 
 // checkDirectGroupMembership calls the Microsoft Graph API to verify that the signed-in user
