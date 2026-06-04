@@ -4649,6 +4649,20 @@ body.admin-page {
     flex-shrink: 0;
 }
 
+.admin-nav-group-label {
+    padding: 0.5rem 1rem 0.125rem;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #475569;
+}
+
+.admin-nav-sub-item {
+    padding-left: 2.25rem;
+    font-size: 0.8125rem;
+}
+
 .admin-sidebar-footer {
     border-top: 1px solid rgba(255, 255, 255, 0.06);
     padding: 0.5rem 0;

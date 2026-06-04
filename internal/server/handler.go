@@ -583,6 +583,7 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 		"ovh-credentials.html":   "web/ovh-credentials.html", // Keep for backward compatibility
 		"ovh-options.html":       "web/ovh-options.html",
 		"azure-options.html":     "web/azure-options.html",
+		"azure-provider.html":    "web/azure-provider.html",
 		"azure-ad.html":          "web/azure-ad.html",
 		"labs-list.html":         "web/labs-list.html",
 		"lab-workspaces.html":    "web/lab-workspaces.html",
@@ -2357,6 +2358,41 @@ func (h *Handler) ServeAzureOptions(w http.ResponseWriter, r *http.Request) {
 		"Config":   cfg,
 	}
 	h.serveTemplate(w, "azure-options.html", data)
+}
+
+// ServeAzureProvider serves the unified Azure provider page (credentials + options tabs).
+func (h *Handler) ServeAzureProvider(w http.ResponseWriter, r *http.Request) {
+	data := map[string]interface{}{
+		"HasCache": false,
+		"Regions":  nil,
+		"Config":   nil,
+	}
+	if h.azureOptionsManager != nil {
+		cfg := h.azureOptionsManager.GetConfig()
+		regions := h.azureOptionsManager.GetCachedRegions()
+		hasCache := h.azureOptionsManager.HasCache()
+		enabledRegionSet := toSet(cfg.Regions.Enabled)
+		showAllRegions := len(enabledRegionSet) == 0
+		type azureRegionRow struct {
+			Name        string
+			DisplayName string
+			Enabled     bool
+			Default     bool
+		}
+		var regionsData []azureRegionRow
+		for _, name := range regions {
+			regionsData = append(regionsData, azureRegionRow{
+				Name:        name,
+				DisplayName: h.azureOptionsManager.RegionDisplayName(name),
+				Enabled:     showAllRegions || enabledRegionSet[name],
+				Default:     name == cfg.Regions.Default,
+			})
+		}
+		data["HasCache"] = hasCache
+		data["Regions"] = regionsData
+		data["Config"] = cfg
+	}
+	h.serveTemplate(w, "azure-provider.html", data)
 }
 
 // ServeAzureAD serves the Azure AD OAuth configuration admin page.

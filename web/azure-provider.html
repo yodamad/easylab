@@ -1,0 +1,233 @@
+{{define "title"}}Azure Configuration{{end}}
+{{define "body-class"}}admin-page{{end}}
+{{define "head-extra"}}
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.0/dist/htmx.min.js" integrity="sha384-LAnQFtNXh8s0hn9mOc8bezfn16i4Zo4y3i4dMT8PtV9yip8jGehR3RxCJrmHV11d" crossorigin="anonymous"></script>
+{{end}}
+
+{{define "body"}}
+<div class="admin-layout">
+    {{template "admin-sidebar" .}}
+    <div class="admin-main">
+        <div class="admin-page-header">
+            <h1>Azure Configuration</h1>
+        </div>
+        <div class="admin-page-body">
+        <div class="admin-content-narrow">
+
+        <div>
+            <div class="provider-tabs">
+                <button class="provider-tab active" data-tab="credentials" onclick="switchProviderTab('credentials')">
+                    🔐 Credentials
+                </button>
+                <button class="provider-tab" data-tab="options" onclick="switchProviderTab('options')">
+                    ⚙️ Options
+                </button>
+            </div>
+
+            <!-- Credentials Tab -->
+            <div id="tab-credentials" class="provider-tab-panel active">
+                <div class="credentials-container">
+                    <div class="info-box">
+                        <h3>ℹ️ About Azure Credentials</h3>
+                        <p>These credentials will be stored in memory and used for all lab deployments. They will be cleared when the application restarts.</p>
+                        <p><strong>Note:</strong> Credentials are not persisted to disk for security reasons.</p>
+                    </div>
+
+                    <div id="provider-section-azure" class="provider-section">
+                        <form id="credentials-form-azure" action="/api/credentials" method="POST" enctype="application/x-www-form-urlencoded" hx-post="/api/credentials" hx-target="#form-response-azure" hx-swap="innerHTML" hx-indicator="#loading-azure" hx-boost="false">
+                            <input type="hidden" name="provider" value="azure">
+                            <div id="form-response-azure"></div>
+                            <div id="loading-azure" class="htmx-indicator">
+                                <div class="spinner"></div>
+                                <p>Saving credentials...</p>
+                            </div>
+
+                            <div class="form-section">
+                                <h2>Azure Service Principal Credentials</h2>
+
+                                <div class="form-group">
+                                    <label for="azure_client_id">Client ID *</label>
+                                    <input type="password" id="azure_client_id" name="azure_client_id" required>
+                                    <small>The Application (client) ID of your Azure Service Principal</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="azure_client_secret">Client Secret *</label>
+                                    <input type="password" id="azure_client_secret" name="azure_client_secret" required>
+                                    <small>The client secret value for your Azure Service Principal</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="azure_tenant_id">Tenant ID *</label>
+                                    <input type="text" id="azure_tenant_id" name="azure_tenant_id" required>
+                                    <small>Your Azure Active Directory Tenant ID</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="azure_subscription_id">Subscription ID *</label>
+                                    <input type="text" id="azure_subscription_id" name="azure_subscription_id" required>
+                                    <small>The Azure Subscription ID where resources will be created</small>
+                                </div>
+                            </div>
+
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary">
+                                    <span class="btn-icon">💾</span> Save Credentials
+                                </button>
+                                <button type="button" id="btn-check-azure" class="btn btn-secondary" onclick="checkCredentials('azure')">
+                                    <span class="btn-icon">✓</span> Check Status
+                                </button>
+                            </div>
+                        </form>
+
+                        <div id="status-container-azure" class="status-container" style="display: none;">
+                            <h3>Current Status</h3>
+                            <div id="status-content-azure"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Options Tab -->
+            <div id="tab-options" class="provider-tab-panel">
+                <div id="save-response"></div>
+
+                {{if not .HasCache}}
+                <div class="info-box">
+                    <h3>No cached data available</h3>
+                    <p>No regions are cached yet. Make sure your Azure credentials are configured, then click "Refresh from Azure" to load available regions.</p>
+                    <div class="info-box-actions">
+                        <button class="btn btn-secondary" onclick="switchProviderTab('credentials')">
+                            <span class="btn-icon">🔐</span> Configure Credentials
+                        </button>
+                        <span class="btn btn-primary btn-with-spinner"
+                              hx-post="/api/azure-options/refresh"
+                              hx-target="#save-response"
+                              hx-swap="innerHTML">
+                            <span class="btn-icon">🔄</span> Refresh from Azure
+                            <div id="refresh-loading" class="htmx-indicator">
+                                <div class="spinner spinner-sm"></div>
+                            </div>
+                        </span>
+                    </div>
+                </div>
+                {{else}}
+                <div class="action-toolbar">
+                    <span class="btn btn-primary btn-with-spinner"
+                          hx-post="/api/azure-options/refresh"
+                          hx-target="#save-response"
+                          hx-swap="innerHTML">
+                        <span class="btn-icon">🔄</span> Refresh from Azure
+                        <div class="htmx-indicator">
+                            <div class="spinner spinner-sm"></div>
+                        </div>
+                    </span>
+                    <span class="hint-text">Loads region list from Azure. VM sizes load when you expand a region below.</span>
+                </div>
+
+                <form id="azure-options-form"
+                      method="POST"
+                      action="/api/azure-options"
+                      hx-post="/api/azure-options"
+                      hx-target="#save-response"
+                      hx-swap="innerHTML"
+                      hx-indicator="#save-loading">
+
+                    <!-- Regions Section -->
+                    <div class="form-section">
+                        <div class="section-header-row">
+                            <h2>Regions</h2>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="invertCheckboxes('region_enabled')">Invert Selection</button>
+                        </div>
+                        <p class="section-description">Select which regions should be available in the lab creation form. Unchecked regions will be hidden. If none are checked, all regions are shown.</p>
+
+                        <table class="options-table">
+                            <thead>
+                                <tr>
+                                    <th>Region</th>
+                                    <th>Display Name</th>
+                                    <th class="col-center">Enabled</th>
+                                    <th class="col-center">Default</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {{range .Regions}}
+                                <tr>
+                                    <td class="col-name-mono">{{.Name}}</td>
+                                    <td>{{.DisplayName}}</td>
+                                    <td class="col-center">
+                                        <input type="checkbox" name="region_enabled" value="{{.Name}}" {{if .Enabled}}checked{{end}}>
+                                    </td>
+                                    <td class="col-center">
+                                        <input type="radio" name="region_default" value="{{.Name}}" {{if .Default}}checked{{end}}>
+                                    </td>
+                                </tr>
+                                {{end}}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- VM Sizes Section -->
+                    <div class="form-section">
+                        <h2>VM Sizes</h2>
+                        <p class="section-description">For each region, expand the section once to fetch VM sizes from Azure, then select which VM sizes should be available. If none are checked for a region, all VM sizes are shown.</p>
+
+                        {{range .Regions}}
+                        <div class="region-flavors-section">
+                            <div class="region-flavors-header">
+                                <span class="region-flavors-header-label" onclick="toggleVMSizes('{{.Name}}')">{{.Name}}{{if .DisplayName}} — {{.DisplayName}}{{end}}</span>
+                                <button type="button" class="btn btn-secondary btn-xs" onclick="invertCheckboxes('vmsize_enabled_{{.Name}}')">Invert</button>
+                                <span class="flavor-toggle region-flavors-toggle" id="toggle-{{.Name}}" onclick="toggleVMSizes('{{.Name}}')">&#9660;</span>
+                            </div>
+                            <div class="region-flavors-body" id="vmsizes-{{.Name}}" style="display: none;">
+                                <p class="hint-text">Expand this section to load VM sizes for {{.Name}} from Azure.</p>
+                            </div>
+                        </div>
+                        {{end}}
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">
+                            <span class="btn-icon">💾</span> Save Options
+                        </button>
+                        <div id="save-loading" class="htmx-indicator">
+                            <div class="spinner spinner-sm"></div>
+                        </div>
+                    </div>
+                </form>
+                {{end}}
+            </div>
+        </div>
+        </div>
+        </div>
+    </div>
+</div>
+
+    <script src="/static/header-provider.js"></script>
+    <script src="/static/credentials.js"></script>
+    <script src="/static/ovh-options.js"></script>
+    <script>
+    function toggleVMSizes(region) {
+        var body = document.getElementById('vmsizes-' + region);
+        var toggle = document.getElementById('toggle-' + region);
+        if (!body || !toggle) return;
+        if (body.style.display === 'none' || body.style.display === '') {
+            body.style.display = 'block';
+            toggle.classList.add('rotate-up');
+            if (!body.dataset.vmSizesFetched) {
+                body.dataset.vmSizesFetched = '1';
+                body.innerHTML = '<p class="hint-text">Loading VM sizes…</p>';
+                if (typeof htmx !== 'undefined') {
+                    htmx.ajax('GET', '/api/azure-options/region-vm-sizes?region=' + encodeURIComponent(region), {
+                        target: '#vmsizes-' + region,
+                        swap: 'innerHTML'
+                    });
+                }
+            }
+        } else {
+            body.style.display = 'none';
+            toggle.classList.remove('rotate-up');
+        }
+    }
+    </script>
+{{end}}

@@ -320,6 +320,7 @@ func main() {
 		http.Redirect(w, r, "/credentials?provider=azure", http.StatusMovedPermanently)
 	}))
 	mux.HandleFunc("/admin/azure-options", authHandler.RequireAuth(handler.ServeAzureOptions))
+	mux.HandleFunc("/admin/azure-provider", authHandler.RequireAuth(handler.ServeAzureProvider))
 	mux.HandleFunc("/admin/azure-ad", authHandler.RequireAuth(handler.ServeAzureAD))
 	mux.HandleFunc("/api/azure/locations", authHandler.RequireAuth(handler.GetAzureLocations))
 	mux.HandleFunc("/api/azure/vm-sizes", authHandler.RequireAuth(handler.GetAzureVMSizes))
