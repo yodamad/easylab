@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -893,6 +894,9 @@ func TestHandler_LaunchLab_DryRunCompleted(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.LaunchLab(w, req)
 	assert.Contains(t, w.Body.String(), "Deployment Launched")
+
+	// Wait for background goroutine to finish before t.TempDir cleanup runs.
+	waitForJobsTerminal(jm, 5*time.Second)
 }
 
 func TestHandler_RequestWorkspace_NoEmail(t *testing.T) {
