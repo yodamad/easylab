@@ -9,10 +9,35 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// waitForJobsTerminal blocks until all jobs in jm have reached a terminal state
+// (completed, failed, destroyed, dry-run-completed) or the timeout elapses.
+// This prevents t.TempDir cleanup from racing with background goroutines that
+// create job directories.
+func waitForJobsTerminal(jm *JobManager, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		allDone := true
+		for _, j := range jm.GetAllJobs() {
+			j.mu.RLock()
+			s := j.Status
+			j.mu.RUnlock()
+			if s == JobStatusPending || s == JobStatusRunning {
+				allDone = false
+				break
+			}
+		}
+		if allDone {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
 
 // --- writeJSONError tests ---
 
@@ -343,6 +368,11 @@ func TestHandler_CreateLab_BYOKGitTemplate_MultipartForm(t *testing.T) {
 	// → executeLabJobWithID is called → returns job HTML
 	body := wr.Body.String()
 	assert.True(t, strings.Contains(body, "job") || strings.Contains(body, "Job Created"), "expected job response, got: "+body)
+
+	// Wait for background goroutine to finish before t.TempDir cleanup runs.
+	// Without this, the goroutine may still be writing job subdirectories when
+	// cleanup tries to remove the temp dir, causing ENOTEMPTY.
+	waitForJobsTerminal(jm, 5*time.Second)
 }
 
 func TestHandler_DryRunLab_BYOKGitTemplate_MultipartForm(t *testing.T) {
