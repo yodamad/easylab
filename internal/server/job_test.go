@@ -730,3 +730,104 @@ func TestJobManager_ResetJobForRetry_NotFound(t *testing.T) {
 		t.Error("ResetJobForRetry() should error for nonexistent job")
 	}
 }
+
+// --- RecordDeletionFailure / ClearDeletionRetry tests ---
+
+func TestJobManager_RecordDeletionFailure_FirstAttempt(t *testing.T) {
+	t.Parallel()
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test"})
+
+	err := jm.RecordDeletionFailure(id, "ws-1", "my-ws", 3)
+	if err != nil {
+		t.Fatalf("RecordDeletionFailure() error = %v", err)
+	}
+
+	job, _ := jm.GetJob(id)
+	job.mu.RLock()
+	r := job.DeletionRetries["ws-1"]
+	job.mu.RUnlock()
+
+	if r == nil {
+		t.Fatal("expected retry record, got nil")
+	}
+	if r.Attempts != 1 {
+		t.Errorf("Attempts = %d, want 1", r.Attempts)
+	}
+	if r.GiveUp {
+		t.Error("GiveUp should be false after first attempt")
+	}
+	if r.WorkspaceName != "my-ws" {
+		t.Errorf("WorkspaceName = %q, want %q", r.WorkspaceName, "my-ws")
+	}
+}
+
+func TestJobManager_RecordDeletionFailure_SetsGiveUpAtMaxRetries(t *testing.T) {
+	t.Parallel()
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test"})
+
+	for i := 0; i < 3; i++ {
+		if err := jm.RecordDeletionFailure(id, "ws-1", "my-ws", 3); err != nil {
+			t.Fatalf("RecordDeletionFailure() error = %v", err)
+		}
+	}
+
+	job, _ := jm.GetJob(id)
+	job.mu.RLock()
+	r := job.DeletionRetries["ws-1"]
+	job.mu.RUnlock()
+
+	if r == nil {
+		t.Fatal("expected retry record, got nil")
+	}
+	if r.Attempts != 3 {
+		t.Errorf("Attempts = %d, want 3", r.Attempts)
+	}
+	if !r.GiveUp {
+		t.Error("GiveUp should be true after max retries")
+	}
+}
+
+func TestJobManager_RecordDeletionFailure_NotFound(t *testing.T) {
+	t.Parallel()
+	jm := NewJobManager("")
+	err := jm.RecordDeletionFailure("nonexistent", "ws-1", "my-ws", 3)
+	if err == nil {
+		t.Error("RecordDeletionFailure() should error for nonexistent job")
+	}
+}
+
+func TestJobManager_ClearDeletionRetry_RemovesRecord(t *testing.T) {
+	t.Parallel()
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test"})
+
+	// Record a failure first
+	if err := jm.RecordDeletionFailure(id, "ws-1", "my-ws", 3); err != nil {
+		t.Fatalf("RecordDeletionFailure() error = %v", err)
+	}
+
+	// Clear it
+	if err := jm.ClearDeletionRetry(id, "ws-1"); err != nil {
+		t.Fatalf("ClearDeletionRetry() error = %v", err)
+	}
+
+	job, _ := jm.GetJob(id)
+	job.mu.RLock()
+	r := job.DeletionRetries["ws-1"]
+	job.mu.RUnlock()
+
+	if r != nil {
+		t.Error("expected retry record to be removed")
+	}
+}
+
+func TestJobManager_ClearDeletionRetry_NotFound(t *testing.T) {
+	t.Parallel()
+	jm := NewJobManager("")
+	err := jm.ClearDeletionRetry("nonexistent", "ws-1")
+	if err == nil {
+		t.Error("ClearDeletionRetry() should error for nonexistent job")
+	}
+}

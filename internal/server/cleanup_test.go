@@ -258,6 +258,232 @@ func TestCleanupInterval_ZeroEnvVar(t *testing.T) {
 	assert.Equal(t, 5*time.Minute, cleanupInterval())
 }
 
+// --- deletionRetryMaxRetries tests ---
+
+func TestDeletionRetryMaxRetries_Default(t *testing.T) {
+	t.Setenv("CLEANUP_DELETE_MAX_RETRIES", "")
+	assert.Equal(t, 3, deletionRetryMaxRetries())
+}
+
+func TestDeletionRetryMaxRetries_EnvVar(t *testing.T) {
+	t.Setenv("CLEANUP_DELETE_MAX_RETRIES", "5")
+	assert.Equal(t, 5, deletionRetryMaxRetries())
+}
+
+func TestDeletionRetryMaxRetries_Invalid(t *testing.T) {
+	t.Setenv("CLEANUP_DELETE_MAX_RETRIES", "not-a-number")
+	assert.Equal(t, 3, deletionRetryMaxRetries())
+}
+
+func TestDeletionRetryMaxRetries_Zero(t *testing.T) {
+	t.Setenv("CLEANUP_DELETE_MAX_RETRIES", "0")
+	assert.Equal(t, 3, deletionRetryMaxRetries())
+}
+
+// --- deletionRetryInterval tests ---
+
+func TestDeletionRetryInterval_Default(t *testing.T) {
+	t.Setenv("CLEANUP_DELETE_RETRY_INTERVAL_HOURS", "")
+	assert.Equal(t, 2*time.Hour, deletionRetryInterval())
+}
+
+func TestDeletionRetryInterval_EnvVar(t *testing.T) {
+	t.Setenv("CLEANUP_DELETE_RETRY_INTERVAL_HOURS", "4")
+	assert.Equal(t, 4*time.Hour, deletionRetryInterval())
+}
+
+func TestDeletionRetryInterval_Invalid(t *testing.T) {
+	t.Setenv("CLEANUP_DELETE_RETRY_INTERVAL_HOURS", "bad")
+	assert.Equal(t, 2*time.Hour, deletionRetryInterval())
+}
+
+func TestDeletionRetryInterval_Zero(t *testing.T) {
+	t.Setenv("CLEANUP_DELETE_RETRY_INTERVAL_HOURS", "0")
+	assert.Equal(t, 2*time.Hour, deletionRetryInterval())
+}
+
+// --- cleanup retry behaviour tests ---
+
+func TestCleanupExpiredWorkspaces_SkipsWorkspaceWithGiveUp(t *testing.T) {
+	// Mock Coder that returns one expired workspace; deletion call should never be made.
+	deleteCalled := false
+	wsID := "550e8400-e29b-41d4-a716-446655440001"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/healthz":
+			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/api/v2/workspaces":
+			type workspace struct {
+				ID        string `json:"id"`
+				Name      string `json:"name"`
+				CreatedAt string `json:"created_at"`
+			}
+			type wsResp struct {
+				Workspaces []workspace `json:"workspaces"`
+				Count      int         `json:"count"`
+			}
+			json.NewEncoder(w).Encode(wsResp{
+				Workspaces: []workspace{{ID: wsID, Name: "old-ws", CreatedAt: time.Now().Add(-2 * time.Hour).Format(time.RFC3339)}},
+				Count:      1,
+			})
+		case r.URL.Path == "/api/v2/workspaces/"+wsID+"/builds" && r.Method == http.MethodPost:
+			deleteCalled = true
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]interface{}{"id": "00000000-0000-0000-0000-000000000001", "workspace_id": wsID, "status": "pending"})
+		case r.URL.Path == "/api/v2/users/login":
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]string{"session_token": "token"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test", WorkspaceLifetimeHours: 1})
+	jm.UpdateJobStatus(id, JobStatusCompleted)
+
+	job, _ := jm.GetJob(id)
+	job.mu.Lock()
+	job.CoderURL = srv.URL
+	job.CoderSessionToken = "token"
+	job.CoderOrganizationID = "00000000-0000-0000-0000-000000000000"
+	job.CoderAdminEmail = "admin@example.com"
+	job.CoderAdminPassword = "password"
+	// Pre-populate a GiveUp retry record
+	job.DeletionRetries[wsID] = &WorkspaceDeletionRetry{
+		WorkspaceID: wsID, Attempts: 3, GiveUp: true, LastAttempt: time.Now().Add(-3 * time.Hour),
+	}
+	job.mu.Unlock()
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	h.cleanupExpiredWorkspaces()
+
+	assert.False(t, deleteCalled, "delete should not be called for workspace with GiveUp=true")
+}
+
+func TestCleanupExpiredWorkspaces_SkipsWorkspaceBeforeRetryInterval(t *testing.T) {
+	// Workspace failed deletion recently; retry interval not yet elapsed.
+	deleteCalled := false
+	wsID := "550e8400-e29b-41d4-a716-446655440002"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/healthz":
+			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/api/v2/workspaces":
+			type workspace struct {
+				ID        string `json:"id"`
+				Name      string `json:"name"`
+				CreatedAt string `json:"created_at"`
+			}
+			type wsResp struct {
+				Workspaces []workspace `json:"workspaces"`
+				Count      int         `json:"count"`
+			}
+			json.NewEncoder(w).Encode(wsResp{
+				Workspaces: []workspace{{ID: wsID, Name: "old-ws", CreatedAt: time.Now().Add(-2 * time.Hour).Format(time.RFC3339)}},
+				Count:      1,
+			})
+		case r.URL.Path == "/api/v2/workspaces/"+wsID+"/builds" && r.Method == http.MethodPost:
+			deleteCalled = true
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]interface{}{"id": "00000000-0000-0000-0000-000000000002", "workspace_id": wsID, "status": "pending"})
+		case r.URL.Path == "/api/v2/users/login":
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]string{"session_token": "token"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("CLEANUP_DELETE_RETRY_INTERVAL_HOURS", "2")
+
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test", WorkspaceLifetimeHours: 1})
+	jm.UpdateJobStatus(id, JobStatusCompleted)
+
+	job, _ := jm.GetJob(id)
+	job.mu.Lock()
+	job.CoderURL = srv.URL
+	job.CoderSessionToken = "token"
+	job.CoderOrganizationID = "00000000-0000-0000-0000-000000000000"
+	job.CoderAdminEmail = "admin@example.com"
+	job.CoderAdminPassword = "password"
+	// Last attempt was 30 minutes ago — interval is 2h, so not ready yet
+	job.DeletionRetries[wsID] = &WorkspaceDeletionRetry{
+		WorkspaceID: wsID, Attempts: 1, GiveUp: false, LastAttempt: time.Now().Add(-30 * time.Minute),
+	}
+	job.mu.Unlock()
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	h.cleanupExpiredWorkspaces()
+
+	assert.False(t, deleteCalled, "delete should not be called before retry interval elapses")
+}
+
+func TestCleanupExpiredWorkspaces_RecordsDeletionFailure(t *testing.T) {
+	// Deletion fails; RecordDeletionFailure should be called.
+	wsID := "550e8400-e29b-41d4-a716-446655440003"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/healthz":
+			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/api/v2/workspaces":
+			type workspace struct {
+				ID        string `json:"id"`
+				Name      string `json:"name"`
+				CreatedAt string `json:"created_at"`
+			}
+			type wsResp struct {
+				Workspaces []workspace `json:"workspaces"`
+				Count      int         `json:"count"`
+			}
+			json.NewEncoder(w).Encode(wsResp{
+				Workspaces: []workspace{{ID: wsID, Name: "old-ws", CreatedAt: time.Now().Add(-2 * time.Hour).Format(time.RFC3339)}},
+				Count:      1,
+			})
+		case r.URL.Path == "/api/v2/users/login":
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]string{"session_token": "token"})
+		case r.URL.Path == "/api/v2/workspaces/"+wsID+"/builds" && r.Method == http.MethodPost:
+			// Return 500 to simulate deletion failure
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"message": "internal error"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test", WorkspaceLifetimeHours: 1})
+	jm.UpdateJobStatus(id, JobStatusCompleted)
+
+	job, _ := jm.GetJob(id)
+	job.mu.Lock()
+	job.CoderURL = srv.URL
+	job.CoderSessionToken = "token"
+	job.CoderOrganizationID = "00000000-0000-0000-0000-000000000000"
+	job.CoderAdminEmail = "admin@example.com"
+	job.CoderAdminPassword = "password"
+	job.mu.Unlock()
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	h.cleanupExpiredWorkspaces()
+
+	job.mu.RLock()
+	r := job.DeletionRetries[wsID]
+	job.mu.RUnlock()
+
+	require.NotNil(t, r, "expected deletion retry record to be created after failed deletion")
+	assert.Equal(t, 1, r.Attempts)
+	assert.False(t, r.GiveUp, "GiveUp should be false after first failed attempt (max retries is 3)")
+}
+
 // --- cleanupExpiredLabs tests ---
 
 func TestCleanupExpiredLabs_NoJobs(t *testing.T) {

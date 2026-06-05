@@ -31,6 +31,15 @@ type CleanupEvent struct {
 	Count int       `json:"count"`
 }
 
+// WorkspaceDeletionRetry tracks failed auto-deletion attempts for a single workspace.
+type WorkspaceDeletionRetry struct {
+	WorkspaceID   string    `json:"workspace_id"`
+	WorkspaceName string    `json:"workspace_name"`
+	Attempts      int       `json:"attempts"`
+	LastAttempt   time.Time `json:"last_attempt"`
+	GiveUp        bool      `json:"give_up"`
+}
+
 // WorkspaceSnapshot records the total workspace count observed at a point in time.
 type WorkspaceSnapshot struct {
 	At    time.Time `json:"at"`
@@ -53,9 +62,10 @@ type Job struct {
 	CoderAdminPassword  string              `json:"coder_admin_password,omitempty"`
 	CoderSessionToken   string              `json:"coder_session_token,omitempty"`
 	CoderOrganizationID string              `json:"coder_organization_id,omitempty"`
-	CleanupEvents       []CleanupEvent      `json:"cleanup_events,omitempty"`
-	WorkspaceSnapshots  []WorkspaceSnapshot `json:"workspace_snapshots,omitempty"`
-	mu                  sync.RWMutex        `json:"-"`
+	CleanupEvents       []CleanupEvent                     `json:"cleanup_events,omitempty"`
+	WorkspaceSnapshots  []WorkspaceSnapshot                `json:"workspace_snapshots,omitempty"`
+	DeletionRetries     map[string]*WorkspaceDeletionRetry `json:"deletion_retries,omitempty"`
+	mu                  sync.RWMutex                       `json:"-"`
 }
 
 // CoderTemplate defines a single Coder template (upload or git source)
@@ -215,12 +225,13 @@ func (jm *JobManager) CreateJob(config *LabConfig) string {
 	now := time.Now()
 	jobID := "job-" + uuid.New().String()
 	job := &Job{
-		ID:        jobID,
-		Status:    JobStatusPending,
-		CreatedAt: now,
-		UpdatedAt: now,
-		Output:    []string{},
-		Config:    config,
+		ID:              jobID,
+		Status:          JobStatusPending,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		Output:          []string{},
+		Config:          config,
+		DeletionRetries: make(map[string]*WorkspaceDeletionRetry),
 	}
 
 	jm.jobs[jobID] = job
@@ -505,8 +516,10 @@ func (jm *JobManager) LoadJobs() error {
 			continue
 		}
 
-		// Initialize mutex for loaded job (mutex is not serialized)
-		// The mutex will be zero-initialized which is correct for sync.RWMutex
+		// Initialise maps that may be absent in jobs persisted before this field was added.
+		if job.DeletionRetries == nil {
+			job.DeletionRetries = make(map[string]*WorkspaceDeletionRetry)
+		}
 
 		// Add to jobs map
 		jm.mu.Lock()
@@ -545,6 +558,48 @@ func (jm *JobManager) GetAllJobs() []*Job {
 	}
 
 	return jobs
+}
+
+// RecordDeletionFailure increments the failed deletion attempt count for a workspace.
+// When attempts reach maxRetries, GiveUp is set to true and no further attempts will be made.
+func (jm *JobManager) RecordDeletionFailure(jobID, wsID, wsName string, maxRetries int) error {
+	jm.mu.RLock()
+	job, exists := jm.jobs[jobID]
+	jm.mu.RUnlock()
+	if !exists {
+		return fmt.Errorf("job %s not found", jobID)
+	}
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	if job.DeletionRetries == nil {
+		job.DeletionRetries = make(map[string]*WorkspaceDeletionRetry)
+	}
+	r := job.DeletionRetries[wsID]
+	if r == nil {
+		r = &WorkspaceDeletionRetry{WorkspaceID: wsID, WorkspaceName: wsName}
+		job.DeletionRetries[wsID] = r
+	}
+	r.Attempts++
+	r.LastAttempt = time.Now()
+	if r.Attempts >= maxRetries {
+		r.GiveUp = true
+	}
+	job.UpdatedAt = time.Now()
+	return nil
+}
+
+// ClearDeletionRetry removes the retry record for a workspace (called on successful deletion).
+func (jm *JobManager) ClearDeletionRetry(jobID, wsID string) error {
+	jm.mu.RLock()
+	job, exists := jm.jobs[jobID]
+	jm.mu.RUnlock()
+	if !exists {
+		return fmt.Errorf("job %s not found", jobID)
+	}
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	delete(job.DeletionRetries, wsID)
+	return nil
 }
 
 // RemoveJob removes a job from the manager and optionally deletes its persisted file

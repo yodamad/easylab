@@ -23,6 +23,28 @@ func cleanupInterval() time.Duration {
 	return 5 * time.Minute
 }
 
+// deletionRetryMaxRetries returns the maximum number of deletion retry attempts,
+// configurable via CLEANUP_DELETE_MAX_RETRIES env var. Defaults to 3.
+func deletionRetryMaxRetries() int {
+	if v := os.Getenv("CLEANUP_DELETE_MAX_RETRIES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 3
+}
+
+// deletionRetryInterval returns the minimum duration between deletion retry attempts,
+// configurable via CLEANUP_DELETE_RETRY_INTERVAL_HOURS env var. Defaults to 2 hours.
+func deletionRetryInterval() time.Duration {
+	if v := os.Getenv("CLEANUP_DELETE_RETRY_INTERVAL_HOURS"); v != "" {
+		if h, err := strconv.Atoi(v); err == nil && h > 0 {
+			return time.Duration(h) * time.Hour
+		}
+	}
+	return 2 * time.Hour
+}
+
 // coderReachabilityTimeout is the maximum time to wait when probing Coder before skipping cleanup for a job.
 const coderReachabilityTimeout = 5 * time.Second
 
@@ -94,14 +116,40 @@ func (h *Handler) cleanupExpiredWorkspaces() {
 			log.Printf("[cleanup] failed to record workspace snapshot for job %s: %v", job.ID, err)
 		}
 
+		maxRetries := deletionRetryMaxRetries()
+		retryInterval := deletionRetryInterval()
+
 		deleted := 0
 		for _, ws := range workspaces {
-			if time.Since(ws.CreatedAt) > lifetime {
-				log.Printf("[cleanup] deleting workspace %s (%s) in job %s: exceeded %dh lifetime", ws.Name, ws.ID, job.ID, job.Config.WorkspaceLifetimeHours)
-				if _, err := coder.DeleteWorkspaceWithRetry(coderConfig, adminEmail, adminPassword, ws.ID); err != nil {
-					log.Printf("[cleanup] failed to delete workspace %s: %v", ws.ID, err)
-				} else {
-					deleted++
+			if time.Since(ws.CreatedAt) <= lifetime {
+				continue
+			}
+			wsID := ws.ID.String()
+
+			job.mu.RLock()
+			retry := job.DeletionRetries[wsID]
+			job.mu.RUnlock()
+
+			if retry != nil && retry.GiveUp {
+				log.Printf("[cleanup] skipping workspace %s (%s) in job %s: max retries (%d) exhausted", ws.Name, wsID, job.ID, maxRetries)
+				continue
+			}
+			if retry != nil && time.Since(retry.LastAttempt) < retryInterval {
+				remaining := (retryInterval - time.Since(retry.LastAttempt)).Round(time.Minute)
+				log.Printf("[cleanup] skipping workspace %s (%s) in job %s: next retry in %v (attempt %d/%d)", ws.Name, wsID, job.ID, remaining, retry.Attempts, maxRetries)
+				continue
+			}
+
+			log.Printf("[cleanup] deleting workspace %s (%s) in job %s: exceeded %dh lifetime", ws.Name, wsID, job.ID, job.Config.WorkspaceLifetimeHours)
+			if _, err := coder.DeleteWorkspaceWithRetry(coderConfig, adminEmail, adminPassword, ws.ID); err != nil {
+				log.Printf("[cleanup] failed to delete workspace %s: %v", wsID, err)
+				if ferr := h.jobManager.RecordDeletionFailure(job.ID, wsID, ws.Name, maxRetries); ferr != nil {
+					log.Printf("[cleanup] failed to record deletion failure for workspace %s: %v", wsID, ferr)
+				}
+			} else {
+				deleted++
+				if cerr := h.jobManager.ClearDeletionRetry(job.ID, wsID); cerr != nil {
+					log.Printf("[cleanup] failed to clear deletion retry for workspace %s: %v", wsID, cerr)
 				}
 			}
 		}
