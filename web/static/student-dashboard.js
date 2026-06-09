@@ -634,12 +634,18 @@ if (typeof htmx !== 'undefined') {
         const btn = document.getElementById('submit-btn');
         btn.disabled = true;
         btn.textContent = 'Requesting...';
+        const fields = document.getElementById('workspace-form-fields');
+        if (fields) fields.style.display = 'none';
     });
 
     workspaceForm.addEventListener('htmx:afterRequest', function(event) {
         const btn = document.getElementById('submit-btn');
         btn.disabled = false;
         btn.textContent = 'Request Workspace';
+        if (!event.detail.successful) {
+            const fields = document.getElementById('workspace-form-fields');
+            if (fields) fields.style.display = '';
+        }
         setTimeout(loadAllWorkspaceInfos, 500);
         setTimeout(startWorkspaceStatusPolling, 100);
     });
@@ -649,9 +655,11 @@ if (typeof htmx !== 'undefined') {
 
         const btn = document.getElementById('submit-btn');
         const responseDiv = document.getElementById('workspace-response');
+        const fields = document.getElementById('workspace-form-fields');
 
         btn.disabled = true;
         btn.textContent = 'Requesting...';
+        if (fields) fields.style.display = 'none';
         responseDiv.innerHTML = '<div class="student-loading">Requesting workspace...</div>';
 
         const formData = new FormData(workspaceForm);
@@ -672,6 +680,7 @@ if (typeof htmx !== 'undefined') {
             responseDiv.innerHTML = `<div class="error-message">Error: ${error.message}</div>`;
             btn.disabled = false;
             btn.textContent = 'Request Workspace';
+            if (fields) fields.style.display = '';
         });
     });
 }
