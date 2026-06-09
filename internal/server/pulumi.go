@@ -1470,6 +1470,11 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 		}
 	}
 
+	// GitHub OAuth2 login (disabled by default; opt-in per lab)
+	if config.CoderGithubLoginEnabled {
+		commands = append(commands, configCommand{"coder:githubLoginEnabled", "true", false})
+	}
+
 	// HTTPS / ingress configuration
 	if config.CoderDomain != "" {
 		commands = append(commands,

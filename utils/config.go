@@ -127,6 +127,7 @@ const CoderInstallCertManager = "installCertManager"
 const CoderNginxIngressNamespace = "nginxIngressNamespace"
 const CoderNginxIngressServiceName = "nginxIngressServiceName"
 const CoderCertManagerNamespace = "certManagerNamespace"
+const CoderGithubLoginEnabled = "githubLoginEnabled"
 
 // DNS provider config group
 const DNSGroup = "dns"

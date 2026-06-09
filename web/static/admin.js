@@ -85,6 +85,13 @@ const wizard = {
             certInstall.addEventListener('click', () => this.setCertManagerMode('install'));
             certExisting.addEventListener('click', () => this.setCertManagerMode('existing'));
         }
+
+        const githubEnable = document.getElementById('github-login-enable-btn');
+        const githubDisable = document.getElementById('github-login-disable-btn');
+        if (githubEnable && githubDisable) {
+            githubEnable.addEventListener('click', () => this.setGithubLoginEnabled(true));
+            githubDisable.addEventListener('click', () => this.setGithubLoginEnabled(false));
+        }
     },
 
     setIngressMode(mode) {
@@ -109,6 +116,16 @@ const wizard = {
         existingBtn.classList.toggle('selected', mode === 'existing');
         fields.style.display = mode === 'existing' ? '' : 'none';
         hidden.value = mode === 'install' ? 'true' : 'false';
+    },
+
+    setGithubLoginEnabled(enabled) {
+        const enableBtn = document.getElementById('github-login-enable-btn');
+        const disableBtn = document.getElementById('github-login-disable-btn');
+        const hidden = document.getElementById('coder_github_login_enabled');
+
+        enableBtn.classList.toggle('selected', enabled);
+        disableBtn.classList.toggle('selected', !enabled);
+        hidden.value = enabled ? 'true' : 'false';
     },
 
     setClusterMode(useExisting) {

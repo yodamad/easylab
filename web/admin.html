@@ -508,6 +508,27 @@
                             <small>Kubernetes namespace for Coder. Defaults to "coder".</small>
                         </div>
 
+                        <div class="form-group">
+                            <label>GitHub Login</label>
+                            <div class="button-group">
+                                <button type="button" class="source-button" id="github-login-enable-btn" data-github-login="true">
+                                    <span class="source-icon">&#128279;</span>
+                                    <div class="source-content">
+                                        <span class="source-title">Enable GitHub login</span>
+                                        <span class="source-description">Show "Login with GitHub" on the Coder sign-in page</span>
+                                    </div>
+                                </button>
+                                <button type="button" class="source-button selected" id="github-login-disable-btn" data-github-login="false">
+                                    <span class="source-icon">&#128683;</span>
+                                    <div class="source-content">
+                                        <span class="source-title">Disable GitHub login</span>
+                                        <span class="source-description">Hide the GitHub OAuth2 button (recommended)</span>
+                                    </div>
+                                </button>
+                            </div>
+                            <input type="hidden" id="coder_github_login_enabled" name="coder_github_login_enabled" value="false">
+                        </div>
+
                         <!-- Database config — collapsed by default, DB password auto-generated -->
                         <details class="advanced-section">
                             <summary>Advanced: Database Configuration</summary>

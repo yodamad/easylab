@@ -163,6 +163,13 @@ func SetupCoder(ctx *pulumi.Context, k8sProvider *k8s.Provider, ns *k8score.Name
 		},
 	}
 
+	if utils.CoderConfigOptional(ctx, utils.CoderGithubLoginEnabled) != "true" {
+		envVars = append(envVars, pulumi.Map{
+			"name":  pulumi.String("CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE"),
+			"value": pulumi.String("false"),
+		})
+	}
+
 	if domain := utils.CoderConfigOptional(ctx, utils.CoderDomain); domain != "" {
 		envVars = append(envVars, pulumi.Map{
 			"name":  pulumi.String("CODER_ACCESS_URL"),

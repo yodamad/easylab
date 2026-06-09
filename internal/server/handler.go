@@ -345,8 +345,9 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 	templates := parseCoderTemplatesFromForm(r, templateFilePaths)
 
 	config := &LabConfig{
-		StackName:          stackName,
-		UseExistingCluster: useExistingCluster,
+		StackName:               stackName,
+		UseExistingCluster:      useExistingCluster,
+		CoderGithubLoginEnabled: r.FormValue("coder_github_login_enabled") == "true",
 
 		CoderNamespace:     r.FormValue("coder_namespace"),
 		CoderAdminEmail:    r.FormValue("coder_admin_email"),
