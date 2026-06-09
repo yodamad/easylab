@@ -105,7 +105,7 @@
                                         </svg>
                                         <span class="tooltip">Coder Credentials</span>
                                     </button>
-                                    <button type="button" class="btn btn-primary btn-icon-only tooltip-trigger" title="Upload a new template to this lab" onclick="showUploadTemplateModal('{{.ID}}')">
+                                    <button type="button" class="btn btn-primary btn-icon-only tooltip-trigger" title="Upload a new template to this lab" onclick="showUploadTemplateModal('{{.ID}}', '{{.StackName}}')">
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                                         </svg>
@@ -165,27 +165,99 @@
         </div>
         </div>
 
-        <div id="upload-template-overlay" class="credentials-modal-overlay" onclick="closeUploadTemplateModal()" aria-hidden="true">
-            <div class="credentials-modal" onclick="event.stopPropagation()">
-                <div class="credentials-modal-header">
-                    <h3>Upload Template</h3>
-                    <button type="button" class="credentials-modal-close" onclick="closeUploadTemplateModal()" title="Close" aria-label="Close">&times;</button>
+        <div id="upload-template-overlay" class="ut-drawer-overlay" onclick="closeUploadTemplateModal()" aria-hidden="true">
+            <div class="ut-panel" onclick="event.stopPropagation()" role="dialog" aria-modal="true" aria-labelledby="ut-panel-title">
+                <div class="ut-panel-header">
+                    <div class="ut-panel-title-group">
+                        <svg class="ut-panel-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                        </svg>
+                        <h3 id="ut-panel-title" class="ut-panel-title">Upload Template</h3>
+                    </div>
+                    <button type="button" class="ut-panel-close" onclick="closeUploadTemplateModal()" title="Close" aria-label="Close">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
                 </div>
-                <div class="credentials-modal-body">
-                    <div id="upload-template-error" class="credentials-modal-error" style="display: none;"></div>
-                    <div id="upload-template-success" class="success-message" style="display: none;"></div>
-                    <form id="upload-template-form" onsubmit="submitUploadTemplate(event)">
-                        <div class="credentials-modal-row">
-                            <label for="upload-template-name">Template name</label>
-                            <input type="text" id="upload-template-name" class="credentials-modal-input" placeholder="my-template" required />
+
+                <div class="ut-drawer-context" id="ut-drawer-lab-context" style="display: none;"></div>
+
+                <div class="ut-panel-body">
+                    <div id="upload-template-error" class="ut-alert ut-alert--error" style="display: none;"></div>
+                    <div id="upload-template-success" class="ut-alert ut-alert--success" style="display: none;"></div>
+
+                    <form id="upload-template-form" onsubmit="submitUploadTemplate(event)" novalidate>
+
+                        <!-- Step 1 -->
+                        <div class="ut-step">
+                            <div class="ut-step-header">
+                                <span class="ut-step-number" aria-hidden="true">1</span>
+                                <span class="ut-step-label">Template name</span>
+                            </div>
+                            <div class="ut-step-body">
+                                <input type="text" id="upload-template-name" class="ut-name-input" placeholder="e.g. docker-workspace" autocomplete="off" required />
+                            </div>
                         </div>
-                        <div class="credentials-modal-row">
-                            <label for="upload-template-file">Template zip</label>
-                            <input type="file" id="upload-template-file" accept=".zip" required />
+
+                        <!-- Step 2 -->
+                        <div class="ut-step">
+                            <div class="ut-step-header">
+                                <span class="ut-step-number" aria-hidden="true">2</span>
+                                <span class="ut-step-label">Template file</span>
+                                <span class="ut-step-hint">.zip or .tf</span>
+                            </div>
+                            <div class="ut-step-body">
+                                <div class="ut-dropzone" id="ut-dropzone">
+                                    <input type="file" id="upload-template-file" class="file-input" accept=".zip,.tf">
+                                    <label for="upload-template-file" class="ut-dropzone-label">
+                                        <div class="ut-dropzone-icon-wrap">
+                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                                            </svg>
+                                        </div>
+                                        <span class="ut-dropzone-primary" id="upload-template-file-text">Drop file here</span>
+                                        <span class="ut-dropzone-secondary">or click to browse</span>
+                                    </label>
+                                </div>
+                            </div>
                         </div>
-                        <div class="credentials-modal-row">
-                            <button type="submit" id="upload-template-submit-btn" class="btn btn-primary">Upload</button>
+
+                        <!-- Step 3 -->
+                        <div class="ut-step ut-step--variables">
+                            <div class="ut-step-header">
+                                <span class="ut-step-number" aria-hidden="true">3</span>
+                                <span class="ut-step-label">Variables</span>
+                                <span class="ut-optional-badge">optional</span>
+                                <div class="ut-step-actions">
+                                    <button type="button" class="ut-action-btn" id="upload-detect-variables-btn" onclick="detectUploadTemplateVariables()">
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                        </svg>
+                                        Detect
+                                    </button>
+                                    <button type="button" class="ut-action-btn ut-action-btn--add" onclick="addUploadTemplateVariableRow()">
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                                        </svg>
+                                        Add
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="ut-step-body">
+                                <div id="upload-template-variables-container" class="ut-vars-container"></div>
+                            </div>
                         </div>
+
+                        <div class="ut-footer">
+                            <button type="submit" id="upload-template-submit-btn" class="ut-submit-btn">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                                </svg>
+                                Upload Template
+                            </button>
+                        </div>
+
                     </form>
                 </div>
             </div>

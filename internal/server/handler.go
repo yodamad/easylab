@@ -1,6 +1,7 @@
 package server
 
 import (
+	"archive/zip"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -1257,8 +1258,9 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	if !strings.HasSuffix(strings.ToLower(header.Filename), ".zip") {
-		http.Error(w, "Only .zip files are allowed", http.StatusBadRequest)
+	lowerName := strings.ToLower(header.Filename)
+	if !strings.HasSuffix(lowerName, ".zip") && !strings.HasSuffix(lowerName, ".tf") {
+		http.Error(w, "Only .zip or .tf files are allowed", http.StatusBadRequest)
 		return
 	}
 
@@ -1276,19 +1278,46 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dst, err := os.Create(zipPath)
-	if err != nil {
-		log.Printf("Failed to save uploaded file: %v", err)
-		http.Error(w, "Failed to save uploaded file", http.StatusInternalServerError)
-		return
-	}
-	if _, err := io.Copy(dst, file); err != nil {
+	if strings.HasSuffix(lowerName, ".tf") {
+		// Wrap the .tf file in a zip archive for Coder
+		if err := wrapTFInZip(file, header.Filename, zipPath); err != nil {
+			log.Printf("Failed to wrap .tf file for lab %s: %v", jobID, err)
+			http.Error(w, "Failed to package template file", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		dst, err := os.Create(zipPath)
+		if err != nil {
+			log.Printf("Failed to save uploaded file: %v", err)
+			http.Error(w, "Failed to save uploaded file", http.StatusInternalServerError)
+			return
+		}
+		if _, err := io.Copy(dst, file); err != nil {
+			dst.Close()
+			log.Printf("Failed to write uploaded file: %v", err)
+			http.Error(w, "Failed to write uploaded file", http.StatusInternalServerError)
+			return
+		}
 		dst.Close()
-		log.Printf("Failed to write uploaded file: %v", err)
-		http.Error(w, "Failed to write uploaded file", http.StatusInternalServerError)
-		return
 	}
-	dst.Close()
+
+	varNames := r.Form["template_0_var_name"]
+	varValues := r.Form["template_0_var_value"]
+	var variables map[string]string
+	if len(varNames) > 0 {
+		variables = make(map[string]string, len(varNames))
+		for i, vn := range varNames {
+			vn = strings.TrimSpace(vn)
+			if vn == "" {
+				continue
+			}
+			vv := ""
+			if i < len(varValues) {
+				vv = varValues[i]
+			}
+			variables[vn] = vv
+		}
+	}
 
 	coderConfig := coder.CoderClientConfig{
 		ServerURL:      coderURL,
@@ -1296,11 +1325,11 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 		OrganizationID: coderOrganizationID,
 	}
 
-	if err := coder.CreateTemplateStandalone(coderConfig, templateName, zipPath, nil, func(msg string) {
+	if err := coder.CreateTemplateStandalone(coderConfig, templateName, zipPath, variables, func(msg string) {
 		log.Printf("[UploadTemplate][%s] %s", jobID, msg)
 	}); err != nil {
 		log.Printf("Failed to create template for lab %s: %v", jobID, err)
-		http.Error(w, "Failed to create template", http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -3800,4 +3829,25 @@ func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		log.Printf("failed to encode stats response: %v", err)
 	}
+}
+
+// wrapTFInZip writes the contents of src (a .tf file) into a new zip archive at zipPath.
+func wrapTFInZip(src io.Reader, tfFileName string, zipPath string) error {
+	out, err := os.Create(zipPath)
+	if err != nil {
+		return fmt.Errorf("failed to create zip: %w", err)
+	}
+	defer out.Close()
+
+	zw := zip.NewWriter(out)
+	defer zw.Close()
+
+	entry, err := zw.Create(filepath.Base(tfFileName))
+	if err != nil {
+		return fmt.Errorf("failed to create zip entry: %w", err)
+	}
+	if _, err := io.Copy(entry, src); err != nil {
+		return fmt.Errorf("failed to write tf content to zip: %w", err)
+	}
+	return nil
 }

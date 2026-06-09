@@ -1,6 +1,8 @@
 package server
 
 import (
+	"bytes"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -299,6 +301,35 @@ func TestHandler_UploadTemplateToLab_NotCompleted(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.UploadTemplateToLab(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHandler_UploadTemplateToLab_InvalidFileType(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test"})
+	job, _ := jm.GetJob(id)
+	job.mu.Lock()
+	job.Status = JobStatusCompleted
+	job.CoderURL = "http://coder.example"
+	job.CoderSessionToken = "token"
+	job.CoderOrganizationID = "00000000-0000-0000-0000-000000000000"
+	job.CoderAdminEmail = "admin@example.com"
+	job.CoderAdminPassword = "pass"
+	job.mu.Unlock()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	_ = mw.WriteField("template_name", "mytemplate")
+	fw, _ := mw.CreateFormFile("template_file", "bad.json")
+	fw.Write([]byte(`{}`))
+	mw.Close()
+
+	req := httptest.NewRequest("POST", "/api/labs/"+id+"/templates/upload", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	w := httptest.NewRecorder()
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	h.UploadTemplateToLab(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), ".zip or .tf")
 }
 
 // --- ServeLabWorkspaces error paths ---

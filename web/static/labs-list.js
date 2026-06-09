@@ -185,13 +185,31 @@ function showCopyFeedback(btn) {
 
 var _uploadTemplatLabId = null;
 
-function showUploadTemplateModal(labId) {
+function _utSetFile(file) {
+    var fileText = document.getElementById('upload-template-file-text');
+    var dropzone = document.getElementById('ut-dropzone');
+    if (fileText) fileText.textContent = file ? file.name : 'Drop file here';
+    if (dropzone) {
+        dropzone.classList.toggle('ut-dropzone--active', !!file);
+    }
+}
+
+function showUploadTemplateModal(labId, labName) {
     _uploadTemplatLabId = labId;
     var overlay = document.getElementById('upload-template-overlay');
     var errorEl = document.getElementById('upload-template-error');
     var successEl = document.getElementById('upload-template-success');
     var form = document.getElementById('upload-template-form');
     var submitBtn = document.getElementById('upload-template-submit-btn');
+    var dropzone = document.getElementById('ut-dropzone');
+
+    // Populate the lab context bar
+    var contextBar = document.getElementById('ut-drawer-lab-context');
+    if (contextBar) {
+        contextBar.style.display = 'flex';
+        contextBar.innerHTML = 'Targeting lab <span class="ut-drawer-lab-chip">' +
+            (labName ? labName : labId) + '</span>';
+    }
 
     form.reset();
     errorEl.style.display = 'none';
@@ -199,17 +217,137 @@ function showUploadTemplateModal(labId) {
     successEl.style.display = 'none';
     successEl.textContent = '';
     submitBtn.disabled = false;
-    submitBtn.textContent = 'Upload';
+    // Restore inner HTML (icon + text) to original
+    submitBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>Upload Template';
+    _utSetFile(null);
 
     overlay.classList.add('visible');
     overlay.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+
+    var fileInput = document.getElementById('upload-template-file');
+    if (fileInput) {
+        fileInput.onchange = function () {
+            _utSetFile(fileInput.files && fileInput.files[0] ? fileInput.files[0] : null);
+        };
+    }
+
+    // Drag & drop on the dropzone
+    if (dropzone) {
+        dropzone.ondragover = function (e) {
+            e.preventDefault();
+            dropzone.classList.add('ut-dropzone--dragging');
+        };
+        dropzone.ondragleave = function () {
+            dropzone.classList.remove('ut-dropzone--dragging');
+        };
+        dropzone.ondrop = function (e) {
+            e.preventDefault();
+            dropzone.classList.remove('ut-dropzone--dragging');
+            var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+            if (file && fileInput) {
+                var dt = new DataTransfer();
+                dt.items.add(file);
+                fileInput.files = dt.files;
+                _utSetFile(file);
+            }
+        };
+    }
 }
 
 function closeUploadTemplateModal() {
     var overlay = document.getElementById('upload-template-overlay');
     overlay.classList.remove('visible');
     overlay.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
     _uploadTemplatLabId = null;
+    _utSetFile(null);
+    var container = document.getElementById('upload-template-variables-container');
+    if (container) container.innerHTML = '';
+    var contextBar = document.getElementById('ut-drawer-lab-context');
+    if (contextBar) contextBar.style.display = 'none';
+}
+
+function createUploadTemplateVariableRow(name, value, description, required) {
+    var div = document.createElement('div');
+    div.className = 'template-variable-row';
+
+    var nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.name = 'template_0_var_name';
+    nameInput.placeholder = 'Variable name';
+    nameInput.value = name || '';
+    if (required) nameInput.setAttribute('data-required', 'true');
+
+    var valueInput = document.createElement('input');
+    valueInput.type = 'text';
+    valueInput.name = 'template_0_var_value';
+    valueInput.placeholder = description || 'Value';
+    valueInput.value = value || '';
+
+    var removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn btn-secondary btn-remove-variable';
+    removeBtn.textContent = 'x';
+    removeBtn.title = 'Remove variable';
+    removeBtn.addEventListener('click', function() { div.remove(); });
+
+    div.appendChild(nameInput);
+    div.appendChild(valueInput);
+    div.appendChild(removeBtn);
+    return div;
+}
+
+function addUploadTemplateVariableRow() {
+    var container = document.getElementById('upload-template-variables-container');
+    if (container) container.appendChild(createUploadTemplateVariableRow('', '', '', false));
+}
+
+function detectUploadTemplateVariables() {
+    var fileInput = document.getElementById('upload-template-file');
+    var container = document.getElementById('upload-template-variables-container');
+    var detectBtn = document.getElementById('upload-detect-variables-btn');
+    if (!fileInput || !fileInput.files || !fileInput.files[0]) {
+        alert('Please select a template file first.');
+        return;
+    }
+    detectBtn.disabled = true;
+    detectBtn.textContent = 'Detecting...';
+
+    var formData = new FormData();
+    formData.append('source', 'upload');
+    formData.append('template_file', fileInput.files[0]);
+
+    fetch('/api/templates/detect-variables', { method: 'POST', body: formData })
+        .then(function(resp) {
+            if (!resp.ok) {
+                return resp.json().then(function(d) { throw new Error(d.message || 'Detection failed'); });
+            }
+            return resp.json();
+        })
+        .then(function(variables) {
+            container.innerHTML = '';
+            if (!variables || variables.length === 0) {
+                var empty = document.createElement('div');
+                empty.className = 'detect-variables-status';
+                empty.textContent = 'No Terraform variables found in this template.';
+                container.appendChild(empty);
+            } else {
+                variables.forEach(function(v) {
+                    container.appendChild(createUploadTemplateVariableRow(v.name, v.default || '', v.description || '', v.required));
+                });
+            }
+        })
+        .catch(function(err) {
+            var errDiv = document.createElement('div');
+            errDiv.className = 'detect-variables-status error-message';
+            errDiv.textContent = 'Detection failed: ' + err.message;
+            container.appendChild(errDiv);
+        })
+        .finally(function() {
+            detectBtn.disabled = false;
+            detectBtn.textContent = 'Detect Variables';
+        });
 }
 
 function submitUploadTemplate(event) {
@@ -232,7 +370,13 @@ function submitUploadTemplate(event) {
         return;
     }
     if (!fileInput.files || !fileInput.files[0]) {
-        errorEl.textContent = 'Please select a zip file.';
+        errorEl.textContent = 'Please select a .zip or .tf file.';
+        errorEl.style.display = 'block';
+        return;
+    }
+    var fname = fileInput.files[0].name.toLowerCase();
+    if (!fname.endsWith('.zip') && !fname.endsWith('.tf')) {
+        errorEl.textContent = 'Only .zip or .tf files are accepted.';
         errorEl.style.display = 'block';
         return;
     }
@@ -240,6 +384,19 @@ function submitUploadTemplate(event) {
     var formData = new FormData();
     formData.append('template_name', name);
     formData.append('template_file', fileInput.files[0]);
+
+    var container = document.getElementById('upload-template-variables-container');
+    if (container) {
+        var rows = container.querySelectorAll('.template-variable-row');
+        rows.forEach(function(row) {
+            var nameInp = row.querySelector('input[name="template_0_var_name"]');
+            var valueInp = row.querySelector('input[name="template_0_var_value"]');
+            if (nameInp && nameInp.value.trim()) {
+                formData.append('template_0_var_name', nameInp.value.trim());
+                formData.append('template_0_var_value', valueInp ? valueInp.value : '');
+            }
+        });
+    }
 
     submitBtn.disabled = true;
     submitBtn.textContent = 'Uploading…';
@@ -258,16 +415,19 @@ function submitUploadTemplate(event) {
     })
     .then(function () {
         successEl.textContent = 'Template "' + name + '" uploaded successfully.';
-        successEl.style.display = 'block';
+        successEl.style.display = 'flex';
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Upload';
+        submitBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>Upload Template';
         document.getElementById('upload-template-form').reset();
+        _utSetFile(null);
+        var container = document.getElementById('upload-template-variables-container');
+        if (container) container.innerHTML = '';
     })
     .catch(function (err) {
         errorEl.textContent = typeof err === 'string' ? err : 'Failed to upload template.';
-        errorEl.style.display = 'block';
+        errorEl.style.display = 'flex';
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Upload';
+        submitBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>Upload Template';
     });
 }
 
