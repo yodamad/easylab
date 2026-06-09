@@ -107,7 +107,11 @@ func main() {
 			}
 		}
 
-		templateOutput := coder.CreateTemplateFromZip(ctx, coderConfig, utils.CoderConfig(ctx, utils.CoderTemplateName), "file://"+zipFile)
+		nsName := utils.CoderConfigOptional(ctx, utils.CoderNamespace)
+		if nsName == "" {
+			nsName = "coder"
+		}
+		templateOutput := coder.CreateTemplateFromZip(ctx, coderConfig, utils.CoderConfig(ctx, utils.CoderTemplateName), "file://"+zipFile, map[string]string{"namespace": nsName})
 		templateOutput.ApplyT(func(_ interface{}) error {
 			utils.LogInfo(ctx, "Template created successfully!")
 			return nil

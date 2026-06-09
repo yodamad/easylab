@@ -535,8 +535,9 @@ func InitCoderOutput(ctx *pulumi.Context, externalIp pulumi.StringOutput) *Coder
 }
 
 // CreateTemplateFromZip creates a new Coder template from an external zip file URL
-// It accepts CoderConfigOutput and returns a pulumi.Output that resolves when the template is created
-func CreateTemplateFromZip(ctx *pulumi.Context, coderInfos *CoderConfigOutput, templateName string, zipURL string) pulumi.Output {
+// It accepts CoderConfigOutput and returns a pulumi.Output that resolves when the template is created.
+// variables is an optional map of Terraform variable values to set on the template version.
+func CreateTemplateFromZip(ctx *pulumi.Context, coderInfos *CoderConfigOutput, templateName string, zipURL string, variables map[string]string) pulumi.Output {
 	// Combine all outputs and extract actual values
 	return pulumi.All(coderInfos.ServerURL, coderInfos.SessionToken, coderInfos.OrganizationID).ApplyT(func(args []interface{}) (interface{}, error) {
 		serverURLStr := args[0].(string)
@@ -643,12 +644,20 @@ func CreateTemplateFromZip(ctx *pulumi.Context, coderInfos *CoderConfigOutput, t
 
 		// Create a template version from the uploaded file
 		utils.LogInfo(ctx, "Creating template version...")
-		templateVersion, err := client.CreateTemplateVersion(context.Background(), organizationID, codersdk.CreateTemplateVersionRequest{
+		versionReq := codersdk.CreateTemplateVersionRequest{
 			Name:          templateName,
 			FileID:        uploadResp.ID,
 			StorageMethod: codersdk.ProvisionerStorageMethodFile,
 			Provisioner:   codersdk.ProvisionerTypeTerraform,
-		})
+		}
+		if len(variables) > 0 {
+			varValues := make([]codersdk.VariableValue, 0, len(variables))
+			for k, v := range variables {
+				varValues = append(varValues, codersdk.VariableValue{Name: k, Value: v})
+			}
+			versionReq.UserVariableValues = varValues
+		}
+		templateVersion, err := client.CreateTemplateVersion(context.Background(), organizationID, versionReq)
 		if err != nil {
 			utils.LogError(ctx, "failed to create template version: "+err.Error())
 			return nil, fmt.Errorf("failed to create template version: %w", err)

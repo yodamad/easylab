@@ -1252,6 +1252,13 @@ func (pe *PulumiExecutor) initCoderAndTemplates(jobID string, outputs auto.Outpu
 		pe.jobManager.AppendOutput(jobID, "Coder initialized and configuration stored successfully")
 	}
 
+	// Resolve the effective Coder namespace so workspace templates target the right namespace.
+	// The Coder service account only has RBAC in the namespace it was deployed into.
+	coderNamespace := config.CoderNamespace
+	if coderNamespace == "" {
+		coderNamespace = "coder"
+	}
+
 	// Create Coder templates
 	templates := config.GetCoderTemplates()
 	if len(templates) == 0 {
@@ -1260,7 +1267,7 @@ func (pe *PulumiExecutor) initCoderAndTemplates(jobID string, outputs auto.Outpu
 		if gitErr != nil {
 			return fmt.Errorf("failed to clone and zip default template: %w", gitErr)
 		}
-		if err := coder.CreateTemplateStandalone(coderCfg, "docker-template", zipFile, nil, logFunc); err != nil {
+		if err := coder.CreateTemplateStandalone(coderCfg, "docker-template", zipFile, map[string]string{"namespace": coderNamespace}, logFunc); err != nil {
 			return fmt.Errorf("failed to create default template: %w", err)
 		}
 		return nil
@@ -1290,11 +1297,21 @@ func (pe *PulumiExecutor) initCoderAndTemplates(jobID string, outputs auto.Outpu
 			return fmt.Errorf("template %d (%s): invalid config (source=%s, need file or git repo)", i+1, t.Name, t.Source)
 		}
 
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Creating Coder template: %s", t.Name))
-		if len(t.Variables) > 0 {
-			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("  with %d variable(s)", len(t.Variables)))
+		// Inject the namespace variable if the template did not set it explicitly,
+		// so workspace resources are created in the same namespace as the Coder deployment.
+		vars := t.Variables
+		if vars == nil {
+			vars = map[string]string{}
 		}
-		if err := coder.CreateTemplateStandalone(coderCfg, t.Name, zipFile, t.Variables, logFunc); err != nil {
+		if _, hasNS := vars["namespace"]; !hasNS {
+			vars["namespace"] = coderNamespace
+		}
+
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Creating Coder template: %s", t.Name))
+		if len(vars) > 0 {
+			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("  with %d variable(s)", len(vars)))
+		}
+		if err := coder.CreateTemplateStandalone(coderCfg, t.Name, zipFile, vars, logFunc); err != nil {
 			return fmt.Errorf("failed to create template %s: %w", t.Name, err)
 		}
 	}

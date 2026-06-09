@@ -1222,6 +1222,13 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 	coderSessionToken := job.CoderSessionToken
 	coderOrganizationID := job.CoderOrganizationID
 	coderAdminEmail, coderAdminPassword := job.coderCredentials()
+	var coderNamespace string
+	if job.Config != nil {
+		coderNamespace = job.Config.CoderNamespace
+	}
+	if coderNamespace == "" {
+		coderNamespace = "coder"
+	}
 	job.mu.RUnlock()
 
 	if status != JobStatusCompleted {
@@ -1323,6 +1330,14 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 		ServerURL:      coderURL,
 		SessionToken:   coderSessionToken,
 		OrganizationID: coderOrganizationID,
+	}
+
+	// Inject the namespace variable so workspace resources target the Coder deployment namespace.
+	if variables == nil {
+		variables = map[string]string{}
+	}
+	if _, hasNS := variables["namespace"]; !hasNS {
+		variables["namespace"] = coderNamespace
 	}
 
 	if err := coder.CreateTemplateStandalone(coderConfig, templateName, zipPath, variables, func(msg string) {
