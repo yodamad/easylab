@@ -54,7 +54,7 @@ function getAllWorkspaceCookies() {
         if (match) {
             try {
                 const info = JSON.parse(decodeURIComponent(match[2]));
-                workspaces.push({ cookieName: `workspace_info_${match[1]}`, labId: match[1], info });
+                workspaces.push({ cookieName: `workspace_info_${match[1]}`, labId: info.lab_id || match[1], uniqueId: match[1], info });
             } catch (e) {
                 console.error('Failed to parse workspace cookie:', trimmed, e);
             }
@@ -78,7 +78,7 @@ function loadAllWorkspaceInfos() {
     }
 
     section.style.display = 'block';
-    container.innerHTML = workspaces.map(ws => renderWorkspaceCard(ws.info, ws.labId)).join('');
+    container.innerHTML = workspaces.map(ws => renderWorkspaceCard(ws.info, ws.uniqueId)).join('');
 
     const card = document.querySelector('#workspaces-list-section .collapsible-card');
     const content = document.getElementById('workspaces-list-content');
@@ -139,7 +139,7 @@ function renderWorkspaceCard(info, labId) {
             <div class="workspace-card-header" onclick="toggleWorkspaceCard('${safeLab}')">
                 <h3>${safeName}</h3>
                 <div class="workspace-card-actions">
-                    <button onclick="event.stopPropagation(); openCodeServer('${safeLab}', '${escapeHtml(info.workspace_name)}', '${escapeHtml(ownerID)}')" class="student-btn student-btn-small" title="Open code-server">Open Code Server</button>
+                    <button onclick="event.stopPropagation(); openCodeServer('${escapeHtml(info.lab_id)}', '${escapeHtml(info.workspace_name)}', '${escapeHtml(ownerID)}')" class="student-btn student-btn-small" title="Open code-server">Open Code Server</button>
                     ${isEncrypted ? '' : `<button onclick="event.stopPropagation(); encryptSingleWorkspace('${safeLab}')" class="student-btn student-btn-small" title="Encrypt password">Encrypt</button>`}
                     <button onclick="event.stopPropagation(); clearWorkspaceInfo('${safeLab}')" class="student-btn student-btn-danger student-btn-small" title="Remove">Clear</button>
                     <button class="collapsible-toggle" type="button" aria-label="Toggle workspace details">
@@ -403,7 +403,7 @@ async function saveWorkspaceInfoWithEncryption(workspaceInfo) {
             created_at: workspaceInfo.created_at
         };
 
-        const cookieName = `workspace_info_${workspaceInfo.lab_id}`;
+        const cookieName = `workspace_info_${workspaceInfo.lab_id}_${workspaceInfo.workspace_name}`;
         const cookieValue = encodeURIComponent(JSON.stringify(encryptedInfo));
         setCookie(cookieName, cookieValue, 1);
 

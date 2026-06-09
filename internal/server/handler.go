@@ -1586,7 +1586,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 		if existingWSInfoJSON, jsonErr := json.Marshal(existingWSInfo); jsonErr == nil {
 			isSecure := strings.HasPrefix(coderURL, "https://") || r.TLS != nil
-			cookieName := fmt.Sprintf("workspace_info_%s", labID)
+			cookieName := fmt.Sprintf("workspace_info_%s_%s", labID, existingWS.Name)
 			http.SetCookie(w, &http.Cookie{
 				Name:     cookieName,
 				Value:    url.QueryEscape(string(existingWSInfoJSON)),
@@ -1673,8 +1673,8 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		// URL-encode the JSON string for cookie value (cookies need URL encoding for special characters)
 		cookieValue := url.QueryEscape(string(workspaceInfoJSON))
 
-		// Set per-lab cookie with workspace info
-		cookieName := fmt.Sprintf("workspace_info_%s", labID)
+		// Set per-workspace cookie with workspace info
+		cookieName := fmt.Sprintf("workspace_info_%s_%s", labID, workspace.Name)
 		cookie := &http.Cookie{
 			Name:     cookieName,
 			Value:    cookieValue,
