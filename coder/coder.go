@@ -55,9 +55,9 @@ func SetupDB(ctx *pulumi.Context, k8sProvider *k8s.Provider, ns *k8score.Namespa
 
 	helmValues := internalK8s.HelmChartInfo{
 		Name:        "postgresql",
-		ChartName:   "postgresql",
+		ChartName:   "oci://registry-1.docker.io/bitnamicharts/postgresql",
 		Version:     "",
-		Url:         "https://charts.bitnami.com/bitnami",
+		Url:         "",
 		ReleaseName: "postgresql",
 		Values: pulumi.Map{
 			"auth": pulumi.Map{
