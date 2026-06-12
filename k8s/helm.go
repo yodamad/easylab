@@ -33,13 +33,15 @@ func InitHelm(ctx *pulumi.Context, provider *k8s.Provider, chart HelmChartInfo, 
 		Chart:           pulumi.String(chart.ChartName),
 		Namespace:       namespace.Metadata.Name(),
 		CreateNamespace: pulumi.Bool(chart.createNamespace),
-		RepositoryOpts: &helmv3.RepositoryOptsArgs{
+		SkipCrds:        pulumi.Bool(chart.crds),
+		Version:         pulumi.String(chart.Version),
+		Values:          chart.Values,
+		Timeout:         pulumi.Int(helmTimeout(chart.Timeout)),
+	}
+	if chart.Url != "" {
+		releaseArgs.RepositoryOpts = &helmv3.RepositoryOptsArgs{
 			Repo: pulumi.String(chart.Url),
-		},
-		SkipCrds: pulumi.Bool(chart.crds),
-		Version:  pulumi.String(chart.Version),
-		Values:   chart.Values,
-		Timeout:  pulumi.Int(helmTimeout(chart.Timeout)),
+		}
 	}
 	if chart.ReleaseName != "" {
 		releaseArgs.Name = pulumi.String(chart.ReleaseName)
