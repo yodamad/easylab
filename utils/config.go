@@ -128,6 +128,8 @@ const CoderNginxIngressNamespace = "nginxIngressNamespace"
 const CoderNginxIngressServiceName = "nginxIngressServiceName"
 const CoderCertManagerNamespace = "certManagerNamespace"
 const CoderGithubLoginEnabled = "githubLoginEnabled"
+const CoderSessionDuration = "sessionDuration"    // maps to CODER_SESSION_DURATION (e.g. "24h")
+const CoderDormancyThreshold = "dormancyThreshold" // maps to CODER_DORMANCY_THRESHOLD (e.g. "168h")
 
 // DNS provider config group
 const DNSGroup = "dns"

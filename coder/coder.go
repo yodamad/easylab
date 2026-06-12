@@ -170,6 +170,20 @@ func SetupCoder(ctx *pulumi.Context, k8sProvider *k8s.Provider, ns *k8score.Name
 		})
 	}
 
+	if dur := utils.CoderConfigOptional(ctx, utils.CoderSessionDuration); dur != "" {
+		envVars = append(envVars, pulumi.Map{
+			"name":  pulumi.String("CODER_SESSION_DURATION"),
+			"value": pulumi.String(dur),
+		})
+	}
+
+	if thr := utils.CoderConfigOptional(ctx, utils.CoderDormancyThreshold); thr != "" {
+		envVars = append(envVars, pulumi.Map{
+			"name":  pulumi.String("CODER_DORMANCY_THRESHOLD"),
+			"value": pulumi.String(thr),
+		})
+	}
+
 	if domain := utils.CoderConfigOptional(ctx, utils.CoderDomain); domain != "" {
 		envVars = append(envVars, pulumi.Map{
 			"name":  pulumi.String("CODER_ACCESS_URL"),

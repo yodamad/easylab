@@ -1774,8 +1774,8 @@ func (h *Handler) WorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 		coderURL = "https://" + wsCoderDomain
 	}
 
-	log.Printf("[debug] WorkspaceStatus: coderURL=%q hasToken=%v hasAdminEmail=%v hasAdminPassword=%v orgID=%q",
-		coderURL, coderSessionToken != "", coderAdminEmail != "", coderAdminPassword != "", coderOrganizationID)
+	log.Printf("[debug] WorkspaceStatus: coderURL=%q hasToken=%v adminEmail=%q passwordLen=%d orgID=%q",
+		coderURL, coderSessionToken != "", coderAdminEmail, len(coderAdminPassword), coderOrganizationID)
 
 	if coderURL == "" || coderSessionToken == "" {
 		log.Printf("[debug] WorkspaceStatus: missing coderURL or sessionToken, returning checking")
@@ -1813,21 +1813,75 @@ func (h *Handler) WorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 	wsURL := ""
 	if readiness == "running" {
 		agentName := workspaceFirstAgentName(workspace)
-		appPath := fmt.Sprintf("/@%s/%s.%s/apps/code-server/?folder=/workspaces",
-			workspace.OwnerName, workspace.Name, agentName)
-		// Create a short-lived API key for the student so the browser can access the
-		// workspace app directly without a login prompt (token is read by Coder from
-		// the ?coder_session_token= query parameter before proxying).
-		if studentKey, keyErr := createStudentAppToken(coderURL, coderSessionToken, ownerID); keyErr == nil {
-			wsURL = fmt.Sprintf("%s%s&%s=%s",
-				coderURL, appPath, codersdk.SessionTokenCookie, url.QueryEscape(studentKey))
-		} else {
-			log.Printf("WorkspaceStatus: failed to create student token for %s: %v", ownerID, keyErr)
-			wsURL = fmt.Sprintf("%s/login?redirect=%s", coderURL, url.QueryEscape(appPath))
-		}
+		// Route through the OpenWorkspace redirect endpoint so the session token is
+		// created fresh at the moment the student clicks (not at polling time). This
+		// maximises the session cookie lifetime and ensures the user is reactivated
+		// just before Coder processes the token.
+		wsURL = fmt.Sprintf("/api/student/workspace/open?lab_id=%s&workspace_name=%s&owner_id=%s&agent=%s",
+			url.QueryEscape(labID), url.QueryEscape(workspaceName),
+			url.QueryEscape(ownerID), url.QueryEscape(agentName))
 	}
 	w.Header().Set("Content-Type", "text/html")
 	fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, ownerID, readiness, wsURL))
+}
+
+// OpenWorkspace creates a fresh Coder session token for the student and redirects
+// them directly to code-server. Doing this at click time (rather than embedding a
+// stale token in the polling HTML) maximises the session cookie lifetime and
+// re-activates dormant users immediately before Coder validates the token.
+func (h *Handler) OpenWorkspace(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	labID := r.URL.Query().Get("lab_id")
+	workspaceName := r.URL.Query().Get("workspace_name")
+	ownerID := r.URL.Query().Get("owner_id")
+	agentName := r.URL.Query().Get("agent")
+
+	if labID == "" || workspaceName == "" || ownerID == "" || agentName == "" {
+		http.Error(w, "lab_id, workspace_name, owner_id, and agent are required", http.StatusBadRequest)
+		return
+	}
+
+	job, exists := h.jobManager.GetJob(labID)
+	if !exists {
+		http.Error(w, "lab not found", http.StatusNotFound)
+		return
+	}
+
+	job.mu.RLock()
+	coderURL := extractStringFromConfigValue(job.CoderURL)
+	coderSessionToken := extractStringFromConfigValue(job.CoderSessionToken)
+	wsCoderDomain := ""
+	if job.Config != nil {
+		wsCoderDomain = job.Config.CoderDomain
+	}
+	job.mu.RUnlock()
+
+	if wsCoderDomain != "" {
+		coderURL = "https://" + wsCoderDomain
+	}
+
+	if coderURL == "" || coderSessionToken == "" {
+		http.Error(w, "lab is not ready", http.StatusServiceUnavailable)
+		return
+	}
+
+	appPath := fmt.Sprintf("/@%s/%s.%s/apps/code-server/?folder=/workspaces",
+		ownerID, workspaceName, agentName)
+
+	studentKey, err := createStudentAppToken(coderURL, coderSessionToken, ownerID)
+	if err != nil {
+		log.Printf("OpenWorkspace: failed to create token for %s: %v", ownerID, err)
+		http.Redirect(w, r, coderURL+"/login?redirect="+url.QueryEscape(appPath), http.StatusFound)
+		return
+	}
+
+	target := fmt.Sprintf("%s%s&%s=%s",
+		coderURL, appPath, codersdk.SessionTokenCookie, url.QueryEscape(studentKey))
+	http.Redirect(w, r, target, http.StatusFound)
 }
 
 // workspaceReadinessStatus derives a single readiness string from a workspace.
@@ -1892,6 +1946,9 @@ func workspaceFirstAgentName(ws codersdk.Workspace) string {
 // scoped to the given student username. The returned key can be passed as
 // ?coder_session_token= on workspace app URLs so the student lands directly in
 // code-server without a login prompt (Coder reads the query param before proxying).
+// CreateAPIKey is used (not CreateToken) because Coder only sets a proper browser-session
+// cookie from browser-session-type keys; machine tokens created via CreateToken are not
+// accepted for browser sessions and cause 401s on subsequent API calls (/api/v2/users/me).
 func createStudentAppToken(coderURL, adminToken, username string) (string, error) {
 	parsedURL, err := url.Parse(coderURL)
 	if err != nil {
@@ -3287,6 +3344,39 @@ func (h *Handler) RecreateLab(w http.ResponseWriter, r *http.Request) {
 	// Create new job with the same configuration
 	newJobID := h.jobManager.CreateJob(config)
 	log.Printf("Recreating lab from destroyed job %s as new job: %s", jobID, newJobID)
+
+	// Copy uploaded template files from old job directory to new job directory
+	oldJobDir := filepath.Join(h.pulumiExec.GetWorkDir(), jobID)
+	newJobDir := filepath.Join(h.pulumiExec.GetWorkDir(), newJobID)
+	if err := os.MkdirAll(newJobDir, 0755); err != nil {
+		log.Printf("Failed to create new job directory for %s: %v", newJobID, err)
+		http.Error(w, "Failed to prepare job directory", http.StatusInternalServerError)
+		return
+	}
+	for _, t := range config.GetCoderTemplates() {
+		if t.Source == "upload" && t.FilePath != "" {
+			src := filepath.Join(oldJobDir, t.FilePath)
+			dst := filepath.Join(newJobDir, t.FilePath)
+			if copyErr := func() error {
+				in, err := os.Open(src)
+				if err != nil {
+					return fmt.Errorf("open source: %w", err)
+				}
+				defer in.Close()
+				out, err := os.Create(dst)
+				if err != nil {
+					return fmt.Errorf("create dest: %w", err)
+				}
+				defer out.Close()
+				_, err = io.Copy(out, in)
+				return err
+			}(); copyErr != nil {
+				log.Printf("Failed to copy template file %s for recreated job %s: %v", t.FilePath, newJobID, copyErr)
+				http.Error(w, "Failed to copy template file", http.StatusInternalServerError)
+				return
+			}
+		}
+	}
 
 	// Start Pulumi execution in a goroutine
 	go func() {
