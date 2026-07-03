@@ -183,7 +183,7 @@ func TestWaitForCoderReachableStandalone_InvalidURL(t *testing.T) {
 
 func TestGetTemplatesWithRetry_InvalidURL(t *testing.T) {
 	cfg := CoderClientConfig{ServerURL: invalidURL, OrganizationID: uuid.New().String()}
-	_, err := GetTemplatesWithRetry(cfg, "admin@example.com", "pass")
+	_, _, err := GetTemplatesWithRetry(cfg, "admin@example.com", "pass")
 	assert.Error(t, err)
 }
 
@@ -1245,6 +1245,13 @@ func makeRetryMockServer(t *testing.T, orgID uuid.UUID, firstHandler func(w http
 			json.NewEncoder(w).Encode(codersdk.LoginWithPasswordResponse{SessionToken: "refreshed-token"})
 			return
 		}
+		// RefreshToken mints a long-lived admin token after logging in; model that
+		// endpoint so the refreshed config carries the minted token.
+		if strings.HasSuffix(r.URL.Path, "/keys/tokens") && r.Method == http.MethodPost {
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(codersdk.GenerateAPIKeyResponse{Key: "refreshed-token"})
+			return
+		}
 		if callCount <= 1 {
 			firstHandler(w, r)
 		} else {
@@ -1685,9 +1692,13 @@ func TestGetTemplatesWithRetry_RefreshesToken(t *testing.T) {
 		SessionToken:   "old-token",
 		OrganizationID: orgID.String(),
 	}
-	templates, err := GetTemplatesWithRetry(cfg, "admin@example.com", "pass")
+	templates, refreshedCfg, err := GetTemplatesWithRetry(cfg, "admin@example.com", "pass")
 	require.NoError(t, err)
 	assert.Len(t, templates, 1)
+	// The refreshed config must carry the new token so callers can persist it.
+	// (Long-lived token minting hits the mock's NotFound and falls back to the
+	// session token from LoginWithPassword.)
+	assert.Equal(t, "refreshed-token", refreshedCfg.SessionToken)
 }
 
 func TestGetTemplatesWithRetry_Found(t *testing.T) {
@@ -1697,7 +1708,9 @@ func TestGetTemplatesWithRetry_Found(t *testing.T) {
 		SessionToken:   "token",
 		OrganizationID: orgID.String(),
 	}
-	templates, err := GetTemplatesWithRetry(cfg, "admin@example.com", "pass")
+	templates, retCfg, err := GetTemplatesWithRetry(cfg, "admin@example.com", "pass")
 	require.NoError(t, err)
 	assert.Len(t, templates, 1)
+	// No refresh needed — the original config (and token) is returned unchanged.
+	assert.Equal(t, "token", retCfg.SessionToken)
 }

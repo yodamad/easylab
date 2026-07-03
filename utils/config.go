@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
@@ -128,8 +129,27 @@ const CoderNginxIngressNamespace = "nginxIngressNamespace"
 const CoderNginxIngressServiceName = "nginxIngressServiceName"
 const CoderCertManagerNamespace = "certManagerNamespace"
 const CoderGithubLoginEnabled = "githubLoginEnabled"
-const CoderSessionDuration = "sessionDuration"    // maps to CODER_SESSION_DURATION (e.g. "24h")
-const CoderDormancyThreshold = "dormancyThreshold" // maps to CODER_DORMANCY_THRESHOLD (e.g. "168h")
+const CoderSessionDuration = "sessionDuration"             // maps to CODER_SESSION_DURATION (e.g. "24h")
+const CoderDormancyThreshold = "dormancyThreshold"         // maps to CODER_DORMANCY_THRESHOLD (e.g. "168h")
+const CoderMaxAdminTokenLifetime = "maxAdminTokenLifetime" // maps to CODER_MAX_ADMIN_TOKEN_LIFETIME (e.g. "720h")
+
+// DefaultCoderAdminTokenLifetime is the fallback lifetime for the long-lived Coder
+// admin API token minted at provisioning (and on refresh). 30 days keeps a lab
+// usable for its whole lifetime without hitting Coder's session-token expiry.
+const DefaultCoderAdminTokenLifetime = 720 * time.Hour
+
+// CoderAdminTokenLifetime resolves the desired admin token lifetime from the
+// CODER_ADMIN_TOKEN_LIFETIME env var (a Go duration string, e.g. "720h"),
+// falling back to DefaultCoderAdminTokenLifetime. The value must not exceed the
+// Coder deployment's CODER_MAX_ADMIN_TOKEN_LIFETIME or CreateToken is rejected.
+func CoderAdminTokenLifetime() time.Duration {
+	if v := os.Getenv("CODER_ADMIN_TOKEN_LIFETIME"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return DefaultCoderAdminTokenLifetime
+}
 
 // DNS provider config group
 const DNSGroup = "dns"

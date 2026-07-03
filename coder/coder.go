@@ -177,6 +177,19 @@ func SetupCoder(ctx *pulumi.Context, k8sProvider *k8s.Provider, ns *k8score.Name
 		})
 	}
 
+	// Allow the admin (owner) user to mint the long-lived API token EasyLab stores
+	// per lab. Coder caps owner-created tokens at CODER_MAX_ADMIN_TOKEN_LIFETIME
+	// (default 7 days), so raise it to at least the desired admin-token lifetime;
+	// otherwise CreateToken is rejected and the lab falls back to short-lived tokens.
+	maxAdminTokenLifetime := utils.CoderConfigOptional(ctx, utils.CoderMaxAdminTokenLifetime)
+	if maxAdminTokenLifetime == "" {
+		maxAdminTokenLifetime = utils.DefaultCoderAdminTokenLifetime.String()
+	}
+	envVars = append(envVars, pulumi.Map{
+		"name":  pulumi.String("CODER_MAX_ADMIN_TOKEN_LIFETIME"),
+		"value": pulumi.String(maxAdminTokenLifetime),
+	})
+
 	if thr := utils.CoderConfigOptional(ctx, utils.CoderDormancyThreshold); thr != "" {
 		envVars = append(envVars, pulumi.Map{
 			"name":  pulumi.String("CODER_DORMANCY_THRESHOLD"),
@@ -334,9 +347,21 @@ func InitCoder(ctx *pulumi.Context, externalIp string) (CoderConfig, error) {
 		}
 	}
 
+	// Mint a long-lived admin token so the lab survives session-token expiry.
+	// Fall back to the short-lived session token if minting fails.
+	sessionToken := loginRes.SessionToken
+	tokenClient := codersdk.New(serverURL)
+	tokenClient.SetSessionToken(loginRes.SessionToken)
+	if longLived, tokenErr := createAdminToken(tokenClient, utils.CoderAdminTokenLifetime()); tokenErr != nil {
+		utils.LogInfo(ctx, "Warning: could not mint long-lived admin token, using session token: "+tokenErr.Error())
+	} else {
+		sessionToken = longLived
+		utils.LogInfo(ctx, "Minted long-lived admin token")
+	}
+
 	return CoderConfig{
 		ServerURL:      *serverURL,
-		SessionToken:   loginRes.SessionToken,
+		SessionToken:   sessionToken,
 		OrganizationID: organizationID,
 	}, nil
 }
@@ -375,6 +400,24 @@ func waitForCoderReachableStandalone(baseURL string, logFunc func(string)) error
 		}
 	}
 	return fmt.Errorf("Coder did not become reachable after %d attempts", maxAttempts)
+}
+
+// createAdminToken mints a long-lived API token for the currently authenticated
+// admin user. EasyLab stores one admin token per lab and reuses it for the lab's
+// whole lifetime; a plain login SessionToken expires (CODER_SESSION_DURATION) and
+// forces students to hit a raw Coder 401, so a long-lived token avoids that.
+// The client must already have a valid session token set. The lifetime is capped
+// by the deployment's CODER_MAX_ADMIN_TOKEN_LIFETIME (see SetupCoder). Callers
+// should treat an error as non-fatal and fall back to the session token.
+func createAdminToken(client *codersdk.Client, lifetime time.Duration) (string, error) {
+	res, err := client.CreateToken(context.Background(), codersdk.Me, codersdk.CreateTokenRequest{
+		Lifetime:  lifetime,
+		TokenName: fmt.Sprintf("easylab-admin-%d", time.Now().UnixNano()),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create long-lived admin token: %w", err)
+	}
+	return res.Key, nil
 }
 
 // InitCoderStandalone initializes Coder outside of the Pulumi engine.
@@ -442,9 +485,21 @@ func InitCoderStandalone(serverURLStr, email, password string, logFunc func(stri
 		}
 	}
 
+	// Mint a long-lived admin token so the lab survives session-token expiry.
+	// Fall back to the short-lived session token if minting fails.
+	sessionToken := loginRes.SessionToken
+	tokenClient := codersdk.New(serverURL)
+	tokenClient.SetSessionToken(loginRes.SessionToken)
+	if longLived, tokenErr := createAdminToken(tokenClient, utils.CoderAdminTokenLifetime()); tokenErr != nil {
+		logFunc("Warning: could not mint long-lived admin token, using session token: " + tokenErr.Error())
+	} else {
+		sessionToken = longLived
+		logFunc("Minted long-lived admin token")
+	}
+
 	return CoderClientConfig{
 		ServerURL:      baseURL,
-		SessionToken:   loginRes.SessionToken,
+		SessionToken:   sessionToken,
 		OrganizationID: organizationID.String(),
 	}, nil
 }
@@ -937,10 +992,20 @@ func RefreshToken(config CoderClientConfig, adminEmail, adminPassword string) (C
 		return CoderClientConfig{}, fmt.Errorf("login with admin credentials failed: %w", err)
 	}
 
+	// Mint a long-lived admin token so the refreshed token does not immediately
+	// expire again. Fall back to the short-lived session token on failure.
+	sessionToken := loginRes.SessionToken
+	client.SetSessionToken(loginRes.SessionToken)
+	if longLived, tokenErr := createAdminToken(client, utils.CoderAdminTokenLifetime()); tokenErr != nil {
+		log.Printf("RefreshToken: could not mint long-lived admin token, using session token: %v", tokenErr)
+	} else {
+		sessionToken = longLived
+	}
+
 	// Return updated config with new token
 	return CoderClientConfig{
 		ServerURL:      config.ServerURL,
-		SessionToken:   loginRes.SessionToken,
+		SessionToken:   sessionToken,
 		OrganizationID: config.OrganizationID,
 	}, nil
 }
@@ -963,27 +1028,28 @@ func GetStudentSessionToken(serverURL, email, password string) (string, error) {
 	return loginRes.SessionToken, nil
 }
 
-// GetTemplatesWithRetry gets templates with automatic token refresh on failure
-func GetTemplatesWithRetry(config CoderClientConfig, adminEmail, adminPassword string) ([]codersdk.Template, error) {
+// GetTemplatesWithRetry gets templates with automatic token refresh on failure.
+// It returns the (possibly refreshed) config so callers can persist the new token.
+func GetTemplatesWithRetry(config CoderClientConfig, adminEmail, adminPassword string) ([]codersdk.Template, CoderClientConfig, error) {
 	templates, err := GetTemplates(config)
 	if err != nil {
 		// If it fails, try to refresh token and retry
 		log.Printf("Template retrieval failed, attempting token refresh...")
 		refreshedConfig, refreshErr := RefreshToken(config, adminEmail, adminPassword)
 		if refreshErr != nil {
-			return nil, fmt.Errorf("failed to refresh token: %w", refreshErr)
+			return nil, config, fmt.Errorf("failed to refresh token: %w", refreshErr)
 		}
 
 		// Retry with refreshed token
 		templates, err = GetTemplates(refreshedConfig)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get templates even after token refresh: %w", err)
+			return nil, refreshedConfig, fmt.Errorf("failed to get templates even after token refresh: %w", err)
 		}
 
-		// Return refreshed config as well (though not used in this context)
 		log.Printf("Token refreshed successfully")
+		return templates, refreshedConfig, nil
 	}
-	return templates, nil
+	return templates, config, nil
 }
 
 // CreateUserWithRetry creates a user with automatic token refresh on failure

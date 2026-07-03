@@ -349,6 +349,37 @@ func (jm *JobManager) SetCoderConfig(id string, coderURL, coderAdminEmail, coder
 	return nil
 }
 
+// UpdateCoderSessionToken persists a refreshed Coder session/admin token for a job.
+// It is a no-op when the token is empty or unchanged (avoids needless disk writes
+// and write amplification when many requests hit the same lab). When the token
+// changed it is written back to the job's JSON file via SaveJob, so subsequent
+// requests (and a server restart) start from a valid token instead of the stale
+// one minted at provisioning.
+func (jm *JobManager) UpdateCoderSessionToken(id, token string) error {
+	if token == "" {
+		return nil
+	}
+
+	jm.mu.RLock()
+	job, exists := jm.jobs[id]
+	jm.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("job %s not found", id)
+	}
+
+	job.mu.Lock()
+	if job.CoderSessionToken == token {
+		job.mu.Unlock()
+		return nil
+	}
+	job.CoderSessionToken = token
+	job.UpdatedAt = time.Now()
+	job.mu.Unlock()
+
+	return jm.SaveJob(id)
+}
+
 // coderCredentials returns the effective Coder admin email and password.
 // Falls back to Config fields for jobs where the top-level fields are empty
 // (e.g. jobs loaded from disk that predate the SetCoderConfig call).

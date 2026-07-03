@@ -106,7 +106,8 @@ func (h *Handler) cleanupExpiredWorkspaces() {
 			OrganizationID: job.CoderOrganizationID,
 		}
 		adminEmail, adminPassword := job.coderCredentials()
-		workspaces, _, err := coder.ListWorkspacesWithRetry(coderConfig, adminEmail, adminPassword, uuid.Nil, "")
+		workspaces, listCfg, err := coder.ListWorkspacesWithRetry(coderConfig, adminEmail, adminPassword, uuid.Nil, "")
+		coderConfig = listCfg
 		if err != nil {
 			log.Printf("[cleanup] failed to list workspaces for job %s: %v", job.ID, err)
 			continue
@@ -141,8 +142,10 @@ func (h *Handler) cleanupExpiredWorkspaces() {
 			}
 
 			log.Printf("[cleanup] deleting workspace %s (%s) in job %s: exceeded %dh lifetime", ws.Name, wsID, job.ID, job.Config.WorkspaceLifetimeHours)
-			if _, err := coder.DeleteWorkspaceWithRetry(coderConfig, adminEmail, adminPassword, ws.ID); err != nil {
-				log.Printf("[cleanup] failed to delete workspace %s: %v", wsID, err)
+			delCfg, delErr := coder.DeleteWorkspaceWithRetry(coderConfig, adminEmail, adminPassword, ws.ID)
+			coderConfig = delCfg
+			if delErr != nil {
+				log.Printf("[cleanup] failed to delete workspace %s: %v", wsID, delErr)
 				if ferr := h.jobManager.RecordDeletionFailure(job.ID, wsID, ws.Name, maxRetries); ferr != nil {
 					log.Printf("[cleanup] failed to record deletion failure for workspace %s: %v", wsID, ferr)
 				}
@@ -152,6 +155,10 @@ func (h *Handler) cleanupExpiredWorkspaces() {
 					log.Printf("[cleanup] failed to clear deletion retry for workspace %s: %v", wsID, cerr)
 				}
 			}
+		}
+		// Persist any refreshed admin token so future ticks and requests start valid.
+		if perr := h.jobManager.UpdateCoderSessionToken(job.ID, coderConfig.SessionToken); perr != nil {
+			log.Printf("[cleanup] failed to persist refreshed token for job %s: %v", job.ID, perr)
 		}
 		if deleted > 0 {
 			if err := h.jobManager.RecordCleanupEvent(job.ID, deleted); err != nil {

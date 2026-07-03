@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // helper to build a minimal workspace with one agent
@@ -192,6 +194,52 @@ func TestWorkspaceFirstAgentName_CustomName(t *testing.T) {
 	}
 	got := workspaceFirstAgentName(ws)
 	assert.Equal(t, "custom-agent", got)
+}
+
+// --- createStudentAppToken tests ---
+
+// TestCreateStudentAppToken_RefreshesOnExpiredToken proves the student "Open
+// workspace" path self-heals: when the stored admin token is expired, it
+// re-logins with admin credentials and returns the refreshed token so the caller
+// can persist it, instead of leaking a raw Coder 401 to the student.
+func TestCreateStudentAppToken_RefreshesOnExpiredToken(t *testing.T) {
+	const staleToken = "stale-token"
+	const refreshedToken = "refreshed-token"
+	const wantKey = "student-api-key"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		token := r.Header.Get(codersdk.SessionTokenHeader)
+		switch {
+		case r.URL.Path == "/api/v2/users/login" && r.Method == http.MethodPost:
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(codersdk.LoginWithPasswordResponse{SessionToken: refreshedToken})
+		case strings.HasSuffix(r.URL.Path, "/keys/tokens") && r.Method == http.MethodPost:
+			// Long-lived admin-token minting — force fallback to the session token.
+			w.WriteHeader(http.StatusNotFound)
+		case strings.HasSuffix(r.URL.Path, "/status") && r.Method == http.MethodPut:
+			// Reactivation is best-effort; failing it proves it is non-fatal.
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(codersdk.Response{Message: "unauthorized"})
+		case strings.HasSuffix(r.URL.Path, "/keys") && r.Method == http.MethodPost:
+			// Only the refreshed token is accepted — the stale token 401s.
+			if token != refreshedToken {
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(codersdk.Response{Message: "unauthorized"})
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(codersdk.GenerateAPIKeyResponse{Key: wantKey})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	key, freshToken, err := createStudentAppToken(srv.URL, staleToken, "admin@example.com", "pass", "student")
+	require.NoError(t, err)
+	assert.Equal(t, wantKey, key)
+	assert.Equal(t, refreshedToken, freshToken)
 }
 
 // --- GetCoderCredentials path tests ---

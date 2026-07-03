@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestJobStatus_Constants(t *testing.T) {
@@ -303,6 +306,60 @@ func TestJobManager_SetCoderConfig_NotFound(t *testing.T) {
 	if err == nil {
 		t.Error("SetCoderConfig() expected error for nonexistent job")
 	}
+}
+
+func TestJobManager_UpdateCoderSessionToken(t *testing.T) {
+	tests := []struct {
+		name         string
+		initialToken string
+		newToken     string
+		wantToken    string
+	}{
+		{name: "updates to a refreshed token", initialToken: "old-token", newToken: "new-token", wantToken: "new-token"},
+		{name: "no-op on empty token", initialToken: "old-token", newToken: "", wantToken: "old-token"},
+		{name: "no-op on unchanged token", initialToken: "old-token", newToken: "old-token", wantToken: "old-token"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			jm := NewJobManager("")
+			jobID := jm.CreateJob(&LabConfig{StackName: "test"})
+			require.NoError(t, jm.SetCoderConfig(jobID, "http://coder.example.com", "admin@test.com", "pass", tt.initialToken, "org-id"))
+
+			require.NoError(t, jm.UpdateCoderSessionToken(jobID, tt.newToken))
+
+			job, ok := jm.GetJob(jobID)
+			require.True(t, ok)
+			assert.Equal(t, tt.wantToken, job.CoderSessionToken)
+		})
+	}
+}
+
+func TestJobManager_UpdateCoderSessionToken_NotFound(t *testing.T) {
+	jm := NewJobManager("")
+
+	err := jm.UpdateCoderSessionToken("nonexistent", "token")
+	assert.Error(t, err)
+}
+
+func TestJobManager_UpdateCoderSessionToken_Persists(t *testing.T) {
+	dataDir := t.TempDir()
+	jm := NewJobManager(dataDir)
+
+	jobID := jm.CreateJob(&LabConfig{StackName: "test"})
+	// SaveJob only persists terminal states; a deployed lab is "completed".
+	require.NoError(t, jm.UpdateJobStatus(jobID, JobStatusCompleted))
+	require.NoError(t, jm.SetCoderConfig(jobID, "http://coder.example.com", "admin@test.com", "pass", "stale-token", "org-id"))
+
+	require.NoError(t, jm.UpdateCoderSessionToken(jobID, "fresh-token"))
+
+	// Reload from disk with a fresh manager to prove the token was persisted.
+	reloaded := NewJobManager(dataDir)
+	require.NoError(t, reloaded.LoadJobs())
+	job, ok := reloaded.GetJob(jobID)
+	require.True(t, ok)
+	assert.Equal(t, "fresh-token", job.CoderSessionToken)
 }
 
 func TestJobManager_GetAllJobs(t *testing.T) {

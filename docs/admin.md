@@ -223,3 +223,32 @@ You can see all the labs you have created with following information:
 * **Cleanup** - Display the cleanup policy for the lab (*i.e. after how many hours/days the workspaces will be deleted*)
 
 ![Lab Workspaces](screens/list-workspaces.png){width=350}
+
+## Workspace access reliability (Coder session tokens)
+
+EasyLab talks to each lab's Coder instance with an admin token that it stores per
+lab. Plain Coder session tokens expire (governed by `CODER_SESSION_DURATION`),
+which previously caused students to hit a raw Coder `401 – Try logging in using
+'coder login'` when they opened a workspace on a lab created days earlier.
+
+This is now handled transparently, so students never see a Coder login error:
+
+* **Long-lived admin token at provisioning** — when a lab is created, EasyLab mints
+  a long-lived admin API token (default lifetime **30 days**) instead of relying on
+  a short-lived session token.
+* **Automatic refresh + persistence** — if a stored token is ever rejected, EasyLab
+  silently re-authenticates with the stored admin credentials, retries the request,
+  and saves the refreshed token back to the lab. This also fixes labs that were
+  created before this behaviour existed, without re-provisioning.
+
+Operators can tune the token lifetime with these settings (defaults are sensible;
+no configuration is required):
+
+* `CODER_ADMIN_TOKEN_LIFETIME` (server env, Go duration such as `720h`) — the
+  lifetime requested for the admin token. Defaults to `720h` (30 days).
+* `coder:maxAdminTokenLifetime` (Pulumi config) — injected as
+  `CODER_MAX_ADMIN_TOKEN_LIFETIME` on the Coder deployment. Coder caps admin
+  (owner) tokens at **7 days** by default, so EasyLab raises this to the admin-token
+  lifetime automatically; override it only if you need a different maximum. If the
+  requested lifetime exceeds this cap, EasyLab falls back to short-lived tokens plus
+  automatic refresh.

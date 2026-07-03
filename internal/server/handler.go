@@ -1177,11 +1177,14 @@ func (h *Handler) ListLabTemplates(w http.ResponseWriter, r *http.Request) {
 		OrganizationID: coderOrganizationID,
 	}
 
-	templates, err := coder.GetTemplatesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword)
+	templates, refreshedConfig, err := coder.GetTemplatesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword)
 	if err != nil {
 		log.Printf("Failed to get templates for lab %s: %v", labID, err)
 		http.Error(w, "Failed to fetch templates", http.StatusInternalServerError)
 		return
+	}
+	if perr := h.jobManager.UpdateCoderSessionToken(labID, refreshedConfig.SessionToken); perr != nil {
+		log.Printf("ListLabTemplates: failed to persist refreshed token for lab %s: %v", labID, perr)
 	}
 
 	type templateOption struct {
@@ -1465,8 +1468,19 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		OrganizationID: coderOrganizationID,
 	}
 
+	// Persist any refreshed admin token (the *WithRetry calls below re-login on an
+	// expired token and update coderConfig) so future requests and a server restart
+	// start from a valid token instead of the stale one minted at provisioning.
+	// No-op when nothing refreshed.
+	defer func() {
+		if perr := h.jobManager.UpdateCoderSessionToken(labID, coderConfig.SessionToken); perr != nil {
+			log.Printf("RequestWorkspace: failed to persist refreshed token for lab %s: %v", labID, perr)
+		}
+	}()
+
 	// Get available templates with automatic token refresh
-	templates, err := coder.GetTemplatesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword)
+	templates, refreshedTmplCfg, err := coder.GetTemplatesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword)
+	coderConfig = refreshedTmplCfg
 	if err != nil {
 		log.Printf("Failed to get templates: %v", err)
 		w.Header().Set("Content-Type", "text/html")
@@ -1638,7 +1652,8 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Workspace not found — create it
-	workspace, _, err := coder.CreateWorkspaceWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, user.ID, templateID, workspaceName)
+	workspace, createdCfg, err := coder.CreateWorkspaceWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, user.ID, templateID, workspaceName)
+	coderConfig = createdCfg
 	if err != nil {
 		log.Printf("Failed to create workspace: %v", err)
 		w.Header().Set("Content-Type", "text/html")
@@ -1790,7 +1805,10 @@ func (h *Handler) WorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 		OrganizationID: coderOrganizationID,
 	}
 
-	workspace, _, err := coder.GetWorkspaceByOwnerAndNameWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, ownerID, workspaceName)
+	workspace, refreshedCfg, err := coder.GetWorkspaceByOwnerAndNameWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, ownerID, workspaceName)
+	if perr := h.jobManager.UpdateCoderSessionToken(labID, refreshedCfg.SessionToken); perr != nil {
+		log.Printf("WorkspaceStatus: failed to persist refreshed token for lab %s: %v", labID, perr)
+	}
 	if err != nil {
 		log.Printf("[debug] WorkspaceStatus: lookup failed workspace=%s owner=%s error=%v", workspaceName, ownerID, err)
 		w.Header().Set("Content-Type", "text/html")
@@ -1854,6 +1872,7 @@ func (h *Handler) OpenWorkspace(w http.ResponseWriter, r *http.Request) {
 	job.mu.RLock()
 	coderURL := extractStringFromConfigValue(job.CoderURL)
 	coderSessionToken := extractStringFromConfigValue(job.CoderSessionToken)
+	coderAdminEmail, coderAdminPassword := job.coderCredentials()
 	wsCoderDomain := ""
 	if job.Config != nil {
 		wsCoderDomain = job.Config.CoderDomain
@@ -1872,11 +1891,17 @@ func (h *Handler) OpenWorkspace(w http.ResponseWriter, r *http.Request) {
 	appPath := fmt.Sprintf("/@%s/%s.%s/apps/code-server/?folder=/workspaces",
 		ownerID, workspaceName, agentName)
 
-	studentKey, err := createStudentAppToken(coderURL, coderSessionToken, ownerID)
+	studentKey, freshToken, err := createStudentAppToken(coderURL, coderSessionToken, coderAdminEmail, coderAdminPassword, ownerID)
 	if err != nil {
 		log.Printf("OpenWorkspace: failed to create token for %s: %v", ownerID, err)
 		http.Redirect(w, r, coderURL+"/login?redirect="+url.QueryEscape(appPath), http.StatusFound)
 		return
+	}
+	// Persist a refreshed admin token so future requests start from a valid token.
+	if freshToken != coderSessionToken {
+		if perr := h.jobManager.UpdateCoderSessionToken(labID, freshToken); perr != nil {
+			log.Printf("OpenWorkspace: failed to persist refreshed token for lab %s: %v", labID, perr)
+		}
 	}
 
 	target := fmt.Sprintf("%s%s&%s=%s",
@@ -1949,23 +1974,46 @@ func workspaceFirstAgentName(ws codersdk.Workspace) string {
 // CreateAPIKey is used (not CreateToken) because Coder only sets a proper browser-session
 // cookie from browser-session-type keys; machine tokens created via CreateToken are not
 // accepted for browser sessions and cause 401s on subsequent API calls (/api/v2/users/me).
-func createStudentAppToken(coderURL, adminToken, username string) (string, error) {
-	parsedURL, err := url.Parse(coderURL)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse coder URL: %w", err)
+// It self-heals when the stored admin token has expired: on failure it re-logins
+// with the admin credentials (via coder.RefreshToken), retries once, and returns
+// the refreshed token as freshToken so the caller can persist it. When no refresh
+// was needed, freshToken equals the passed-in adminToken.
+func createStudentAppToken(coderURL, adminToken, adminEmail, adminPassword, username string) (key, freshToken string, err error) {
+	parsedURL, parseErr := url.Parse(coderURL)
+	if parseErr != nil {
+		return "", adminToken, fmt.Errorf("failed to parse coder URL: %w", parseErr)
 	}
 	ctx := context.Background()
-	client := codersdk.New(parsedURL)
-	client.SetSessionToken(adminToken)
-	// Coder marks users dormant after inactivity; reactivate before creating the key.
-	if _, err := client.UpdateUserStatus(ctx, username, codersdk.UserStatusActive); err != nil {
-		log.Printf("createStudentAppToken: could not reactivate user %s (continuing): %v", username, err)
+
+	attempt := func(token string) (string, error) {
+		client := codersdk.New(parsedURL)
+		client.SetSessionToken(token)
+		// Coder marks users dormant after inactivity; reactivate before creating the key.
+		if _, statusErr := client.UpdateUserStatus(ctx, username, codersdk.UserStatusActive); statusErr != nil {
+			log.Printf("createStudentAppToken: could not reactivate user %s (continuing): %v", username, statusErr)
+		}
+		resp, apiErr := client.CreateAPIKey(ctx, username)
+		if apiErr != nil {
+			return "", apiErr
+		}
+		return resp.Key, nil
 	}
-	resp, err := client.CreateAPIKey(ctx, username)
-	if err != nil {
-		return "", fmt.Errorf("failed to create API key for %s: %w", username, err)
+
+	if key, err = attempt(adminToken); err == nil {
+		return key, adminToken, nil
 	}
-	return resp.Key, nil
+
+	// The stored admin token likely expired — refresh with admin credentials and
+	// retry once, so the student never sees a raw Coder 401.
+	log.Printf("createStudentAppToken: attempt failed, refreshing admin token: %v", err)
+	refreshed, refreshErr := coder.RefreshToken(coder.CoderClientConfig{ServerURL: coderURL, SessionToken: adminToken}, adminEmail, adminPassword)
+	if refreshErr != nil {
+		return "", adminToken, fmt.Errorf("failed to refresh admin token: %w", refreshErr)
+	}
+	if key, err = attempt(refreshed.SessionToken); err != nil {
+		return "", refreshed.SessionToken, fmt.Errorf("failed to create API key for %s after token refresh: %w", username, err)
+	}
+	return key, refreshed.SessionToken, nil
 }
 
 // buildWorkspaceStatusHTML returns an HTML partial for the workspace readiness indicator.
@@ -2865,7 +2913,8 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 		OrganizationID: coderOrganizationID,
 	}
 
-	templates, err := coder.GetTemplatesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword)
+	templates, tmplCfg, err := coder.GetTemplatesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword)
+	coderConfig = tmplCfg
 	if err != nil {
 		log.Printf("Failed to get templates: %v", err)
 		http.Error(w, "Failed to fetch templates", http.StatusInternalServerError)
@@ -2895,8 +2944,11 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update config if token was refreshed
+	// Update config if token was refreshed, and persist it for future requests.
 	coderConfig = updatedConfig
+	if perr := h.jobManager.UpdateCoderSessionToken(labID, coderConfig.SessionToken); perr != nil {
+		log.Printf("ServeLabWorkspaces: failed to persist refreshed token for lab %s: %v", labID, perr)
+	}
 
 	// Prepare workspace data for template
 	type WorkspaceDisplay struct {
@@ -2997,7 +3049,8 @@ func (h *Handler) ListLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 		OrganizationID: coderOrganizationID,
 	}
 
-	templates, err := coder.GetTemplatesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword)
+	templates, tmplCfg, err := coder.GetTemplatesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword)
+	coderConfig = tmplCfg
 	if err != nil {
 		log.Printf("Failed to get templates: %v", err)
 		http.Error(w, "Failed to fetch templates", http.StatusInternalServerError)
@@ -3020,11 +3073,14 @@ func (h *Handler) ListLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get workspaces for this template
-	workspaces, _, err := coder.ListWorkspacesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, templateID, templateName)
+	workspaces, updatedConfig, err := coder.ListWorkspacesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, templateID, templateName)
 	if err != nil {
 		log.Printf("Failed to list workspaces: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to list workspaces: %s", err.Error()), http.StatusInternalServerError)
 		return
+	}
+	if perr := h.jobManager.UpdateCoderSessionToken(labID, updatedConfig.SessionToken); perr != nil {
+		log.Printf("ListLabWorkspaces: failed to persist refreshed token for lab %s: %v", labID, perr)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -3104,10 +3160,16 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			_, err = coder.DeleteWorkspaceWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, wsID)
+			var delCfg coder.CoderClientConfig
+			delCfg, err = coder.DeleteWorkspaceWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, wsID)
+			coderConfig = delCfg
 			if err != nil {
 				errors = append(errors, fmt.Sprintf("Failed to delete workspace %s: %v", wsIDStr, err))
 			}
+		}
+		// Persist any refreshed admin token for future requests.
+		if perr := h.jobManager.UpdateCoderSessionToken(labID, coderConfig.SessionToken); perr != nil {
+			log.Printf("DeleteWorkspace: failed to persist refreshed token for lab %s: %v", labID, perr)
 		}
 
 		if len(errors) > 0 {
@@ -3184,7 +3246,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		OrganizationID: coderOrganizationID,
 	}
 
-	_, err = coder.DeleteWorkspaceWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, workspaceID)
+	updatedConfig, err := coder.DeleteWorkspaceWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, workspaceID)
+	if perr := h.jobManager.UpdateCoderSessionToken(labID, updatedConfig.SessionToken); perr != nil {
+		log.Printf("DeleteWorkspace: failed to persist refreshed token for lab %s: %v", labID, perr)
+	}
 	if err != nil {
 		log.Printf("Failed to delete workspace: %v", err)
 		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to delete workspace: %s", err.Error()))
