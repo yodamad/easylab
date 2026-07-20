@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -13,6 +14,7 @@ import (
 	"html/template"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -36,13 +38,13 @@ type Handler struct {
 	pulumiExec *PulumiExecutor
 	// newWorkspaceBackend builds the workspace backend for a lab from its kubeconfig
 	// and namespace. Overridable in tests to inject a fake backend.
-	newWorkspaceBackend         func(kubeconfig, namespace string) (workspace.Backend, error)
-	templates                   map[string]*template.Template
-	templatesMu                 sync.RWMutex
-	credentialsManager          *CredentialsManager
-	ovhOptionsManager           *OVHOptionsManager
-	azureOptionsManager         *AzureOptionsManager
-	feedbackStore               *FeedbackStore
+	newWorkspaceBackend func(kubeconfig, namespace string) (workspace.Backend, error)
+	templates           map[string]*template.Template
+	templatesMu         sync.RWMutex
+	credentialsManager  *CredentialsManager
+	ovhOptionsManager   *OVHOptionsManager
+	azureOptionsManager *AzureOptionsManager
+	feedbackStore       *FeedbackStore
 	// pendingSecrets holds credentials captured in the creation wizard until the
 	// lab's cluster exists to receive them (see pending_secrets.go).
 	pendingSecrets              *pendingSecretStore
@@ -540,6 +542,24 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 	return config
 }
 
+// validateDNSConfig rejects a DNS-provider selection that cannot produce a valid
+// A record: a missing zone, or a domain that does not sit inside the zone. Without
+// this check the empty/mismatched zone only surfaces as an OVH 404 deep inside
+// pulumi up (coder/https.go strips the zone off the domain to derive the subdomain).
+func validateDNSConfig(cfg *LabConfig) error {
+	if cfg.DNSProvider == "" {
+		return nil
+	}
+	zone := strings.TrimSpace(cfg.DNSZone)
+	if zone == "" {
+		return fmt.Errorf("DNS Zone is required when a DNS provider is selected")
+	}
+	if cfg.Domain != "" && cfg.Domain != zone && !strings.HasSuffix(cfg.Domain, "."+zone) {
+		return fmt.Errorf("domain %q is not inside DNS zone %q", cfg.Domain, zone)
+	}
+	return nil
+}
+
 // executeLabJob creates a job and starts execution, returning the job ID and HTML response
 func (h *Handler) executeLabJob(config *LabConfig, isDryRun bool) (string, string) {
 	// Create job
@@ -782,6 +802,15 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 	// files to upload.
 	initialConfig := h.createLabConfigFromForm(r, providerCreds)
 	initialConfig.WorkspaceTemplates = templates
+
+	// A DNS-provider selection with no (or a mismatched) zone can only fail deep
+	// inside pulumi up, after minutes of provisioning. Reject it here, before any
+	// job or job directory exists.
+	if err := validateDNSConfig(initialConfig); err != nil {
+		log.Printf("Invalid DNS configuration: %v", err)
+		h.renderHTMLError(w, "DNS Configuration Error", err.Error())
+		return
+	}
 
 	// Create job and job directory
 	jobID := h.jobManager.CreateJob(initialConfig)
@@ -1638,14 +1667,74 @@ func (h *Handler) WorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 	readiness := ws.Phase
 	wsURL := ""
 	if ws.Ready {
-		readiness = "running"
-		// Route through the OpenWorkspace redirect endpoint so the connection token
-		// is appended at click time.
-		wsURL = fmt.Sprintf("/api/student/workspace/open?lab_id=%s&workspace_name=%s",
-			url.QueryEscape(labID), url.QueryEscape(ws.Name))
+		if workspaceDNSReady(r.Context(), ws) {
+			readiness = "running"
+			// Route through the OpenWorkspace redirect endpoint so the connection token
+			// is appended at click time.
+			wsURL = fmt.Sprintf("/api/student/workspace/open?lab_id=%s&workspace_name=%s",
+				url.QueryEscape(labID), url.QueryEscape(ws.Name))
+		} else {
+			// The pod is up but the workspace hostname does not resolve yet — the DNS
+			// record created during provisioning is still propagating. Keep polling
+			// instead of handing the student a URL that would NXDOMAIN (which the
+			// browser then negatively caches, making the workspace look broken).
+			readiness = "dns_propagating"
+		}
 	}
 	w.Header().Set("Content-Type", "text/html")
 	fmt.Fprint(w, buildWorkspaceStatusHTML(labID, ws.Name, readiness, wsURL))
+}
+
+// dnsPropagationGrace bounds how long the student UI holds the "ready" signal back
+// while a freshly-created workspace hostname propagates through DNS. Past this
+// window we fail open and show the workspace as ready anyway, so a lab whose DNS
+// is managed manually (no provider automation) is never trapped in "propagating".
+const dnsPropagationGrace = 3 * time.Minute
+
+// dnsLookupTimeout caps a single reachability lookup so a slow resolver never
+// stalls the status poll.
+const dnsLookupTimeout = 2 * time.Second
+
+// hostResolver is the subset of *net.Resolver used to probe workspace DNS. It is a
+// package var so tests can substitute a deterministic resolver.
+type hostResolver interface {
+	LookupHost(ctx context.Context, host string) ([]string, error)
+}
+
+var workspaceDNSResolver hostResolver = net.DefaultResolver
+
+// workspaceDNSReady reports whether a pod-ready workspace's public hostname
+// resolves yet. A Deployment can report Ready seconds before the DNS A record
+// created during provisioning has propagated; opening the URL then yields
+// DNS_PROBE_FINISHED_NXDOMAIN. Gating the green "ready" state on resolution keeps
+// students from clicking too early. It fails open once dnsPropagationGrace has
+// elapsed so manually-managed DNS is never blocked forever, and returns true
+// immediately when there is no public host to resolve (in-cluster workspaces).
+func workspaceDNSReady(ctx context.Context, ws workspace.Workspace) bool {
+	host := hostFromWorkspaceURL(ws.URL)
+	if host == "" {
+		return true
+	}
+	if time.Since(ws.UpdatedAt) > dnsPropagationGrace {
+		return true
+	}
+	lctx, cancel := context.WithTimeout(ctx, dnsLookupTimeout)
+	defer cancel()
+	addrs, err := workspaceDNSResolver.LookupHost(lctx, host)
+	return err == nil && len(addrs) > 0
+}
+
+// hostFromWorkspaceURL extracts the hostname from a workspace base URL, returning
+// "" when there is no domain configured or the URL cannot be parsed.
+func hostFromWorkspaceURL(rawURL string) string {
+	if rawURL == "" {
+		return ""
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
 }
 
 // usernameInvalidChars matches characters not allowed in a DNS-1123 label.
@@ -1739,6 +1828,8 @@ func buildWorkspaceStatusHTML(labID, workspaceName, status, workspaceURL string)
 			message = "Checking workspace status..."
 		case "agents_starting":
 			message = "Workspace is provisioned, waiting for agent to be ready..."
+		case "dns_propagating":
+			message = "Workspace is up — waiting for DNS to propagate (this can take a minute)..."
 		default:
 			message = fmt.Sprintf("Workspace is %s, this may take a moment...", status)
 		}

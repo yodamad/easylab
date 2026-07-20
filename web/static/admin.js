@@ -758,10 +758,14 @@ function handleDNSProviderChange() {
     const provider = select.value;
 
     const zoneGroup = document.getElementById('dns_zone_group');
+    const zoneInput = document.getElementById('dns_zone');
     const ovhFields = document.getElementById('dns-ovh-fields');
     const azureFields = document.getElementById('dns-azure-fields');
 
     if (zoneGroup) zoneGroup.style.display = provider ? '' : 'none';
+    // Zone is mandatory once a provider is chosen: without it the A record fails
+    // deep inside pulumi up. Keep required in lockstep with visibility.
+    if (zoneInput) zoneInput.required = !!provider;
     if (ovhFields) ovhFields.style.display = provider === 'ovh' ? '' : 'none';
     if (azureFields) azureFields.style.display = provider === 'azure' ? '' : 'none';
 }

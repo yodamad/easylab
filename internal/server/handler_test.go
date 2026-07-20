@@ -2,12 +2,15 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"easylab/internal/providers/workspace"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1480,5 +1483,145 @@ func TestHandler_SetClassicAdminLoginConfigurer(t *testing.T) {
 	h.classicAdminLoginConfigurer(false)
 	if !called {
 		t.Error("classicAdminLoginConfigurer callback was not called")
+	}
+}
+
+func TestValidateDNSConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  *LabConfig
+		wantErr bool
+	}{
+		{
+			name:    "no DNS provider is always valid",
+			config:  &LabConfig{DNSProvider: "", DNSZone: "", Domain: ""},
+			wantErr: false,
+		},
+		{
+			name:    "provider with empty zone is rejected",
+			config:  &LabConfig{DNSProvider: "ovh", DNSZone: "", Domain: "ai-bb.yodamad.fr"},
+			wantErr: true,
+		},
+		{
+			name:    "provider with whitespace-only zone is rejected",
+			config:  &LabConfig{DNSProvider: "ovh", DNSZone: "   ", Domain: "ai-bb.yodamad.fr"},
+			wantErr: true,
+		},
+		{
+			name:    "domain outside the zone is rejected",
+			config:  &LabConfig{DNSProvider: "ovh", DNSZone: "yodamad.fr", Domain: "ai-bb.example.com"},
+			wantErr: true,
+		},
+		{
+			name:    "subdomain inside the zone is valid",
+			config:  &LabConfig{DNSProvider: "ovh", DNSZone: "yodamad.fr", Domain: "ai-bb.yodamad.fr"},
+			wantErr: false,
+		},
+		{
+			name:    "domain equal to the zone is valid",
+			config:  &LabConfig{DNSProvider: "ovh", DNSZone: "yodamad.fr", Domain: "yodamad.fr"},
+			wantErr: false,
+		},
+		{
+			name:    "provider and zone with no domain is valid",
+			config:  &LabConfig{DNSProvider: "ovh", DNSZone: "yodamad.fr", Domain: ""},
+			wantErr: false,
+		},
+		{
+			name:    "suffix match that is not a subdomain boundary is rejected",
+			config:  &LabConfig{DNSProvider: "ovh", DNSZone: "yodamad.fr", Domain: "notyodamad.fr"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validateDNSConfig(tt.config)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestHostFromWorkspaceURL(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{name: "empty url", url: "", want: ""},
+		{name: "https host", url: "https://ws-admin-11f346ae.ai-bb.yodamad.fr/", want: "ws-admin-11f346ae.ai-bb.yodamad.fr"},
+		{name: "http host", url: "http://141.95.239.107.nip.io/", want: "141.95.239.107.nip.io"},
+		{name: "host with port", url: "https://foo.example.com:8443/", want: "foo.example.com"},
+		{name: "unparseable", url: "https://exa mple.com/", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, hostFromWorkspaceURL(tt.url))
+		})
+	}
+}
+
+// fakeHostResolver is a deterministic hostResolver for testing workspaceDNSReady.
+type fakeHostResolver struct {
+	addrs []string
+	err   error
+}
+
+func (f fakeHostResolver) LookupHost(_ context.Context, _ string) ([]string, error) {
+	return f.addrs, f.err
+}
+
+func TestWorkspaceDNSReady(t *testing.T) {
+	// These cases swap the package-level resolver, so they must not run in parallel.
+	orig := workspaceDNSResolver
+	t.Cleanup(func() { workspaceDNSResolver = orig })
+
+	now := time.Now()
+	nxdomain := fakeHostResolver{err: errors.New("no such host")}
+	resolves := fakeHostResolver{addrs: []string{"141.95.239.107"}}
+
+	tests := []struct {
+		name     string
+		resolver hostResolver
+		ws       workspace.Workspace
+		want     bool
+	}{
+		{
+			name:     "no public host is always ready",
+			resolver: nxdomain, // must not matter — never consulted
+			ws:       workspace.Workspace{URL: "", UpdatedAt: now},
+			want:     true,
+		},
+		{
+			name:     "host resolves within grace is ready",
+			resolver: resolves,
+			ws:       workspace.Workspace{URL: "https://x.ai-bb.yodamad.fr/", UpdatedAt: now},
+			want:     true,
+		},
+		{
+			name:     "host not resolving within grace is not ready",
+			resolver: nxdomain,
+			ws:       workspace.Workspace{URL: "https://x.ai-bb.yodamad.fr/", UpdatedAt: now},
+			want:     false,
+		},
+		{
+			name:     "not resolving but past grace fails open",
+			resolver: nxdomain,
+			ws:       workspace.Workspace{URL: "https://x.ai-bb.yodamad.fr/", UpdatedAt: now.Add(-dnsPropagationGrace - time.Minute)},
+			want:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspaceDNSResolver = tt.resolver
+			assert.Equal(t, tt.want, workspaceDNSReady(context.Background(), tt.ws))
+		})
 	}
 }

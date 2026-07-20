@@ -42,6 +42,9 @@ Then, you'll get all information needed to connect to your workspace!
 
 Just use the provided link and credentials to connect to your workspace.
 
+!!! info "Waiting for DNS"
+    Right after a workspace starts you may briefly see *"Workspace is up — waiting for DNS to propagate..."*. On a lab with a public domain, the workspace address is created in DNS when the environment is provisioned and can take up to a minute to become resolvable. EasyLab holds back the **Open** button until the address actually resolves, so you are not handed a link that fails with `DNS_PROBE_FINISHED_NXDOMAIN`. When the button turns green, the workspace is reachable.
+
 ![Request a new development environment](screens/lab-create.png){width=85%}
 
 ### Save your workspace information

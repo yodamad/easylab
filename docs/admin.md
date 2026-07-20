@@ -334,6 +334,9 @@ Select a DNS provider to automate A-record creation and unlock wildcard certific
 | **OVH DNS** | OVH application key, secret, and consumer key with `/domain/zone/*` permissions |
 | **Azure DNS** | Azure service principal with `DNS Zone Contributor` role on the DNS zone resource group |
 
+!!! warning "DNS Zone is required"
+    When you select a DNS provider you **must** fill in the **DNS Zone** field with the parent zone that hosts your domain — for example, domain `ai-bb.yodamad.fr` belongs to zone `yodamad.fr`. The domain must sit inside the zone. Leaving the zone empty (or entering a zone the domain is not part of) is rejected as soon as you submit the form, before any infrastructure is provisioned.
+
 When a DNS provider is configured:
 
 1. EasyLab automatically creates the A record `<domain> → <ingressIP>` during deployment.
