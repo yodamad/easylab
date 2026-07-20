@@ -1,15 +1,14 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestJobStatus_Constants(t *testing.T) {
@@ -270,98 +269,6 @@ func TestJobManager_SetKubeconfig_NotFound(t *testing.T) {
 	}
 }
 
-func TestJobManager_SetCoderConfig(t *testing.T) {
-	jm := NewJobManager("")
-
-	config := &LabConfig{StackName: "test"}
-	jobID := jm.CreateJob(config)
-
-	err := jm.SetCoderConfig(jobID, "http://coder.example.com", "admin@test.com", "password123", "session-token", "org-id")
-	if err != nil {
-		t.Fatalf("SetCoderConfig() error = %v", err)
-	}
-
-	job, _ := jm.GetJob(jobID)
-	if job.CoderURL != "http://coder.example.com" {
-		t.Errorf("SetCoderConfig() CoderURL = %s, want http://coder.example.com", job.CoderURL)
-	}
-	if job.CoderAdminEmail != "admin@test.com" {
-		t.Errorf("SetCoderConfig() CoderAdminEmail = %s, want admin@test.com", job.CoderAdminEmail)
-	}
-	if job.CoderAdminPassword != "password123" {
-		t.Errorf("SetCoderConfig() CoderAdminPassword mismatch")
-	}
-	if job.CoderSessionToken != "session-token" {
-		t.Errorf("SetCoderConfig() CoderSessionToken mismatch")
-	}
-	if job.CoderOrganizationID != "org-id" {
-		t.Errorf("SetCoderConfig() CoderOrganizationID = %s, want org-id", job.CoderOrganizationID)
-	}
-}
-
-func TestJobManager_SetCoderConfig_NotFound(t *testing.T) {
-	jm := NewJobManager("")
-
-	err := jm.SetCoderConfig("nonexistent", "", "", "", "", "")
-	if err == nil {
-		t.Error("SetCoderConfig() expected error for nonexistent job")
-	}
-}
-
-func TestJobManager_UpdateCoderSessionToken(t *testing.T) {
-	tests := []struct {
-		name         string
-		initialToken string
-		newToken     string
-		wantToken    string
-	}{
-		{name: "updates to a refreshed token", initialToken: "old-token", newToken: "new-token", wantToken: "new-token"},
-		{name: "no-op on empty token", initialToken: "old-token", newToken: "", wantToken: "old-token"},
-		{name: "no-op on unchanged token", initialToken: "old-token", newToken: "old-token", wantToken: "old-token"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			jm := NewJobManager("")
-			jobID := jm.CreateJob(&LabConfig{StackName: "test"})
-			require.NoError(t, jm.SetCoderConfig(jobID, "http://coder.example.com", "admin@test.com", "pass", tt.initialToken, "org-id"))
-
-			require.NoError(t, jm.UpdateCoderSessionToken(jobID, tt.newToken))
-
-			job, ok := jm.GetJob(jobID)
-			require.True(t, ok)
-			assert.Equal(t, tt.wantToken, job.CoderSessionToken)
-		})
-	}
-}
-
-func TestJobManager_UpdateCoderSessionToken_NotFound(t *testing.T) {
-	jm := NewJobManager("")
-
-	err := jm.UpdateCoderSessionToken("nonexistent", "token")
-	assert.Error(t, err)
-}
-
-func TestJobManager_UpdateCoderSessionToken_Persists(t *testing.T) {
-	dataDir := t.TempDir()
-	jm := NewJobManager(dataDir)
-
-	jobID := jm.CreateJob(&LabConfig{StackName: "test"})
-	// SaveJob only persists terminal states; a deployed lab is "completed".
-	require.NoError(t, jm.UpdateJobStatus(jobID, JobStatusCompleted))
-	require.NoError(t, jm.SetCoderConfig(jobID, "http://coder.example.com", "admin@test.com", "pass", "stale-token", "org-id"))
-
-	require.NoError(t, jm.UpdateCoderSessionToken(jobID, "fresh-token"))
-
-	// Reload from disk with a fresh manager to prove the token was persisted.
-	reloaded := NewJobManager(dataDir)
-	require.NoError(t, reloaded.LoadJobs())
-	job, ok := reloaded.GetJob(jobID)
-	require.True(t, ok)
-	assert.Equal(t, "fresh-token", job.CoderSessionToken)
-}
-
 func TestJobManager_GetAllJobs(t *testing.T) {
 	jm := NewJobManager("")
 
@@ -559,14 +466,8 @@ func TestLabConfig_Fields(t *testing.T) {
 		NodePoolDesiredNodeCount:  3,
 		NodePoolMinNodeCount:      1,
 		NodePoolMaxNodeCount:      5,
-		CoderNamespace:            "coder",
-		CoderAdminEmail:           "admin@test.com",
-		CoderAdminPassword:        "password",
-		CoderVersion:              "1.0.0",
-		CoderDbUser:               "coder",
-		CoderDbPassword:           "dbpass",
-		CoderDbName:               "coder",
-		CoderTemplateName:         "template",
+		WorkspaceNamespace:        "workshops",
+		WorkspaceTemplates:        []WorkspaceTemplate{{Name: "template"}},
 		OvhEndpoint:               "ovh-eu",
 	}
 
@@ -611,71 +512,60 @@ func TestJobManager_ConcurrentAccess(t *testing.T) {
 	}
 }
 
-// --- GetCoderTemplates tests ---
+// --- GetWorkspaceTemplates tests ---
 
-func TestLabConfig_GetCoderTemplates_MultiTemplate(t *testing.T) {
+func TestLabConfig_GetWorkspaceTemplates_MultiTemplate(t *testing.T) {
 	c := &LabConfig{
-		CoderTemplates: []CoderTemplate{
-			{Name: "t1", Source: "git"},
-			{Name: "t2", Source: "upload"},
+		WorkspaceTemplates: []WorkspaceTemplate{
+			{Name: "t1", Image: "img1"},
+			{Name: "t2", GitRepo: "https://example.com/repo"},
 		},
 	}
-	got := c.GetCoderTemplates()
+	got := c.GetWorkspaceTemplates()
 	if len(got) != 2 {
-		t.Errorf("GetCoderTemplates() len = %d, want 2", len(got))
+		t.Errorf("GetWorkspaceTemplates() len = %d, want 2", len(got))
 	}
 }
 
-func TestLabConfig_GetCoderTemplates_LegacyFallback_Upload(t *testing.T) {
-	c := &LabConfig{
-		CoderTemplateName: "my-template",
-		TemplateFilePath:  "/path/to/file.zip",
+func TestWorkspaceTemplate_JSONRoundTrip(t *testing.T) {
+	in := WorkspaceTemplate{
+		Name:          "full",
+		IDE:           "code-server",
+		Image:         "codercom/code-server:latest",
+		GitRepo:       "https://example.com/repo",
+		GitBranch:     "dev",
+		GitFolder:     "backend",
+		CPU:           "500m",
+		Memory:        "1Gi",
+		DiskSize:      "5Gi",
+		Env:           map[string]string{"K": "V"},
+		StartupScript: "sudo apt-get install -y jq",
+		DotfilesRepo:  "https://example.com/dotfiles",
+		Extensions:    []string{"golang.go"},
+		Sidecars:      []WorkspaceSidecar{{Name: "docker", Image: "docker:dind", Ports: []int{2375}, Env: map[string]string{"DOCKER_TLS_CERTDIR": ""}, Privileged: true, Capabilities: []string{"SYS_ADMIN"}}},
+		Mounts:        []WorkspaceMount{{Type: "secret", Name: "tls", Path: "/etc/tls"}},
 	}
-	got := c.GetCoderTemplates()
-	if len(got) != 1 {
-		t.Fatalf("GetCoderTemplates() len = %d, want 1", len(got))
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
-	if got[0].Name != "my-template" {
-		t.Errorf("GetCoderTemplates() name = %q, want %q", got[0].Name, "my-template")
+	var out WorkspaceTemplate
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
 	}
-	if got[0].Source != "upload" {
-		t.Errorf("GetCoderTemplates() source = %q, want upload", got[0].Source)
-	}
-}
-
-func TestLabConfig_GetCoderTemplates_LegacyFallback_Git(t *testing.T) {
-	c := &LabConfig{
-		CoderTemplateName: "my-template",
-		TemplateGitRepo:   "https://github.com/example/repo",
-	}
-	got := c.GetCoderTemplates()
-	if len(got) != 1 {
-		t.Fatalf("GetCoderTemplates() len = %d, want 1", len(got))
-	}
-	if got[0].Source != "git" {
-		t.Errorf("GetCoderTemplates() source = %q, want git", got[0].Source)
-	}
-}
-
-func TestLabConfig_GetCoderTemplates_LegacyFallback_ExplicitSource(t *testing.T) {
-	c := &LabConfig{
-		CoderTemplateName: "my-template",
-		TemplateSource:    "custom-source",
-	}
-	got := c.GetCoderTemplates()
-	if len(got) != 1 {
-		t.Fatalf("GetCoderTemplates() len = %d, want 1", len(got))
-	}
-	if got[0].Source != "custom-source" {
-		t.Errorf("GetCoderTemplates() source = %q, want custom-source", got[0].Source)
+	if !reflect.DeepEqual(in, out) {
+		t.Errorf("round-trip mismatch:\n in=%+v\nout=%+v", in, out)
 	}
 }
 
-func TestLabConfig_GetCoderTemplates_NilWhenEmpty(t *testing.T) {
+func TestLabConfig_GetWorkspaceTemplates_DefaultWhenEmpty(t *testing.T) {
 	c := &LabConfig{}
-	got := c.GetCoderTemplates()
-	if got != nil {
-		t.Errorf("GetCoderTemplates() = %v, want nil", got)
+	got := c.GetWorkspaceTemplates()
+	if len(got) != 1 {
+		t.Fatalf("GetWorkspaceTemplates() len = %d, want 1 default", len(got))
+	}
+	if got[0].Name != "default" {
+		t.Errorf("GetWorkspaceTemplates() default name = %q, want %q", got[0].Name, "default")
 	}
 }
 

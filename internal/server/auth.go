@@ -1043,3 +1043,26 @@ func GenerateSecurePassword() (string, error) {
 
 	return string(password), nil
 }
+
+// GenerateWorkspaceToken generates a strong random token for a workspace's IDE
+// connection. Unlike GenerateSecurePassword it stays within [0-9a-zA-Z]: this same
+// value is passed to openvscode-server's --connection-token, which rejects any
+// character outside 0-9, a-z, A-Z or '-' and exits, and it is also the secret the
+// student signs in with. 24 alphanumerics keep well over 128 bits of entropy.
+func GenerateWorkspaceToken() (string, error) {
+	const (
+		alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+		length   = 24
+	)
+
+	token := make([]byte, length)
+	for i := range token {
+		idx, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphabet))))
+		if err != nil {
+			return "", fmt.Errorf("failed to generate workspace token: %w", err)
+		}
+		token[i] = alphabet[idx.Int64()]
+	}
+
+	return string(token), nil
+}

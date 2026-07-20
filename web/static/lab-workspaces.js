@@ -186,3 +186,25 @@ document.addEventListener('DOMContentLoaded', function() {
         checkbox.addEventListener('change', updateDeleteButton);
     });
 });
+
+// A git credential has no server field: basic auth is sent to whatever host the
+// template's git_repo names, so asking for one would imply a scoping that does
+// not exist.
+function toggleSecretServerField() {
+    const kind = document.getElementById('secret-kind');
+    const row = document.getElementById('secret-server-row');
+    const server = document.getElementById('secret-server');
+    if (!kind || !row || !server) {
+        return;
+    }
+    const isRegistry = kind.value === 'registry';
+    row.classList.toggle('is-hidden', !isRegistry);
+    // Only the registry form requires a server; leaving it required while hidden
+    // would block submission with an error the admin cannot see.
+    server.required = isRegistry;
+    if (!isRegistry) {
+        server.value = '';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', toggleSecretServerField);

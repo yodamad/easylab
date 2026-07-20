@@ -11,12 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"easylab/coder"
 	dnsregistry "easylab/internal/providers/dns"
 	_ "easylab/internal/providers/dns/azure" // register Azure DNS provider
 	_ "easylab/internal/providers/dns/ovh"   // register OVH DNS provider
 	internalPulumi "easylab/internal/pulumi"
-	"easylab/utils"
 
 	"github.com/pulumi/pulumi/sdk/v3/go/auto"
 	"github.com/pulumi/pulumi/sdk/v3/go/auto/optdestroy"
@@ -37,6 +35,11 @@ func getEnvOrDefault(key, defaultValue string) string {
 type PulumiExecutor struct {
 	jobManager *JobManager
 	workDir    string
+	// afterProvision runs once a lab's cluster is up and its kubeconfig is
+	// extracted, just before the lab is marked completed. It is how captured
+	// credentials reach the new cluster. Optional (nil in tests that do not need
+	// it); the executor owns the timing, the handler owns the cluster connection.
+	afterProvision func(jobID string)
 }
 
 // jobOutputWriter is a custom io.Writer that forwards output to jobManager
@@ -973,13 +976,11 @@ func (pe *PulumiExecutor) Execute(jobID string) error {
 	pe.jobManager.AppendOutput(jobID, "Extracting stack outputs...")
 	pe.extractKubeconfigFromOutputs(jobID, upResult.Outputs)
 
-	// Post-deployment: initialize Coder and create templates (runs outside Pulumi engine)
-	if err := pe.initCoderAndTemplates(jobID, upResult.Outputs); err != nil {
-		pe.jobManager.SetError(jobID, fmt.Errorf("infrastructure deployed but Coder setup failed: %w", err))
-		if saveErr := pe.jobManager.SaveJob(jobID); saveErr != nil {
-			log.Printf("Warning: failed to persist failed job %s: %v", jobID, saveErr)
-		}
-		return err
+	// Write any credentials the admin supplied in the wizard now that the cluster
+	// exists, before the lab is reported ready — so a completed lab has the
+	// credentials its templates reference.
+	if pe.afterProvision != nil {
+		pe.afterProvision(jobID)
 	}
 
 	// Success
@@ -1051,13 +1052,11 @@ func (pe *PulumiExecutor) ExecuteRetry(jobID string) error {
 	pe.jobManager.AppendOutput(jobID, "Extracting stack outputs...")
 	pe.extractKubeconfigFromOutputs(jobID, upResult.Outputs)
 
-	// Post-deployment: initialize Coder and create templates (runs outside Pulumi engine)
-	if err := pe.initCoderAndTemplates(jobID, upResult.Outputs); err != nil {
-		pe.jobManager.SetError(jobID, fmt.Errorf("infrastructure deployed but Coder setup failed: %w", err))
-		if saveErr := pe.jobManager.SaveJob(jobID); saveErr != nil {
-			log.Printf("Warning: failed to persist failed job %s: %v", jobID, saveErr)
-		}
-		return err
+	// Write any credentials the admin supplied in the wizard now that the cluster
+	// exists, before the lab is reported ready — so a completed lab has the
+	// credentials its templates reference.
+	if pe.afterProvision != nil {
+		pe.afterProvision(jobID)
 	}
 
 	// Success
@@ -1204,121 +1203,6 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 	return nil
 }
 
-// initCoderAndTemplates performs Coder initialization and template creation after
-// Stack.Up() completes. This runs outside the Pulumi engine, so it won't block
-// the Pulumi resource operations from finishing.
-func (pe *PulumiExecutor) initCoderAndTemplates(jobID string, outputs auto.OutputMap) error {
-	job, exists := pe.jobManager.GetJob(jobID)
-	if !exists || job.Config == nil {
-		return nil
-	}
-	config := job.Config
-
-	// Get external IP from Pulumi outputs
-	var externalIP string
-	if ipVal, ok := outputs["externalIp"]; ok {
-		externalIP = pe.outputValueToString(ipVal)
-	}
-	if externalIP == "" {
-		pe.jobManager.AppendOutput(jobID, "No external IP found in outputs, skipping Coder initialization")
-		return nil
-	}
-
-	// Use the exported coderURL when available: it is "https://<domain>" when DNS is
-	// configured, or "http://<ip>" otherwise. Falling back to http://<ip> handles
-	// stacks deployed before the coderURL export was added.
-	coderServerURL := fmt.Sprintf("http://%s", externalIP)
-	if urlVal, ok := outputs["coderURL"]; ok {
-		if u := pe.outputValueToString(urlVal); u != "" {
-			coderServerURL = u
-		}
-	}
-
-	logFunc := func(msg string) {
-		pe.jobManager.AppendOutput(jobID, msg)
-	}
-
-	// Initialize Coder: wait for reachability, create first user, login
-	pe.jobManager.AppendOutput(jobID, "Initializing Coder server...")
-	coderCfg, err := coder.InitCoderStandalone(coderServerURL, config.CoderAdminEmail, config.CoderAdminPassword, logFunc)
-	if err != nil {
-		return fmt.Errorf("failed to initialize Coder: %w", err)
-	}
-
-	// Store Coder config in job
-	if err := pe.jobManager.SetCoderConfig(jobID, coderCfg.ServerURL, config.CoderAdminEmail, config.CoderAdminPassword, coderCfg.SessionToken, coderCfg.OrganizationID); err != nil {
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to store Coder config: %v", err))
-	} else {
-		pe.jobManager.AppendOutput(jobID, "Coder initialized and configuration stored successfully")
-	}
-
-	// Resolve the effective Coder namespace so workspace templates target the right namespace.
-	// The Coder service account only has RBAC in the namespace it was deployed into.
-	coderNamespace := config.CoderNamespace
-	if coderNamespace == "" {
-		coderNamespace = "coder"
-	}
-
-	// Create Coder templates
-	templates := config.GetCoderTemplates()
-	if len(templates) == 0 {
-		pe.jobManager.AppendOutput(jobID, "No templates configured, using default Git-based template")
-		zipFile, gitErr := utils.CloneFolderFromGitAndZipIt("https://gitlab.com/yodamad-workshops/coder-templates#", "docker", "main")
-		if gitErr != nil {
-			return fmt.Errorf("failed to clone and zip default template: %w", gitErr)
-		}
-		if err := coder.CreateTemplateStandalone(coderCfg, "docker-template", zipFile, map[string]string{"namespace": coderNamespace}, logFunc); err != nil {
-			return fmt.Errorf("failed to create default template: %w", err)
-		}
-		return nil
-	}
-
-	jobDir := filepath.Join(pe.workDir, jobID)
-	for i, t := range templates {
-		var zipFile string
-		if t.Source == "upload" && t.FilePath != "" {
-			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Template %d (%s): using uploaded file", i+1, t.Name))
-			zipFile = filepath.Join(jobDir, t.FilePath)
-			if _, statErr := os.Stat(zipFile); statErr != nil {
-				return fmt.Errorf("template file not found at %s: %w", zipFile, statErr)
-			}
-		} else if t.Source == "git" && t.GitRepo != "" {
-			gitBranch := t.GitBranch
-			if gitBranch == "" {
-				gitBranch = "main"
-			}
-			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Template %d (%s): cloning from Git repo=%s", i+1, t.Name, t.GitRepo))
-			var gitErr error
-			zipFile, gitErr = utils.CloneFolderFromGitAndZipIt(t.GitRepo, t.GitFolder, gitBranch)
-			if gitErr != nil {
-				return fmt.Errorf("failed to clone and zip template from Git: %w", gitErr)
-			}
-		} else {
-			return fmt.Errorf("template %d (%s): invalid config (source=%s, need file or git repo)", i+1, t.Name, t.Source)
-		}
-
-		// Inject the namespace variable if the template did not set it explicitly,
-		// so workspace resources are created in the same namespace as the Coder deployment.
-		vars := t.Variables
-		if vars == nil {
-			vars = map[string]string{}
-		}
-		if _, hasNS := vars["namespace"]; !hasNS {
-			vars["namespace"] = coderNamespace
-		}
-
-		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Creating Coder template: %s", t.Name))
-		if len(vars) > 0 {
-			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("  with %d variable(s)", len(vars)))
-		}
-		if err := coder.CreateTemplateStandalone(coderCfg, t.Name, zipFile, vars, logFunc); err != nil {
-			return fmt.Errorf("failed to create template %s: %w", t.Name, err)
-		}
-	}
-
-	return nil
-}
-
 // cleanupJobDirectory removes the job's working directory after successful completion
 // If preservePulumiState is true, it preserves the .pulumi directory (needed for file backend destroy operations)
 func (pe *PulumiExecutor) cleanupJobDirectory(jobID string, preservePulumiState bool) error {
@@ -1378,9 +1262,10 @@ type configCommand struct {
 func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 	var commands []configCommand
 
-	coderNamespace := config.CoderNamespace
-	if coderNamespace == "" {
-		coderNamespace = "coder"
+	// Namespace student workspaces are created in.
+	workspaceNamespace := config.WorkspaceNamespace
+	if workspaceNamespace == "" {
+		workspaceNamespace = "workshops"
 	}
 
 	provider := config.Provider
@@ -1389,16 +1274,10 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 	}
 
 	if config.UseExistingCluster {
-		// BYOK mode: only Coder config + kubeconfig path
+		// BYOK mode: workspace namespace + kubeconfig path
 		commands = []configCommand{
 			{"k8s:useExistingCluster", "true", false},
-			{"coder:namespace", coderNamespace, false},
-			{"coder:adminEmail", config.CoderAdminEmail, false},
-			{"coder:adminPassword", config.CoderAdminPassword, true},
-			{"coder:version", config.CoderVersion, false},
-			{"coder:dbUser", config.CoderDbUser, false},
-			{"coder:dbPassword", config.CoderDbPassword, true},
-			{"coder:dbName", config.CoderDbName, false},
+			{"coder:namespace", workspaceNamespace, false},
 		}
 
 		// The kubeconfig file path is relative to the job directory
@@ -1416,13 +1295,7 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 			{"nodepool:minNodeCount", fmt.Sprintf("%d", config.NodePoolMinNodeCount), false},
 			{"nodepool:maxNodeCount", fmt.Sprintf("%d", config.NodePoolMaxNodeCount), false},
 			{"k8s:clusterName", prefixedK8sClusterName, false},
-			{"coder:namespace", coderNamespace, false},
-			{"coder:adminEmail", config.CoderAdminEmail, false},
-			{"coder:adminPassword", config.CoderAdminPassword, true},
-			{"coder:version", config.CoderVersion, false},
-			{"coder:dbUser", config.CoderDbUser, false},
-			{"coder:dbPassword", config.CoderDbPassword, true},
-			{"coder:dbName", config.CoderDbName, false},
+			{"coder:namespace", workspaceNamespace, false},
 		}
 	} else {
 		// OVH mode (default): full infrastructure config with gateway/private network
@@ -1445,13 +1318,7 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 			{"nodepool:minNodeCount", fmt.Sprintf("%d", config.NodePoolMinNodeCount), false},
 			{"nodepool:maxNodeCount", fmt.Sprintf("%d", config.NodePoolMaxNodeCount), false},
 			{"k8s:clusterName", prefixedK8sClusterName, false},
-			{"coder:namespace", coderNamespace, false},
-			{"coder:adminEmail", config.CoderAdminEmail, false},
-			{"coder:adminPassword", config.CoderAdminPassword, true},
-			{"coder:version", config.CoderVersion, false},
-			{"coder:dbUser", config.CoderDbUser, false},
-			{"coder:dbPassword", config.CoderDbPassword, true},
-			{"coder:dbName", config.CoderDbName, false},
+			{"coder:namespace", workspaceNamespace, false},
 		}
 
 		if config.NetworkID != "" {
@@ -1459,40 +1326,28 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 		}
 	}
 
-	// Add Coder templates as JSON (multiple templates per lab)
-	templates := config.GetCoderTemplates()
-	if len(templates) > 0 {
-		templatesJSON, err := json.Marshal(templates)
-		if err != nil {
-			log.Printf("Failed to marshal Coder templates: %v", err)
-		} else {
-			commands = append(commands, configCommand{"coder:templates", string(templatesJSON), false})
+	// Ingress controller configuration. This applies with or without a domain:
+	// domainless labs expose workspaces over plain HTTP via nip.io on the ingress
+	// controller's LoadBalancer IP.
+	// Only emit when false (skip install). Absent = install (backward compat with old jobs).
+	if config.InstallNginxIngress != nil && !*config.InstallNginxIngress {
+		commands = append(commands, configCommand{"coder:installNginxIngress", "false", false})
+		if config.NginxIngressNamespace != "" {
+			commands = append(commands, configCommand{"coder:nginxIngressNamespace", config.NginxIngressNamespace, false})
+		}
+		if config.NginxIngressServiceName != "" {
+			commands = append(commands, configCommand{"coder:nginxIngressServiceName", config.NginxIngressServiceName, false})
 		}
 	}
 
-	// GitHub OAuth2 login (disabled by default; opt-in per lab)
-	if config.CoderGithubLoginEnabled {
-		commands = append(commands, configCommand{"coder:githubLoginEnabled", "true", false})
-	}
-
-	// HTTPS / ingress configuration
-	if config.CoderDomain != "" {
+	// HTTPS / TLS configuration — only meaningful when a domain is set.
+	if config.Domain != "" {
 		commands = append(commands,
-			configCommand{"coder:domain", config.CoderDomain, false},
-			configCommand{"coder:acmeEmail", config.CoderAcmeEmail, false},
+			configCommand{"coder:domain", config.Domain, false},
+			configCommand{"coder:acmeEmail", config.AcmeEmail, false},
 		)
-		if config.CoderWildcardDomain != "" {
-			commands = append(commands, configCommand{"coder:wildcardDomain", config.CoderWildcardDomain, false})
-		}
-		// Only emit when false (skip install). Absent = install (backward compat with old jobs).
-		if config.InstallNginxIngress != nil && !*config.InstallNginxIngress {
-			commands = append(commands, configCommand{"coder:installNginxIngress", "false", false})
-			if config.NginxIngressNamespace != "" {
-				commands = append(commands, configCommand{"coder:nginxIngressNamespace", config.NginxIngressNamespace, false})
-			}
-			if config.NginxIngressServiceName != "" {
-				commands = append(commands, configCommand{"coder:nginxIngressServiceName", config.NginxIngressServiceName, false})
-			}
+		if config.WildcardDomain != "" {
+			commands = append(commands, configCommand{"coder:wildcardDomain", config.WildcardDomain, false})
 		}
 		if config.InstallCertManager != nil && !*config.InstallCertManager {
 			commands = append(commands, configCommand{"coder:installCertManager", "false", false})

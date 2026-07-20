@@ -56,27 +56,125 @@ type Job struct {
 	Error      string     `json:"error,omitempty"`
 	Config     *LabConfig `json:"config,omitempty"`
 	Kubeconfig string     `json:"kubeconfig,omitempty"`
-	// Coder configuration stored after deployment
-	CoderURL            string              `json:"coder_url,omitempty"`
-	CoderAdminEmail     string              `json:"coder_admin_email,omitempty"`
-	CoderAdminPassword  string              `json:"coder_admin_password,omitempty"`
-	CoderSessionToken   string              `json:"coder_session_token,omitempty"`
-	CoderOrganizationID string              `json:"coder_organization_id,omitempty"`
-	CleanupEvents       []CleanupEvent                     `json:"cleanup_events,omitempty"`
-	WorkspaceSnapshots  []WorkspaceSnapshot                `json:"workspace_snapshots,omitempty"`
-	DeletionRetries     map[string]*WorkspaceDeletionRetry `json:"deletion_retries,omitempty"`
-	mu                  sync.RWMutex                       `json:"-"`
+	// CleanupEvents/WorkspaceSnapshots/DeletionRetries feed the stats dashboard
+	// and the background workspace cleanup loop.
+	CleanupEvents      []CleanupEvent                     `json:"cleanup_events,omitempty"`
+	WorkspaceSnapshots []WorkspaceSnapshot                `json:"workspace_snapshots,omitempty"`
+	DeletionRetries    map[string]*WorkspaceDeletionRetry `json:"deletion_retries,omitempty"`
+	mu                 sync.RWMutex                       `json:"-"`
 }
 
-// CoderTemplate defines a single Coder template (upload or git source)
-type CoderTemplate struct {
+// WorkspaceTemplate defines a selectable workspace flavor for a lab: the IDE
+// base, container image, an optional git repo cloned on first start, resource
+// sizing, and environment provisioning (startup script, dotfiles, extensions,
+// sidecars, and ConfigMap/Secret mounts) applied to the student's pod.
+type WorkspaceTemplate struct {
 	Name      string            `json:"name"`
-	Source    string            `json:"source"` // "upload" or "git"
-	FilePath  string            `json:"file_path,omitempty"`
+	Image     string            `json:"image,omitempty"`
 	GitRepo   string            `json:"git_repo,omitempty"`
-	GitFolder string            `json:"git_folder,omitempty"`
 	GitBranch string            `json:"git_branch,omitempty"`
-	Variables map[string]string `json:"variables,omitempty"`
+	GitFolder string            `json:"git_folder,omitempty"`
+	CPU       string            `json:"cpu,omitempty"`
+	Memory    string            `json:"memory,omitempty"`
+	DiskSize  string            `json:"disk_size,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+
+	// IDE selects the workspace IDE base: "openvscode" (default) or "code-server".
+	IDE string `json:"ide,omitempty"`
+	// StartupScript runs (best-effort) in the workspace container before the IDE
+	// starts — install tools, configure the shell, run a bootstrap.
+	StartupScript string `json:"startup_script,omitempty"`
+	// DotfilesRepo is cloned into ~/.dotfiles and its install script (if any) run.
+	DotfilesRepo string `json:"dotfiles_repo,omitempty"`
+	// Extensions are VS Code extension IDs (or .vsix URLs) installed on start.
+	Extensions []string `json:"extensions,omitempty"`
+	// Sidecars are additional containers in the workspace pod (e.g. a database),
+	// reachable from the IDE at localhost:<port>.
+	Sidecars []WorkspaceSidecar `json:"sidecars,omitempty"`
+	// Mounts mount existing ConfigMaps/Secrets (in the workspace namespace) into
+	// the workspace container.
+	Mounts []WorkspaceMount `json:"mounts,omitempty"`
+	// ImagePullSecrets name existing kubernetes.io/dockerconfigjson Secrets in the
+	// workspace namespace that the kubelet uses to pull this template's images —
+	// the workspace image, the sidecars and the init containers alike. References
+	// rather than inline credentials, so no secret material is stored in the lab
+	// config or leaves through the templates export.
+	//
+	// The devcontainer build pulls its base and fallback images from inside the pod
+	// rather than through the kubelet, so those are covered by
+	// devcontainer.registry_auth_secret, not by this.
+	ImagePullSecrets []string `json:"image_pull_secrets,omitempty"`
+	// GitAuthSecret names an existing kubernetes.io/basic-auth Secret (username +
+	// password keys) in the workspace namespace, used to clone a private GitRepo
+	// over HTTPS. The credentials are injected by reference, so the token reaches
+	// git without ever appearing in the Deployment.
+	//
+	// It is read by the clone step only, never by the IDE container: the student
+	// has a shell there, and the workshop author's token must not be in it.
+	GitAuthSecret string `json:"git_auth_secret,omitempty"`
+	// Devcontainer builds the workspace image from the workshop repo's
+	// devcontainer.json instead of using Image. Requires GitRepo; conflicts with
+	// Image.
+	Devcontainer *DevcontainerConfig `json:"devcontainer,omitempty"`
+}
+
+// DevcontainerConfig builds a workspace from the repo's devcontainer.json
+// (image or Dockerfile, plus features) rather than a fixed image. The build runs
+// inside the student's pod on first start, so the layer cache is what keeps that
+// start bearable — hence CacheRepo being required rather than optional.
+//
+// Note the division of labour: envbuilder reads image/build/features/containerEnv
+// and the lifecycle commands straight from the repo, so none of those appear
+// here. The surrounding WorkspaceTemplate covers what envbuilder ignores
+// (Extensions, CPU/Memory/DiskSize, GitFolder).
+type DevcontainerConfig struct {
+	Enabled bool `json:"enabled,omitempty"`
+	// Dir is the folder containing devcontainer.json, relative to the repo root
+	// (default ".devcontainer").
+	Dir string `json:"dir,omitempty"`
+	// CacheRepo is the container registry image layers are cached in. Required:
+	// without it every student's pod rebuilds the devcontainer from scratch.
+	CacheRepo string `json:"cache_repo,omitempty"`
+	// RegistryAuthSecret names an existing kubernetes.io/dockerconfigjson Secret
+	// in the workspace namespace, used to authenticate every registry operation the
+	// build makes from inside the pod: pulling the devcontainer's base image and
+	// FallbackImage, and pulling and pushing CacheRepo. It is a reference rather
+	// than inline credentials so no secret material is stored in the lab config or
+	// leaves through the templates export.
+	//
+	// Distinct from the template's ImagePullSecrets, which cover the images the
+	// kubelet pulls (the workspace image, sidecars, init containers). The two are
+	// not interchangeable: the build pulls with its own credentials, not the
+	// kubelet's.
+	RegistryAuthSecret string `json:"registry_auth_secret,omitempty"`
+	// FallbackImage is used when the devcontainer declares neither an image nor a
+	// Dockerfile (features-only). A failed build is not fallen back to: it fails
+	// the workspace rather than handing the student an environment missing its tools.
+	FallbackImage string `json:"fallback_image,omitempty"`
+	// Insecure bypasses TLS verification when cloning and pulling from registries.
+	Insecure bool `json:"insecure,omitempty"`
+}
+
+// WorkspaceSidecar is an additional container co-located in the workspace pod.
+type WorkspaceSidecar struct {
+	Name  string            `json:"name"`
+	Image string            `json:"image"`
+	Ports []int             `json:"ports,omitempty"`
+	Env   map[string]string `json:"env,omitempty"`
+	// Privileged runs the sidecar as a privileged container (required by
+	// docker-in-docker). Use with care — a privileged container can escalate to
+	// the node.
+	Privileged bool `json:"privileged,omitempty"`
+	// Capabilities are Linux capabilities added to the sidecar (e.g. "SYS_ADMIN"),
+	// for less-than-privileged setups such as rootless docker-in-docker.
+	Capabilities []string `json:"capabilities,omitempty"`
+}
+
+// WorkspaceMount mounts a ConfigMap or Secret into the workspace container.
+type WorkspaceMount struct {
+	Type string `json:"type"` // "configmap" | "secret"
+	Name string `json:"name"` // ConfigMap/Secret name (must exist in the namespace)
+	Path string `json:"path"` // mount path in the workspace container
 }
 
 // LabConfig holds all configuration values for a lab
@@ -117,28 +215,12 @@ type LabConfig struct {
 	NodePoolMinNodeCount     int    `json:"nodepool_min_node_count"`
 	NodePoolMaxNodeCount     int    `json:"nodepool_max_node_count"`
 
-	// Coder Configuration
-	CoderGithubLoginEnabled bool   `json:"coder_github_login_enabled,omitempty"`
-	CoderNamespace          string `json:"coder_namespace,omitempty"`
-	CoderAdminEmail        string `json:"coder_admin_email"`
-	CoderAdminPassword     string `json:"coder_admin_password"`
-	CoderVersion           string `json:"coder_version"`
-	CoderDbUser            string `json:"coder_db_user"`
-	CoderDbPassword        string `json:"coder_db_password"`
-	CoderDbName            string `json:"coder_db_name"`
-	WorkspaceLifetimeHours int        `json:"workspace_lifetime_hours,omitempty"`
-	LabDeletionDate        *time.Time `json:"lab_deletion_date,omitempty"`
-
-	// Coder Templates (multiple templates per lab)
-	CoderTemplates []CoderTemplate `json:"coder_templates,omitempty"`
-
-	// Legacy single-template fields (kept for backward compatibility when loading persisted jobs)
-	CoderTemplateName string `json:"coder_template_name,omitempty"`
-	TemplateFilePath  string `json:"template_file_path,omitempty"`
-	TemplateSource    string `json:"template_source,omitempty"`
-	TemplateGitRepo   string `json:"template_git_repo,omitempty"`
-	TemplateGitFolder string `json:"template_git_folder,omitempty"`
-	TemplateGitBranch string `json:"template_git_branch,omitempty"`
+	// Workspace Configuration
+	// WorkspaceNamespace is the Kubernetes namespace student workspaces are created in.
+	WorkspaceNamespace     string              `json:"workspace_namespace,omitempty"`
+	WorkspaceTemplates     []WorkspaceTemplate `json:"workspace_templates,omitempty"`
+	WorkspaceLifetimeHours int                 `json:"workspace_lifetime_hours,omitempty"`
+	LabDeletionDate        *time.Time          `json:"lab_deletion_date,omitempty"`
 
 	// OVH Endpoint
 	OvhEndpoint string `json:"ovh_endpoint"`
@@ -150,10 +232,13 @@ type LabConfig struct {
 	AzureSubscriptionID string `json:"azure_subscription_id,omitempty"`
 	AzureLocation       string `json:"azure_location,omitempty"`
 
-	// HTTPS / ingress configuration
-	CoderDomain         string `json:"coder_domain,omitempty"`
-	CoderAcmeEmail      string `json:"coder_acme_email,omitempty"`
-	CoderWildcardDomain string `json:"coder_wildcard_domain,omitempty"`
+	// HTTPS / ingress configuration. Domain is the lab's public domain, wired into
+	// cert-manager + ingress-nginx and used to build per-student workspace URLs
+	// ("{workspace}.{Domain}"). WildcardDomain drives the wildcard DNS A-record so
+	// per-student subdomains resolve.
+	Domain         string `json:"domain,omitempty"`
+	AcmeEmail      string `json:"acme_email,omitempty"`
+	WildcardDomain string `json:"wildcard_domain,omitempty"`
 
 	// Controls whether nginx-ingress / cert-manager are installed as part of the lab.
 	// nil means "install" (default, preserves backward compat for persisted jobs).
@@ -170,29 +255,14 @@ type LabConfig struct {
 	DNSCredentials map[string]string `json:"dns_credentials,omitempty"`
 }
 
-// GetCoderTemplates returns the list of Coder templates, migrating from legacy single-template fields if needed
-func (c *LabConfig) GetCoderTemplates() []CoderTemplate {
-	if len(c.CoderTemplates) > 0 {
-		return c.CoderTemplates
+// GetWorkspaceTemplates returns the lab's workspace templates. When none are
+// configured it returns a single default OpenVSCode template so every lab is
+// usable out of the box.
+func (c *LabConfig) GetWorkspaceTemplates() []WorkspaceTemplate {
+	if len(c.WorkspaceTemplates) > 0 {
+		return c.WorkspaceTemplates
 	}
-	// Backward compatibility: migrate from legacy single-template fields
-	if c.CoderTemplateName != "" {
-		t := CoderTemplate{
-			Name:      c.CoderTemplateName,
-			Source:    c.TemplateSource,
-			FilePath:  c.TemplateFilePath,
-			GitRepo:   c.TemplateGitRepo,
-			GitFolder: c.TemplateGitFolder,
-			GitBranch: c.TemplateGitBranch,
-		}
-		if t.Source == "" && t.FilePath != "" {
-			t.Source = "upload"
-		} else if t.Source == "" && t.GitRepo != "" {
-			t.Source = "git"
-		}
-		return []CoderTemplate{t}
-	}
-	return nil
+	return []WorkspaceTemplate{{Name: "default"}}
 }
 
 // JobManager manages Pulumi execution jobs
@@ -327,73 +397,18 @@ func (jm *JobManager) SetKubeconfig(id string, kubeconfig string) error {
 	return nil
 }
 
-// SetCoderConfig sets the Coder configuration for a job
-func (jm *JobManager) SetCoderConfig(id string, coderURL, coderAdminEmail, coderAdminPassword, coderSessionToken, coderOrganizationID string) error {
-	jm.mu.RLock()
-	job, exists := jm.jobs[id]
-	jm.mu.RUnlock()
+// defaultWorkspaceNamespace is the namespace student workspaces live in when a
+// lab does not specify one. It matches kube.DefaultNamespace.
+const defaultWorkspaceNamespace = "workshops"
 
-	if !exists {
-		return fmt.Errorf("job %s not found", id)
+// workspaceNamespace returns the effective Kubernetes namespace student
+// workspaces live in for this job, falling back to the default when unset.
+// Must be called with the job at least read-locked (or on a detached copy).
+func (j *Job) workspaceNamespace() string {
+	if j.Config != nil && j.Config.WorkspaceNamespace != "" {
+		return j.Config.WorkspaceNamespace
 	}
-
-	job.mu.Lock()
-	defer job.mu.Unlock()
-
-	job.CoderURL = coderURL
-	job.CoderAdminEmail = coderAdminEmail
-	job.CoderAdminPassword = coderAdminPassword
-	job.CoderSessionToken = coderSessionToken
-	job.CoderOrganizationID = coderOrganizationID
-	job.UpdatedAt = time.Now()
-	return nil
-}
-
-// UpdateCoderSessionToken persists a refreshed Coder session/admin token for a job.
-// It is a no-op when the token is empty or unchanged (avoids needless disk writes
-// and write amplification when many requests hit the same lab). When the token
-// changed it is written back to the job's JSON file via SaveJob, so subsequent
-// requests (and a server restart) start from a valid token instead of the stale
-// one minted at provisioning.
-func (jm *JobManager) UpdateCoderSessionToken(id, token string) error {
-	if token == "" {
-		return nil
-	}
-
-	jm.mu.RLock()
-	job, exists := jm.jobs[id]
-	jm.mu.RUnlock()
-
-	if !exists {
-		return fmt.Errorf("job %s not found", id)
-	}
-
-	job.mu.Lock()
-	if job.CoderSessionToken == token {
-		job.mu.Unlock()
-		return nil
-	}
-	job.CoderSessionToken = token
-	job.UpdatedAt = time.Now()
-	job.mu.Unlock()
-
-	return jm.SaveJob(id)
-}
-
-// coderCredentials returns the effective Coder admin email and password.
-// Falls back to Config fields for jobs where the top-level fields are empty
-// (e.g. jobs loaded from disk that predate the SetCoderConfig call).
-// Must be called with j.mu at least read-locked.
-func (j *Job) coderCredentials() (email, password string) {
-	email = extractStringFromConfigValue(j.CoderAdminEmail)
-	password = extractStringFromConfigValue(j.CoderAdminPassword)
-	if email == "" && j.Config != nil {
-		email = j.Config.CoderAdminEmail
-	}
-	if password == "" && j.Config != nil {
-		password = j.Config.CoderAdminPassword
-	}
-	return
+	return defaultWorkspaceNamespace
 }
 
 // RecordCleanupEvent appends an auto-cleanup event to a job.

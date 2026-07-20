@@ -21,28 +21,69 @@ function destroyStack(labId) {
     });
 }
 
-function recreateLab(labId) {
-    // Send POST request to recreate endpoint
+function submitRecreate(body) {
     fetch('/api/labs/recreate', {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: 'job_id=' + encodeURIComponent(labId)
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body
     })
     .then(response => {
         if (response.redirected) {
-            // Follow the redirect
             window.location.href = response.url;
         } else {
-            // Handle error
             console.error('Recreate failed:', response.status);
         }
     })
-    .catch(error => {
-        console.error('Recreate error:', error);
-    });
+    .catch(error => console.error('Recreate error:', error));
 }
+
+function recreateLab(labId) {
+    // Recreation lands on a new cluster, so any credentials the lab's templates
+    // reference must be supplied again. Ask the server which ones; prompt only if
+    // there are any, otherwise recreate straight away.
+    fetch('/api/labs/' + encodeURIComponent(labId) + '/recreate-credentials')
+        .then(response => response.ok ? response.text() : '')
+        .then(rows => {
+            if (rows.trim() === '') {
+                submitRecreate('job_id=' + encodeURIComponent(labId));
+                return;
+            }
+            document.getElementById('recreate-job-id').value = labId;
+            document.getElementById('recreate-credentials-rows').innerHTML = rows;
+            openRecreateCredentialsModal();
+        })
+        .catch(error => {
+            console.error('Could not load credentials for recreate:', error);
+            // Fall back to recreating without the prompt rather than blocking.
+            submitRecreate('job_id=' + encodeURIComponent(labId));
+        });
+}
+
+function openRecreateCredentialsModal() {
+    const overlay = document.getElementById('recreate-credentials-overlay');
+    if (overlay) {
+        overlay.classList.add('visible');
+        overlay.setAttribute('aria-hidden', 'false');
+    }
+}
+
+function closeRecreateCredentialsModal() {
+    const overlay = document.getElementById('recreate-credentials-overlay');
+    if (overlay) {
+        overlay.classList.remove('visible');
+        overlay.setAttribute('aria-hidden', 'true');
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('recreate-credentials-form');
+    if (form) {
+        form.addEventListener('submit', function(event) {
+            event.preventDefault();
+            submitRecreate(new URLSearchParams(new FormData(form)).toString());
+        });
+    }
+});
 
 function removeLab(labId) {
     if (!confirm('Remove this lab from the list? This action cannot be undone.')) return;
@@ -116,12 +157,13 @@ function showCoderCredentials(labId) {
         .then(function (data) {
             loading.style.display = 'none';
             document.getElementById('coder-cred-url').value = data.url || '';
-            document.getElementById('coder-cred-email').value = data.email || '';
-            document.getElementById('coder-cred-password').value = data.password || '';
+            var emailEl = document.getElementById('coder-cred-email');
+            if (emailEl) emailEl.value = data.namespace || '';
             var pwdInput = document.getElementById('coder-cred-password');
-            pwdInput.type = 'password';
-            var toggleBtn = document.querySelector('.credentials-toggle-password');
-            if (toggleBtn) toggleBtn.textContent = 'Show';
+            if (pwdInput) {
+                pwdInput.value = '';
+                pwdInput.type = 'text';
+            }
             fields.style.display = 'block';
         })
         .catch(function (err) {
@@ -218,7 +260,7 @@ function showUploadTemplateModal(labId, labName) {
     successEl.textContent = '';
     submitBtn.disabled = false;
     // Restore inner HTML (icon + text) to original
-    submitBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>Upload Template';
+    submitBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>Add Template';
     _utSetFile(null);
 
     overlay.classList.add('visible');
@@ -355,7 +397,14 @@ function submitUploadTemplate(event) {
     if (!_uploadTemplatLabId) return;
 
     var name = document.getElementById('upload-template-name').value.trim();
-    var fileInput = document.getElementById('upload-template-file');
+    var ideEl = document.getElementById('upload-template-ide');
+    var imageEl = document.getElementById('upload-template-image');
+    var gitEl = document.getElementById('upload-template-git-repo');
+    var gitBranchEl = document.getElementById('upload-template-git-branch');
+    var gitFolderEl = document.getElementById('upload-template-git-folder');
+    var startupEl = document.getElementById('upload-template-startup-script');
+    var dotfilesEl = document.getElementById('upload-template-dotfiles-repo');
+    var extEl = document.getElementById('upload-template-extensions');
     var errorEl = document.getElementById('upload-template-error');
     var successEl = document.getElementById('upload-template-success');
     var submitBtn = document.getElementById('upload-template-submit-btn');
@@ -369,37 +418,20 @@ function submitUploadTemplate(event) {
         errorEl.style.display = 'block';
         return;
     }
-    if (!fileInput.files || !fileInput.files[0]) {
-        errorEl.textContent = 'Please select a .zip or .tf file.';
-        errorEl.style.display = 'block';
-        return;
-    }
-    var fname = fileInput.files[0].name.toLowerCase();
-    if (!fname.endsWith('.zip') && !fname.endsWith('.tf')) {
-        errorEl.textContent = 'Only .zip or .tf files are accepted.';
-        errorEl.style.display = 'block';
-        return;
-    }
 
     var formData = new FormData();
     formData.append('template_name', name);
-    formData.append('template_file', fileInput.files[0]);
-
-    var container = document.getElementById('upload-template-variables-container');
-    if (container) {
-        var rows = container.querySelectorAll('.template-variable-row');
-        rows.forEach(function(row) {
-            var nameInp = row.querySelector('input[name="template_0_var_name"]');
-            var valueInp = row.querySelector('input[name="template_0_var_value"]');
-            if (nameInp && nameInp.value.trim()) {
-                formData.append('template_0_var_name', nameInp.value.trim());
-                formData.append('template_0_var_value', valueInp ? valueInp.value : '');
-            }
-        });
-    }
+    if (ideEl) formData.append('template_ide', ideEl.value);
+    if (imageEl) formData.append('template_image', imageEl.value.trim());
+    if (gitEl) formData.append('template_git_repo', gitEl.value.trim());
+    if (gitBranchEl) formData.append('template_git_branch', gitBranchEl.value.trim());
+    if (gitFolderEl) formData.append('template_git_folder', gitFolderEl.value.trim());
+    if (startupEl) formData.append('template_startup_script', startupEl.value);
+    if (dotfilesEl) formData.append('template_dotfiles_repo', dotfilesEl.value.trim());
+    if (extEl) formData.append('template_extensions', extEl.value.trim());
 
     submitBtn.disabled = true;
-    submitBtn.textContent = 'Uploading…';
+    submitBtn.textContent = 'Adding…';
 
     fetch('/api/labs/' + encodeURIComponent(_uploadTemplatLabId) + '/templates/upload', {
         method: 'POST',
@@ -414,10 +446,10 @@ function submitUploadTemplate(event) {
         return response.json();
     })
     .then(function () {
-        successEl.textContent = 'Template "' + name + '" uploaded successfully.';
+        successEl.textContent = 'Template "' + name + '" added successfully.';
         successEl.style.display = 'flex';
         submitBtn.disabled = false;
-        submitBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>Upload Template';
+        submitBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>Add Template';
         document.getElementById('upload-template-form').reset();
         _utSetFile(null);
         var container = document.getElementById('upload-template-variables-container');
@@ -427,7 +459,7 @@ function submitUploadTemplate(event) {
         errorEl.textContent = typeof err === 'string' ? err : 'Failed to upload template.';
         errorEl.style.display = 'flex';
         submitBtn.disabled = false;
-        submitBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>Upload Template';
+        submitBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>Add Template';
     });
 }
 

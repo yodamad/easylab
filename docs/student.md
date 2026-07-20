@@ -12,7 +12,7 @@ You can request **one workspace per template per lab**. If a lab has multiple te
 
 To access the student portal, you must log in with:
 
-* **Email** — your email address (used to identify you and create your Coder account)
+* **Email** — your email address (used to identify you and create your workspace)
 * **Student Password** — provided by the workshop organiser
 
 Your email is validated on submission and stored in your session. It will be pre-filled automatically on all subsequent pages so you don't need to enter it again.
@@ -23,7 +23,7 @@ Your email is validated on submission and stored in your session. It will be pre
 
 If the workshop organiser has configured Azure AD authentication, a **Sign in with Microsoft** button is displayed at the top of the login page, above the password form. Click it to authenticate with your Microsoft account — any valid account in the organisation's tenant is accepted. No separate student password is required via this method.
 
-After a successful Azure AD login, your Coder account is created automatically using your Microsoft email address, exactly as with the password-based flow.
+After a successful Azure AD login, your workspace account is created automatically using your Microsoft email address, exactly as with the password-based flow.
 
 If the organiser has also enabled **Disable password login for students**, the password form is hidden entirely and only the Microsoft login button is shown.
 
@@ -59,7 +59,7 @@ When you have saved at least one workspace, the **My Workspaces** panel appears 
 Each card shows:
 
 * **Workspace name** — the name assigned to your workspace
-* **Workspace URL** — direct link to your Coder workspace (with a copy button)
+* **Workspace URL** — direct link to your OpenVSCode Server workspace (with a copy button)
 * **Email** — the email used to create the workspace (with a copy button)
 * **Password** — your workspace password, encrypted or in clear text (with a copy button)
 * **Lab ID** — the lab this workspace belongs to

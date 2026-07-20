@@ -122,6 +122,7 @@ const wizard = {
         const enableBtn = document.getElementById('github-login-enable-btn');
         const disableBtn = document.getElementById('github-login-disable-btn');
         const hidden = document.getElementById('coder_github_login_enabled');
+        if (!enableBtn || !disableBtn || !hidden) return;
 
         enableBtn.classList.toggle('selected', enabled);
         disableBtn.classList.toggle('selected', !enabled);
@@ -366,11 +367,6 @@ const wizard = {
             } else {
                 loadOVHFlavors();
             }
-        }
-        // Fetch Coder versions when entering step 5 (Coder) for the first time
-        if (this.currentStep === 5 && !this._coderVersionsLoaded) {
-            this._coderVersionsLoaded = true;
-            loadCoderVersions();
         }
     }
 };
@@ -639,49 +635,6 @@ function loadOVHFlavors() {
             const hint = document.getElementById('flavor-filter-hint');
             if (hint) hint.style.display = 'none';
         });
-}
-
-// Fetch available Coder versions from GitHub and populate the version select
-function loadCoderVersions() {
-    const versionSelect = document.getElementById('coder_version_select');
-    const versionInput = document.getElementById('coder_version');
-    if (!versionSelect || !versionInput) return;
-
-    versionSelect.innerHTML = '<option value="">Loading versions…</option>';
-
-    fetch('/api/coder/versions')
-        .then(response => {
-            if (!response.ok) throw new Error('Failed to load versions');
-            return response.text();
-        })
-        .then(html => {
-            versionSelect.innerHTML = html;
-            syncCoderVersionFromSelect();
-        })
-        .catch(err => {
-            console.error('Error loading Coder versions:', err);
-            versionSelect.innerHTML = '<option value="custom" selected>Custom version…</option>';
-            syncCoderVersionFromSelect();
-        });
-}
-
-// Sync the hidden coder_version input from the select value, showing/hiding the manual input
-function syncCoderVersionFromSelect() {
-    const versionSelect = document.getElementById('coder_version_select');
-    const versionInput = document.getElementById('coder_version');
-    const hint = document.getElementById('coder_version_custom_hint');
-    if (!versionSelect || !versionInput) return;
-
-    if (versionSelect.value === 'custom') {
-        versionInput.style.display = '';
-        versionInput.required = true;
-        if (hint) hint.style.display = '';
-    } else {
-        versionInput.style.display = 'none';
-        versionInput.required = false;
-        versionInput.value = versionSelect.value;
-        if (hint) hint.style.display = 'none';
-    }
 }
 
 // Toggle flavor filters section visibility (lab creation form)
@@ -1063,12 +1016,6 @@ document.addEventListener('DOMContentLoaded', function() {
         regionSelect.addEventListener('change', loadOVHFlavors);
     }
 
-    // Sync coder version input when select changes
-    const coderVersionSelect = document.getElementById('coder_version_select');
-    if (coderVersionSelect) {
-        coderVersionSelect.addEventListener('change', syncCoderVersionFromSelect);
-    }
-
     // Reload flavors when flavor filter inputs change (provider-aware)
     ['flavor_filter_min_vcpus', 'flavor_filter_max_vcpus', 'flavor_filter_min_ram', 'flavor_filter_max_ram'].forEach(function (id) {
         const el = document.getElementById(id);
@@ -1266,8 +1213,137 @@ document.body.addEventListener('htmx:afterSettle', function(event) {
     scrollOutputToBottom();
 });
 
+// Wizard credentials: repeatable registry/git token rows, applied to the lab's
+// cluster once it is provisioned. A git credential has no server field — basic
+// auth goes to whatever host the template's git_repo names.
+const credentialsContainer = document.getElementById('wizard-credentials-container');
+const credentialRowTmpl = document.getElementById('credential-row-tmpl');
+const btnAddCredential = document.getElementById('btn-add-credential');
+
+// The names of the git credentials currently defined, in row order. A template's
+// "Git credential" picker offers these so a private repo can name the token that
+// unlocks it without the admin retyping the name (and risking a typo).
+function gitCredentialNames() {
+    const names = [];
+    if (!credentialsContainer) return names;
+    credentialsContainer.querySelectorAll('.credential-row').forEach(row => {
+        const kind = row.querySelector('.credential-kind');
+        const nameInput = row.querySelector('[name="secret_name"]');
+        const name = nameInput ? nameInput.value.trim() : '';
+        if (kind && kind.value === 'git' && name) names.push(name);
+    });
+    return names;
+}
+
+// Rebuild every template's git-credential picker from the defined credentials,
+// keeping any explicit choice that still exists. With exactly one git credential
+// the empty option is labelled to match the server's auto-link, so the common case
+// reads as "already handled".
+function refreshGitCredentialOptions() {
+    const names = gitCredentialNames();
+    document.querySelectorAll('.template-git-cred-select').forEach(select => {
+        const current = select.value;
+        select.innerHTML = '';
+        const auto = document.createElement('option');
+        auto.value = '';
+        auto.textContent = names.length === 1 ? 'Auto — use ' + names[0] : 'None';
+        select.appendChild(auto);
+        names.forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            select.appendChild(opt);
+        });
+        if (current && names.includes(current)) select.value = current;
+    });
+}
+
+// The names of the registry credentials currently defined, in row order. The
+// devcontainer picker offers these so a private base image or cache registry can
+// name the dockerconfigjson Secret that unlocks it without the admin retyping it.
+function registryCredentialNames() {
+    const names = [];
+    if (!credentialsContainer) return names;
+    credentialsContainer.querySelectorAll('.credential-row').forEach(row => {
+        const kind = row.querySelector('.credential-kind');
+        const nameInput = row.querySelector('[name="secret_name"]');
+        const name = nameInput ? nameInput.value.trim() : '';
+        if (kind && kind.value === 'registry' && name) names.push(name);
+    });
+    return names;
+}
+
+// Rebuild every registry-credential picker from the defined credentials, keeping
+// any explicit choice that still exists. With exactly one registry credential the
+// empty option is labelled to match the devcontainer import's auto-resolve, so the
+// common case reads as "already handled".
+function refreshRegistryCredentialOptions() {
+    const names = registryCredentialNames();
+    document.querySelectorAll('.template-registry-cred-select').forEach(select => {
+        const current = select.value;
+        select.innerHTML = '';
+        const auto = document.createElement('option');
+        auto.value = '';
+        auto.textContent = names.length === 1 ? 'Auto — use ' + names[0] : 'None';
+        select.appendChild(auto);
+        names.forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            select.appendChild(opt);
+        });
+        if (current && names.includes(current)) select.value = current;
+    });
+}
+
+function toggleCredentialServer(row) {
+    const kind = row.querySelector('.credential-kind');
+    const serverGroup = row.querySelector('.credential-server');
+    if (!kind || !serverGroup) {
+        return;
+    }
+    serverGroup.style.display = kind.value === 'registry' ? '' : 'none';
+}
+
+function wireCredentialRow(row) {
+    const kind = row.querySelector('.credential-kind');
+    if (kind) {
+        kind.addEventListener('change', () => {
+            toggleCredentialServer(row);
+            refreshGitCredentialOptions();
+            refreshRegistryCredentialOptions();
+        });
+    }
+    const nameInput = row.querySelector('[name="secret_name"]');
+    if (nameInput) {
+        nameInput.addEventListener('input', () => {
+            refreshGitCredentialOptions();
+            refreshRegistryCredentialOptions();
+        });
+    }
+    const removeBtn = row.querySelector('.btn-remove-credential');
+    if (removeBtn) {
+        removeBtn.addEventListener('click', () => {
+            row.remove();
+            refreshGitCredentialOptions();
+            refreshRegistryCredentialOptions();
+        });
+    }
+    toggleCredentialServer(row);
+}
+
+if (btnAddCredential && credentialRowTmpl && credentialsContainer) {
+    btnAddCredential.addEventListener('click', function() {
+        const row = credentialRowTmpl.content.firstElementChild.cloneNode(true);
+        credentialsContainer.appendChild(row);
+        wireCredentialRow(row);
+        refreshGitCredentialOptions();
+        refreshRegistryCredentialOptions();
+    });
+}
+
 // Multi-template: Add/Remove rows and per-row source selection
-const templatesContainer = document.getElementById('coder-templates-container');
+const templatesContainer = document.getElementById('workspace-templates-container');
 const templateRowTmpl = document.getElementById('template-row-tmpl');
 const btnAddTemplate = document.getElementById('btn-add-template');
 const templateCountInput = document.getElementById('template_count');
@@ -1302,14 +1378,14 @@ function createVariableRow(templateIdx, varName, varValue, description, required
     div.className = 'template-variable-row';
     const nameInput = document.createElement('input');
     nameInput.type = 'text';
-    nameInput.name = 'template_' + templateIdx + '_var_name';
-    nameInput.placeholder = 'Variable name';
+    nameInput.name = 'template_' + templateIdx + '_env_name';
+    nameInput.placeholder = 'Env variable name';
     nameInput.value = varName || '';
     if (required) nameInput.setAttribute('data-required', 'true');
 
     const valueInput = document.createElement('input');
     valueInput.type = 'text';
-    valueInput.name = 'template_' + templateIdx + '_var_value';
+    valueInput.name = 'template_' + templateIdx + '_env_value';
     valueInput.placeholder = description || 'Value';
     valueInput.value = varValue || '';
 
@@ -1334,6 +1410,87 @@ function addVariableRow(row) {
     if (container) {
         container.appendChild(createVariableRow(idx, '', '', '', false));
     }
+}
+
+function makeTextInput(name, placeholder) {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.name = name;
+    input.placeholder = placeholder;
+    return input;
+}
+
+function makeRemoveButton(div, title) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-secondary btn-remove-variable';
+    btn.textContent = 'x';
+    btn.title = title;
+    btn.addEventListener('click', function() { div.remove(); });
+    return btn;
+}
+
+// makePrivilegedToggle returns a checkbox that drives a hidden input carrying the
+// value, so an unchecked box still submits (keeping the sidecar arrays aligned).
+function makePrivilegedToggle(name) {
+    const wrap = document.createElement('label');
+    wrap.className = 'sidecar-privileged';
+    const hidden = document.createElement('input');
+    hidden.type = 'hidden';
+    hidden.name = name;
+    hidden.value = 'false';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.addEventListener('change', function() { hidden.value = cb.checked ? 'true' : 'false'; });
+    const span = document.createElement('span');
+    span.textContent = 'privileged';
+    wrap.appendChild(hidden);
+    wrap.appendChild(cb);
+    wrap.appendChild(span);
+    return wrap;
+}
+
+function createSidecarRow(templateIdx) {
+    const div = document.createElement('div');
+    div.className = 'template-variable-row';
+    div.appendChild(makeTextInput('template_' + templateIdx + '_sidecar_name', 'name'));
+    div.appendChild(makeTextInput('template_' + templateIdx + '_sidecar_image', 'image (e.g. postgres:16)'));
+    div.appendChild(makeTextInput('template_' + templateIdx + '_sidecar_ports', 'ports (5432,6379)'));
+    div.appendChild(makeTextInput('template_' + templateIdx + '_sidecar_env', 'env (KEY=VAL,KEY2=VAL2)'));
+    div.appendChild(makeTextInput('template_' + templateIdx + '_sidecar_capabilities', 'capabilities (SYS_ADMIN,…)'));
+    div.appendChild(makePrivilegedToggle('template_' + templateIdx + '_sidecar_privileged'));
+    div.appendChild(makeRemoveButton(div, 'Remove sidecar'));
+    return div;
+}
+
+function addSidecarRow(row) {
+    const idx = parseInt(row.getAttribute('data-template-index'), 10);
+    const container = row.querySelector('.template-sidecars-container');
+    if (container) container.appendChild(createSidecarRow(idx));
+}
+
+function createMountRow(templateIdx) {
+    const div = document.createElement('div');
+    div.className = 'template-variable-row';
+    const typeSelect = document.createElement('select');
+    typeSelect.name = 'template_' + templateIdx + '_mount_type';
+    ['configmap', 'secret'].forEach(function(t) {
+        const opt = document.createElement('option');
+        opt.value = t;
+        opt.textContent = t;
+        typeSelect.appendChild(opt);
+    });
+    div.appendChild(typeSelect);
+    div.appendChild(makeTextInput('template_' + templateIdx + '_mount_name', 'ConfigMap/Secret name'));
+    div.appendChild(makeTextInput('template_' + templateIdx + '_mount_path', 'mount path (/etc/config)'));
+    div.appendChild(makeRemoveButton(div, 'Remove mount'));
+    return div;
+}
+
+function addMountRow(row) {
+    const idx = parseInt(row.getAttribute('data-template-index'), 10);
+    const container = row.querySelector('.template-mounts-container');
+    if (container) container.appendChild(createMountRow(idx));
 }
 
 function detectVariables(row) {
@@ -1510,6 +1667,22 @@ function initTemplateRowHandlers() {
                 addVariableRow(row);
             });
         }
+
+        const addSidecarBtn = row.querySelector('.btn-add-sidecar');
+        if (addSidecarBtn) {
+            addSidecarBtn.replaceWith(addSidecarBtn.cloneNode(true));
+            row.querySelector('.btn-add-sidecar').addEventListener('click', function() {
+                addSidecarRow(row);
+            });
+        }
+
+        const addMountBtn = row.querySelector('.btn-add-mount');
+        if (addMountBtn) {
+            addMountBtn.replaceWith(addMountBtn.cloneNode(true));
+            row.querySelector('.btn-add-mount').addEventListener('click', function() {
+                addMountRow(row);
+            });
+        }
     });
 }
 
@@ -1533,14 +1706,273 @@ if (btnAddTemplate && templateRowTmpl) {
         });
         newRow.querySelector('input[data-field="name"]').value = '';
         newRow.querySelector('input[data-field="git_branch"]').value = 'main';
-        newRow.querySelector('input[data-field="source"][value="git"]').checked = true;
         templatesContainer.appendChild(newRow);
         reindexTemplateRows();
         updateRowSourceVisibility(newRow);
+        // The clone ships with a bare picker; fill it from the defined credentials.
+        refreshGitCredentialOptions();
     });
 }
 
 document.addEventListener('DOMContentLoaded', function() {
     initTemplateRowHandlers();
     templatesContainer.querySelectorAll('.template-row').forEach(row => updateRowSourceVisibility(row));
+    refreshGitCredentialOptions();
+    refreshRegistryCredentialOptions();
+});
+
+// Workspace templates: three ways to define the workspace — a field builder, a
+// devcontainer importer, or raw YAML. The server only distinguishes form from
+// yaml; the devcontainer path resolves to yaml (it generates a YAML document that
+// the admin reviews in the editor), so templates_mode only ever holds those two.
+const templatesModeInput = document.getElementById('templates_mode');
+const templatesFormMode = document.getElementById('templates-form-mode');
+const templatesDevcontainerMode = document.getElementById('templates-devcontainer-mode');
+const templatesYamlMode = document.getElementById('templates-yaml-mode');
+const templatesYamlTextarea = document.getElementById('templates_yaml');
+const templatesModeFormBtn = document.getElementById('templates-mode-form');
+const templatesModeDevcontainerBtn = document.getElementById('templates-mode-devcontainer');
+const templatesModeYamlBtn = document.getElementById('templates-mode-yaml');
+
+// Collects the wizard's template fields to seed the editor. Must run before the
+// inputs are disabled: FormData skips disabled fields.
+function templatesFormData() {
+    const data = new FormData();
+    if (!templatesFormMode) {
+        return data;
+    }
+    templatesFormMode.querySelectorAll('[name^="template_"]').forEach(el => {
+        if (el.type === 'file' || el.disabled) return;
+        if ((el.type === 'checkbox' || el.type === 'radio') && !el.checked) return;
+        data.append(el.getAttribute('name'), el.value);
+    });
+    return data;
+}
+
+function seedTemplatesYaml() {
+    return fetch('/api/labs/templates/yaml', { method: 'POST', body: templatesFormData() })
+        .then(response => response.ok ? response.text() : Promise.reject(new Error('seed failed')))
+        .then(text => { templatesYamlTextarea.value = text; })
+        .catch(() => { /* Leave the editor empty — "Insert skeleton" is still available. */ });
+}
+
+function setTemplatesMode(mode) {
+    const useForm = mode === 'form';
+    // Only the form builder submits the wizard fields; both other paths submit YAML.
+    if (templatesModeInput) templatesModeInput.value = useForm ? 'form' : 'yaml';
+    if (templatesModeFormBtn) templatesModeFormBtn.classList.toggle('selected', useForm);
+    if (templatesModeDevcontainerBtn) templatesModeDevcontainerBtn.classList.toggle('selected', mode === 'devcontainer');
+    if (templatesModeYamlBtn) templatesModeYamlBtn.classList.toggle('selected', mode === 'yaml');
+    if (templatesFormMode) templatesFormMode.style.display = useForm ? '' : 'none';
+    if (templatesDevcontainerMode) templatesDevcontainerMode.style.display = mode === 'devcontainer' ? '' : 'none';
+    if (templatesYamlMode) templatesYamlMode.style.display = mode === 'yaml' ? '' : 'none';
+    // Hiding the wizard is not enough: its inputs would still be submitted, and a
+    // `required` field that is hidden but empty blocks submission with an error the
+    // admin cannot see. Disabling takes them out of the form entirely.
+    if (templatesFormMode) {
+        templatesFormMode.querySelectorAll('input, select, textarea').forEach(el => {
+            el.disabled = !useForm;
+        });
+    }
+    if (templatesYamlTextarea) templatesYamlTextarea.disabled = useForm;
+}
+
+if (templatesModeFormBtn) {
+    templatesModeFormBtn.addEventListener('click', () => setTemplatesMode('form'));
+}
+if (templatesModeDevcontainerBtn) {
+    templatesModeDevcontainerBtn.addEventListener('click', function() {
+        // The form builder's first template usually already points at the workshop repo.
+        const repoField = document.getElementById('devcontainer_git_repo');
+        const formRepo = document.querySelector('[name="template_0_git_repo"]');
+        if (repoField && !repoField.value && formRepo && formRepo.value) repoField.value = formRepo.value;
+        setTemplatesMode('devcontainer');
+    });
+}
+if (templatesModeYamlBtn) {
+    templatesModeYamlBtn.addEventListener('click', function() {
+        const seeded = templatesYamlTextarea && !templatesYamlTextarea.value.trim()
+            ? seedTemplatesYaml()
+            : Promise.resolve();
+        seeded.then(() => setTemplatesMode('yaml'));
+    });
+}
+
+const btnSkeletonTemplatesYaml = document.getElementById('btn-skeleton-templates-yaml');
+if (btnSkeletonTemplatesYaml) {
+    btnSkeletonTemplatesYaml.addEventListener('click', function() {
+        if (templatesYamlTextarea.value.trim() &&
+            !confirm('Replace the current YAML with the commented skeleton?')) {
+            return;
+        }
+        // Posting no template fields makes the server return the skeleton.
+        fetch('/api/labs/templates/yaml', { method: 'POST', body: new FormData() })
+            .then(response => response.ok ? response.text() : Promise.reject(new Error('skeleton failed')))
+            .then(text => { templatesYamlTextarea.value = text; })
+            .catch(() => { /* Nothing to insert; leave what the admin has. */ });
+    });
+}
+
+const btnUploadTemplatesYaml = document.getElementById('btn-upload-templates-yaml');
+const templatesYamlFileInput = document.getElementById('templates_yaml_file');
+if (btnUploadTemplatesYaml && templatesYamlFileInput) {
+    btnUploadTemplatesYaml.addEventListener('click', () => templatesYamlFileInput.click());
+    templatesYamlFileInput.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = evt => { templatesYamlTextarea.value = evt.target.result; };
+        reader.readAsText(file);
+        // Let the same file be picked again after an edit.
+        e.target.value = '';
+    });
+}
+
+// Workspace templates: import from a workshop repo's devcontainer.json. The
+// translation happens here, at authoring time, so the admin can see and edit what
+// a student will get — and so the keys the builder cannot honour are reported
+// while there is still something to do about them.
+const devcontainerImportResult = document.getElementById('devcontainer-import-result');
+const devcontainerUploadRow = document.getElementById('devcontainer-upload-row');
+const devcontainerGitAuthRow = document.getElementById('devcontainer-git-auth-row');
+const devcontainerSourceGitBtn = document.getElementById('devcontainer-source-git');
+const devcontainerSourceUploadBtn = document.getElementById('devcontainer-source-upload');
+let devcontainerSource = 'git';
+
+function setDevcontainerSource(source) {
+    devcontainerSource = source === 'upload' ? 'upload' : 'git';
+    if (devcontainerSourceGitBtn) devcontainerSourceGitBtn.classList.toggle('selected', devcontainerSource === 'git');
+    if (devcontainerSourceUploadBtn) devcontainerSourceUploadBtn.classList.toggle('selected', devcontainerSource === 'upload');
+    if (devcontainerUploadRow) devcontainerUploadRow.style.display = devcontainerSource === 'upload' ? '' : 'none';
+    // An upload is read straight from the file: there is no clone to authenticate,
+    // so offering a token would only invite pasting one for nothing.
+    if (devcontainerGitAuthRow) devcontainerGitAuthRow.style.display = devcontainerSource === 'git' ? '' : 'none';
+}
+
+if (devcontainerSourceGitBtn) {
+    devcontainerSourceGitBtn.addEventListener('click', () => setDevcontainerSource('git'));
+}
+if (devcontainerSourceUploadBtn) {
+    devcontainerSourceUploadBtn.addEventListener('click', () => setDevcontainerSource('upload'));
+}
+
+// Once the import succeeds the generated YAML is waiting in the editor; this button
+// takes the admin there to review and tweak it before creating the lab. It stays
+// hidden until there is something to review.
+const btnDevcontainerReviewYaml = document.getElementById('btn-devcontainer-review-yaml');
+if (btnDevcontainerReviewYaml) {
+    btnDevcontainerReviewYaml.addEventListener('click', () => setTemplatesMode('yaml'));
+}
+
+// The import result renders values that came out of a workshop's own
+// devcontainer.json (image names, feature refs, its name), so it is not trusted
+// markup.
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text == null ? '' : text;
+    return div.innerHTML;
+}
+
+function devcontainerImportMessage(kind, text) {
+    if (!devcontainerImportResult) return;
+    devcontainerImportResult.innerHTML =
+        `<div class="toast toast--inline toast-${kind}"><span>${escapeHtml(text)}</span></div>`;
+}
+
+// renderDevcontainerImport reports what the builder will produce, and every key
+// it will ignore. The warning list is the point of importing: it is cheaper to
+// learn here than from a student halfway through a workshop.
+function renderDevcontainerImport(data) {
+    if (!devcontainerImportResult) return;
+
+    const base = data.base || {};
+    let summary = 'no image or Dockerfile — the fallback image is used';
+    if (base.kind === 'image') summary = `image <code>${escapeHtml(base.image)}</code>`;
+    else if (base.kind === 'dockerfile') summary = `built from <code>${escapeHtml(base.dockerfile)}</code>`;
+
+    let html = '<div class="toast toast--inline toast-success"><span>' +
+        `Imported <code>${escapeHtml(data.path || 'devcontainer.json')}</code> — ${summary}.` +
+        '</span></div>';
+
+    if (data.features && data.features.length) {
+        html += '<p class="devcontainer-import-note">Features built into the workspace: ' +
+            data.features.map(f => `<code>${escapeHtml(f)}</code>`).join(', ') + '</p>';
+    }
+
+    if (data.warnings && data.warnings.length) {
+        html += '<p class="devcontainer-import-note">These parts of the devcontainer will not take effect:</p><ul class="devcontainer-import-warnings">';
+        data.warnings.forEach(w => {
+            html += `<li><code>${escapeHtml(w.key)}</code> — ${escapeHtml(w.message)}</li>`;
+        });
+        html += '</ul>';
+    }
+
+    devcontainerImportResult.innerHTML = html;
+}
+
+const btnRunDevcontainerImport = document.getElementById('btn-run-devcontainer-import');
+if (btnRunDevcontainerImport) {
+    btnRunDevcontainerImport.addEventListener('click', function() {
+        const fileInput = document.getElementById('devcontainer_file');
+        const body = new FormData();
+        body.append('source', devcontainerSource);
+        body.append('git_repo', (document.getElementById('devcontainer_git_repo') || {}).value || '');
+        body.append('git_branch', (document.getElementById('devcontainer_git_branch') || {}).value || '');
+        body.append('devcontainer_dir', (document.getElementById('devcontainer_dir') || {}).value || '');
+        body.append('cache_repo', (document.getElementById('devcontainer_cache_repo') || {}).value || '');
+        // The registry credential each student's workspace pulls the private base image
+        // (and pushes the layer cache) with, baked into the generated template. Empty
+        // means "auto": with a single registry credential, resolve it here so the common
+        // case needs no choice, mirroring the git credential below.
+        let registryAuthSecret = (document.getElementById('devcontainer_registry_auth_secret') || {}).value || '';
+        if (!registryAuthSecret) {
+            const rnames = registryCredentialNames();
+            if (rnames.length === 1) registryAuthSecret = rnames[0];
+        }
+        body.append('registry_auth_secret', registryAuthSecret);
+        // The credential the students' workspaces clone with, baked into the generated
+        // template. Empty means "auto": with a single git credential, resolve it here so
+        // the common case needs no choice, mirroring the form path's picker.
+        let gitAuthSecret = (document.getElementById('devcontainer_git_auth_secret') || {}).value || '';
+        if (!gitAuthSecret) {
+            const names = gitCredentialNames();
+            if (names.length === 1) gitAuthSecret = names[0];
+        }
+        body.append('git_auth_secret', gitAuthSecret);
+        // Request-scoped: authenticates this clone only, and is never persisted.
+        body.append('git_username', (document.getElementById('devcontainer_git_username') || {}).value || '');
+        body.append('git_token', (document.getElementById('devcontainer_git_token') || {}).value || '');
+
+        if (devcontainerSource === 'upload') {
+            const file = fileInput && fileInput.files[0];
+            if (!file) {
+                devcontainerImportMessage('error', 'Choose a devcontainer.json or a repository .zip to upload.');
+                return;
+            }
+            body.append('devcontainer_file', file);
+        }
+
+        devcontainerImportMessage('success', 'Reading the devcontainer…');
+        btnRunDevcontainerImport.disabled = true;
+
+        fetch('/api/templates/detect-devcontainer', { method: 'POST', body: body })
+            .then(response => response.json().then(data => ({ ok: response.ok, data: data })))
+            .then(({ ok, data }) => {
+                if (!ok) {
+                    devcontainerImportMessage('error', data.message || 'Could not read the devcontainer.');
+                    return;
+                }
+                if (templatesYamlTextarea) templatesYamlTextarea.value = data.templates_yaml || '';
+                renderDevcontainerImport(data);
+                // The YAML is now populated — surface the way to go review it.
+                if (btnDevcontainerReviewYaml) btnDevcontainerReviewYaml.style.display = '';
+            })
+            .catch(() => devcontainerImportMessage('error', 'Could not reach the server.'))
+            .finally(() => { btnRunDevcontainerImport.disabled = false; });
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    setTemplatesMode(templatesModeInput ? templatesModeInput.value : 'form');
+    setDevcontainerSource('git');
 });

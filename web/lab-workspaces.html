@@ -18,6 +18,54 @@
         <div class="workspaces-page-container">
 
         <div>
+            <details class="secrets-section">
+                <summary class="secrets-summary">
+                    <span class="secrets-summary-title">Credentials</span>
+                    <span class="secrets-summary-hint">Registry and git tokens for private images and repositories</span>
+                </summary>
+
+                <p class="secrets-intro">
+                    Credentials are stored in this lab's cluster, never in EasyLab. Reference one
+                    from a workspace template by name — <code>image_pull_secrets</code> for a private
+                    image, <code>git_auth_secret</code> for a private repository. Saving over an
+                    existing name rotates its token; workspaces already running keep the old one
+                    until they are recreated.
+                </p>
+
+                <div id="secrets-panel" hx-get="/api/labs/{{.LabID}}/secrets" hx-trigger="load">
+                    <p class="secrets-empty">Loading credentials…</p>
+                </div>
+
+                <!-- Reset on success so the token does not sit in the DOM after it has been saved. -->
+                <form class="secrets-form" hx-post="/api/labs/{{.LabID}}/secrets" hx-target="#secrets-panel"
+                      hx-on::after-request="if (event.detail.successful) this.reset()">
+                    <div class="secrets-form-row">
+                        <label for="secret-kind">Type</label>
+                        <select id="secret-kind" name="kind" onchange="toggleSecretServerField()">
+                            <option value="registry">Container registry</option>
+                            <option value="git">Git repository</option>
+                        </select>
+                    </div>
+                    <div class="secrets-form-row">
+                        <label for="secret-name">Name</label>
+                        <input type="text" id="secret-name" name="name" placeholder="regcred" required>
+                    </div>
+                    <div class="secrets-form-row" id="secret-server-row">
+                        <label for="secret-server">Server</label>
+                        <input type="text" id="secret-server" name="server" placeholder="registry.example.com">
+                    </div>
+                    <div class="secrets-form-row">
+                        <label for="secret-username">Username</label>
+                        <input type="text" id="secret-username" name="username" placeholder="oauth2" autocomplete="off">
+                    </div>
+                    <div class="secrets-form-row">
+                        <label for="secret-token">Token</label>
+                        <input type="password" id="secret-token" name="token" placeholder="Personal access token" autocomplete="off" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm">Save credential</button>
+                </form>
+            </details>
+
             {{if .Workspaces}}
             <div class="stats-bar">
                 <div class="stats-item">

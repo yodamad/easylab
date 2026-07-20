@@ -131,37 +131,26 @@ func CreateLabProgram(jobDir string) pulumi.RunFunc {
 			}
 		}
 
-		utils.LogInfo(ctx, "Starting Coder setup (parallel mode)...")
-		ns, err := k8s.InitNamespace(ctx, k8sProvider)
-		if err != nil {
+		utils.LogInfo(ctx, "Creating workspace namespace...")
+		if _, err := k8s.InitNamespace(ctx, k8sProvider); err != nil {
 			return fmt.Errorf("failed to create namespace: %w", err)
 		}
 
-		infraResult, err := coder.SetupInfrastructureParallel(ctx, k8sProvider, ns)
-		if err != nil {
-			return fmt.Errorf("failed to setup infrastructure: %w", err)
+		// Install the ingress controller so the per-student workspace ingresses the
+		// server creates at runtime can be routed. With a domain this also brings up
+		// cert-manager + the ClusterIssuer + DNS records for TLS; without one the
+		// server falls back to plain HTTP via nip.io on the LoadBalancer IP, which
+		// still needs the controller.
+		_, ingressIP, httpsErr := coder.SetupHTTPS(ctx, k8sProvider, kubeconfigOut)
+		if httpsErr != nil {
+			return fmt.Errorf("failed to setup HTTPS ingress: %w", httpsErr)
+		}
+		ctx.Export("ingressIP", ingressIP)
+		if domain := utils.CoderConfigOptional(ctx, utils.CoderDomain); domain != "" {
+			ctx.Export("domain", pulumi.String(domain))
 		}
 
-		extIp, err := k8s.GetExternalIP(ctx, kubeconfigOut, infraResult.CoderRelease)
-		if err != nil {
-			return fmt.Errorf("failed to get external IP: %w", err)
-		}
-
-		ctx.Export("externalIp", extIp)
-
-		domain := utils.CoderConfigOptional(ctx, utils.CoderDomain)
-		if domain != "" {
-			_, ingressIP, httpsErr := coder.SetupHTTPS(ctx, k8sProvider, ns, infraResult.CoderRelease, kubeconfigOut)
-			if httpsErr != nil {
-				return fmt.Errorf("failed to setup HTTPS ingress: %w", httpsErr)
-			}
-			ctx.Export("ingressIP", ingressIP)
-			ctx.Export("coderURL", pulumi.Sprintf("https://%s", domain))
-		} else {
-			ctx.Export("coderURL", pulumi.Sprintf("http://%s", extIp))
-		}
-
-		utils.LogInfo(ctx, "Infrastructure setup completed! Coder initialization continues after deployment.")
+		utils.LogInfo(ctx, "Infrastructure setup completed!")
 		return nil
 	}
 }

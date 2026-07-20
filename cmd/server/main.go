@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	_ "easylab/internal/providers/workspace/kube" // register the kube workspace backend
 	"easylab/internal/server"
 	"easylab/utils"
 	"flag"
@@ -311,7 +312,6 @@ func main() {
 	}))
 	mux.HandleFunc("/api/ovh/regions", authHandler.RequireAuth(handler.GetOVHRegions))
 	mux.HandleFunc("/api/ovh/flavors", authHandler.RequireAuth(handler.GetOVHFlavors))
-	mux.HandleFunc("/api/coder/versions", authHandler.RequireAuth(handler.GetCoderVersions))
 	mux.HandleFunc("/admin/ovh-options", authHandler.RequireAuth(handler.ServeOVHOptions))
 	mux.HandleFunc("/api/ovh-options", authHandler.RequireAuth(handler.SaveOVHOptions))
 	mux.HandleFunc("/api/ovh-options/refresh", authHandler.RequireAuth(handler.RefreshOVHOptions))
@@ -330,38 +330,15 @@ func main() {
 	mux.HandleFunc("/api/azure-options/refresh", authHandler.RequireAuth(handler.RefreshAzureOptions))
 	mux.HandleFunc("/api/azure-ad-config", authHandler.RequireAuth(handler.SaveAzureADConfig))
 	mux.HandleFunc("/api/templates/detect-variables", authHandler.RequireAuth(handler.DetectTemplateVariables))
+	mux.HandleFunc("/api/templates/detect-devcontainer", authHandler.RequireAuth(handler.DetectDevcontainer))
 	mux.HandleFunc("/api/labs", authHandler.RequireAuth(handler.CreateLab))
+	mux.HandleFunc("/api/labs/templates/yaml", authHandler.RequireAuth(handler.ServeWorkspaceTemplatesYAML))
+	mux.HandleFunc("/api/labs/templates/yaml/validate", authHandler.RequireAuth(handler.ValidateWorkspaceTemplatesYAML))
 	mux.HandleFunc("/api/labs/dry-run", authHandler.RequireAuth(handler.DryRunLab))
 	mux.HandleFunc("/api/labs/launch", authHandler.RequireAuth(handler.LaunchLab))
 	mux.HandleFunc("/api/labs/recreate", authHandler.RequireAuth(handler.RecreateLab))
 	mux.HandleFunc("/api/stacks/destroy", authHandler.RequireAuth(handler.DestroyStack))
-	// routeLabRequest is the shared handler for /api/labs/{id}/... and the
-	// backward-compatible /api/jobs/{id}/... prefix.
-	routeLabRequest := func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-		switch {
-		case strings.Contains(path, "/workspaces") && !strings.Contains(path, "/delete") && r.Method == http.MethodGet:
-			handler.ListLabWorkspaces(w, r)
-		case strings.Contains(path, "/workspaces/") && strings.Contains(path, "delete") && r.Method == http.MethodPost:
-			handler.DeleteWorkspace(w, r)
-		case strings.HasSuffix(path, "/delete") && !strings.Contains(path, "/workspaces") && r.Method == http.MethodPost:
-			handler.DeleteLab(w, r)
-		case strings.HasSuffix(path, "/retry"):
-			handler.RetryJob(w, r)
-		case strings.HasSuffix(path, "/templates/upload") && r.Method == http.MethodPost:
-			handler.UploadTemplateToLab(w, r)
-		case strings.HasSuffix(path, "/coder-credentials") && r.Method == http.MethodGet:
-			handler.GetCoderCredentials(w, r)
-		case strings.HasSuffix(path, "/kubeconfig"):
-			handler.DownloadKubeconfig(w, r)
-		default:
-			if r.URL.Query().Get("format") == "json" {
-				handler.GetJobStatusJSON(w, r)
-			} else {
-				handler.GetJobStatus(w, r)
-			}
-		}
-	}
+	routeLabRequest := labRequestRouter(handler)
 	mux.HandleFunc("/api/labs/", authHandler.RequireAuth(routeLabRequest))
 	// Backward compatibility route
 	mux.HandleFunc("/api/jobs/", authHandler.RequireAuth(routeLabRequest))
@@ -446,4 +423,107 @@ func main() {
 	}
 
 	log.Println("Server exited")
+}
+
+// labRoute names one of the endpoints under /api/labs/{id}/... (and the
+// backward-compatible /api/jobs/{id}/... prefix).
+//
+// Resolving the route is kept separate from dispatching it so the precedence
+// between the cases can be tested on its own. That matters here more than it
+// looks: several of these patterns overlap — "/secrets/delete" also ends with
+// "/delete", and "/workspaces/{id}/delete" contains both "/workspaces" and
+// "delete" — so the routes are ordered, and reordering them silently sends a
+// request somewhere else.
+type labRoute int
+
+const (
+	// routeJobStatus is the fallback: anything not matched below.
+	routeJobStatus labRoute = iota
+	routeJobStatusJSON
+	routeListWorkspaces
+	routeDeleteWorkspace
+	routeDeleteLabSecret
+	routeSaveLabSecret
+	routeServeLabSecrets
+	routeDeleteLab
+	routeRetryJob
+	routeUploadTemplate
+	routeCoderCredentials
+	routeKubeconfig
+	routeRecreateCredentials
+)
+
+// resolveLabRoute picks the endpoint for a request. The case order is the
+// contract; see labRoute.
+func resolveLabRoute(path, method, format string) labRoute {
+	switch {
+	case strings.Contains(path, "/workspaces") && !strings.Contains(path, "/delete") && method == http.MethodGet:
+		return routeListWorkspaces
+	case strings.Contains(path, "/workspaces/") && strings.Contains(path, "delete") && method == http.MethodPost:
+		return routeDeleteWorkspace
+
+	// Secrets must be matched before the generic "/delete" below, which
+	// "/secrets/delete" also ends with. DeleteLab happens to reject the path
+	// anyway — it requires "delete" to be the segment straight after the lab ID —
+	// but that is a second check in internal/server, and far too fine a thread to
+	// leave this route hanging from.
+	case strings.HasSuffix(path, "/secrets/delete") && method == http.MethodPost:
+		return routeDeleteLabSecret
+	case strings.HasSuffix(path, "/secrets") && method == http.MethodPost:
+		return routeSaveLabSecret
+	case strings.HasSuffix(path, "/secrets") && method == http.MethodGet:
+		return routeServeLabSecrets
+
+	case strings.HasSuffix(path, "/delete") && !strings.Contains(path, "/workspaces") && method == http.MethodPost:
+		return routeDeleteLab
+	case strings.HasSuffix(path, "/retry"):
+		return routeRetryJob
+	case strings.HasSuffix(path, "/templates/upload") && method == http.MethodPost:
+		return routeUploadTemplate
+	case strings.HasSuffix(path, "/recreate-credentials") && method == http.MethodGet:
+		return routeRecreateCredentials
+	case strings.HasSuffix(path, "/coder-credentials") && method == http.MethodGet:
+		return routeCoderCredentials
+	case strings.HasSuffix(path, "/kubeconfig"):
+		return routeKubeconfig
+	case format == "json":
+		return routeJobStatusJSON
+	default:
+		return routeJobStatus
+	}
+}
+
+// labRequestRouter is the shared handler for /api/labs/{id}/... and the
+// backward-compatible /api/jobs/{id}/... prefix.
+func labRequestRouter(h *server.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch resolveLabRoute(r.URL.Path, r.Method, r.URL.Query().Get("format")) {
+		case routeListWorkspaces:
+			h.ListLabWorkspaces(w, r)
+		case routeDeleteWorkspace:
+			h.DeleteWorkspace(w, r)
+		case routeDeleteLabSecret:
+			h.DeleteLabSecret(w, r)
+		case routeSaveLabSecret:
+			h.SaveLabSecret(w, r)
+		case routeServeLabSecrets:
+			h.ServeLabSecrets(w, r)
+		case routeDeleteLab:
+			h.DeleteLab(w, r)
+		case routeRetryJob:
+			h.RetryJob(w, r)
+		case routeUploadTemplate:
+			h.UploadTemplateToLab(w, r)
+		case routeRecreateCredentials:
+			h.ServeRecreateCredentials(w, r)
+		case routeCoderCredentials:
+			h.GetCoderCredentials(w, r)
+		case routeKubeconfig:
+			h.DownloadKubeconfig(w, r)
+		case routeJobStatusJSON:
+			h.GetJobStatusJSON(w, r)
+		default:
+			h.GetJobStatus(w, r)
+		}
+	}
 }

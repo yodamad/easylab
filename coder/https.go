@@ -12,30 +12,29 @@ import (
 	k8score "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/core/v1"
 	helmv3 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/helm/v3"
 	metav1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/meta/v1"
-	k8snetv1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/networking/v1"
 	rbacv1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/rbac/v1"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
 
-// SetupHTTPS installs ingress-nginx and cert-manager, creates a ClusterIssuer,
-// and creates an Ingress for Coder with TLS. Returns the ingress-nginx release
-// and the LoadBalancer IP assigned to the ingress-nginx controller service.
+// SetupHTTPS installs ingress-nginx and cert-manager and creates a Let's Encrypt
+// ClusterIssuer, plus (when a DNS provider is configured) the DNS A-records that
+// let per-student workspace subdomains resolve. Per-student ingresses are created
+// at runtime by the server; this function only provisions the shared TLS/ingress
+// infrastructure. Returns the ingress-nginx release and the LoadBalancer IP
+// assigned to the ingress-nginx controller service.
 // kubeconfigOut is the kubeconfig file content as a StringOutput, used to read
 // the LoadBalancer IP directly from the Kubernetes API (avoiding the Pulumi
 // provider's await which blocks on OVHcloud's ipMode:VIP).
 //
-// If coder:domain is not set, returns nil, zero StringOutput, nil (HTTPS disabled).
+// If coder:domain is not set, only ingress-nginx is installed: the server then
+// exposes workspaces over plain HTTP via nip.io on the returned LoadBalancer IP,
+// so the controller is still required, but there is no domain to certify.
 func SetupHTTPS(
 	ctx *pulumi.Context,
 	k8sProvider *k8s.Provider,
-	coderNs *k8score.Namespace,
-	coderRelease *helmv3.Release,
 	kubeconfigOut pulumi.StringOutput,
 ) (*helmv3.Release, pulumi.StringOutput, error) {
 	domain := utils.CoderConfigOptional(ctx, utils.CoderDomain)
-	if domain == "" {
-		return nil, pulumi.StringOutput{}, nil
-	}
 
 	acmeEmail := utils.CoderConfigOptional(ctx, utils.CoderAcmeEmail)
 
@@ -58,8 +57,10 @@ func SetupHTTPS(
 	}
 
 	// ── cert-manager ────────────────────────────────────────────────────────
+	// Without a domain there is no ClusterIssuer and no certificate to request,
+	// so cert-manager would sit idle — skip it.
 	var certManagerRelease *helmv3.Release
-	if installCertManager {
+	if installCertManager && domain != "" {
 		certManagerNs, err := k8score.NewNamespace(ctx, "cert-manager-ns", &k8score.NamespaceArgs{
 			Metadata: &metav1.ObjectMetaArgs{Name: pulumi.String(certManagerNsName)},
 		}, pulumi.Provider(k8sProvider))
@@ -111,6 +112,17 @@ func SetupHTTPS(
 		if err != nil {
 			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to install ingress-nginx: %w", err)
 		}
+	}
+
+	// No domain: the ingress controller is all that is needed. Hand back its
+	// LoadBalancer IP so the server can route workspaces at "{name}.{ip}.nip.io"
+	// over plain HTTP, and skip the ACME ClusterIssuer and DNS records entirely.
+	if domain == "" {
+		ingressIP, ipErr := GetIngressIP(kubeconfigOut, ingressRelease, nginxNsName, nginxServiceName)
+		if ipErr != nil {
+			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to get ingress-nginx IP: %w", ipErr)
+		}
+		return ingressRelease, ingressIP, nil
 	}
 
 	// ── ClusterIssuer (Let's Encrypt) ────────────────────────────────────────
@@ -254,71 +266,9 @@ func SetupHTTPS(
 		return nil, pulumi.StringOutput{}, fmt.Errorf("failed to create ClusterIssuer: %w", err)
 	}
 
-	// ── Ingress for Coder ────────────────────────────────────────────────────
-	ingressDeps := []pulumi.Resource{coderRelease}
-	if certManagerRelease != nil {
-		ingressDeps = append(ingressDeps, certManagerRelease)
-	}
-	if ingressRelease != nil {
-		ingressDeps = append(ingressDeps, ingressRelease)
-	}
-
-	tls := k8snetv1.IngressTLSArray{
-		&k8snetv1.IngressTLSArgs{
-			Hosts:      pulumi.StringArray{pulumi.String(domain)},
-			SecretName: pulumi.String("coder-tls"),
-		},
-	}
-
-	wildcardDomain := utils.CoderConfigOptional(ctx, utils.CoderWildcardDomain)
-	if wildcardDomain != "" {
-		tls = append(tls, &k8snetv1.IngressTLSArgs{
-			Hosts:      pulumi.StringArray{pulumi.String(wildcardDomain)},
-			SecretName: pulumi.String("coder-wildcard-tls"),
-		})
-	}
-
-	ingressClassName := pulumi.String("nginx")
-	_, err = k8snetv1.NewIngress(ctx, "coder-ingress", &k8snetv1.IngressArgs{
-		Metadata: &metav1.ObjectMetaArgs{
-			Namespace: coderNs.Metadata.Name(),
-			Annotations: pulumi.StringMap{
-				"cert-manager.io/cluster-issuer":                 pulumi.String("letsencrypt-prod"),
-				"nginx.ingress.kubernetes.io/proxy-read-timeout": pulumi.String("3600"),
-				"nginx.ingress.kubernetes.io/proxy-send-timeout": pulumi.String("3600"),
-				"nginx.ingress.kubernetes.io/proxy-body-size":    pulumi.String("0"),
-				"nginx.ingress.kubernetes.io/proxy-http-version": pulumi.String("1.1"),
-			},
-		},
-		Spec: &k8snetv1.IngressSpecArgs{
-			IngressClassName: &ingressClassName,
-			Rules: k8snetv1.IngressRuleArray{
-				&k8snetv1.IngressRuleArgs{
-					Host: pulumi.String(domain),
-					Http: &k8snetv1.HTTPIngressRuleValueArgs{
-						Paths: k8snetv1.HTTPIngressPathArray{
-							&k8snetv1.HTTPIngressPathArgs{
-								Path:     pulumi.String("/"),
-								PathType: pulumi.String("Prefix"),
-								Backend: &k8snetv1.IngressBackendArgs{
-									Service: &k8snetv1.IngressServiceBackendArgs{
-										Name: pulumi.String("coder"),
-										Port: &k8snetv1.ServiceBackendPortArgs{
-											Number: pulumi.Int(80),
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			Tls: tls,
-		},
-	}, pulumi.Provider(k8sProvider), pulumi.DependsOn(ingressDeps))
-	if err != nil {
-		return nil, pulumi.StringOutput{}, fmt.Errorf("failed to create Coder ingress: %w", err)
-	}
+	// Per-student workspace ingresses are created at runtime by the server (each
+	// requests its own TLS certificate via the ClusterIssuer above), so no shared
+	// Coder ingress is created here.
 
 	// For HTTP-01 (no DNS provider), GetIngressIP hasn't been called yet.
 	// Resolve it here after all setup is complete, giving the cloud provider

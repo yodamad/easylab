@@ -1064,7 +1064,7 @@ func TestCreateLabConfigFromForm_BasicOVH(t *testing.T) {
 		ServiceName:       "service",
 		Endpoint:          "ovh-eu",
 	}
-	cfg := h.createLabConfigFromForm(req, creds, nil)
+	cfg := h.createLabConfigFromForm(req, creds)
 	if cfg.StackName != "my-stack" {
 		t.Errorf("StackName = %q, want my-stack", cfg.StackName)
 	}
@@ -1081,7 +1081,7 @@ func TestCreateLabConfigFromForm_BYOK(t *testing.T) {
 		"use_existing_cluster": {"true"},
 		"template_0_name":      {"tmpl"},
 	}
-	cfg := h.createLabConfigFromForm(req, nil, nil)
+	cfg := h.createLabConfigFromForm(req, nil)
 	if !cfg.UseExistingCluster {
 		t.Error("UseExistingCluster should be true for BYOK")
 	}
@@ -1102,7 +1102,7 @@ func TestCreateLabConfigFromForm_AzureProvider(t *testing.T) {
 		TenantID:       "tenant",
 		SubscriptionID: "sub",
 	}
-	cfg := h.createLabConfigFromForm(req, creds, nil)
+	cfg := h.createLabConfigFromForm(req, creds)
 	if cfg.AzureClientID != "client" {
 		t.Errorf("AzureClientID = %q, want client", cfg.AzureClientID)
 	}
@@ -1117,7 +1117,7 @@ func TestCreateLabConfigFromForm_DefaultStackName(t *testing.T) {
 	req.Form = map[string][]string{
 		"template_0_name": {"tmpl"},
 	}
-	cfg := h.createLabConfigFromForm(req, nil, nil)
+	cfg := h.createLabConfigFromForm(req, nil)
 	if cfg.StackName != "dev" {
 		t.Errorf("default StackName = %q, want dev", cfg.StackName)
 	}
@@ -1132,7 +1132,7 @@ func TestCreateLabConfigFromForm_WorkspaceLifetimeDays(t *testing.T) {
 		"workspace_lifetime_hours": {"3"},
 		"workspace_lifetime_unit":  {"days"},
 	}
-	cfg := h.createLabConfigFromForm(req, nil, nil)
+	cfg := h.createLabConfigFromForm(req, nil)
 	if cfg.WorkspaceLifetimeHours != 72 {
 		t.Errorf("WorkspaceLifetimeHours = %d, want 72 (3 days)", cfg.WorkspaceLifetimeHours)
 	}
@@ -1147,7 +1147,7 @@ func TestCreateLabConfigFromForm_LabDeletionDate_Valid(t *testing.T) {
 		"template_0_name":   {"tmpl"},
 		"lab_deletion_date": {"2030-12-31"},
 	}
-	cfg := h.createLabConfigFromForm(req, nil, nil)
+	cfg := h.createLabConfigFromForm(req, nil)
 	require.NotNil(t, cfg.LabDeletionDate, "LabDeletionDate should be set for a valid date")
 	assert.Equal(t, 2030, cfg.LabDeletionDate.Year())
 	assert.Equal(t, 12, int(cfg.LabDeletionDate.Month()))
@@ -1167,7 +1167,7 @@ func TestCreateLabConfigFromForm_LabDeletionDate_WithTime(t *testing.T) {
 		"lab_deletion_date": {"2030-06-15"},
 		"lab_deletion_time": {"14:30"},
 	}
-	cfg := h.createLabConfigFromForm(req, nil, nil)
+	cfg := h.createLabConfigFromForm(req, nil)
 	require.NotNil(t, cfg.LabDeletionDate)
 	assert.Equal(t, 2030, cfg.LabDeletionDate.Year())
 	assert.Equal(t, 6, int(cfg.LabDeletionDate.Month()))
@@ -1186,7 +1186,7 @@ func TestCreateLabConfigFromForm_LabDeletionDate_InvalidTime(t *testing.T) {
 		"lab_deletion_date": {"2030-06-15"},
 		"lab_deletion_time": {"not-a-time"},
 	}
-	cfg := h.createLabConfigFromForm(req, nil, nil)
+	cfg := h.createLabConfigFromForm(req, nil)
 	require.NotNil(t, cfg.LabDeletionDate, "LabDeletionDate should still be set when only time is invalid")
 	// Falls back to end-of-day default
 	assert.Equal(t, 23, cfg.LabDeletionDate.Hour())
@@ -1202,7 +1202,7 @@ func TestCreateLabConfigFromForm_LabDeletionDate_TimeWithoutDate(t *testing.T) {
 		"template_0_name":   {"tmpl"},
 		"lab_deletion_time": {"09:00"},
 	}
-	cfg := h.createLabConfigFromForm(req, nil, nil)
+	cfg := h.createLabConfigFromForm(req, nil)
 	assert.Nil(t, cfg.LabDeletionDate, "LabDeletionDate should be nil when date is absent even if time is set")
 }
 
@@ -1214,7 +1214,7 @@ func TestCreateLabConfigFromForm_LabDeletionDate_Empty(t *testing.T) {
 		"stack_name":      {"s"},
 		"template_0_name": {"tmpl"},
 	}
-	cfg := h.createLabConfigFromForm(req, nil, nil)
+	cfg := h.createLabConfigFromForm(req, nil)
 	assert.Nil(t, cfg.LabDeletionDate, "LabDeletionDate should be nil when field is absent")
 }
 
@@ -1227,89 +1227,118 @@ func TestCreateLabConfigFromForm_LabDeletionDate_Invalid(t *testing.T) {
 		"template_0_name":   {"tmpl"},
 		"lab_deletion_date": {"not-a-date"},
 	}
-	cfg := h.createLabConfigFromForm(req, nil, nil)
+	cfg := h.createLabConfigFromForm(req, nil)
 	assert.Nil(t, cfg.LabDeletionDate, "LabDeletionDate should be nil when date is invalid")
 }
 
-func TestParseCoderTemplatesFromForm_NoTemplates(t *testing.T) {
+func TestParseWorkspaceTemplatesFromForm_NoTemplates(t *testing.T) {
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Form = make(map[string][]string)
-	templates := parseCoderTemplatesFromForm(req, nil)
+	templates := parseWorkspaceTemplatesFromForm(req)
 	assert.Empty(t, templates)
 }
 
-func TestParseCoderTemplatesFromForm_OneTemplate_Git(t *testing.T) {
+func TestParseWorkspaceTemplatesFromForm_OneTemplate(t *testing.T) {
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Form = map[string][]string{
-		"template_0_name":       {"my-template"},
-		"template_0_source":     {"git"},
-		"template_0_git_repo":   {"https://github.com/example/repo"},
-		"template_0_git_folder": {"coder/"},
-		"template_0_git_branch": {"main"},
+		"template_0_name":      {"my-template"},
+		"template_0_image":     {"gitpod/openvscode-server:latest"},
+		"template_0_git_repo":  {"https://github.com/example/repo"},
+		"template_0_cpu":       {"500m"},
+		"template_0_memory":    {"1Gi"},
+		"template_0_disk_size": {"5Gi"},
 	}
-	templates := parseCoderTemplatesFromForm(req, nil)
+	templates := parseWorkspaceTemplatesFromForm(req)
 	assert.Len(t, templates, 1)
 	assert.Equal(t, "my-template", templates[0].Name)
-	assert.Equal(t, "git", templates[0].Source)
+	assert.Equal(t, "gitpod/openvscode-server:latest", templates[0].Image)
 	assert.Equal(t, "https://github.com/example/repo", templates[0].GitRepo)
+	assert.Equal(t, "500m", templates[0].CPU)
+	assert.Equal(t, "1Gi", templates[0].Memory)
+	assert.Equal(t, "5Gi", templates[0].DiskSize)
 }
 
-func TestParseCoderTemplatesFromForm_DefaultBranch(t *testing.T) {
-	req := httptest.NewRequest("POST", "/", nil)
-	req.Form = map[string][]string{
-		"template_0_name":   {"tmpl"},
-		"template_0_source": {"git"},
-	}
-	templates := parseCoderTemplatesFromForm(req, nil)
-	assert.Len(t, templates, 1)
-	assert.Equal(t, "main", templates[0].GitBranch)
-}
-
-func TestParseCoderTemplatesFromForm_DefaultSourceGit(t *testing.T) {
-	req := httptest.NewRequest("POST", "/", nil)
-	req.Form = map[string][]string{
-		"template_0_name": {"tmpl"},
-	}
-	templates := parseCoderTemplatesFromForm(req, nil)
-	assert.Len(t, templates, 1)
-	assert.Equal(t, "git", templates[0].Source)
-}
-
-func TestParseCoderTemplatesFromForm_UploadWithFilePath(t *testing.T) {
-	req := httptest.NewRequest("POST", "/", nil)
-	req.Form = map[string][]string{
-		"template_0_name":   {"tmpl"},
-		"template_0_source": {"upload"},
-	}
-	templates := parseCoderTemplatesFromForm(req, []string{"path/to/template.zip"})
-	assert.Len(t, templates, 1)
-	assert.Equal(t, "path/to/template.zip", templates[0].FilePath)
-}
-
-func TestParseCoderTemplatesFromForm_WithVariables(t *testing.T) {
+func TestParseWorkspaceTemplatesFromForm_WithEnv(t *testing.T) {
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Form = map[string][]string{
 		"template_0_name":       {"tmpl"},
-		"template_0_source":     {"git"},
-		"template_0_var_name":   {"key1", "key2"},
-		"template_0_var_value":  {"val1", "val2"},
+		"template_0_env_name":   {"KEY1", "KEY2"},
+		"template_0_env_value":  {"val1", "val2"},
 	}
-	templates := parseCoderTemplatesFromForm(req, nil)
+	templates := parseWorkspaceTemplatesFromForm(req)
 	assert.Len(t, templates, 1)
-	assert.Equal(t, "val1", templates[0].Variables["key1"])
-	assert.Equal(t, "val2", templates[0].Variables["key2"])
+	assert.Equal(t, "val1", templates[0].Env["KEY1"])
+	assert.Equal(t, "val2", templates[0].Env["KEY2"])
 }
 
-func TestParseCoderTemplatesFromForm_MultipleTemplates(t *testing.T) {
+func TestParseWorkspaceTemplatesFromForm_GitAuthSecret(t *testing.T) {
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Form = map[string][]string{
-		"template_0_name":   {"tmpl-a"},
-		"template_0_source": {"git"},
-		"template_1_name":   {"tmpl-b"},
-		"template_1_source": {"upload"},
+		"template_0_name":            {"tmpl"},
+		"template_0_git_repo":        {"https://gitlab.com/o/r.git"},
+		"template_0_git_auth_secret": {"gitcred"},
 	}
-	templates := parseCoderTemplatesFromForm(req, []string{"", "file.zip"})
+	templates := parseWorkspaceTemplatesFromForm(req)
+	assert.Len(t, templates, 1)
+	assert.Equal(t, "gitcred", templates[0].GitAuthSecret)
+}
+
+func TestParseWorkspaceTemplatesFromForm_MultipleTemplates(t *testing.T) {
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"template_0_name": {"tmpl-a"},
+		"template_1_name": {"tmpl-b"},
+	}
+	templates := parseWorkspaceTemplatesFromForm(req)
 	assert.Len(t, templates, 2)
+}
+
+func TestParseWorkspaceTemplatesFromForm_RichFields(t *testing.T) {
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"template_0_name":           {"full"},
+		"template_0_ide":            {"code-server"},
+		"template_0_git_branch":     {"dev"},
+		"template_0_git_folder":     {"backend"},
+		"template_0_startup_script": {"sudo apt-get install -y jq"},
+		"template_0_dotfiles_repo":  {"https://github.com/you/dotfiles"},
+		"template_0_extensions":     {"golang.go, ms-python.python"},
+		// two sidecars, index-aligned
+		"template_0_sidecar_name":         {"db", "docker"},
+		"template_0_sidecar_image":        {"postgres:16", "docker:dind"},
+		"template_0_sidecar_ports":        {"5432", "2375"},
+		"template_0_sidecar_env":          {"POSTGRES_PASSWORD=x", "DOCKER_TLS_CERTDIR="},
+		"template_0_sidecar_privileged":   {"false", "true"},
+		"template_0_sidecar_capabilities": {"", "SYS_ADMIN"},
+		// one mount
+		"template_0_mount_type": {"secret"},
+		"template_0_mount_name": {"tls-cert"},
+		"template_0_mount_path": {"/etc/tls"},
+	}
+	templates := parseWorkspaceTemplatesFromForm(req)
+	assert.Len(t, templates, 1)
+	tmpl := templates[0]
+	assert.Equal(t, "code-server", tmpl.IDE)
+	assert.Equal(t, "dev", tmpl.GitBranch)
+	assert.Equal(t, "backend", tmpl.GitFolder)
+	assert.Equal(t, "sudo apt-get install -y jq", tmpl.StartupScript)
+	assert.Equal(t, "https://github.com/you/dotfiles", tmpl.DotfilesRepo)
+	assert.Equal(t, []string{"golang.go", "ms-python.python"}, tmpl.Extensions)
+
+	assert.Len(t, tmpl.Sidecars, 2)
+	assert.Equal(t, "db", tmpl.Sidecars[0].Name)
+	assert.Equal(t, "postgres:16", tmpl.Sidecars[0].Image)
+	assert.Equal(t, []int{5432}, tmpl.Sidecars[0].Ports)
+	assert.Equal(t, "x", tmpl.Sidecars[0].Env["POSTGRES_PASSWORD"])
+	assert.False(t, tmpl.Sidecars[0].Privileged)
+	assert.Equal(t, "docker", tmpl.Sidecars[1].Name)
+	assert.True(t, tmpl.Sidecars[1].Privileged)
+	assert.Equal(t, []string{"SYS_ADMIN"}, tmpl.Sidecars[1].Capabilities)
+
+	assert.Len(t, tmpl.Mounts, 1)
+	assert.Equal(t, "secret", tmpl.Mounts[0].Type)
+	assert.Equal(t, "tls-cert", tmpl.Mounts[0].Name)
+	assert.Equal(t, "/etc/tls", tmpl.Mounts[0].Path)
 }
 
 func TestGetPostFormKeys(t *testing.T) {

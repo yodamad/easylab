@@ -388,10 +388,7 @@ func TestGetConfigCommands_BYOK(t *testing.T) {
 	pe := &PulumiExecutor{}
 	cfg := &LabConfig{
 		UseExistingCluster: true,
-		CoderNamespace:     "my-coder",
-		CoderAdminEmail:    "admin@test.com",
-		CoderAdminPassword: "pass",
-		CoderVersion:       "2.0.0",
+		WorkspaceNamespace: "workshops",
 	}
 	cmds := pe.getConfigCommands(cfg)
 	if len(cmds) == 0 {
@@ -440,8 +437,8 @@ func TestGetConfigCommands_Azure(t *testing.T) {
 func TestGetConfigCommands_WithDomain(t *testing.T) {
 	pe := &PulumiExecutor{}
 	cfg := &LabConfig{
-		CoderDomain:    "coder.example.com",
-		CoderAcmeEmail: "acme@example.com",
+		Domain:    "coder.example.com",
+		AcmeEmail: "acme@example.com",
 	}
 	cmds := pe.getConfigCommands(cfg)
 	found := false
