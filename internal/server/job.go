@@ -79,7 +79,9 @@ type WorkspaceTemplate struct {
 	DiskSize  string            `json:"disk_size,omitempty"`
 	Env       map[string]string `json:"env,omitempty"`
 
-	// IDE selects the workspace IDE base: "openvscode" (default) or "code-server".
+	// IDE selects the workspace IDE base. Only "code-server" is supported, so this
+	// is optional and normally left empty; the retired "openvscode" value is still
+	// accepted from older labs and normalized away.
 	IDE string `json:"ide,omitempty"`
 	// StartupScript runs (best-effort) in the workspace container before the IDE
 	// starts — install tools, configure the shell, run a bootstrap.
@@ -256,7 +258,7 @@ type LabConfig struct {
 }
 
 // GetWorkspaceTemplates returns the lab's workspace templates. When none are
-// configured it returns a single default OpenVSCode template so every lab is
+// configured it returns a single default code-server template so every lab is
 // usable out of the box.
 func (c *LabConfig) GetWorkspaceTemplates() []WorkspaceTemplate {
 	if len(c.WorkspaceTemplates) > 0 {

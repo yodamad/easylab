@@ -1449,9 +1449,9 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate the OpenVSCode connection token shown to the student. It must stay
-	// within [0-9a-zA-Z-]: openvscode-server validates --connection-token and exits
-	// on any other character, so a symbol-bearing password would crash the IDE.
+	// Generate the code-server password shown to the student. It stays within
+	// [0-9a-zA-Z-] (see GenerateWorkspaceToken) — plenty of entropy, and safe to
+	// carry through the shell-quoted container bootstrap.
 	password, err := GenerateWorkspaceToken()
 	if err != nil {
 		log.Printf("Failed to generate workspace token: %v", err)
@@ -1546,7 +1546,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	workspaceInfo := map[string]interface{}{
 		"email":              email,
 		"workspace_url":      workspaceURL,
-		"password":           password, // OpenVSCode connection token; encrypted client-side
+		"password":           password, // code-server login password; encrypted client-side
 		"encrypted_password": "",
 		"workspace_name":     workspaceName,
 		"lab_id":             labID,
@@ -1751,8 +1751,8 @@ func usernameFromEmail(email string) string {
 	return strings.Trim(usernameInvalidChars.ReplaceAllString(local, "-"), "-")
 }
 
-// OpenWorkspace redirects the student straight into their OpenVSCode workspace,
-// appending the connection token so they land in the IDE without a prompt.
+// OpenWorkspace redirects the student to their code-server workspace, where they
+// sign in with the password shown in the portal.
 func (h *Handler) OpenWorkspace(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1800,8 +1800,8 @@ func (h *Handler) OpenWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// OpenURL is IDE-specific: openvscode carries the connection token for a silent
-	// open; code-server redirects to the login page where the student enters the token.
+	// OpenURL is the workspace base URL; code-server serves its login page there,
+	// where the student enters the token.
 	http.Redirect(w, r, ws.OpenURL, http.StatusFound)
 }
 

@@ -210,13 +210,11 @@
                         <div class="ut-step">
                             <div class="ut-step-header">
                                 <span class="ut-step-number" aria-hidden="true">2</span>
-                                <span class="ut-step-label">IDE</span>
+                                <span class="ut-step-label">Image</span>
+                                <span class="ut-optional-badge">optional</span>
                             </div>
                             <div class="ut-step-body">
-                                <select id="upload-template-ide" class="ut-name-input">
-                                    <option value="openvscode">OpenVSCode Server (silent open)</option>
-                                    <option value="code-server">code-server (sudo/apt for setup scripts)</option>
-                                </select>
+                                <input type="text" id="upload-template-image" class="ut-name-input" placeholder="codercom/code-server:latest" autocomplete="off" />
                             </div>
                         </div>
 
@@ -224,18 +222,6 @@
                         <div class="ut-step">
                             <div class="ut-step-header">
                                 <span class="ut-step-number" aria-hidden="true">3</span>
-                                <span class="ut-step-label">Image</span>
-                                <span class="ut-optional-badge">optional</span>
-                            </div>
-                            <div class="ut-step-body">
-                                <input type="text" id="upload-template-image" class="ut-name-input" placeholder="gitpod/openvscode-server:latest" autocomplete="off" />
-                            </div>
-                        </div>
-
-                        <!-- Step 4 -->
-                        <div class="ut-step">
-                            <div class="ut-step-header">
-                                <span class="ut-step-number" aria-hidden="true">4</span>
                                 <span class="ut-step-label">Git repository</span>
                                 <span class="ut-optional-badge">optional</span>
                             </div>
@@ -246,10 +232,10 @@
                             </div>
                         </div>
 
-                        <!-- Step 5 -->
+                        <!-- Step 4 -->
                         <div class="ut-step">
                             <div class="ut-step-header">
-                                <span class="ut-step-number" aria-hidden="true">5</span>
+                                <span class="ut-step-number" aria-hidden="true">4</span>
                                 <span class="ut-step-label">Startup script</span>
                                 <span class="ut-optional-badge">optional</span>
                             </div>
@@ -258,10 +244,10 @@
                             </div>
                         </div>
 
-                        <!-- Step 6 -->
+                        <!-- Step 5 -->
                         <div class="ut-step">
                             <div class="ut-step-header">
-                                <span class="ut-step-number" aria-hidden="true">6</span>
+                                <span class="ut-step-number" aria-hidden="true">5</span>
                                 <span class="ut-step-label">Dotfiles &amp; extensions</span>
                                 <span class="ut-optional-badge">optional</span>
                             </div>

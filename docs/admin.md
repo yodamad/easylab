@@ -76,7 +76,7 @@ When creating new infrastructure, you choose OVHcloud as the cloud provider. Mos
 
 ### Configure workspaces
 
-Student workspaces run as **OpenVSCode Server** pods provisioned directly on the
+Student workspaces run as **code-server** pods provisioned directly on the
 lab's Kubernetes cluster — there is no separate IDE server or database to
 configure. On the **Workspace** step you only set:
 
@@ -97,22 +97,19 @@ At the top of the step you choose **how** to define the workspace:
 * **Paste YAML** — edit the templates as YAML directly; see
   [Editing templates as YAML](#editing-templates-as-yaml).
 
-With **Build with a form**, each template shows three **essentials** up front and
+With **Build with a form**, each template shows two **essentials** up front and
 tucks the rest behind **Advanced options**, so simple labs stay simple. Use **Add
 Template** to define additional templates.
 
 The **essentials**:
 
 * **Template name** — Name shown in the student template selector.
-* **IDE** — the IDE base:
-    * **OpenVSCode Server** (`gitpod/openvscode-server`) — opens **silently** via a token in the URL; smaller image; runs as a **non-root** user, so a startup script **cannot** `apt-get install` system packages.
-    * **code-server** (`codercom/code-server`) — has passwordless **sudo/apt**, so startup scripts can install system packages; the student authenticates on a **login page** with the password shown in the portal.
 * **Git Repository** (optional) — a repo cloned into the workspace on first start (a persistent volume is provisioned automatically). The **branch** field clones a specific branch; **subfolder** opens a subdirectory of the repo.
 
 Under **Advanced options** (all optional):
 
 * **Git credential** — the credential (from the **Credentials** section below) that unlocks a **private** Git Repository. Define a single git credential and it is wired into every template with a private repo automatically; add more than one and pick the right one per template here.
-* **Image** — a container image override. Defaults to the selected IDE's image.
+* **Image** — a container image override. Defaults to `codercom/code-server:latest`.
 * **CPU / Memory / Disk Size** — resource requests for the workspace pod (e.g. `500m`, `1Gi`, `5Gi`).
 * **Startup Script** — shell commands run (best-effort) on start, *before* the IDE opens: install tools, configure the shell, run a bootstrap. Failures are shown in `kubectl logs` but never block the workspace from opening.
 * **Dotfiles Repository** — cloned to `~/.dotfiles`; its `install.sh` / `setup.sh` / `bootstrap.sh` is run if present.
@@ -121,7 +118,7 @@ Under **Advanced options** (all optional):
 * **Sidecars** — extra containers in the workspace pod (name / image / ports / env), reachable from the IDE at `localhost:<port>` — e.g. a `postgres:16` database. Each sidecar can also be marked **privileged** and given extra **capabilities** (e.g. `SYS_ADMIN`) — needed to run **docker-in-docker** (see below).
 * **Mounts** — mount an existing **ConfigMap** or **Secret** into the workspace container. The referenced object **must already exist** in the workspace namespace, or the pod won't start.
 
-If no template is defined, a `default` OpenVSCode Server workspace is used.
+If no template is defined, a `default` code-server workspace is used.
 Students can request **one workspace per template** within a lab, so multiple
 templates let them get multiple workspaces in the same environment.
 
@@ -139,7 +136,6 @@ configuration in a git repository.
 ```yaml
 workspace_templates:
   - name: go-workshop
-    ide: code-server
     image: codercom/enterprise-base:ubuntu
     git_repo: https://gitlab.com/user/workshop.git
     git_branch: main
@@ -225,12 +221,11 @@ Choose **From a devcontainer** at the top of the **Templates** step:
 The import is a starting point, not a black box — what it produces is ordinary
 template YAML you can change.
 
-The **IDE** picker applies here as it does for a hand-built template: the image
-the devcontainer builds carries no IDE, so the one you choose is injected into
-it. This is independent of the devcontainer's own base image, with one catch —
-that base must be **glibc**-based, since neither IDE's bundled Node runs on
-Alpine/musl. If the workspace container exits with `no such file or directory`,
-this is why.
+The image the devcontainer builds carries no IDE, so code-server is injected
+into it. This is independent of the devcontainer's own base image, with one
+catch — that base must be **glibc**-based, since code-server's bundled Node does
+not run on Alpine/musl. If the workspace container exits with `no such file or
+directory`, this is why.
 
 !!! danger "A cache registry is required"
     Devcontainer templates must set `cache_repo`. Layers are cached there and
@@ -263,23 +258,23 @@ this is why.
     breakdown of what is honoured.
 
 !!! tip "Installing system tools"
-    Startup scripts run as the workspace user. On **code-server** you can `sudo apt-get install …`; on **OpenVSCode Server** (non-root) you can't — bake system packages into a **custom image** instead and set it as the template **Image**:
+    Startup scripts run as the workspace user, which has passwordless `sudo`, so `sudo apt-get install …` works. For anything slow or large, bake it into a **custom image** instead so students don't wait for it on every start, and set that image as the template **Image**:
 
     ```dockerfile
-    FROM gitpod/openvscode-server:latest
+    FROM codercom/code-server:latest
     USER root
     RUN apt-get update && apt-get install -y golang nodejs && rm -rf /var/lib/apt/lists/*
-    USER openvscode-server
+    USER coder
     ```
 
-    Build, push to a registry your cluster can pull from, and set **Image** to it. The same pattern works `FROM codercom/code-server:latest`.
+    Build, push to a registry your cluster can pull from, and set **Image** to it.
 
 !!! tip "Docker inside a workspace (docker-in-docker)"
     Managed clusters (OVHcloud, AKS) run **containerd**, not Docker, so there is no host Docker socket to reuse. To give students a working `docker`, run a **Docker-in-Docker sidecar** and point the workspace CLI at it:
 
     * **Sidecar** — name `docker`, image `docker:dind`, port `2375`, env `DOCKER_TLS_CERTDIR=` (empty, disables TLS), **privileged** ✅ (dind requires it; capability `SYS_ADMIN` alone is not enough for full dind).
     * **Env** (on the template) — `DOCKER_HOST=tcp://localhost:2375`.
-    * **Startup Script** — install the CLI (use a `code-server` template so `sudo` is available):
+    * **Startup Script** — install the CLI (`sudo` is available in the workspace):
 
     ```bash
     sudo apt-get update && sudo apt-get install -y docker.io
@@ -481,9 +476,8 @@ Full reference, including the `kubectl` equivalents and the difference between
 
 ## Workspace access
 
-Each student workspace is an OpenVSCode Server pod exposed (when a domain is
+Each student workspace is a code-server pod exposed (when a domain is
 configured) at `https://{workspace}.{domain}/`. Access is gated by a per-student
-**connection token** that EasyLab generates and shows to the student on the
-portal. There is no separate IDE login: the token is appended to the workspace
-URL (`?tkn=…`) when the student opens their workspace, and EasyLab's own student
-authentication protects the portal itself.
+**password** that EasyLab generates and shows to the student on the portal. The
+student enters it on code-server's own login page when they open their
+workspace, and EasyLab's own student authentication protects the portal itself.

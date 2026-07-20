@@ -5,7 +5,7 @@ title: Templates
 # Workspace template examples
 
 A lab's **workspace templates** describe the environments students can request.
-Each template is one workspace flavor: an IDE, an image, an optional git repo to
+Each template is one workspace flavor: an image, an optional git repo to
 clone, resources, and anything extra the workshop needs (a database, a Docker
 daemon, some VS Code extensions).
 
@@ -33,8 +33,8 @@ validation instead of silently shipping a lab without its image.
 | Key | Type | Notes |
 |---|---|---|
 | `name` | string | **Required.** Shown in the student template selector; unique per lab. |
-| `ide` | string | `openvscode` (default) or `code-server`. |
-| `image` | string | Container image override. Defaults to the IDE's own image. |
+| `ide` | string | **Legacy — omit it.** Workspaces always run code-server. Older labs carrying `openvscode` still load; the value is rewritten to `code-server`. |
+| `image` | string | Container image override. Defaults to `codercom/code-server:latest`. |
 | `git_repo` | string | Cloned into the workspace on first start. **Implies a 5Gi volume** when `disk_size` is unset. |
 | `git_branch` | string | Clones a single branch. Default branch when unset. |
 | `git_folder` | string | Subfolder of the repo the IDE opens. Repo root when unset. |
@@ -53,7 +53,7 @@ validation instead of silently shipping a lab without its image.
 
 ## Minimal
 
-The smallest valid document. Students get an OpenVSCode Server workspace on the
+The smallest valid document. Students get a code-server workspace on the
 default image, with no persistent volume.
 
 ```yaml
@@ -123,13 +123,12 @@ workspace_templates:
 
 ## Installing system packages
 
-Startup scripts run as the workspace user. **code-server** has passwordless
-`sudo`, so it can install packages at start:
+Startup scripts run as the workspace user, which has passwordless `sudo`, so
+packages can be installed at start:
 
 ```yaml
 workspace_templates:
   - name: tooling
-    ide: code-server
     startup_script: |
       sudo apt-get update
       sudo apt-get install -y jq make httpie
@@ -138,14 +137,14 @@ workspace_templates:
 Startup scripts are **best-effort**: a failing command is visible in
 `kubectl logs` but never blocks the workspace from opening.
 
-**OpenVSCode Server** runs as a non-root user and *cannot* `apt-get install`. Bake
-the tools into an image instead and point the template at it:
+Every student pays this cost on every workspace start, so for anything slow or
+large bake the tools into an image instead and point the template at it:
 
 ```dockerfile
-FROM gitpod/openvscode-server:latest
+FROM codercom/code-server:latest
 USER root
 RUN apt-get update && apt-get install -y golang nodejs && rm -rf /var/lib/apt/lists/*
-USER openvscode-server
+USER coder
 ```
 
 ```yaml
@@ -167,7 +166,6 @@ Sidecars are extra containers in the same pod, reachable from the IDE at
 ```yaml
 workspace_templates:
   - name: api-workshop
-    ide: code-server
     git_repo: https://gitlab.com/yodamad/api-workshop.git
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/app
@@ -195,7 +193,6 @@ Docker socket to reuse. Run a Docker-in-Docker sidecar and point the CLI at it:
 ```yaml
 workspace_templates:
   - name: docker-workshop
-    ide: code-server
     env:
       DOCKER_HOST: tcp://localhost:2375
     startup_script: |
@@ -228,7 +225,6 @@ Mount a ConfigMap or Secret that **already exists** in the workspace namespace
 ```yaml
 workspace_templates:
   - name: preconfigured
-    ide: code-server
     mounts:
       - type: configmap
         name: workshop-config
@@ -267,7 +263,6 @@ A full-featured template using most of the schema:
 ```yaml
 workspace_templates:
   - name: full-stack
-    ide: code-server
     image: codercom/enterprise-base:ubuntu
     git_repo: https://gitlab.com/yodamad/workshop.git
     git_branch: main
@@ -432,17 +427,16 @@ workspace_templates:
 
 The template's own `ide` key applies here too — see the constraints below.
 
-Both IDEs work in this mode. The image the devcontainer builds contains no IDE
-of its own, so the one you pick is copied onto a volume the build is told to
-leave alone, and started from there. That makes `ide` independent of the
-devcontainer's own base image — but it does impose three constraints, all of
-which apply to **either** IDE:
+The image the devcontainer builds contains no IDE of its own, so code-server is
+copied onto a volume the build is told to leave alone, and started from there.
+That makes the IDE independent of the devcontainer's own base image — but it
+does impose three constraints:
 
-- **The base image must be glibc-based.** Both bundles ship a dynamically
+- **The base image must be glibc-based.** The bundle ships a dynamically
   linked Node, which cannot run on Alpine/musl. The failure is misleading: the
   workspace container exits with `no such file or directory` even though the
   binary is plainly there.
-- **The devcontainer's user needs a writable `$HOME`.** Each IDE stores its
+- **The devcontainer's user needs a writable `$HOME`.** code-server stores its
   user data and extensions under the home directory of the user the
   devcontainer runs as. When that is unwritable, extension installs are skipped
   quietly and the IDE then fails to start — so an unexplained "my extensions
@@ -452,9 +446,8 @@ which apply to **either** IDE:
   devcontainer users (`vscode`, `node`, `coder`). Without it, the folder can end
   up owned by root and the student cannot save.
 
-Note the two IDEs authenticate differently, exactly as they do outside
-devcontainer mode: OpenVSCode opens silently through a token in the URL, while
-code-server presents a login page taking the workspace password.
+Authentication is the same as outside devcontainer mode: code-server presents a
+login page taking the workspace password.
 
 !!! note "A private devcontainer repo needs `git_auth_secret`"
     The devcontainer is built inside the pod, and the builder clones the repo
@@ -558,7 +551,7 @@ workshop edition to the next.
 | Student work disappears after a restart | No `disk_size` — the workspace has no volume. |
 | The repo isn't cloned | `git_repo` clones only into an **empty** volume; an existing workspace keeps its contents. |
 | Workspace never opens | Often a `mounts` entry pointing at a ConfigMap/Secret that doesn't exist in the namespace. |
-| `apt-get` fails in the startup script | OpenVSCode Server runs non-root — use `ide: code-server` or a custom image. |
+| `apt-get` fails in the startup script | Prefix it with `sudo`; the workspace user has passwordless sudo but is not root. |
 | A sidecar is missing from the pod | It was named `workspace` (reserved) or has no `image`. |
 | `devcontainer.cache_repo is required` | Devcontainer mode needs a layer cache registry; see [Devcontainer workshops](#devcontainer-workshops). |
 | `devcontainer.enabled conflicts with image` | The image is built from the repo's `devcontainer.json` — remove `image`. |

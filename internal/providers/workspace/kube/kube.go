@@ -1,5 +1,5 @@
 // Package kube implements the workspace.Backend interface by provisioning one
-// OpenVSCode Server workspace per student directly on a Kubernetes cluster using
+// code-server workspace per student directly on a Kubernetes cluster using
 // client-go. Each workspace is a Deployment + Service + Ingress (+ optional PVC),
 // labeled so it can be listed and cleaned up per lab.
 package kube
@@ -10,7 +10,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	neturl "net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -39,20 +38,19 @@ const (
 	// DefaultNamespace is where student workspaces are created when the lab does
 	// not specify one.
 	DefaultNamespace = "workshops"
-	// DefaultImage is the OpenVSCode Server image used when a lab does not set one.
-	DefaultImage = "gitpod/openvscode-server:latest"
+	// DefaultImage is the code-server image used when a lab does not set one.
+	DefaultImage = "codercom/code-server:latest"
 
 	// workspaceContainerName is the reserved name of the IDE container (sidecars
 	// may not reuse it).
 	workspaceContainerName = "workspace"
 
-	labelManagedBy  = "app.kubernetes.io/managed-by"
-	labelLabID      = "easylab.io/lab-id"
-	labelOwner      = "easylab.io/owner"
-	labelName       = "app.kubernetes.io/name"
+	labelManagedBy   = "app.kubernetes.io/managed-by"
+	labelLabID       = "easylab.io/lab-id"
+	labelOwner       = "easylab.io/owner"
+	labelName        = "app.kubernetes.io/name"
 	annotationIDE    = "easylab.io/ide"
 	annotationToken  = "easylab.io/token"
-	annotationFolder = "easylab.io/folder"
 	annotationDomain = "easylab.io/domain"
 	annotationScheme = "easylab.io/scheme"
 
@@ -89,7 +87,9 @@ const (
 
 var dns1123Invalid = regexp.MustCompile(`[^a-z0-9-]`)
 
-// ideProfile captures the image/port/paths/binaries that differ between IDE bases.
+// ideProfile captures the image/port/paths/binaries the IDE is started from. It
+// stays a struct rather than a set of constants because devcontainerProfile
+// returns a copy with serverBin retargeted at the injected /ide bundle.
 type ideProfile struct {
 	kind         string
 	defaultImage string
@@ -107,36 +107,24 @@ type ideProfile struct {
 	bundleBin  string
 }
 
-var ideProfiles = map[string]ideProfile{
-	workspace.IDEOpenVSCode: {
-		kind:         workspace.IDEOpenVSCode,
-		defaultImage: "gitpod/openvscode-server:latest",
-		port:         3000,
-		workspaceDir: "/home/workspace",
-		serverBin:    "${OPENVSCODE_SERVER_ROOT:-/home/.openvscode-server}/bin/openvscode-server",
-		bundleRoot:   "${OPENVSCODE_SERVER_ROOT:-/home/.openvscode-server}",
-		bundleBin:    "bin/openvscode-server",
-	},
-	workspace.IDECodeServer: {
-		kind:         workspace.IDECodeServer,
-		defaultImage: "codercom/code-server:latest",
-		port:         8080,
-		workspaceDir: "/home/coder/project",
-		serverBin:    "code-server",
-		// The .deb installs the self-contained bundle here; /usr/bin/code-server is
-		// a small wrapper around bin/code-server inside it, which is what serverBin
-		// reaches through PATH in plain mode.
-		bundleRoot: "/usr/lib/code-server",
-		bundleBin:  "bin/code-server",
-	},
+// codeServerProfile is the only supported IDE base.
+var codeServerProfile = ideProfile{
+	kind:         workspace.IDECodeServer,
+	defaultImage: DefaultImage,
+	port:         8080,
+	workspaceDir: "/home/coder/project",
+	serverBin:    "code-server",
+	// The .deb installs the self-contained bundle here; /usr/bin/code-server is
+	// a small wrapper around bin/code-server inside it, which is what serverBin
+	// reaches through PATH in plain mode.
+	bundleRoot: "/usr/lib/code-server",
+	bundleBin:  "bin/code-server",
 }
 
-// profileFor returns the IDE profile for a kind, defaulting to openvscode.
-func profileFor(kind string) ideProfile {
-	if p, ok := ideProfiles[kind]; ok {
-		return p
-	}
-	return ideProfiles[workspace.IDEOpenVSCode]
+// profileFor returns the IDE profile for a kind. Only code-server is supported;
+// the legacy "openvscode" value (and anything else) resolves to it as well.
+func profileFor(string) ideProfile {
+	return codeServerProfile
 }
 
 // Backend is a client-go backed workspace.Backend scoped to one cluster + namespace.
@@ -393,10 +381,8 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 	for k, v := range spec.Env {
 		env = append(env, corev1.EnvVar{Name: k, Value: v})
 	}
-	// code-server authenticates via the PASSWORD env var (openvscode uses a CLI flag).
-	if p.kind == workspace.IDECodeServer {
-		env = append(env, corev1.EnvVar{Name: "PASSWORD", Value: spec.Token})
-	}
+	// code-server authenticates via the PASSWORD env var.
+	env = append(env, corev1.EnvVar{Name: "PASSWORD", Value: spec.Token})
 
 	container := corev1.Container{
 		Name:      workspaceContainerName,
@@ -480,7 +466,6 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 				annotationScheme: scheme,
 				annotationIDE:    p.kind,
 				annotationToken:  spec.Token,
-				annotationFolder: openvscodeFolder(spec, p),
 			},
 		},
 		Spec: appsv1.DeploymentSpec{
@@ -544,26 +529,10 @@ func openFolder(spec workspace.Spec, p ideProfile) string {
 	return p.workspaceDir
 }
 
-// openvscodeFolder returns the subfolder to embed in an openvscode workspace URL
-// (?folder=), or "" when not applicable (no subfolder, or code-server, which opens
-// its folder via a positional CLI arg instead).
-func openvscodeFolder(spec workspace.Spec, p ideProfile) string {
-	if p.kind != workspace.IDEOpenVSCode || strings.TrimSpace(spec.GitFolder) == "" {
-		return ""
-	}
-	return openFolder(spec, p)
-}
-
-// ideStartArgs returns the args that start the IDE server for a profile. For
-// code-server the folder to open is the positional argument; openvscode opens the
-// folder via its URL (?folder=) instead, since it has no reliable open-folder flag.
+// ideStartArgs returns the args that start the IDE server. The folder to open is
+// code-server's positional argument.
 func ideStartArgs(spec workspace.Spec, p ideProfile) []string {
-	switch p.kind {
-	case workspace.IDECodeServer:
-		return []string{"--bind-addr", fmt.Sprintf("0.0.0.0:%d", p.port), "--auth", "password", openFolder(spec, p)}
-	default: // openvscode
-		return []string{"--host", "0.0.0.0", "--port", fmt.Sprintf("%d", p.port), "--connection-token", spec.Token}
-	}
+	return []string{"--bind-addr", fmt.Sprintf("0.0.0.0:%d", p.port), "--auth", "password", openFolder(spec, p)}
 }
 
 // buildBootstrap returns the container command/args. When a startup script,
@@ -984,25 +953,17 @@ func (b *Backend) createIngress(ctx context.Context, name string, labels map[str
 // toWorkspace maps a Deployment (plus routing context) to a workspace.Workspace.
 func (b *Backend) toWorkspace(dep *appsv1.Deployment, domain, token string) workspace.Workspace {
 	phase, ready := deploymentReadiness(dep)
-	ide := dep.Annotations[annotationIDE]
-	if ide == "" {
-		ide = workspace.DefaultIDEKind
-	}
+	// Deployments created before OpenVSCode support was removed still carry the
+	// legacy annotation; report them as what they are now driven by rather than
+	// leaking the retired value into the API.
+	ide := workspace.DefaultIDEKind
 	host := workspaceHost(dep.Name, domain)
 	// URL is the base workspace URL (shown to the student). OpenURL is the redirect
-	// target: openvscode carries the connection token for a silent open; code-server
-	// uses the base URL (the student enters Token on the login page).
+	// target — the same URL, since the student enters Token on code-server's login page.
 	url, openURL := "", ""
 	if host != "" {
 		url = fmt.Sprintf("%s://%s/", schemeFromDeployment(dep), host)
 		openURL = url
-		if ide == workspace.IDEOpenVSCode && token != "" {
-			openURL = url + "?tkn=" + token
-			// openvscode opens a subfolder via the standard VS Code-web ?folder= param.
-			if folder := dep.Annotations[annotationFolder]; folder != "" {
-				openURL += "&folder=" + neturl.QueryEscape(folder)
-			}
-		}
 	}
 	return workspace.Workspace{
 		ID:        dep.Name,

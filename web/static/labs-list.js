@@ -397,7 +397,6 @@ function submitUploadTemplate(event) {
     if (!_uploadTemplatLabId) return;
 
     var name = document.getElementById('upload-template-name').value.trim();
-    var ideEl = document.getElementById('upload-template-ide');
     var imageEl = document.getElementById('upload-template-image');
     var gitEl = document.getElementById('upload-template-git-repo');
     var gitBranchEl = document.getElementById('upload-template-git-branch');
@@ -421,7 +420,6 @@ function submitUploadTemplate(event) {
 
     var formData = new FormData();
     formData.append('template_name', name);
-    if (ideEl) formData.append('template_ide', ideEl.value);
     if (imageEl) formData.append('template_image', imageEl.value.trim());
     if (gitEl) formData.append('template_git_repo', gitEl.value.trim());
     if (gitBranchEl) formData.append('template_git_branch', gitBranchEl.value.trim());

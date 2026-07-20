@@ -1045,10 +1045,11 @@ func GenerateSecurePassword() (string, error) {
 }
 
 // GenerateWorkspaceToken generates a strong random token for a workspace's IDE
-// connection. Unlike GenerateSecurePassword it stays within [0-9a-zA-Z]: this same
-// value is passed to openvscode-server's --connection-token, which rejects any
-// character outside 0-9, a-z, A-Z or '-' and exits, and it is also the secret the
-// student signs in with. 24 alphanumerics keep well over 128 bits of entropy.
+// connection. Unlike GenerateSecurePassword it stays within [0-9a-zA-Z]: the value
+// is the secret the student signs in with on code-server's login page and it
+// travels through a shell-quoted container bootstrap, so keeping it free of
+// symbols avoids a whole class of quoting problems. 24 alphanumerics keep well
+// over 128 bits of entropy.
 func GenerateWorkspaceToken() (string, error) {
 	const (
 		alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"

@@ -23,8 +23,7 @@ const workspaceTemplatesYAMLSkeleton = `# Workspace templates for this lab. Each
 # can pick on their dashboard. Only "name" is required — uncomment what you need.
 workspace_templates:
   - name: default
-    # ide: openvscode                            # openvscode (default) | code-server
-    # image: gitpod/openvscode-server:latest     # overrides the IDE's default image
+    # image: codercom/code-server:latest         # overrides the IDE's default image
     # git_repo: https://gitlab.com/user/repo.git # cloned into the workspace on first start
     # git_branch: main
     # git_folder: exercises                      # subfolder opened in the IDE
@@ -59,7 +58,7 @@ workspace_templates:
     #   dir: .devcontainer                       # folder holding devcontainer.json
     #   cache_repo: registry.example.com/cache   # REQUIRED — without it every student rebuilds
     #   registry_auth_secret: regcred            # existing dockerconfigjson Secret in the namespace
-    #   fallback_image: gitpod/openvscode-server:latest
+    #   fallback_image: codercom/code-server:latest
     #   insecure: false                          # bypass registry/git TLS verification
 `
 
@@ -107,7 +106,19 @@ func parseWorkspaceTemplatesYAML(s string) ([]WorkspaceTemplate, error) {
 	if err := validateWorkspaceTemplates(doc.WorkspaceTemplates); err != nil {
 		return nil, err
 	}
+	normalizeIDE(doc.WorkspaceTemplates)
 	return doc.WorkspaceTemplates, nil
+}
+
+// normalizeIDE rewrites the retired "openvscode" value to code-server in place,
+// so a lab saved before OpenVSCode support was removed round-trips through the
+// editor as code-server instead of carrying a value nothing honours any more.
+func normalizeIDE(templates []WorkspaceTemplate) {
+	for i := range templates {
+		if templates[i].IDE == workspace.IDEOpenVSCode {
+			templates[i].IDE = workspace.IDECodeServer
+		}
+	}
 }
 
 // marshalWorkspaceTemplatesYAML renders templates back to the editor's document
@@ -238,8 +249,10 @@ func validateWorkspaceTemplates(templates []WorkspaceTemplate) error {
 		}
 		seen[t.Name] = true
 
+		// IDEOpenVSCode is still accepted so labs saved before OpenVSCode support
+		// was removed keep loading; normalizeIDE rewrites it to code-server.
 		if t.IDE != "" && t.IDE != workspace.IDEOpenVSCode && t.IDE != workspace.IDECodeServer {
-			return fmt.Errorf("%s: ide must be %q or %q, got %q", where, workspace.IDEOpenVSCode, workspace.IDECodeServer, t.IDE)
+			return fmt.Errorf("%s: ide must be %q, got %q", where, workspace.IDECodeServer, t.IDE)
 		}
 		if t.GitRepo != "" && !validateURL(t.GitRepo) {
 			return fmt.Errorf("%s: git_repo %q is not a valid URL", where, t.GitRepo)

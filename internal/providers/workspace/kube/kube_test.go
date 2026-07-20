@@ -39,7 +39,7 @@ func hasArg(args []string, flag, val string) bool {
 	return false
 }
 
-func TestEnsureWorkspace_OpenVSCodeDefaults(t *testing.T) {
+func TestEnsureWorkspace_CodeServerDefaults(t *testing.T) {
 	b, cs := newTestBackend()
 	ws, err := b.EnsureWorkspace(context.Background(), workspace.Spec{
 		LabID: "job-1", Owner: "alice", Domain: "lab.example.com", Token: "tok123",
@@ -48,20 +48,41 @@ func TestEnsureWorkspace_OpenVSCodeDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := ideContainer(t, cs, ws.ID)
-	if !strings.Contains(c.Image, "openvscode-server") {
-		t.Errorf("expected openvscode image, got %q", c.Image)
+	if !strings.Contains(c.Image, "code-server") {
+		t.Errorf("expected code-server image, got %q", c.Image)
 	}
-	if c.Ports[0].ContainerPort != 3000 {
-		t.Errorf("expected port 3000, got %d", c.Ports[0].ContainerPort)
+	if c.Ports[0].ContainerPort != 8080 {
+		t.Errorf("expected port 8080, got %d", c.Ports[0].ContainerPort)
 	}
-	if !hasArg(c.Args, "--connection-token", "tok123") {
-		t.Errorf("expected --connection-token arg, got %v", c.Args)
+	if !hasArg(c.Args, "--auth", "password") {
+		t.Errorf("expected --auth password arg, got %v", c.Args)
 	}
-	if ws.IDE != workspace.IDEOpenVSCode {
-		t.Errorf("expected IDE openvscode, got %q", ws.IDE)
+	if ws.IDE != workspace.IDECodeServer {
+		t.Errorf("expected IDE code-server, got %q", ws.IDE)
 	}
-	if !strings.HasSuffix(ws.OpenURL, "?tkn=tok123") {
-		t.Errorf("expected OpenURL with ?tkn=, got %q", ws.OpenURL)
+	if ws.OpenURL != ws.URL {
+		t.Errorf("expected OpenURL to be the bare login-page URL, got %q", ws.OpenURL)
+	}
+}
+
+// TestEnsureWorkspace_LegacyIDEValue pins the backward-compatibility contract:
+// a lab saved before OpenVSCode support was removed must still produce a working
+// code-server workspace, and must not report the retired value back to callers.
+func TestEnsureWorkspace_LegacyIDEValue(t *testing.T) {
+	b, cs := newTestBackend()
+	ws, err := b.EnsureWorkspace(context.Background(), workspace.Spec{
+		LabID: "job-1", Owner: "alice", IDE: workspace.IDEOpenVSCode,
+		Domain: "lab.example.com", Token: "tok123",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := ideContainer(t, cs, ws.ID)
+	if !strings.Contains(c.Image, "code-server") {
+		t.Errorf("expected code-server image, got %q", c.Image)
+	}
+	if ws.IDE != workspace.IDECodeServer {
+		t.Errorf("expected the legacy value to normalize to code-server, got %q", ws.IDE)
 	}
 }
 
@@ -250,7 +271,7 @@ func TestEnsureWorkspace_CreatesResources(t *testing.T) {
 	ws, err := b.EnsureWorkspace(ctx, workspace.Spec{
 		LabID:    "job-1",
 		Owner:    "alice",
-		Image:    "gitpod/openvscode-server:latest",
+		Image:    "codercom/code-server:latest",
 		DiskSize: "5Gi",
 		Domain:   "lab.example.com",
 		Token:    "secret-token",
@@ -328,8 +349,8 @@ func TestEnsureWorkspace_NipIOFallbackWhenNoDomain(t *testing.T) {
 	if ws.URL != "http://"+wantHost+"/" {
 		t.Errorf("expected plain-HTTP nip.io URL, got %q", ws.URL)
 	}
-	if ws.OpenURL != "http://"+wantHost+"/?tkn=tok" {
-		t.Errorf("expected tokenized nip.io OpenURL, got %q", ws.OpenURL)
+	if ws.OpenURL != ws.URL {
+		t.Errorf("expected the bare nip.io OpenURL, got %q", ws.OpenURL)
 	}
 
 	ing, err := cs.NetworkingV1().Ingresses("workshops").Get(ctx, ws.ID, metav1.GetOptions{})
@@ -599,15 +620,17 @@ func TestEnsureWorkspace_ReadinessProbeAndProgressDeadline(t *testing.T) {
 	if c.ReadinessProbe == nil || c.ReadinessProbe.TCPSocket == nil {
 		t.Fatalf("expected a TCP readiness probe, got %+v", c.ReadinessProbe)
 	}
-	if c.ReadinessProbe.TCPSocket.Port.IntValue() != 3000 {
-		t.Errorf("expected readiness probe on port 3000, got %v", c.ReadinessProbe.TCPSocket.Port)
+	if c.ReadinessProbe.TCPSocket.Port.IntValue() != 8080 {
+		t.Errorf("expected readiness probe on port 8080, got %v", c.ReadinessProbe.TCPSocket.Port)
 	}
 }
 
+// TestEnsureWorkspace_GitFolderOpenPath pins that a template's subfolder reaches
+// the IDE. code-server takes it as the positional start argument — it is not a
+// URL parameter, so a regression here would silently open the repo root instead.
 func TestEnsureWorkspace_GitFolderOpenPath(t *testing.T) {
 	ctx := context.Background()
 
-	// openvscode: folder goes in the URL, not a start flag.
 	b, cs := newTestBackend()
 	ws, err := b.EnsureWorkspace(ctx, workspace.Spec{
 		LabID: "job-1", Owner: "jo", Domain: "lab.example.com", Token: "t",
@@ -616,34 +639,18 @@ func TestEnsureWorkspace_GitFolderOpenPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(ws.OpenURL, "folder=") {
-		t.Errorf("expected folder= in openvscode OpenURL, got %q", ws.OpenURL)
+	if strings.Contains(ws.OpenURL, "folder=") {
+		t.Errorf("the folder is a start argument, not a URL param: %q", ws.OpenURL)
 	}
 	c := ideContainer(t, cs, ws.ID)
-	for _, a := range append(c.Args, c.Command...) {
-		if a == "--default-folder" {
-			t.Errorf("openvscode must not use --default-folder: %v", c.Args)
-		}
-	}
-
-	// code-server: folder is the positional arg.
-	b2, cs2 := newTestBackend()
-	ws2, err := b2.EnsureWorkspace(ctx, workspace.Spec{
-		LabID: "job-1", Owner: "kim", IDE: workspace.IDECodeServer, Domain: "lab.example.com", Token: "t",
-		GitRepo: "https://example.com/repo.git", DiskSize: "5Gi", GitFolder: "backend",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	c2 := ideContainer(t, cs2, ws2.ID)
 	found := false
-	for _, a := range c2.Args {
+	for _, a := range c.Args {
 		if a == "/home/coder/project/backend" {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("expected code-server to open /home/coder/project/backend, got args %v", c2.Args)
+		t.Errorf("expected code-server to open /home/coder/project/backend, got args %v", c.Args)
 	}
 }
 

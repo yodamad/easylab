@@ -73,9 +73,9 @@ func TestEnsureWorkspace_DevcontainerRunsEnvbuilder(t *testing.T) {
 	assert.Equal(t, int64(0), *c.SecurityContext.RunAsUser)
 
 	// Routing is unchanged: still the IDE's port, so the student contract holds.
-	assert.Equal(t, int32(3000), c.Ports[0].ContainerPort)
-	assert.Equal(t, workspace.IDEOpenVSCode, ws.IDE)
-	assert.True(t, strings.HasSuffix(ws.OpenURL, "?tkn=tok123"))
+	assert.Equal(t, int32(8080), c.Ports[0].ContainerPort)
+	assert.Equal(t, workspace.IDECodeServer, ws.IDE)
+	assert.NotContains(t, ws.OpenURL, "tkn=", "code-server authenticates on its own login page")
 }
 
 func TestEnsureWorkspace_DevcontainerEnv(t *testing.T) {
@@ -94,16 +94,25 @@ func TestEnsureWorkspace_DevcontainerEnv(t *testing.T) {
 	// A failed build must not quietly hand over a workspace missing its tools.
 	assert.Equal(t, "true", env["ENVBUILDER_EXIT_ON_BUILD_FAILURE"])
 	// Clone where a plain workspace clones, so git_folder means the same thing.
-	assert.Equal(t, "/home/workspace", env["ENVBUILDER_WORKSPACE_FOLDER"])
+	assert.Equal(t, "/home/coder/project", env["ENVBUILDER_WORKSPACE_FOLDER"])
 
 	// The build wipes the filesystem; the IDE and the student's files must survive.
 	assert.Contains(t, env["ENVBUILDER_IGNORE_PATHS"], ideMountPath)
-	assert.Contains(t, env["ENVBUILDER_IGNORE_PATHS"], "/home/workspace")
+	assert.Contains(t, env["ENVBUILDER_IGNORE_PATHS"], "/home/coder/project")
+
+	// PASSWORD is what --auth password reads, and it is appended to the container's
+	// env before the devcontainer branch rewrites the container. That ordering is
+	// the only thing carrying it into envbuilder's init script: envbuilder's own
+	// UnsetEnv strips ENVBUILDER_* names but leaves this one. If a refactor moved
+	// the append after applyDevcontainer, or assigned c.Env instead of appending,
+	// every student would be locked out with no other test failing.
+	assert.Equal(t, "tok123", env["PASSWORD"])
 
 	// The init script starts the injected IDE, not one from the image. Args are
 	// shell-quoted because the script is handed to a shell, not exec'd directly.
-	assert.Contains(t, env["ENVBUILDER_INIT_SCRIPT"], "exec "+ideMountPath+"/bin/openvscode-server")
-	assert.Contains(t, env["ENVBUILDER_INIT_SCRIPT"], "'--connection-token' 'tok123'")
+	assert.Contains(t, env["ENVBUILDER_INIT_SCRIPT"], "exec "+ideMountPath+"/bin/code-server")
+	assert.Contains(t, env["ENVBUILDER_INIT_SCRIPT"], "'--bind-addr' '0.0.0.0:8080'")
+	assert.Contains(t, env["ENVBUILDER_INIT_SCRIPT"], "'--auth' 'password'")
 }
 
 func TestEnsureWorkspace_DevcontainerInjectsIDE(t *testing.T) {
@@ -114,9 +123,10 @@ func TestEnsureWorkspace_DevcontainerInjectsIDE(t *testing.T) {
 
 	inject, ok := initContainerNamed(t, cs, ws.ID, "ide-inject")
 	require.True(t, ok, "devcontainer mode must inject an IDE: the built image has none")
-	assert.Contains(t, inject.Image, "openvscode-server")
+	assert.Contains(t, inject.Image, "code-server")
 
 	script := inject.Command[len(inject.Command)-1]
+	assert.Contains(t, script, `cp -dR "/usr/lib/code-server/."`, "code-server's bundle lives here")
 	assert.Contains(t, script, ideMountPath)
 	// The init script runs as the devcontainer's own user, not the copier's uid.
 	assert.Contains(t, script, "chmod -R a+rX")
@@ -166,7 +176,7 @@ func TestEnsureWorkspace_PlainModeStillClones(t *testing.T) {
 	assert.True(t, ok)
 
 	c := ideContainer(t, cs, ws.ID)
-	assert.Contains(t, c.Image, "openvscode-server")
+	assert.Contains(t, c.Image, "code-server")
 	assert.NotEqual(t, envbuilderImage, c.Image)
 }
 
@@ -186,8 +196,11 @@ func TestEnsureWorkspace_DevcontainerAppliesSetupSteps(t *testing.T) {
 	// A devcontainer workspace gets the same provisioning as a plain one — the
 	// extensions especially, since envbuilder only partially supports them.
 	assert.Contains(t, script, "echo hello")
-	// Extensions install via the injected bundle, not a binary from the image.
-	assert.Contains(t, script, ideMountPath+"/bin/openvscode-server --install-extension 'golang.go'")
+	// Extensions install via the injected bundle, not a binary from the image —
+	// the built image has no code-server on PATH for a bare name to resolve to.
+	assert.Contains(t, script, ideMountPath+"/bin/code-server --install-extension 'golang.go'")
+	// code-server takes the folder to open as a positional argument.
+	assert.Contains(t, script, "'/home/coder/project/exercises'")
 }
 
 func TestEnsureWorkspace_DevcontainerRegistryAuth(t *testing.T) {
@@ -274,9 +287,9 @@ func TestEnsureWorkspace_DevcontainerOptionalEnv(t *testing.T) {
 	}{
 		{
 			name:    "fallback image",
-			mutate:  func(d *workspace.DevcontainerSpec) { d.FallbackImage = "gitpod/openvscode-server:latest" },
+			mutate:  func(d *workspace.DevcontainerSpec) { d.FallbackImage = "codercom/code-server:latest" },
 			env:     "ENVBUILDER_FALLBACK_IMAGE",
-			want:    "gitpod/openvscode-server:latest",
+			want:    "codercom/code-server:latest",
 			present: true,
 		},
 		{
@@ -383,83 +396,25 @@ func TestEnsureWorkspace_DevcontainerDropsServiceAccountToken(t *testing.T) {
 		"a plain workspace must keep the cluster default")
 }
 
-func TestEnsureWorkspace_DevcontainerCodeServer(t *testing.T) {
+// TestEnsureWorkspace_DevcontainerLegacyIDEValue pins that a lab saved before
+// OpenVSCode support was removed still builds a working code-server workspace
+// rather than resolving to a profile that no longer exists.
+func TestEnsureWorkspace_DevcontainerLegacyIDEValue(t *testing.T) {
 	b, cs := newTestBackend()
 
 	spec := devcontainerSpec()
-	spec.IDE = workspace.IDECodeServer
+	spec.IDE = workspace.IDEOpenVSCode
 
 	ws, err := b.EnsureWorkspace(context.Background(), spec)
 	require.NoError(t, err)
 	c := ideContainer(t, cs, ws.ID)
 
-	assert.Equal(t, envbuilderImage, c.Image, "devcontainer mode must run envbuilder, not the IDE image")
-	assert.Equal(t, int32(8080), c.Ports[0].ContainerPort, "code-server listens on its own port, not openvscode's")
+	assert.Equal(t, int32(8080), c.Ports[0].ContainerPort)
+	assert.Equal(t, workspace.IDECodeServer, ws.IDE, "the retired value must not leak back out")
 
-	env := envOf(c)
-	assert.Equal(t, "/home/coder/project", env["ENVBUILDER_WORKSPACE_FOLDER"])
-	assert.Contains(t, env["ENVBUILDER_IGNORE_PATHS"], ideMountPath)
-	assert.Contains(t, env["ENVBUILDER_IGNORE_PATHS"], "/home/coder/project")
-
-	// PASSWORD is what --auth password reads, and it is appended to the container's
-	// env before the devcontainer branch rewrites the container. That ordering is
-	// the only thing carrying it into envbuilder's init script: envbuilder's own
-	// UnsetEnv strips ENVBUILDER_* names but leaves this one. If a refactor moved
-	// the append after applyDevcontainer, or assigned c.Env instead of appending,
-	// every code-server student would be locked out with no other test failing.
-	assert.Equal(t, "tok123", env["PASSWORD"])
-
-	// The IDE starts from the injected bundle, since the built image has none.
-	script := env["ENVBUILDER_INIT_SCRIPT"]
+	script := envOf(c)["ENVBUILDER_INIT_SCRIPT"]
 	assert.Contains(t, script, "exec "+ideMountPath+"/bin/code-server")
-	assert.Contains(t, script, "'--bind-addr' '0.0.0.0:8080'")
-	assert.Contains(t, script, "'--auth' 'password'")
-	assert.NotContains(t, script, "--connection-token", "the token is code-server's login password, not a URL param")
-
-	assert.Equal(t, workspace.IDECodeServer, ws.IDE)
-	assert.NotContains(t, ws.OpenURL, "tkn=", "code-server authenticates on its own login page")
-}
-
-func TestEnsureWorkspace_DevcontainerInjectsCodeServerBundle(t *testing.T) {
-	b, cs := newTestBackend()
-
-	spec := devcontainerSpec()
-	spec.IDE = workspace.IDECodeServer
-
-	ws, err := b.EnsureWorkspace(context.Background(), spec)
-	require.NoError(t, err)
-
-	inject, ok := initContainerNamed(t, cs, ws.ID, "ide-inject")
-	require.True(t, ok, "devcontainer mode must inject an IDE: the built image has none")
-	assert.Contains(t, inject.Image, "code-server")
-
-	script := inject.Command[len(inject.Command)-1]
-	assert.Contains(t, script, `cp -dR "/usr/lib/code-server/."`, "code-server's bundle lives here, not at openvscode's root")
-	assert.Contains(t, script, "chmod -R a+rX "+ideMountPath)
-	assert.NotContains(t, script, "openvscode", "the copy source must follow the selected IDE")
-
-	require.NotNil(t, inject.SecurityContext)
-	require.NotNil(t, inject.SecurityContext.RunAsUser)
-	assert.Equal(t, int64(0), *inject.SecurityContext.RunAsUser, "ide-inject must copy as root")
-}
-
-func TestEnsureWorkspace_DevcontainerCodeServerAppliesSetupSteps(t *testing.T) {
-	b, cs := newTestBackend()
-
-	spec := devcontainerSpec()
-	spec.IDE = workspace.IDECodeServer
-	spec.Extensions = []string{"golang.go"}
-	spec.GitFolder = "exercises"
-
-	ws, err := b.EnsureWorkspace(context.Background(), spec)
-	require.NoError(t, err)
-	script := envOf(ideContainer(t, cs, ws.ID))["ENVBUILDER_INIT_SCRIPT"]
-
-	// Extensions install through the injected bundle too — the built image has no
-	// code-server on PATH for a bare name to resolve to.
-	assert.Contains(t, script, ideMountPath+"/bin/code-server --install-extension 'golang.go'")
-	// code-server takes the folder to open as a positional argument.
-	assert.Contains(t, script, "'/home/coder/project/exercises'")
+	assert.NotContains(t, script, "openvscode")
 }
 
 func TestDevcontainerProfile(t *testing.T) {
@@ -467,67 +422,28 @@ func TestDevcontainerProfile(t *testing.T) {
 
 	t.Run("retargets the launcher at the injected bundle", func(t *testing.T) {
 		t.Parallel()
-		tests := []struct {
-			name string
-			kind string
-			want string
-		}{
-			{name: "openvscode", kind: workspace.IDEOpenVSCode, want: "/ide/bin/openvscode-server"},
-			{name: "code-server", kind: workspace.IDECodeServer, want: "/ide/bin/code-server"},
-		}
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
-				assert.Equal(t, tt.want, devcontainerProfile(profileFor(tt.kind)).serverBin)
-			})
-		}
+		assert.Equal(t, "/ide/bin/code-server", devcontainerProfile(codeServerProfile).serverBin)
 	})
 
-	// Structural invariants every profile must hold, so a third IDE added with a
-	// mismatched bundle fails here rather than as a CrashLoopBackOff mid-workshop.
-	t.Run("every profile carries a usable bundle", func(t *testing.T) {
+	// Structural invariants the profile must hold, so a second IDE added later with
+	// a mismatched bundle fails here rather than as a CrashLoopBackOff mid-workshop.
+	t.Run("the profile carries a usable bundle", func(t *testing.T) {
 		t.Parallel()
-		for kind, p := range ideProfiles {
-			t.Run(kind, func(t *testing.T) {
-				t.Parallel()
-				assert.NotEmpty(t, p.bundleRoot, "bundleRoot names the tree copied onto the /ide volume")
-				assert.NotEmpty(t, p.bundleBin, "bundleBin names the launcher inside that tree")
-				assert.False(t, strings.HasPrefix(p.bundleBin, "/"),
-					"bundleBin must be relative to bundleRoot: the launcher resolves its own root from its path, so an absolute path would look outside the copied tree")
-				assert.True(t, strings.HasPrefix(devcontainerProfile(p).serverBin, ideMountPath+"/"),
-					"in devcontainer mode the launcher must live on the injected volume, which is all the build leaves alone")
-			})
-		}
+		p := codeServerProfile
+		assert.NotEmpty(t, p.bundleRoot, "bundleRoot names the tree copied onto the /ide volume")
+		assert.NotEmpty(t, p.bundleBin, "bundleBin names the launcher inside that tree")
+		assert.False(t, strings.HasPrefix(p.bundleBin, "/"),
+			"bundleBin must be relative to bundleRoot: the launcher resolves its own root from its path, so an absolute path would look outside the copied tree")
+		assert.True(t, strings.HasPrefix(devcontainerProfile(p).serverBin, ideMountPath+"/"),
+			"in devcontainer mode the launcher must live on the injected volume, which is all the build leaves alone")
 	})
 }
 
-func TestIdeInjectInit_ScriptPerIDE(t *testing.T) {
+func TestIdeInjectInit_Script(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name string
-		kind string
-		want string
-	}{
-		{
-			// Verbatim the script shipped before the bundle fields existed — this row
-			// pins that making the copy profile-driven changed openvscode not at all.
-			name: "openvscode",
-			kind: workspace.IDEOpenVSCode,
-			want: `cp -dR "${OPENVSCODE_SERVER_ROOT:-/home/.openvscode-server}/." /ide/ && chmod -R a+rX /ide`,
-		},
-		{
-			name: "code-server",
-			kind: workspace.IDECodeServer,
-			want: `cp -dR "/usr/lib/code-server/." /ide/ && chmod -R a+rX /ide`,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			c := ideInjectInit(profileFor(tt.kind))
-			assert.Equal(t, tt.want, c.Command[len(c.Command)-1])
-		})
-	}
+	c := ideInjectInit(codeServerProfile)
+	assert.Equal(t,
+		`cp -dR "/usr/lib/code-server/." /ide/ && chmod -R a+rX /ide`,
+		c.Command[len(c.Command)-1])
 }

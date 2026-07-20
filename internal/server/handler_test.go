@@ -787,11 +787,11 @@ func TestAtoiForm(t *testing.T) {
 
 func TestGetFormValue(t *testing.T) {
 	tests := []struct {
-		name      string
-		postForm  url.Values
-		form      url.Values
-		key       string
-		want      string
+		name     string
+		postForm url.Values
+		form     url.Values
+		key      string
+		want     string
 	}{
 		{
 			name:     "postForm wins",
@@ -1053,12 +1053,12 @@ func TestCreateLabConfigFromForm_BasicOVH(t *testing.T) {
 	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Form = map[string][]string{
-		"stack_name":         {"my-stack"},
-		"template_0_name":    {"my-template"},
-		"template_0_source":  {"git"},
-		"coder_admin_email":  {"admin@example.com"},
-		"provider":           {"ovh"},
-		"network_region":     {"GRA7"},
+		"stack_name":        {"my-stack"},
+		"template_0_name":   {"my-template"},
+		"template_0_source": {"git"},
+		"coder_admin_email": {"admin@example.com"},
+		"provider":          {"ovh"},
+		"network_region":    {"GRA7"},
 	}
 	creds := &OVHCredentials{
 		ApplicationKey:    "key",
@@ -1094,10 +1094,10 @@ func TestCreateLabConfigFromForm_AzureProvider(t *testing.T) {
 	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Form = map[string][]string{
-		"stack_name":        {"azure-stack"},
-		"provider":          {"azure"},
-		"azure_location":    {"eastus"},
-		"template_0_name":   {"tmpl"},
+		"stack_name":      {"azure-stack"},
+		"provider":        {"azure"},
+		"azure_location":  {"eastus"},
+		"template_0_name": {"tmpl"},
 	}
 	creds := &AzureCredentials{
 		ClientID:       "client",
@@ -1245,7 +1245,7 @@ func TestParseWorkspaceTemplatesFromForm_OneTemplate(t *testing.T) {
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Form = map[string][]string{
 		"template_0_name":      {"my-template"},
-		"template_0_image":     {"gitpod/openvscode-server:latest"},
+		"template_0_image":     {"codercom/code-server:latest"},
 		"template_0_git_repo":  {"https://github.com/example/repo"},
 		"template_0_cpu":       {"500m"},
 		"template_0_memory":    {"1Gi"},
@@ -1254,7 +1254,7 @@ func TestParseWorkspaceTemplatesFromForm_OneTemplate(t *testing.T) {
 	templates := parseWorkspaceTemplatesFromForm(req)
 	assert.Len(t, templates, 1)
 	assert.Equal(t, "my-template", templates[0].Name)
-	assert.Equal(t, "gitpod/openvscode-server:latest", templates[0].Image)
+	assert.Equal(t, "codercom/code-server:latest", templates[0].Image)
 	assert.Equal(t, "https://github.com/example/repo", templates[0].GitRepo)
 	assert.Equal(t, "500m", templates[0].CPU)
 	assert.Equal(t, "1Gi", templates[0].Memory)
@@ -1264,9 +1264,9 @@ func TestParseWorkspaceTemplatesFromForm_OneTemplate(t *testing.T) {
 func TestParseWorkspaceTemplatesFromForm_WithEnv(t *testing.T) {
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Form = map[string][]string{
-		"template_0_name":       {"tmpl"},
-		"template_0_env_name":   {"KEY1", "KEY2"},
-		"template_0_env_value":  {"val1", "val2"},
+		"template_0_name":      {"tmpl"},
+		"template_0_env_name":  {"KEY1", "KEY2"},
+		"template_0_env_value": {"val1", "val2"},
 	}
 	templates := parseWorkspaceTemplatesFromForm(req)
 	assert.Len(t, templates, 1)

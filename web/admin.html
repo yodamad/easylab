@@ -591,12 +591,7 @@
                                 </div>
 
                                 <div class="form-group">
-                                    <label for="devcontainer_ide">IDE</label>
-                                    <select id="devcontainer_ide">
-                                        <option value="openvscode">OpenVSCode Server (silent open)</option>
-                                        <option value="code-server">code-server (sudo/apt for setup scripts)</option>
-                                    </select>
-                                    <small>The IDE is injected into the image the devcontainer builds, so this is independent of the devcontainer's own base image. The devcontainer must be built on a glibc base — the injected IDE cannot run on Alpine/musl.</small>
+                                    <small>code-server is injected into the image the devcontainer builds, so it is independent of the devcontainer's own base image. The devcontainer must be built on a glibc base — the injected IDE cannot run on Alpine/musl.</small>
                                 </div>
 
                                 <div class="form-group">
@@ -666,18 +661,6 @@
                                         <div class="ut-step">
                                             <div class="ut-step-header">
                                                 <span class="ut-step-number" aria-hidden="true">2</span>
-                                                <span class="ut-step-label">IDE</span>
-                                            </div>
-                                            <div class="ut-step-body">
-                                                <select name="template_0_ide" data-field="ide" class="ut-name-input">
-                                                    <option value="openvscode">OpenVSCode Server (silent open)</option>
-                                                    <option value="code-server">code-server (sudo/apt for setup scripts)</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div class="ut-step">
-                                            <div class="ut-step-header">
-                                                <span class="ut-step-number" aria-hidden="true">3</span>
                                                 <span class="ut-step-label">Git repository</span>
                                                 <span class="ut-optional-badge">optional</span>
                                             </div>
@@ -701,8 +684,8 @@
                                                 </div>
                                                 <div class="form-group">
                                                     <label>Image (Optional)</label>
-                                                    <input type="text" name="template_0_image" data-field="image" placeholder="gitpod/openvscode-server:latest">
-                                                    <small>Container image override. Defaults to the selected IDE's image.</small>
+                                                    <input type="text" name="template_0_image" data-field="image" placeholder="codercom/code-server:latest">
+                                                    <small>Container image override. Defaults to the code-server image.</small>
                                                 </div>
                                                 <div class="template-resources">
                                                     <div class="form-group">
@@ -721,7 +704,7 @@
                                                 <div class="form-group">
                                                     <label>Startup Script (Optional)</label>
                                                     <textarea name="template_0_startup_script" data-field="startup_script" rows="4" class="monospace" placeholder="# runs before the IDE starts"></textarea>
-                                                    <small>Runs (best-effort) on start. code-server can use sudo/apt; OpenVSCode runs as a non-root user.</small>
+                                                    <small>Runs (best-effort) on start. code-server has passwordless sudo, so the script can install system packages with apt.</small>
                                                 </div>
                                                 <div class="form-group">
                                                     <label>Dotfiles Repository (Optional)</label>
@@ -793,18 +776,6 @@
                                     <div class="ut-step">
                                         <div class="ut-step-header">
                                             <span class="ut-step-number" aria-hidden="true">2</span>
-                                            <span class="ut-step-label">IDE</span>
-                                        </div>
-                                        <div class="ut-step-body">
-                                            <select name="template_0_ide" data-field="ide" class="ut-name-input">
-                                                <option value="openvscode">OpenVSCode Server (silent open)</option>
-                                                <option value="code-server">code-server (sudo/apt for setup scripts)</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                    <div class="ut-step">
-                                        <div class="ut-step-header">
-                                            <span class="ut-step-number" aria-hidden="true">3</span>
                                             <span class="ut-step-label">Git repository</span>
                                             <span class="ut-optional-badge">optional</span>
                                         </div>
@@ -828,8 +799,8 @@
                                             </div>
                                             <div class="form-group">
                                                 <label>Image (Optional)</label>
-                                                <input type="text" name="template_0_image" data-field="image" placeholder="gitpod/openvscode-server:latest">
-                                                <small>Container image override. Defaults to the selected IDE's image.</small>
+                                                <input type="text" name="template_0_image" data-field="image" placeholder="codercom/code-server:latest">
+                                                <small>Container image override. Defaults to the code-server image.</small>
                                             </div>
                                             <div class="template-resources">
                                                 <div class="form-group">
@@ -848,7 +819,7 @@
                                             <div class="form-group">
                                                 <label>Startup Script (Optional)</label>
                                                 <textarea name="template_0_startup_script" data-field="startup_script" rows="4" class="monospace" placeholder="# runs before the IDE starts"></textarea>
-                                                <small>Runs (best-effort) on start. code-server can use sudo/apt; OpenVSCode runs as a non-root user.</small>
+                                                <small>Runs (best-effort) on start. code-server has passwordless sudo, so the script can install system packages with apt.</small>
                                             </div>
                                             <div class="form-group">
                                                 <label>Dotfiles Repository (Optional)</label>

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"easylab/internal/providers/workspace"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -104,9 +106,9 @@ func TestParseWorkspaceTemplatesYAML(t *testing.T) {
 			}},
 		},
 		{
-			// Both IDEs are injected onto a volume the build leaves alone, so
-			// code-server is as valid here as the default.
-			name: "devcontainer with code-server",
+			// The IDE is injected onto a volume the build leaves alone, so an
+			// explicit ide alongside a devcontainer is valid.
+			name: "devcontainer with an explicit ide",
 			input: `workspace_templates:
   - name: default
     ide: code-server
@@ -140,7 +142,7 @@ func TestParseWorkspaceTemplatesYAML(t *testing.T) {
       dir: .devcontainer
       cache_repo: registry.example.com/easylab/cache
       registry_auth_secret: regcred
-      fallback_image: gitpod/openvscode-server:latest
+      fallback_image: codercom/code-server:latest
       insecure: false`,
 			expected: []WorkspaceTemplate{{
 				Name:       "go-workshop",
@@ -155,7 +157,7 @@ func TestParseWorkspaceTemplatesYAML(t *testing.T) {
 					Dir:                ".devcontainer",
 					CacheRepo:          "registry.example.com/easylab/cache",
 					RegistryAuthSecret: "regcred",
-					FallbackImage:      "gitpod/openvscode-server:latest",
+					FallbackImage:      "codercom/code-server:latest",
 				},
 			}},
 		},
@@ -406,7 +408,7 @@ func TestMarshalWorkspaceTemplatesYAML_RoundTripDevcontainer(t *testing.T) {
 			Dir:                ".devcontainer",
 			CacheRepo:          "registry.example.com/easylab/cache",
 			RegistryAuthSecret: "regcred",
-			FallbackImage:      "gitpod/openvscode-server:latest",
+			FallbackImage:      "codercom/code-server:latest",
 			Insecure:           true,
 		},
 	}}
@@ -500,13 +502,55 @@ func TestWorkspaceTemplatesYAMLSkeleton_IsValid(t *testing.T) {
 	assert.Equal(t, "default", got[0].Name)
 }
 
+// TestParseWorkspaceTemplatesYAML_LegacyIDEValue pins the backward-compatibility
+// contract for labs authored before OpenVSCode support was removed: their YAML
+// must still parse, and the retired value must be rewritten rather than kept, so
+// re-saving the lab does not carry it forward.
+func TestParseWorkspaceTemplatesYAML_LegacyIDEValue(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "retired openvscode value is normalized",
+			input: "workspace_templates:\n  - name: default\n    ide: openvscode",
+			want:  workspace.IDECodeServer,
+		},
+		{
+			name:  "code-server is preserved",
+			input: "workspace_templates:\n  - name: default\n    ide: code-server",
+			want:  workspace.IDECodeServer,
+		},
+		{
+			name:  "omitted ide stays empty",
+			input: "workspace_templates:\n  - name: default",
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := parseWorkspaceTemplatesYAML(tt.input)
+			require.NoError(t, err)
+			require.Len(t, got, 1)
+			assert.Equal(t, tt.want, got[0].IDE)
+		})
+	}
+}
+
 func TestWorkspaceTemplatesYAMLSkeleton_DocumentsEverySupportedKey(t *testing.T) {
 	t.Parallel()
 
 	// Guards against the skeleton going stale as WorkspaceTemplate grows: every
-	// json key on the struct should appear in the commented schema.
+	// json key on the struct should appear in the commented schema. "ide" is the
+	// deliberate exception — it is a legacy field kept only so older labs keep
+	// loading, and advertising it would invite admins to set a retired value.
 	keys := []string{
-		"name", "ide", "image", "git_repo", "git_branch", "git_folder", "cpu",
+		"name", "image", "git_repo", "git_branch", "git_folder", "cpu",
 		"memory", "disk_size", "startup_script", "dotfiles_repo", "extensions",
 		"env", "sidecars", "mounts", "devcontainer",
 		"git_auth_secret", "image_pull_secrets",

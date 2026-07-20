@@ -1,7 +1,7 @@
 // Package workspace defines the backend abstraction for provisioning student
 // IDE workspaces on a Kubernetes cluster. It replaces the former Coder-based
 // workspace layer: each student gets a self-managed set of Kubernetes resources
-// (Deployment + Service + Ingress + PVC) running an OpenVSCode Server image.
+// (Deployment + Service + Ingress + PVC) running a code-server image.
 //
 // Backends are registered by name (see registry.go) and instantiated per-lab
 // from the lab's kubeconfig, so handlers never hardcode backend selection.
@@ -33,14 +33,13 @@ type Workspace struct {
 	Owner string `json:"owner"`
 	// URL is the base workspace URL (shown to the student; no auth token).
 	URL string `json:"url"`
-	// OpenURL is the redirect target that lands the student in the IDE. For
-	// openvscode it carries the connection token (?tkn=); for code-server it is
-	// the base URL (the student authenticates with Token on the login page).
+	// OpenURL is the redirect target that lands the student in the IDE. It is the
+	// base URL: the student authenticates with Token on the code-server login page.
 	OpenURL string `json:"open_url"`
-	// Token is the IDE access secret (openvscode connection token / code-server
-	// password). It is a per-student secret and is never serialized to admin APIs.
+	// Token is the IDE access secret (the code-server password). It is a
+	// per-student secret and is never serialized to admin APIs.
 	Token string `json:"-"`
-	// IDE is the IDE base this workspace runs ("openvscode" | "code-server").
+	// IDE is the IDE base this workspace runs. Always "code-server".
 	IDE string `json:"ide"`
 	// CreatedAt is the workspace creation time (used for lifetime cleanup).
 	CreatedAt time.Time `json:"created_at"`
@@ -54,9 +53,12 @@ type Workspace struct {
 
 // IDE base identifiers.
 const (
+	// IDEOpenVSCode is a legacy value kept for backward compatibility only.
+	// OpenVSCode Server support was removed; labs and saved YAML carrying this
+	// value are normalized to IDECodeServer rather than rejected.
 	IDEOpenVSCode  = "openvscode"
 	IDECodeServer  = "code-server"
-	DefaultIDEKind = IDEOpenVSCode
+	DefaultIDEKind = IDECodeServer
 )
 
 // Sidecar is an additional container co-located in the workspace pod.
@@ -107,7 +109,7 @@ type Spec struct {
 	Owner    string // sanitized student username
 	Template string // template name — part of the workspace identity (one workspace per template)
 
-	IDE       string            // "openvscode" (default) | "code-server"
+	IDE       string            // IDE base; only "code-server" is supported (empty = default)
 	Image     string            // container image override (empty = IDE default)
 	GitRepo   string            // optional git repo cloned into the workspace on first start
 	GitBranch string            // optional branch to clone (default branch when empty)

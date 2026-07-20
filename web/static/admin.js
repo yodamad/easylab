@@ -1950,7 +1950,6 @@ if (btnRunDevcontainerImport) {
         body.append('git_branch', (document.getElementById('devcontainer_git_branch') || {}).value || '');
         body.append('devcontainer_dir', (document.getElementById('devcontainer_dir') || {}).value || '');
         body.append('cache_repo', (document.getElementById('devcontainer_cache_repo') || {}).value || '');
-        body.append('ide', (document.getElementById('devcontainer_ide') || {}).value || '');
         // The registry credential each student's workspace pulls the private base image
         // (and pushes the layer cache) with, baked into the generated template. Empty
         // means "auto": with a single registry credential, resolve it here so the common

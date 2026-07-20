@@ -182,11 +182,11 @@ func TestGenerateWorkspaceToken(t *testing.T) {
 		t.Errorf("GenerateWorkspaceToken() length = %d, want >= 16", len(token))
 	}
 
-	// The token is passed to openvscode-server's --connection-token, which rejects
-	// anything outside 0-9, a-z, A-Z or '-' and exits. It must therefore never carry
-	// a symbol, unlike GenerateSecurePassword.
+	// The token is the student's code-server login password and travels through a
+	// shell-quoted container bootstrap, so it must never carry a symbol — unlike
+	// GenerateSecurePassword.
 	if !regexp.MustCompile(`^[0-9A-Za-z-]+$`).MatchString(token) {
-		t.Errorf("GenerateWorkspaceToken() = %q, contains characters openvscode-server rejects", token)
+		t.Errorf("GenerateWorkspaceToken() = %q, contains characters outside [0-9A-Za-z-]", token)
 	}
 }
 

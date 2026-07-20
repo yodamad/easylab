@@ -62,13 +62,13 @@ When you have saved at least one workspace, the **My Workspaces** panel appears 
 Each card shows:
 
 * **Workspace name** — the name assigned to your workspace
-* **Workspace URL** — direct link to your OpenVSCode Server workspace (with a copy button)
+* **Workspace URL** — direct link to your code-server workspace (with a copy button)
 * **Email** — the email used to create the workspace (with a copy button)
 * **Password** — your workspace password, encrypted or in clear text (with a copy button)
 * **Lab ID** — the lab this workspace belongs to
 * **Created at** — when the workspace was created
 
-An **Open Code Server** button is available on each card header. Click it to open your code-server directly in a new tab — EasyLab resolves the workspace URL automatically so you don't need to copy it manually.
+An **Open Code Server** button is available on each card header. Click it to open your code-server directly in a new tab — EasyLab resolves the workspace URL automatically so you don't need to copy it manually. code-server asks for a password on first open: paste the **Password** from this card.
 
 ### Encrypting and decrypting credentials
 
