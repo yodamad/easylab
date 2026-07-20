@@ -169,7 +169,10 @@ func devcontainerTemplate(res devcontainer.Result, r *http.Request) WorkspaceTem
 	}
 
 	return WorkspaceTemplate{
-		Name:       name,
+		Name: name,
+		// The IDE is injected onto a volume the build leaves alone, so it is the
+		// admin's choice rather than anything the devcontainer.json dictates.
+		IDE:        strings.TrimSpace(getFormValue(r, "ide")),
 		GitRepo:    strings.TrimSpace(getFormValue(r, "git_repo")),
 		GitBranch:  strings.TrimSpace(getFormValue(r, "git_branch")),
 		GitFolder:  res.GitFolder,

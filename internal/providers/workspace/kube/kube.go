@@ -96,6 +96,15 @@ type ideProfile struct {
 	port         int32
 	workspaceDir string // folder the IDE opens / git repo clones into
 	serverBin    string // path to the IDE binary (for exec + extension install)
+
+	// bundleRoot is the self-contained IDE install inside defaultImage, written as
+	// a shell expression evaluated in that image; bundleBin is the launcher's path
+	// relative to it. Devcontainer mode copies bundleRoot onto the /ide volume and
+	// starts bundleBin from there. Both launchers resolve their install root from
+	// their own path at startup, so a relocated bundle finds its runtime only if
+	// the tree is copied whole and these two stay consistent.
+	bundleRoot string
+	bundleBin  string
 }
 
 var ideProfiles = map[string]ideProfile{
@@ -105,6 +114,8 @@ var ideProfiles = map[string]ideProfile{
 		port:         3000,
 		workspaceDir: "/home/workspace",
 		serverBin:    "${OPENVSCODE_SERVER_ROOT:-/home/.openvscode-server}/bin/openvscode-server",
+		bundleRoot:   "${OPENVSCODE_SERVER_ROOT:-/home/.openvscode-server}",
+		bundleBin:    "bin/openvscode-server",
 	},
 	workspace.IDECodeServer: {
 		kind:         workspace.IDECodeServer,
@@ -112,6 +123,11 @@ var ideProfiles = map[string]ideProfile{
 		port:         8080,
 		workspaceDir: "/home/coder/project",
 		serverBin:    "code-server",
+		// The .deb installs the self-contained bundle here; /usr/bin/code-server is
+		// a small wrapper around bin/code-server inside it, which is what serverBin
+		// reaches through PATH in plain mode.
+		bundleRoot: "/usr/lib/code-server",
+		bundleBin:  "bin/code-server",
 	},
 }
 
@@ -597,7 +613,7 @@ func ideExecLine(spec workspace.Spec, p ideProfile) string {
 // devcontainerProfile retargets an IDE profile at the injected bundle: in
 // devcontainer mode the IDE is not in the image, it sits on the /ide volume.
 func devcontainerProfile(p ideProfile) ideProfile {
-	p.serverBin = ideMountPath + "/bin/openvscode-server"
+	p.serverBin = ideMountPath + "/" + p.bundleBin
 	return p
 }
 
@@ -698,9 +714,12 @@ func ideInjectInit(p ideProfile) corev1.Container {
 	// fail with EPERM on the mount root itself -- cp -a can't set its timestamps and
 	// chmod -R can't change its mode. Root sidesteps that, and a+rX below is what
 	// grants the devcontainer's own (possibly non-root) user read/execute access.
-	// cp -dR rather than -a: we neither need nor want source ownership/timestamps.
-	script := fmt.Sprintf(`cp -dR "${OPENVSCODE_SERVER_ROOT:-/home/.openvscode-server}/." %s/ && chmod -R a+rX %s`,
-		ideMountPath, ideMountPath)
+	// cp -dR rather than -a: we neither need nor want source ownership/timestamps,
+	// and -d keeps the bundle's relative node_modules/.bin symlinks as links, which
+	// still resolve once the tree lands at ideMountPath. Dereferencing instead would
+	// turn any inert dangling link into a failed init container.
+	script := fmt.Sprintf(`cp -dR "%s/." %s/ && chmod -R a+rX %s`,
+		p.bundleRoot, ideMountPath, ideMountPath)
 	return corev1.Container{
 		Name:            "ide-inject",
 		Image:           p.defaultImage,

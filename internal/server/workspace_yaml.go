@@ -354,11 +354,6 @@ func validateDevcontainer(where string, t WorkspaceTemplate) error {
 	if strings.TrimSpace(dc.CacheRepo) == "" {
 		return fmt.Errorf("%s: devcontainer.cache_repo is required — without a layer cache registry every student rebuilds the devcontainer from scratch on first start", where)
 	}
-	// The IDE is injected into the image envbuilder builds; only the OpenVSCode
-	// bundle is relocatable enough for that today.
-	if t.IDE != "" && t.IDE != workspace.IDEOpenVSCode {
-		return fmt.Errorf("%s: devcontainer.enabled supports ide %q only, got %q", where, workspace.IDEOpenVSCode, t.IDE)
-	}
 	return nil
 }
 

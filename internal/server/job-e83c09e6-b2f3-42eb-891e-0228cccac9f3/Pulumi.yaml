@@ -1,3 +1,0 @@
-name: easylab
-runtime: go
-main: /Users/yodamad/work/gitlab/workshops/lab-as-code/internal/server

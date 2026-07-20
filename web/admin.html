@@ -591,6 +591,15 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label for="devcontainer_ide">IDE</label>
+                                    <select id="devcontainer_ide">
+                                        <option value="openvscode">OpenVSCode Server (silent open)</option>
+                                        <option value="code-server">code-server (sudo/apt for setup scripts)</option>
+                                    </select>
+                                    <small>The IDE is injected into the image the devcontainer builds, so this is independent of the devcontainer's own base image. The devcontainer must be built on a glibc base — the injected IDE cannot run on Alpine/musl.</small>
+                                </div>
+
+                                <div class="form-group">
                                     <label for="devcontainer_git_auth_secret">Git credential for students (Optional)</label>
                                     <select id="devcontainer_git_auth_secret" class="template-git-cred-select">
                                         <option value="">None</option>

@@ -525,3 +525,39 @@ func TestErrDevcontainerClone_MentionsTheToken(t *testing.T) {
 	assert.NotContains(t, errDevcontainerClone.Error(), "without credentials")
 	assert.Contains(t, errDevcontainerClone.Error(), "access token")
 }
+
+func TestDetectDevcontainer_IDEIsCarriedIntoTheTemplate(t *testing.T) {
+	t.Parallel()
+
+	got := postDevcontainerUpload(t, "devcontainer.json", []byte(`{"name":"Rust","image":"rust:1"}`), url.Values{
+		"git_repo":   {"https://gitlab.com/org/workshop.git"},
+		"cache_repo": {"registry.example.com/cache"},
+		"ide":        {"code-server"},
+	})
+
+	// The IDE is injected onto a volume the build leaves alone, so it is the admin's
+	// choice rather than anything devcontainer.json dictates — and the generated
+	// template has to carry it, since nothing downstream can infer it.
+	assert.Contains(t, got.TemplatesYAML, "ide: code-server")
+
+	templates, err := parseWorkspaceTemplatesYAML(got.TemplatesYAML)
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	assert.Equal(t, "code-server", templates[0].IDE)
+}
+
+func TestDetectDevcontainer_NoIDESelectionStaysUnset(t *testing.T) {
+	t.Parallel()
+
+	got := postDevcontainerUpload(t, "devcontainer.json", []byte(`{"name":"Rust","image":"rust:1"}`), url.Values{
+		"git_repo":   {"https://gitlab.com/org/workshop.git"},
+		"cache_repo": {"registry.example.com/cache"},
+	})
+
+	// An older client that posts no ide must still round-trip: an empty value is
+	// omitted from the YAML and resolves to the default IDE at the backend.
+	templates, err := parseWorkspaceTemplatesYAML(got.TemplatesYAML)
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	assert.Empty(t, templates[0].IDE)
+}

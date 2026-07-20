@@ -104,6 +104,27 @@ func TestParseWorkspaceTemplatesYAML(t *testing.T) {
 			}},
 		},
 		{
+			// Both IDEs are injected onto a volume the build leaves alone, so
+			// code-server is as valid here as the default.
+			name: "devcontainer with code-server",
+			input: `workspace_templates:
+  - name: default
+    ide: code-server
+    git_repo: https://gitlab.com/org/workshop.git
+    devcontainer:
+      enabled: true
+      cache_repo: registry.example.com/cache`,
+			expected: []WorkspaceTemplate{{
+				Name:    "default",
+				IDE:     "code-server",
+				GitRepo: "https://gitlab.com/org/workshop.git",
+				Devcontainer: &DevcontainerConfig{
+					Enabled:   true,
+					CacheRepo: "registry.example.com/cache",
+				},
+			}},
+		},
+		{
 			name: "devcontainer block",
 			input: `workspace_templates:
   - name: go-workshop
@@ -301,17 +322,6 @@ func TestParseWorkspaceTemplatesYAML_Errors(t *testing.T) {
     devcontainer:
       enabled: true`,
 			wantInErr: "cache_repo is required",
-		},
-		{
-			name: "devcontainer with code-server has no relocatable IDE bundle",
-			input: `workspace_templates:
-  - name: default
-    ide: code-server
-    git_repo: https://gitlab.com/org/workshop.git
-    devcontainer:
-      enabled: true
-      cache_repo: registry.example.com/cache`,
-			wantInErr: `supports ide "openvscode" only`,
 		},
 	}
 

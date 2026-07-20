@@ -225,6 +225,13 @@ Choose **From a devcontainer** at the top of the **Templates** step:
 The import is a starting point, not a black box — what it produces is ordinary
 template YAML you can change.
 
+The **IDE** picker applies here as it does for a hand-built template: the image
+the devcontainer builds carries no IDE, so the one you choose is injected into
+it. This is independent of the devcontainer's own base image, with one catch —
+that base must be **glibc**-based, since neither IDE's bundled Node runs on
+Alpine/musl. If the workspace container exits with `no such file or directory`,
+this is why.
+
 !!! danger "A cache registry is required"
     Devcontainer templates must set `cache_repo`. Layers are cached there and
     pushed after the first build, so the first workspace pays for the build and

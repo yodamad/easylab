@@ -430,9 +430,31 @@ workspace_templates:
 | `fallback_image` | string | Used when the devcontainer names neither an image nor a Dockerfile. |
 | `insecure` | bool | Skip TLS verification when cloning and pulling. |
 
-Only `ide: openvscode` (the default) is supported in this mode: the IDE is
-injected into the image that gets built, and only the OpenVSCode bundle is
-relocatable enough for that.
+The template's own `ide` key applies here too — see the constraints below.
+
+Both IDEs work in this mode. The image the devcontainer builds contains no IDE
+of its own, so the one you pick is copied onto a volume the build is told to
+leave alone, and started from there. That makes `ide` independent of the
+devcontainer's own base image — but it does impose three constraints, all of
+which apply to **either** IDE:
+
+- **The base image must be glibc-based.** Both bundles ship a dynamically
+  linked Node, which cannot run on Alpine/musl. The failure is misleading: the
+  workspace container exits with `no such file or directory` even though the
+  binary is plainly there.
+- **The devcontainer's user needs a writable `$HOME`.** Each IDE stores its
+  user data and extensions under the home directory of the user the
+  devcontainer runs as. When that is unwritable, extension installs are skipped
+  quietly and the IDE then fails to start — so an unexplained "my extensions
+  are missing" is worth checking here first.
+- **Set `disk_size`.** It provisions the volume holding the student's files,
+  which is what makes the workspace folder writable by the usual uid-1000
+  devcontainer users (`vscode`, `node`, `coder`). Without it, the folder can end
+  up owned by root and the student cannot save.
+
+Note the two IDEs authenticate differently, exactly as they do outside
+devcontainer mode: OpenVSCode opens silently through a token in the URL, while
+code-server presents a login page taking the workspace password.
 
 !!! note "A private devcontainer repo needs `git_auth_secret`"
     The devcontainer is built inside the pod, and the builder clones the repo
