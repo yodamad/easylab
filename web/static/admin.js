@@ -931,6 +931,32 @@ function pollJobStatus(jobId, container) {
         });
 }
 
+function retryJob(jobId) {
+    // Send POST request to retry endpoint
+    fetch('/api/jobs/' + encodeURIComponent(jobId) + '/retry', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        }
+    })
+    .then(response => {
+        if (response.ok) {
+            // Redirect to admin page to view retry progress
+            window.location.href = '/admin?job=' + encodeURIComponent(jobId);
+        } else {
+            // Handle error
+            response.text().then(text => {
+                console.error('Retry failed:', response.status, text);
+                alert('Failed to retry job: ' + response.status);
+            });
+        }
+    })
+    .catch(error => {
+        console.error('Retry error:', error);
+        alert('Error retrying job: ' + error.message);
+    });
+}
+
 function startPolling() {
     const responseDiv = document.getElementById('form-response');
     const jobStatusDiv = responseDiv.querySelector('[id^="job-status"]');

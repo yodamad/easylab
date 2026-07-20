@@ -999,8 +999,8 @@ func (h *Handler) GetJobStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Show retry button if job failed
 	if status == JobStatusFailed {
-		statusHTML.WriteString(`<form hx-post="/api/jobs/` + jobID + `/retry" hx-target="#job-status" hx-swap="outerHTML" style="display: inline-block; margin-left: 1rem;">`)
-		statusHTML.WriteString(`<button type="submit" class="btn btn-primary">`)
+		statusHTML.WriteString(`<form style="display: inline-block; margin-left: 1rem;">`)
+		statusHTML.WriteString(`<button type="button" class="btn btn-primary" onclick="retryJob('` + jobID + `')">`)
 		statusHTML.WriteString(`<span class="btn-icon">🔄</span> Retry Job`)
 		statusHTML.WriteString(`</button>`)
 		statusHTML.WriteString(`</form>`)
