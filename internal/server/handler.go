@@ -1287,9 +1287,13 @@ func (h *Handler) ListLabTemplates(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(options)
 }
 
-// UploadTemplateToLab adds a new workspace template (image + optional git repo +
-// resources) to an existing lab's configuration. The route keeps its historical
-// name for backward compatibility; it no longer uploads Terraform files.
+// UploadTemplateToLab appends one or more workspace templates to an existing lab's
+// configuration. It accepts the same payload the create-lab wizard sends — the
+// "Build with a form" fields (template_N_*), a "Paste YAML" document
+// (templates_yaml), or a devcontainer import (which the client turns into YAML) —
+// and falls back to the legacy flat template_* fields for older callers. The route
+// keeps its historical name for backward compatibility; it no longer uploads
+// Terraform files.
 func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1318,20 +1322,82 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := r.ParseForm(); err != nil {
-		log.Printf("Failed to parse form: %v", err)
+	// The drawer posts multipart FormData; ErrNotMultipart just means an older
+	// urlencoded caller, which ParseForm (called below via getFormValue) handles.
+	if err := r.ParseMultipartForm(32 << 20); err != nil && err != http.ErrNotMultipart {
+		log.Printf("Failed to parse form for lab %s: %v", jobID, err)
 		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
 		return
 	}
 
-	templateName := strings.TrimSpace(r.FormValue("template_name"))
-	if templateName == "" {
+	templates, err := templatesFromUploadRequest(r)
+	if err != nil {
+		// Resolve/parse failures are user-facing validation messages (bad YAML,
+		// bad URL) — safe to return and useful to the admin.
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(templates) == 0 {
 		http.Error(w, "template_name is required", http.StatusBadRequest)
 		return
 	}
+	if err := validateWorkspaceTemplates(templates); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
+	// Append to the lab config, rejecting a name that clashes with an existing
+	// template or another in the same batch, then persist.
+	var dupName string
+	h.updateJobConfig(jobID, func(config *LabConfig) {
+		existing := make(map[string]bool, len(config.WorkspaceTemplates))
+		for _, t := range config.WorkspaceTemplates {
+			existing[t.Name] = true
+		}
+		for _, t := range templates {
+			if existing[t.Name] {
+				dupName = t.Name
+				return
+			}
+			existing[t.Name] = true
+		}
+		config.WorkspaceTemplates = append(config.WorkspaceTemplates, templates...)
+	})
+	if dupName != "" {
+		http.Error(w, fmt.Sprintf("A template named %q already exists", dupName), http.StatusConflict)
+		return
+	}
+	if err := h.jobManager.SaveJob(jobID); err != nil {
+		log.Printf("Failed to persist templates for lab %s: %v", jobID, err)
+	}
+
+	names := make([]string, len(templates))
+	for i, t := range templates {
+		names[i] = t.Name
+	}
+	w.Header().Set("Content-Type", "application/json")
+	// "template" (first name) is kept for backward compatibility with older clients.
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "template": names[0], "templates": names})
+}
+
+// templatesFromUploadRequest resolves the workspace templates to append to a lab.
+// It prefers the create-lab wizard's payload (templates_mode + template_N_* fields,
+// or templates_yaml) so the "Add Template" drawer matches lab creation, and falls
+// back to the legacy flat template_* fields so older callers keep working.
+func templatesFromUploadRequest(r *http.Request) ([]WorkspaceTemplate, error) {
+	if getFormValue(r, "template_0_name") != "" ||
+		getFormValue(r, "templates_mode") != "" ||
+		getFormValue(r, "templates_yaml") != "" {
+		return workspaceTemplatesFromRequest(r)
+	}
+
+	// Legacy: a single template described by flat template_* fields.
+	name := strings.TrimSpace(r.FormValue("template_name"))
+	if name == "" {
+		return nil, nil
+	}
 	tmpl := WorkspaceTemplate{
-		Name:          templateName,
+		Name:          name,
 		IDE:           strings.TrimSpace(r.FormValue("template_ide")),
 		Image:         strings.TrimSpace(r.FormValue("template_image")),
 		GitRepo:       strings.TrimSpace(r.FormValue("template_git_repo")),
@@ -1345,31 +1411,9 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 		Extensions:    splitList(r.FormValue("template_extensions")),
 	}
 	if tmpl.GitRepo != "" && !validateURL(tmpl.GitRepo) {
-		http.Error(w, "Invalid git repository URL", http.StatusBadRequest)
-		return
+		return nil, fmt.Errorf("Invalid git repository URL")
 	}
-
-	// Append the template to the lab config (rejecting duplicate names), then persist.
-	var dupErr bool
-	h.updateJobConfig(jobID, func(config *LabConfig) {
-		for _, t := range config.WorkspaceTemplates {
-			if t.Name == templateName {
-				dupErr = true
-				return
-			}
-		}
-		config.WorkspaceTemplates = append(config.WorkspaceTemplates, tmpl)
-	})
-	if dupErr {
-		http.Error(w, "A template with this name already exists", http.StatusConflict)
-		return
-	}
-	if err := h.jobManager.SaveJob(jobID); err != nil {
-		log.Printf("Failed to persist template for lab %s: %v", jobID, err)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "template": templateName})
+	return []WorkspaceTemplate{tmpl}, nil
 }
 
 // ListLabs returns a list of completed jobs (labs) available for workspace requests
@@ -2573,20 +2617,21 @@ func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
 
 	// Prepare lab data for template (without sensitive info)
 	type LabDisplay struct {
-		ID                     string
-		IDShort                string
-		Status                 string
-		CreatedAt              string
-		UpdatedAt              string
-		StackName              string
-		IsDryRun               bool
-		HasError               bool
-		ErrorMsg               string
-		HasKubeconfig          bool
-		IsDestroyed            bool
-		WorkspaceLifetimeHours int
-		LabDeletionDate        string
-		HasDeletionDate        bool
+		ID                        string
+		IDShort                   string
+		Status                    string
+		CreatedAt                 string
+		UpdatedAt                 string
+		StackName                 string
+		IsDryRun                  bool
+		HasError                  bool
+		ErrorMsg                  string
+		HasKubeconfig             bool
+		IsDestroyed               bool
+		WorkspaceLifetimeHours    int
+		LabDeletionDate           string
+		HasDeletionDate           bool
+		WorkspaceTemplateNamesCSV string
 	}
 
 	labsDisplay := make([]LabDisplay, 0, len(allJobs))
@@ -2614,23 +2659,30 @@ func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
 			labDeletionDate = job.Config.LabDeletionDate.Format("Jan 02, 2006 at 15:04")
 			hasLabDeletionDate = true
 		}
+		var templateNames []string
+		if job.Config != nil {
+			for _, t := range job.Config.WorkspaceTemplates {
+				templateNames = append(templateNames, t.Name)
+			}
+		}
 		job.mu.RUnlock()
 
 		labsDisplay = append(labsDisplay, LabDisplay{
-			ID:                     job.ID,
-			IDShort:                shortenLabID(job.ID),
-			Status:                 status,
-			CreatedAt:              createdAt,
-			UpdatedAt:              updatedAt,
-			StackName:              stackName,
-			IsDryRun:               isDryRun,
-			HasError:               hasError,
-			ErrorMsg:               errorMsg,
-			HasKubeconfig:          hasKubeconfig,
-			IsDestroyed:            isDestroyed,
-			WorkspaceLifetimeHours: workspaceLifetimeHours,
-			LabDeletionDate:        labDeletionDate,
-			HasDeletionDate:        hasLabDeletionDate,
+			ID:                        job.ID,
+			IDShort:                   shortenLabID(job.ID),
+			Status:                    status,
+			CreatedAt:                 createdAt,
+			UpdatedAt:                 updatedAt,
+			StackName:                 stackName,
+			IsDryRun:                  isDryRun,
+			HasError:                  hasError,
+			ErrorMsg:                  errorMsg,
+			HasKubeconfig:             hasKubeconfig,
+			IsDestroyed:               isDestroyed,
+			WorkspaceLifetimeHours:    workspaceLifetimeHours,
+			LabDeletionDate:           labDeletionDate,
+			HasDeletionDate:           hasLabDeletionDate,
+			WorkspaceTemplateNamesCSV: strings.Join(templateNames, ", "),
 		})
 	}
 
@@ -3002,6 +3054,37 @@ func (h *Handler) DestroyStack(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, fmt.Sprintf("/admin?job=%s", jobID), http.StatusSeeOther)
 }
 
+// parseRecreateDeletionDate reads the deletion schedule the admin entered in the
+// recreate prompt. A blank date means "no automatic deletion" and returns
+// (nil, nil). A date is rejected unless it is in the future: the destroyed lab's
+// original date is already in the past, and reusing any past date would make the
+// recreated lab vanish on the very next cleanup tick — the bug this prompt exists
+// to prevent. Field names mirror the creation wizard (lab_deletion_date /
+// lab_deletion_time).
+func parseRecreateDeletionDate(r *http.Request) (*time.Time, error) {
+	dateStr := strings.TrimSpace(r.FormValue("lab_deletion_date"))
+	if dateStr == "" {
+		return nil, nil
+	}
+	d, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		return nil, fmt.Errorf("the deletion date is not a valid date")
+	}
+	hour, minute := 23, 59
+	if timeStr := strings.TrimSpace(r.FormValue("lab_deletion_time")); timeStr != "" {
+		t, err := time.Parse("15:04", timeStr)
+		if err != nil {
+			return nil, fmt.Errorf("the deletion time is not a valid time")
+		}
+		hour, minute = t.Hour(), t.Minute()
+	}
+	deletion := time.Date(d.Year(), d.Month(), d.Day(), hour, minute, 0, 0, time.Local)
+	if !deletion.After(time.Now()) {
+		return nil, fmt.Errorf("the deletion date must be in the future")
+	}
+	return &deletion, nil
+}
+
 // RecreateLab handles recreating a lab from a destroyed job
 func (h *Handler) RecreateLab(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -3054,6 +3137,20 @@ func (h *Handler) RecreateLab(w http.ResponseWriter, r *http.Request) {
 				<p>This job does not have configuration data available for recreation.</p>
 			</div>`)
 		return
+	}
+
+	// A lab with a scheduled deletion date was destroyed with that date now in the
+	// past. Reusing it would delete the recreated lab on the very next cleanup tick,
+	// so the admin re-enters a fresh date in the recreate prompt. A blank date
+	// disables automatic deletion; a past date is rejected.
+	if config.LabDeletionDate != nil {
+		newDeletion, err := parseRecreateDeletionDate(r)
+		if err != nil {
+			log.Printf("Invalid recreate deletion date for job %s: %v", jobID, err)
+			h.renderHTMLError(w, "Invalid Deletion Date", err.Error())
+			return
+		}
+		config.LabDeletionDate = newDeletion
 	}
 
 	// Get OVH credentials only when not using existing cluster (BYOK doesn't need them)

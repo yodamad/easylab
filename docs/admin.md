@@ -14,7 +14,7 @@ As an admin (trainer, speaker, ...), you have access to the admin space to manag
 * [x] Set/update credentials for the cloud providers
 * [x] Manage your labs
     * [x] See logs
-    * [x] Retrieve workspace access info (base URL, namespace) for completed labs
+    * [x] Retrieve endpoint info (workspace base URL, namespace) for completed labs
     * [x] Delete a lab
     * [x] Recreate a destroyed lab with the same configuration
     * [x] List workspaces
@@ -381,6 +381,9 @@ Set a **Date** (and optionally a **Time**) for the entire lab to be automaticall
 !!! note
     The cleanup service also runs scheduled lab deletion checks at the same interval as workspace cleanup. Set `CLEANUP_INTERVAL_MINUTES` to a lower value if you need finer-grained precision (default is 5 minutes).
 
+!!! note "Recreating a lab that had a deletion date"
+    When you **Recreate** a lab whose scheduled deletion date has already passed, EasyLab prompts you for a **new** deletion date before recreating. This prevents the recreated lab from being destroyed immediately by the cleanup service. Enter a future date, or leave it blank to keep the recreated lab running with no scheduled deletion.
+
 ## Dry run (preview before create)
 
 Before creating a lab, you can run a **dry run** to preview what Pulumi would do without actually provisioning resources. This is useful to validate configuration and catch errors early.
@@ -419,12 +422,35 @@ You can see all the labs you have created with following information:
 * **Type** — Real run (🚀) or Dry run (🔍)
 * **Access to the creation logs**
 * **Access to the kubeconfig file** (for completed labs)
-* **Workspace access** — For completed labs, a **Workspace access** button opens a modal with the lab's base URL and the namespace student workspaces run in.
+* **Lab endpoint info** — For completed labs, a **Lab endpoint info** button opens a read-only modal with the workspace base URL and the namespace student workspaces run in. Both values are copyable. An empty base URL means workspaces are only reachable in-cluster. This is reference information only — students reach their own workspace from the student portal.
 * **Actions** — Destroy a lab; **Recreate** a destroyed lab with the same configuration (same workspace templates, options, etc.)
 * **List of workspaces** created for this lab — delete workspaces one by one or in bulk
 * **Cleanup** - Display the cleanup policy for the lab (*i.e. after how many hours/days the workspaces will be deleted*)
 
 ![Lab Workspaces](screens/list-workspaces.png){width=350}
+
+### Add a template to an existing lab
+
+Completed labs have an **Add Template** action that opens a side drawer for appending
+a workspace template without recreating the lab. It mirrors the wizard's **Workspace
+Templates** step, so you define the workspace the same three ways:
+
+* **Build with a form** — fill in the template name and git repository, with an
+  **Advanced options** section for image, CPU/memory/disk, startup script, dotfiles,
+  extensions, environment variables, sidecars, and mounts.
+* **From a devcontainer** — point at a workshop repository (or upload a
+  `devcontainer.json` / repository `.zip`); EasyLab reads the devcontainer, generates
+  the template YAML, and opens it for review before you add it.
+* **Paste YAML** — write (or **Validate**, or **Insert skeleton**) the template YAML
+  directly. The document may define more than one template, and all are appended.
+
+The drawer's context bar names the lab and lists the templates it already has, so a
+duplicate name is visible before you submit (a clash is rejected). On success a toast
+confirms the addition and the list refreshes.
+
+> Credentials for private registries and repositories are configured when the lab is
+> created (see below). A template added here can only reference a credential that
+> already exists on the lab.
 
 ## Lab credentials (private registries and repositories)
 

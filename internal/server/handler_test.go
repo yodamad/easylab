@@ -941,6 +941,95 @@ func TestHandler_RecreateLab_NotDestroyed(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "not destroyed")
 }
 
+func TestParseRecreateDeletionDate(t *testing.T) {
+	t.Parallel()
+
+	future := time.Now().Add(48 * time.Hour)
+	past := time.Now().Add(-48 * time.Hour)
+
+	tests := []struct {
+		name    string
+		date    string
+		time    string
+		wantNil bool
+		wantErr bool
+	}{
+		{name: "blank disables deletion", date: "", wantNil: true},
+		{name: "future date accepted", date: future.Format("2006-01-02"), time: "23:59"},
+		{name: "future date without time defaults to end of day", date: future.Format("2006-01-02")},
+		{name: "past date rejected", date: past.Format("2006-01-02"), time: "23:59", wantErr: true},
+		{name: "malformed date rejected", date: "not-a-date", wantErr: true},
+		{name: "malformed time rejected", date: future.Format("2006-01-02"), time: "99:99", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			form := url.Values{}
+			if tt.date != "" {
+				form.Set("lab_deletion_date", tt.date)
+			}
+			if tt.time != "" {
+				form.Set("lab_deletion_time", tt.time)
+			}
+			req := httptest.NewRequest("POST", "/api/labs/recreate", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+			got, err := parseRecreateDeletionDate(req)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			if tt.wantNil {
+				assert.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			assert.True(t, got.After(time.Now()), "expected a future deletion date")
+		})
+	}
+}
+
+// Recreating a lab whose deletion date is being reset must reject a past date so
+// the recreated lab is not destroyed on the very next cleanup tick — the whole
+// point of prompting for a new date. The rejection happens before any job is
+// created.
+func TestHandler_RecreateLab_RejectsPastDeletionDate(t *testing.T) {
+	jm := NewJobManager("")
+	oldDate := time.Now().Add(-72 * time.Hour)
+	id := jm.CreateJob(&LabConfig{StackName: "test", UseExistingCluster: true, LabDeletionDate: &oldDate})
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusDestroyed))
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	before := len(jm.GetAllJobs())
+
+	form := url.Values{}
+	form.Set("job_id", id)
+	form.Set("lab_deletion_date", time.Now().Add(-24*time.Hour).Format("2006-01-02"))
+	req := httptest.NewRequest("POST", "/api/labs/recreate", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	h.RecreateLab(w, req)
+
+	assert.Contains(t, w.Body.String(), "future")
+	assert.Equal(t, before, len(jm.GetAllJobs()), "no new job should be created when the date is invalid")
+}
+
+// Leaving the deletion date blank on recreate is the supported way to keep the
+// recreated lab running: the reset clears the old (past) date rather than reusing it.
+func TestParseRecreateDeletionDate_BlankClearsSchedule(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest("POST", "/api/labs/recreate", strings.NewReader(""))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	got, err := parseRecreateDeletionDate(req)
+	require.NoError(t, err)
+	assert.Nil(t, got)
+}
+
 func TestHandler_ServeLabsList(t *testing.T) {
 	jm := NewJobManager("")
 	jm.CreateJob(&LabConfig{StackName: "lab-a"})

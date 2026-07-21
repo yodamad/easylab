@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
 	"easylab/internal/providers/workspace"
 
@@ -373,6 +374,29 @@ func TestRenderLabSecrets_EscapesNames(t *testing.T) {
 		Type: workspace.AuthSecretGit,
 	}}, nil)
 	assert.NotContains(t, out, "<script>")
+}
+
+// A lab with no scheduled deletion date must not get a reschedule prompt on
+// recreate — an empty fragment is what lets the client recreate without prompting.
+func TestRenderRecreateDeletionDate_NoDate(t *testing.T) {
+	t.Parallel()
+	assert.Empty(t, renderRecreateDeletionDate(nil))
+}
+
+// A lab that had a deletion date gets a reschedule section carrying the old date
+// (for context) and blank, future-only inputs the admin fills in before recreation.
+func TestRenderRecreateDeletionDate_RendersSection(t *testing.T) {
+	t.Parallel()
+
+	old := time.Date(2020, time.March, 4, 9, 30, 0, 0, time.Local)
+	out := renderRecreateDeletionDate(&old)
+
+	assert.Contains(t, out, `name="lab_deletion_date"`)
+	assert.Contains(t, out, `name="lab_deletion_time"`)
+	// The old date is shown so the admin knows why they are being asked.
+	assert.Contains(t, out, "Mar 04, 2020")
+	// The date input rejects past days client-side via a today floor.
+	assert.Contains(t, out, fmt.Sprintf(`min="%s"`, time.Now().Format("2006-01-02")))
 }
 
 // A missing credential name is attacker-influenced (it comes from the template

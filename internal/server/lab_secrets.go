@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"easylab/internal/providers/workspace"
 )
@@ -187,13 +188,17 @@ func (h *Handler) ServeRecreateCredentials(w http.ResponseWriter, r *http.Reques
 	}
 	job.mu.RLock()
 	var templates []WorkspaceTemplate
+	var deletionDate *time.Time
 	if job.Config != nil {
 		templates = job.Config.GetWorkspaceTemplates()
+		deletionDate = job.Config.LabDeletionDate
 	}
 	job.mu.RUnlock()
 
 	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprint(w, renderRecreateCredentials(referencedCredentials(templates)))
+	// Credentials first, then the reschedule-deletion section. Either may be empty;
+	// an entirely empty response tells the client to recreate without prompting.
+	fmt.Fprint(w, renderRecreateCredentials(referencedCredentials(templates))+renderRecreateDeletionDate(deletionDate))
 }
 
 // renderRecreateCredentials builds the recreate prompt's rows. Names come from
@@ -205,6 +210,7 @@ func renderRecreateCredentials(creds []referencedCredential) string {
 	}
 
 	var b strings.Builder
+	b.WriteString(`<p class="wizard-credentials-intro">Recreating builds a new cluster, so the credentials the old one held are gone. Supply the tokens again — leaving one blank skips it, and it can be added later from the lab's Workspaces page.</p>`)
 	for _, c := range creds {
 		name := template.HTMLEscapeString(c.Name)
 		isRegistry := c.Kind == workspace.AuthSecretRegistry
@@ -213,20 +219,47 @@ func renderRecreateCredentials(creds []referencedCredential) string {
 			kindLabel = "Registry"
 		}
 
-		b.WriteString(`<div class="credential-row">`)
+		b.WriteString(`<div class="credential-row credential-row-stacked">`)
 		fmt.Fprintf(&b, `<input type="hidden" name="secret_kind" value="%s">`, template.HTMLEscapeString(c.Kind))
 		fmt.Fprintf(&b, `<input type="hidden" name="secret_name" value="%s">`, name)
-		fmt.Fprintf(&b, `<span class="secret-name">%s</span><span class="secret-kind">%s</span>`, name, kindLabel)
+		fmt.Fprintf(&b, `<div class="credential-row-title"><span class="secret-name">%s</span><span class="secret-kind">%s</span></div>`, name, kindLabel)
 		if isRegistry {
 			b.WriteString(`<div class="form-group"><label>Server</label><input type="text" name="secret_server" placeholder="registry.example.com"></div>`)
 			b.WriteString(`<div class="form-group"><label>Username</label><input type="text" name="secret_username" placeholder="user" autocomplete="off"></div>`)
 		} else {
+			// A git row still submits an (empty) secret_server so the parsed form
+			// arrays stay index-aligned with the registry rows — parseWizardSecrets
+			// zips them positionally, one entry per row.
+			b.WriteString(`<input type="hidden" name="secret_server" value="">`)
 			// Git username defaults to oauth2 server-side; keep it editable but not required.
 			b.WriteString(`<div class="form-group"><label>Username</label><input type="text" name="secret_username" placeholder="oauth2" autocomplete="off"></div>`)
 		}
 		b.WriteString(`<div class="form-group"><label>Token</label><input type="password" name="secret_token" autocomplete="off"></div>`)
 		b.WriteString(`</div>`)
 	}
+	return b.String()
+}
+
+// renderRecreateDeletionDate builds the recreate prompt's "reschedule deletion"
+// section, shown only when the destroyed lab had a scheduled deletion date. That
+// date is now in the past, and reusing it would delete the recreated lab on the
+// next cleanup tick, so the admin must pick a new one (or leave it blank to keep
+// the lab running). Field names match the creation wizard so RecreateLab parses
+// them the same way. An empty return means the lab had no deletion date.
+func renderRecreateDeletionDate(old *time.Time) string {
+	if old == nil {
+		return ""
+	}
+	today := time.Now().Format("2006-01-02")
+	prev := template.HTMLEscapeString(old.Format("Jan 02, 2006 at 15:04"))
+
+	var b strings.Builder
+	b.WriteString(`<div class="credential-row credential-row-stacked">`)
+	b.WriteString(`<div class="credential-row-title"><span class="secret-name">Scheduled deletion</span></div>`)
+	fmt.Fprintf(&b, `<p class="recreate-deletion-note">This lab was set to auto-delete on %s, which has passed. Choose a new date, or leave it blank to keep the lab running.</p>`, prev)
+	fmt.Fprintf(&b, `<div class="form-group"><label>Deletion date</label><input type="date" name="lab_deletion_date" min="%s"></div>`, today)
+	b.WriteString(`<div class="form-group"><label>Deletion time</label><input type="time" name="lab_deletion_time" placeholder="23:59"></div>`)
+	b.WriteString(`</div>`)
 	return b.String()
 }
 

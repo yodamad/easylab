@@ -3821,6 +3821,27 @@ select.loading {
     font-weight: 500;
 }
 
+/* The names already on the lab, shown under the target chip so a duplicate name
+   is visible before it is submitted. */
+.ut-drawer-context {
+    flex-wrap: wrap;
+}
+
+.ut-drawer-existing {
+    flex-basis: 100%;
+    color: var(--text-light);
+}
+
+/* The create-lab Step 6 choice cards are laid out for full page width; inside the
+   narrow drawer panel, stack them so each card keeps its title and description. */
+.ut-panel .button-group {
+    flex-wrap: wrap;
+}
+
+.ut-panel .source-button {
+    flex: 1 1 100%;
+}
+
 .ut-panel-header {
     display: flex;
     align-items: center;
@@ -5944,6 +5965,31 @@ body.admin-page .wizard-footer {
 
 .credential-row .form-group {
     margin-bottom: 0;
+}
+
+/* Recreate prompt rows: the credential name is a title, its fields stacked below. */
+.credential-row-stacked {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.credential-row-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.credential-row-stacked .form-group input {
+    width: 100%;
+}
+
+/* Explanatory note for the recreate prompt's reschedule-deletion section */
+.recreate-deletion-note {
+    font-size: 0.8rem;
+    opacity: 0.8;
+    line-height: 1.5;
+    margin: 0 0 0.75rem;
 }
 
 /* Pending credentials banner in the lab secrets panel */

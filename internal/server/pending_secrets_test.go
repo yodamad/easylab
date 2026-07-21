@@ -62,6 +62,24 @@ func TestParseWizardSecrets(t *testing.T) {
 			},
 		},
 		{
+			// The recreate prompt lists git credentials before registry ones and
+			// submits an empty secret_server for each git row, so the parallel
+			// arrays stay index-aligned and the registry row's server is not
+			// misread as blank. Regression guard for "regcred needs a server".
+			name: "git-then-registry stays aligned when the git row carries an empty server",
+			form: url.Values{
+				"secret_kind":     {"git", "registry"},
+				"secret_name":     {"gitcred", "regcred"},
+				"secret_server":   {"", "registry.example.com"},
+				"secret_username": {"", "bob"},
+				"secret_token":    {"gtok", "rtok"},
+			},
+			want: []pendingSecret{
+				{Kind: "git", Name: "gitcred", Username: "oauth2", Token: "gtok"},
+				{Kind: "registry", Name: "regcred", Server: "registry.example.com", Username: "bob", Token: "rtok"},
+			},
+		},
+		{
 			name: "a fully blank row is skipped",
 			form: url.Values{
 				"secret_kind":  {"registry", "git"},
@@ -254,8 +272,9 @@ func TestServeRecreateCredentials(t *testing.T) {
 	assert.Contains(t, body, `value="gitcred"`)
 	assert.Contains(t, body, `value="regcred"`)
 	assert.Contains(t, body, `name="secret_token"`)
-	// The git row carries no server field; the registry row does.
-	assert.Contains(t, body, `name="secret_server"`)
+	// Every row emits a secret_server (an empty hidden one on the git row) so the
+	// parallel form arrays stay index-aligned with parseWizardSecrets.
+	assert.Equal(t, 2, strings.Count(body, `name="secret_server"`))
 }
 
 // A lab whose templates reference no credentials yields an empty prompt, so the
@@ -280,6 +299,23 @@ func TestRenderRecreateCredentials_EscapesNames(t *testing.T) {
 		{Name: `<script>alert(1)</script>`, Kind: workspace.AuthSecretGit},
 	})
 	assert.NotContains(t, out, "<script>")
+}
+
+// Every credential row must emit a secret_server field — a hidden empty one on
+// git rows — so the parallel form arrays parseWizardSecrets zips by index stay
+// aligned. Without this a git row shifts the registry row's server out of range
+// and recreate wrongly rejects it as "needs a server".
+func TestRenderRecreateCredentials_EmitsServerForEveryRow(t *testing.T) {
+	t.Parallel()
+
+	out := renderRecreateCredentials([]referencedCredential{
+		{Name: "gitcred", Kind: workspace.AuthSecretGit},
+		{Name: "regcred", Kind: workspace.AuthSecretRegistry},
+	})
+	assert.Equal(t, 2, strings.Count(out, `name="secret_kind"`))
+	assert.Equal(t, 2, strings.Count(out, `name="secret_server"`), "each row must submit a secret_server so the arrays align")
+	// The git row's server is a hidden empty field, not a visible input.
+	assert.Contains(t, out, `<input type="hidden" name="secret_server" value="">`)
 }
 
 func TestRecreateLab_ParsesTokensIntoPendingStore(t *testing.T) {
