@@ -41,12 +41,9 @@ type Workspace struct {
 	Token string `json:"-"`
 	// IDE is the IDE base this workspace runs. Always "code-server".
 	IDE string `json:"ide"`
-<<<<<<< HEAD
-=======
 	// Template is the workspace template this environment was created from. It is
 	// empty for workspaces created before template attribution was added.
 	Template string `json:"template,omitempty"`
->>>>>>> bcfd3a5 (feat: list templates in a lab)
 	// CreatedAt is the workspace creation time (used for lifetime cleanup).
 	CreatedAt time.Time `json:"created_at"`
 	// UpdatedAt is the last time the workspace's Deployment changed.
