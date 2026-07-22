@@ -294,7 +294,7 @@ func TestHandler_DetectTemplateVariables_WrongMethod(t *testing.T) {
 
 // --- processLabRequest (via CreateLab/DryRunLab) ---
 
-func TestHandler_CreateLab_BYOKNoTemplates(t *testing.T) {
+func TestHandler_CreateLab_BYOKRequiresKubeconfig(t *testing.T) {
 	jm := NewJobManager(t.TempDir())
 	pe := NewPulumiExecutor(jm, t.TempDir())
 	h := NewHandler(jm, pe, NewCredentialsManager(), nil, nil, nil)
@@ -306,7 +306,9 @@ func TestHandler_CreateLab_BYOKNoTemplates(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
 	h.CreateLab(w, req)
-	assert.Contains(t, w.Body.String(), "template")
+	// Workspace templates default automatically, so the first BYOK error is the
+	// missing kubeconfig.
+	assert.Contains(t, w.Body.String(), "Kubeconfig")
 }
 
 func TestHandler_DryRunLab_BYOKNoTemplates(t *testing.T) {
@@ -320,7 +322,7 @@ func TestHandler_DryRunLab_BYOKNoTemplates(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
 	h.DryRunLab(w, req)
-	assert.Contains(t, w.Body.String(), "template")
+	assert.Contains(t, w.Body.String(), "Kubeconfig")
 }
 
 func TestHandler_CreateLab_BYOKGitTemplate_NoKubeconfig(t *testing.T) {
@@ -553,4 +555,46 @@ func TestHandler_RequestWorkspace_MissingEmail(t *testing.T) {
 	h.RequestWorkspace(w, req)
 	// "invalid" is not a valid email, should fail
 	// Can't easily test the success case without Coder
+}
+// The lab's public base URL is resolved through the workspace backend: a lab with
+// no domain of its own is exposed via nip.io on the ingress LoadBalancer IP, which
+// is only known at runtime.
+func TestGetCoderCredentials_BaseURL(t *testing.T) {
+	tests := []struct {
+		name          string
+		labDomain     string
+		routingDomain string
+		routingScheme string
+		wantURL       string
+	}{
+		{"configured domain is served over HTTPS", "lab.example.com", "", "", "https://lab.example.com"},
+		{"domainless lab falls back to nip.io over HTTP", "", "1.2.3.4.nip.io", "http", "http://1.2.3.4.nip.io"},
+		{"no ingress IP means no public URL", "", "", "https", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jm := NewJobManager("")
+			id := jm.CreateJob(&LabConfig{
+				StackName: "test", Domain: tt.labDomain, WorkspaceNamespace: "workshops",
+			})
+			jm.UpdateJobStatus(id, JobStatusCompleted)
+			job, _ := jm.GetJob(id)
+			job.mu.Lock()
+			job.Kubeconfig = "fake-kubeconfig"
+			job.mu.Unlock()
+
+			h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+			useFakeBackend(h, &fakeBackend{routingDomain: tt.routingDomain, routingScheme: tt.routingScheme})
+
+			req := httptest.NewRequest(http.MethodGet, "/api/labs/"+id+"/coder-credentials", nil)
+			w := httptest.NewRecorder()
+			h.GetCoderCredentials(w, req)
+
+			require.Equal(t, http.StatusOK, w.Code)
+			var body map[string]string
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+			assert.Equal(t, tt.wantURL, body["url"])
+			assert.Equal(t, "workshops", body["namespace"])
+		})
+	}
 }

@@ -56,3 +56,6 @@ site/
 
 # Claude
 .claude/
+
+# Test data
+internal/server/job-*

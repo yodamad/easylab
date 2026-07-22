@@ -1,13 +1,11 @@
 package main
 
 import (
-	"easylab/coder"
 	"easylab/k8s"
 	"easylab/ovh"
 	"easylab/utils"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
@@ -50,72 +48,14 @@ func main() {
 			return fmt.Errorf("failed to create Kubernetes provider: %w", err)
 		}
 
-		// Initiliaze Coder elements
-		utils.LogInfo(ctx, "Starting Coder setup...")
-		ns, err := k8s.InitNamespace(ctx, k8sProvider)
-		if err != nil {
+		// Create the namespace student workspaces will be provisioned into.
+		utils.LogInfo(ctx, "Creating workspace namespace...")
+		if _, err = k8s.InitNamespace(ctx, k8sProvider); err != nil {
 			return fmt.Errorf("failed to create namespace: %w", err)
 		}
 
-		coder.SetupDB(ctx, k8sProvider, ns)
-		coder.SetupDBSecret(ctx, k8sProvider, ns)
-		coderRelease, err := coder.SetupCoder(ctx, k8sProvider, ns)
-		if err != nil {
-			return fmt.Errorf("failed to setup coder: %w", err)
-		}
-
-		extIp, err := k8s.GetExternalIP(ctx, kubeCluster.Kubeconfig, coderRelease)
-		if err != nil {
-			return fmt.Errorf("failed to get external IP: %w", err)
-		}
-
-		ctx.Export("coderURL", pulumi.Sprintf("http://%s", extIp))
-
-		coderConfig := coder.InitCoderOutput(ctx, extIp)
-		ctx.Export("coderServerURL", coderConfig.ServerURL)
-		ctx.Export("coderSessionToken", coderConfig.SessionToken)
-		ctx.Export("coderOrganizationID", coderConfig.OrganizationID)
+		ctx.Export("kubeconfig", kubeCluster.Kubeconfig)
 		utils.LogInfo(ctx, "Setup completed successfully!")
-
-		// Check if a template file was uploaded
-		templateFilePath := utils.CoderConfigOptional(ctx, utils.CoderTemplateFilePath)
-		var zipFile string
-
-		if templateFilePath != "" {
-			// Use uploaded template file
-			utils.LogInfo(ctx, "Using uploaded template file: "+templateFilePath)
-			// templateFilePath is relative to job directory (e.g., "template.zip")
-			// Pulumi runs from the job directory, so we need to make it absolute
-			// Get current working directory (should be job directory)
-			cwd, cwdErr := os.Getwd()
-			if cwdErr != nil {
-				return fmt.Errorf("failed to get current working directory: %w", cwdErr)
-			}
-			absTemplatePath := filepath.Join(cwd, templateFilePath)
-			// Verify file exists
-			if _, statErr := os.Stat(absTemplatePath); statErr != nil {
-				return fmt.Errorf("template file not found at %s: %w", absTemplatePath, statErr)
-			}
-			zipFile = absTemplatePath
-		} else {
-			// Use default Git-based template (this is expected behavior when no file is uploaded)
-			utils.LogInfo(ctx, "No template file uploaded, using Git-based template (this is expected)")
-			var gitErr error
-			zipFile, gitErr = utils.CloneFolderFromGitAndZipIt("https://gitlab.com/yodamad-workshops/coder-templates#", "docker", "main")
-			if gitErr != nil {
-				return fmt.Errorf("failed to clone and zip template from Git: %w", gitErr)
-			}
-		}
-
-		nsName := utils.CoderConfigOptional(ctx, utils.CoderNamespace)
-		if nsName == "" {
-			nsName = "coder"
-		}
-		templateOutput := coder.CreateTemplateFromZip(ctx, coderConfig, utils.CoderConfig(ctx, utils.CoderTemplateName), "file://"+zipFile, map[string]string{"namespace": nsName})
-		templateOutput.ApplyT(func(_ interface{}) error {
-			utils.LogInfo(ctx, "Template created successfully!")
-			return nil
-		})
 
 		return nil
 	})

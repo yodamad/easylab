@@ -2,12 +2,15 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"easylab/internal/providers/workspace"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -784,11 +787,11 @@ func TestAtoiForm(t *testing.T) {
 
 func TestGetFormValue(t *testing.T) {
 	tests := []struct {
-		name      string
-		postForm  url.Values
-		form      url.Values
-		key       string
-		want      string
+		name     string
+		postForm url.Values
+		form     url.Values
+		key      string
+		want     string
 	}{
 		{
 			name:     "postForm wins",
@@ -938,6 +941,95 @@ func TestHandler_RecreateLab_NotDestroyed(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "not destroyed")
 }
 
+func TestParseRecreateDeletionDate(t *testing.T) {
+	t.Parallel()
+
+	future := time.Now().Add(48 * time.Hour)
+	past := time.Now().Add(-48 * time.Hour)
+
+	tests := []struct {
+		name    string
+		date    string
+		time    string
+		wantNil bool
+		wantErr bool
+	}{
+		{name: "blank disables deletion", date: "", wantNil: true},
+		{name: "future date accepted", date: future.Format("2006-01-02"), time: "23:59"},
+		{name: "future date without time defaults to end of day", date: future.Format("2006-01-02")},
+		{name: "past date rejected", date: past.Format("2006-01-02"), time: "23:59", wantErr: true},
+		{name: "malformed date rejected", date: "not-a-date", wantErr: true},
+		{name: "malformed time rejected", date: future.Format("2006-01-02"), time: "99:99", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			form := url.Values{}
+			if tt.date != "" {
+				form.Set("lab_deletion_date", tt.date)
+			}
+			if tt.time != "" {
+				form.Set("lab_deletion_time", tt.time)
+			}
+			req := httptest.NewRequest("POST", "/api/labs/recreate", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+			got, err := parseRecreateDeletionDate(req)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			if tt.wantNil {
+				assert.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			assert.True(t, got.After(time.Now()), "expected a future deletion date")
+		})
+	}
+}
+
+// Recreating a lab whose deletion date is being reset must reject a past date so
+// the recreated lab is not destroyed on the very next cleanup tick — the whole
+// point of prompting for a new date. The rejection happens before any job is
+// created.
+func TestHandler_RecreateLab_RejectsPastDeletionDate(t *testing.T) {
+	jm := NewJobManager("")
+	oldDate := time.Now().Add(-72 * time.Hour)
+	id := jm.CreateJob(&LabConfig{StackName: "test", UseExistingCluster: true, LabDeletionDate: &oldDate})
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusDestroyed))
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	before := len(jm.GetAllJobs())
+
+	form := url.Values{}
+	form.Set("job_id", id)
+	form.Set("lab_deletion_date", time.Now().Add(-24*time.Hour).Format("2006-01-02"))
+	req := httptest.NewRequest("POST", "/api/labs/recreate", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	h.RecreateLab(w, req)
+
+	assert.Contains(t, w.Body.String(), "future")
+	assert.Equal(t, before, len(jm.GetAllJobs()), "no new job should be created when the date is invalid")
+}
+
+// Leaving the deletion date blank on recreate is the supported way to keep the
+// recreated lab running: the reset clears the old (past) date rather than reusing it.
+func TestParseRecreateDeletionDate_BlankClearsSchedule(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest("POST", "/api/labs/recreate", strings.NewReader(""))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	got, err := parseRecreateDeletionDate(req)
+	require.NoError(t, err)
+	assert.Nil(t, got)
+}
+
 func TestHandler_ServeLabsList(t *testing.T) {
 	jm := NewJobManager("")
 	jm.CreateJob(&LabConfig{StackName: "lab-a"})
@@ -1050,12 +1142,12 @@ func TestCreateLabConfigFromForm_BasicOVH(t *testing.T) {
 	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Form = map[string][]string{
-		"stack_name":         {"my-stack"},
-		"template_0_name":    {"my-template"},
-		"template_0_source":  {"git"},
-		"coder_admin_email":  {"admin@example.com"},
-		"provider":           {"ovh"},
-		"network_region":     {"GRA7"},
+		"stack_name":        {"my-stack"},
+		"template_0_name":   {"my-template"},
+		"template_0_source": {"git"},
+		"coder_admin_email": {"admin@example.com"},
+		"provider":          {"ovh"},
+		"network_region":    {"GRA7"},
 	}
 	creds := &OVHCredentials{
 		ApplicationKey:    "key",
@@ -1064,7 +1156,7 @@ func TestCreateLabConfigFromForm_BasicOVH(t *testing.T) {
 		ServiceName:       "service",
 		Endpoint:          "ovh-eu",
 	}
-	cfg := h.createLabConfigFromForm(req, creds, nil)
+	cfg := h.createLabConfigFromForm(req, creds)
 	if cfg.StackName != "my-stack" {
 		t.Errorf("StackName = %q, want my-stack", cfg.StackName)
 	}
@@ -1081,7 +1173,7 @@ func TestCreateLabConfigFromForm_BYOK(t *testing.T) {
 		"use_existing_cluster": {"true"},
 		"template_0_name":      {"tmpl"},
 	}
-	cfg := h.createLabConfigFromForm(req, nil, nil)
+	cfg := h.createLabConfigFromForm(req, nil)
 	if !cfg.UseExistingCluster {
 		t.Error("UseExistingCluster should be true for BYOK")
 	}
@@ -1091,10 +1183,10 @@ func TestCreateLabConfigFromForm_AzureProvider(t *testing.T) {
 	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Form = map[string][]string{
-		"stack_name":        {"azure-stack"},
-		"provider":          {"azure"},
-		"azure_location":    {"eastus"},
-		"template_0_name":   {"tmpl"},
+		"stack_name":      {"azure-stack"},
+		"provider":        {"azure"},
+		"azure_location":  {"eastus"},
+		"template_0_name": {"tmpl"},
 	}
 	creds := &AzureCredentials{
 		ClientID:       "client",
@@ -1102,7 +1194,7 @@ func TestCreateLabConfigFromForm_AzureProvider(t *testing.T) {
 		TenantID:       "tenant",
 		SubscriptionID: "sub",
 	}
-	cfg := h.createLabConfigFromForm(req, creds, nil)
+	cfg := h.createLabConfigFromForm(req, creds)
 	if cfg.AzureClientID != "client" {
 		t.Errorf("AzureClientID = %q, want client", cfg.AzureClientID)
 	}
@@ -1117,7 +1209,7 @@ func TestCreateLabConfigFromForm_DefaultStackName(t *testing.T) {
 	req.Form = map[string][]string{
 		"template_0_name": {"tmpl"},
 	}
-	cfg := h.createLabConfigFromForm(req, nil, nil)
+	cfg := h.createLabConfigFromForm(req, nil)
 	if cfg.StackName != "dev" {
 		t.Errorf("default StackName = %q, want dev", cfg.StackName)
 	}
@@ -1132,7 +1224,7 @@ func TestCreateLabConfigFromForm_WorkspaceLifetimeDays(t *testing.T) {
 		"workspace_lifetime_hours": {"3"},
 		"workspace_lifetime_unit":  {"days"},
 	}
-	cfg := h.createLabConfigFromForm(req, nil, nil)
+	cfg := h.createLabConfigFromForm(req, nil)
 	if cfg.WorkspaceLifetimeHours != 72 {
 		t.Errorf("WorkspaceLifetimeHours = %d, want 72 (3 days)", cfg.WorkspaceLifetimeHours)
 	}
@@ -1147,7 +1239,7 @@ func TestCreateLabConfigFromForm_LabDeletionDate_Valid(t *testing.T) {
 		"template_0_name":   {"tmpl"},
 		"lab_deletion_date": {"2030-12-31"},
 	}
-	cfg := h.createLabConfigFromForm(req, nil, nil)
+	cfg := h.createLabConfigFromForm(req, nil)
 	require.NotNil(t, cfg.LabDeletionDate, "LabDeletionDate should be set for a valid date")
 	assert.Equal(t, 2030, cfg.LabDeletionDate.Year())
 	assert.Equal(t, 12, int(cfg.LabDeletionDate.Month()))
@@ -1167,7 +1259,7 @@ func TestCreateLabConfigFromForm_LabDeletionDate_WithTime(t *testing.T) {
 		"lab_deletion_date": {"2030-06-15"},
 		"lab_deletion_time": {"14:30"},
 	}
-	cfg := h.createLabConfigFromForm(req, nil, nil)
+	cfg := h.createLabConfigFromForm(req, nil)
 	require.NotNil(t, cfg.LabDeletionDate)
 	assert.Equal(t, 2030, cfg.LabDeletionDate.Year())
 	assert.Equal(t, 6, int(cfg.LabDeletionDate.Month()))
@@ -1186,7 +1278,7 @@ func TestCreateLabConfigFromForm_LabDeletionDate_InvalidTime(t *testing.T) {
 		"lab_deletion_date": {"2030-06-15"},
 		"lab_deletion_time": {"not-a-time"},
 	}
-	cfg := h.createLabConfigFromForm(req, nil, nil)
+	cfg := h.createLabConfigFromForm(req, nil)
 	require.NotNil(t, cfg.LabDeletionDate, "LabDeletionDate should still be set when only time is invalid")
 	// Falls back to end-of-day default
 	assert.Equal(t, 23, cfg.LabDeletionDate.Hour())
@@ -1202,7 +1294,7 @@ func TestCreateLabConfigFromForm_LabDeletionDate_TimeWithoutDate(t *testing.T) {
 		"template_0_name":   {"tmpl"},
 		"lab_deletion_time": {"09:00"},
 	}
-	cfg := h.createLabConfigFromForm(req, nil, nil)
+	cfg := h.createLabConfigFromForm(req, nil)
 	assert.Nil(t, cfg.LabDeletionDate, "LabDeletionDate should be nil when date is absent even if time is set")
 }
 
@@ -1214,7 +1306,7 @@ func TestCreateLabConfigFromForm_LabDeletionDate_Empty(t *testing.T) {
 		"stack_name":      {"s"},
 		"template_0_name": {"tmpl"},
 	}
-	cfg := h.createLabConfigFromForm(req, nil, nil)
+	cfg := h.createLabConfigFromForm(req, nil)
 	assert.Nil(t, cfg.LabDeletionDate, "LabDeletionDate should be nil when field is absent")
 }
 
@@ -1227,89 +1319,118 @@ func TestCreateLabConfigFromForm_LabDeletionDate_Invalid(t *testing.T) {
 		"template_0_name":   {"tmpl"},
 		"lab_deletion_date": {"not-a-date"},
 	}
-	cfg := h.createLabConfigFromForm(req, nil, nil)
+	cfg := h.createLabConfigFromForm(req, nil)
 	assert.Nil(t, cfg.LabDeletionDate, "LabDeletionDate should be nil when date is invalid")
 }
 
-func TestParseCoderTemplatesFromForm_NoTemplates(t *testing.T) {
+func TestParseWorkspaceTemplatesFromForm_NoTemplates(t *testing.T) {
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Form = make(map[string][]string)
-	templates := parseCoderTemplatesFromForm(req, nil)
+	templates := parseWorkspaceTemplatesFromForm(req)
 	assert.Empty(t, templates)
 }
 
-func TestParseCoderTemplatesFromForm_OneTemplate_Git(t *testing.T) {
+func TestParseWorkspaceTemplatesFromForm_OneTemplate(t *testing.T) {
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Form = map[string][]string{
-		"template_0_name":       {"my-template"},
-		"template_0_source":     {"git"},
-		"template_0_git_repo":   {"https://github.com/example/repo"},
-		"template_0_git_folder": {"coder/"},
-		"template_0_git_branch": {"main"},
+		"template_0_name":      {"my-template"},
+		"template_0_image":     {"codercom/code-server:latest"},
+		"template_0_git_repo":  {"https://github.com/example/repo"},
+		"template_0_cpu":       {"500m"},
+		"template_0_memory":    {"1Gi"},
+		"template_0_disk_size": {"5Gi"},
 	}
-	templates := parseCoderTemplatesFromForm(req, nil)
+	templates := parseWorkspaceTemplatesFromForm(req)
 	assert.Len(t, templates, 1)
 	assert.Equal(t, "my-template", templates[0].Name)
-	assert.Equal(t, "git", templates[0].Source)
+	assert.Equal(t, "codercom/code-server:latest", templates[0].Image)
 	assert.Equal(t, "https://github.com/example/repo", templates[0].GitRepo)
+	assert.Equal(t, "500m", templates[0].CPU)
+	assert.Equal(t, "1Gi", templates[0].Memory)
+	assert.Equal(t, "5Gi", templates[0].DiskSize)
 }
 
-func TestParseCoderTemplatesFromForm_DefaultBranch(t *testing.T) {
+func TestParseWorkspaceTemplatesFromForm_WithEnv(t *testing.T) {
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Form = map[string][]string{
-		"template_0_name":   {"tmpl"},
-		"template_0_source": {"git"},
+		"template_0_name":      {"tmpl"},
+		"template_0_env_name":  {"KEY1", "KEY2"},
+		"template_0_env_value": {"val1", "val2"},
 	}
-	templates := parseCoderTemplatesFromForm(req, nil)
+	templates := parseWorkspaceTemplatesFromForm(req)
 	assert.Len(t, templates, 1)
-	assert.Equal(t, "main", templates[0].GitBranch)
+	assert.Equal(t, "val1", templates[0].Env["KEY1"])
+	assert.Equal(t, "val2", templates[0].Env["KEY2"])
 }
 
-func TestParseCoderTemplatesFromForm_DefaultSourceGit(t *testing.T) {
+func TestParseWorkspaceTemplatesFromForm_GitAuthSecret(t *testing.T) {
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Form = map[string][]string{
-		"template_0_name": {"tmpl"},
+		"template_0_name":            {"tmpl"},
+		"template_0_git_repo":        {"https://gitlab.com/o/r.git"},
+		"template_0_git_auth_secret": {"gitcred"},
 	}
-	templates := parseCoderTemplatesFromForm(req, nil)
+	templates := parseWorkspaceTemplatesFromForm(req)
 	assert.Len(t, templates, 1)
-	assert.Equal(t, "git", templates[0].Source)
+	assert.Equal(t, "gitcred", templates[0].GitAuthSecret)
 }
 
-func TestParseCoderTemplatesFromForm_UploadWithFilePath(t *testing.T) {
+func TestParseWorkspaceTemplatesFromForm_MultipleTemplates(t *testing.T) {
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Form = map[string][]string{
-		"template_0_name":   {"tmpl"},
-		"template_0_source": {"upload"},
+		"template_0_name": {"tmpl-a"},
+		"template_1_name": {"tmpl-b"},
 	}
-	templates := parseCoderTemplatesFromForm(req, []string{"path/to/template.zip"})
-	assert.Len(t, templates, 1)
-	assert.Equal(t, "path/to/template.zip", templates[0].FilePath)
-}
-
-func TestParseCoderTemplatesFromForm_WithVariables(t *testing.T) {
-	req := httptest.NewRequest("POST", "/", nil)
-	req.Form = map[string][]string{
-		"template_0_name":       {"tmpl"},
-		"template_0_source":     {"git"},
-		"template_0_var_name":   {"key1", "key2"},
-		"template_0_var_value":  {"val1", "val2"},
-	}
-	templates := parseCoderTemplatesFromForm(req, nil)
-	assert.Len(t, templates, 1)
-	assert.Equal(t, "val1", templates[0].Variables["key1"])
-	assert.Equal(t, "val2", templates[0].Variables["key2"])
-}
-
-func TestParseCoderTemplatesFromForm_MultipleTemplates(t *testing.T) {
-	req := httptest.NewRequest("POST", "/", nil)
-	req.Form = map[string][]string{
-		"template_0_name":   {"tmpl-a"},
-		"template_0_source": {"git"},
-		"template_1_name":   {"tmpl-b"},
-		"template_1_source": {"upload"},
-	}
-	templates := parseCoderTemplatesFromForm(req, []string{"", "file.zip"})
+	templates := parseWorkspaceTemplatesFromForm(req)
 	assert.Len(t, templates, 2)
+}
+
+func TestParseWorkspaceTemplatesFromForm_RichFields(t *testing.T) {
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"template_0_name":           {"full"},
+		"template_0_ide":            {"code-server"},
+		"template_0_git_branch":     {"dev"},
+		"template_0_git_folder":     {"backend"},
+		"template_0_startup_script": {"sudo apt-get install -y jq"},
+		"template_0_dotfiles_repo":  {"https://github.com/you/dotfiles"},
+		"template_0_extensions":     {"golang.go, ms-python.python"},
+		// two sidecars, index-aligned
+		"template_0_sidecar_name":         {"db", "docker"},
+		"template_0_sidecar_image":        {"postgres:16", "docker:dind"},
+		"template_0_sidecar_ports":        {"5432", "2375"},
+		"template_0_sidecar_env":          {"POSTGRES_PASSWORD=x", "DOCKER_TLS_CERTDIR="},
+		"template_0_sidecar_privileged":   {"false", "true"},
+		"template_0_sidecar_capabilities": {"", "SYS_ADMIN"},
+		// one mount
+		"template_0_mount_type": {"secret"},
+		"template_0_mount_name": {"tls-cert"},
+		"template_0_mount_path": {"/etc/tls"},
+	}
+	templates := parseWorkspaceTemplatesFromForm(req)
+	assert.Len(t, templates, 1)
+	tmpl := templates[0]
+	assert.Equal(t, "code-server", tmpl.IDE)
+	assert.Equal(t, "dev", tmpl.GitBranch)
+	assert.Equal(t, "backend", tmpl.GitFolder)
+	assert.Equal(t, "sudo apt-get install -y jq", tmpl.StartupScript)
+	assert.Equal(t, "https://github.com/you/dotfiles", tmpl.DotfilesRepo)
+	assert.Equal(t, []string{"golang.go", "ms-python.python"}, tmpl.Extensions)
+
+	assert.Len(t, tmpl.Sidecars, 2)
+	assert.Equal(t, "db", tmpl.Sidecars[0].Name)
+	assert.Equal(t, "postgres:16", tmpl.Sidecars[0].Image)
+	assert.Equal(t, []int{5432}, tmpl.Sidecars[0].Ports)
+	assert.Equal(t, "x", tmpl.Sidecars[0].Env["POSTGRES_PASSWORD"])
+	assert.False(t, tmpl.Sidecars[0].Privileged)
+	assert.Equal(t, "docker", tmpl.Sidecars[1].Name)
+	assert.True(t, tmpl.Sidecars[1].Privileged)
+	assert.Equal(t, []string{"SYS_ADMIN"}, tmpl.Sidecars[1].Capabilities)
+
+	assert.Len(t, tmpl.Mounts, 1)
+	assert.Equal(t, "secret", tmpl.Mounts[0].Type)
+	assert.Equal(t, "tls-cert", tmpl.Mounts[0].Name)
+	assert.Equal(t, "/etc/tls", tmpl.Mounts[0].Path)
 }
 
 func TestGetPostFormKeys(t *testing.T) {
@@ -1451,5 +1572,145 @@ func TestHandler_SetClassicAdminLoginConfigurer(t *testing.T) {
 	h.classicAdminLoginConfigurer(false)
 	if !called {
 		t.Error("classicAdminLoginConfigurer callback was not called")
+	}
+}
+
+func TestValidateDNSConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  *LabConfig
+		wantErr bool
+	}{
+		{
+			name:    "no DNS provider is always valid",
+			config:  &LabConfig{DNSProvider: "", DNSZone: "", Domain: ""},
+			wantErr: false,
+		},
+		{
+			name:    "provider with empty zone is rejected",
+			config:  &LabConfig{DNSProvider: "ovh", DNSZone: "", Domain: "ai-bb.yodamad.fr"},
+			wantErr: true,
+		},
+		{
+			name:    "provider with whitespace-only zone is rejected",
+			config:  &LabConfig{DNSProvider: "ovh", DNSZone: "   ", Domain: "ai-bb.yodamad.fr"},
+			wantErr: true,
+		},
+		{
+			name:    "domain outside the zone is rejected",
+			config:  &LabConfig{DNSProvider: "ovh", DNSZone: "yodamad.fr", Domain: "ai-bb.example.com"},
+			wantErr: true,
+		},
+		{
+			name:    "subdomain inside the zone is valid",
+			config:  &LabConfig{DNSProvider: "ovh", DNSZone: "yodamad.fr", Domain: "ai-bb.yodamad.fr"},
+			wantErr: false,
+		},
+		{
+			name:    "domain equal to the zone is valid",
+			config:  &LabConfig{DNSProvider: "ovh", DNSZone: "yodamad.fr", Domain: "yodamad.fr"},
+			wantErr: false,
+		},
+		{
+			name:    "provider and zone with no domain is valid",
+			config:  &LabConfig{DNSProvider: "ovh", DNSZone: "yodamad.fr", Domain: ""},
+			wantErr: false,
+		},
+		{
+			name:    "suffix match that is not a subdomain boundary is rejected",
+			config:  &LabConfig{DNSProvider: "ovh", DNSZone: "yodamad.fr", Domain: "notyodamad.fr"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validateDNSConfig(tt.config)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestHostFromWorkspaceURL(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{name: "empty url", url: "", want: ""},
+		{name: "https host", url: "https://ws-admin-11f346ae.ai-bb.yodamad.fr/", want: "ws-admin-11f346ae.ai-bb.yodamad.fr"},
+		{name: "http host", url: "http://141.95.239.107.nip.io/", want: "141.95.239.107.nip.io"},
+		{name: "host with port", url: "https://foo.example.com:8443/", want: "foo.example.com"},
+		{name: "unparseable", url: "https://exa mple.com/", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, hostFromWorkspaceURL(tt.url))
+		})
+	}
+}
+
+// fakeHostResolver is a deterministic hostResolver for testing workspaceDNSReady.
+type fakeHostResolver struct {
+	addrs []string
+	err   error
+}
+
+func (f fakeHostResolver) LookupHost(_ context.Context, _ string) ([]string, error) {
+	return f.addrs, f.err
+}
+
+func TestWorkspaceDNSReady(t *testing.T) {
+	// These cases swap the package-level resolver, so they must not run in parallel.
+	orig := workspaceDNSResolver
+	t.Cleanup(func() { workspaceDNSResolver = orig })
+
+	now := time.Now()
+	nxdomain := fakeHostResolver{err: errors.New("no such host")}
+	resolves := fakeHostResolver{addrs: []string{"141.95.239.107"}}
+
+	tests := []struct {
+		name     string
+		resolver hostResolver
+		ws       workspace.Workspace
+		want     bool
+	}{
+		{
+			name:     "no public host is always ready",
+			resolver: nxdomain, // must not matter — never consulted
+			ws:       workspace.Workspace{URL: "", UpdatedAt: now},
+			want:     true,
+		},
+		{
+			name:     "host resolves within grace is ready",
+			resolver: resolves,
+			ws:       workspace.Workspace{URL: "https://x.ai-bb.yodamad.fr/", UpdatedAt: now},
+			want:     true,
+		},
+		{
+			name:     "host not resolving within grace is not ready",
+			resolver: nxdomain,
+			ws:       workspace.Workspace{URL: "https://x.ai-bb.yodamad.fr/", UpdatedAt: now},
+			want:     false,
+		},
+		{
+			name:     "not resolving but past grace fails open",
+			resolver: nxdomain,
+			ws:       workspace.Workspace{URL: "https://x.ai-bb.yodamad.fr/", UpdatedAt: now.Add(-dnsPropagationGrace - time.Minute)},
+			want:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspaceDNSResolver = tt.resolver
+			assert.Equal(t, tt.want, workspaceDNSReady(context.Background(), tt.ws))
+		})
 	}
 }

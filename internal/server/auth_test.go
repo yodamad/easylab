@@ -172,6 +172,38 @@ func TestGenerateSecurePasswordUniqueness(t *testing.T) {
 	}
 }
 
+func TestGenerateWorkspaceToken(t *testing.T) {
+	token, err := GenerateWorkspaceToken()
+	if err != nil {
+		t.Fatalf("GenerateWorkspaceToken() error = %v", err)
+	}
+
+	if len(token) < 16 {
+		t.Errorf("GenerateWorkspaceToken() length = %d, want >= 16", len(token))
+	}
+
+	// The token is the student's code-server login password and travels through a
+	// shell-quoted container bootstrap, so it must never carry a symbol — unlike
+	// GenerateSecurePassword.
+	if !regexp.MustCompile(`^[0-9A-Za-z-]+$`).MatchString(token) {
+		t.Errorf("GenerateWorkspaceToken() = %q, contains characters outside [0-9A-Za-z-]", token)
+	}
+}
+
+func TestGenerateWorkspaceTokenUniqueness(t *testing.T) {
+	tokens := make(map[string]bool)
+	for i := 0; i < 100; i++ {
+		token, err := GenerateWorkspaceToken()
+		if err != nil {
+			t.Fatalf("GenerateWorkspaceToken() error = %v", err)
+		}
+		if tokens[token] {
+			t.Errorf("GenerateWorkspaceToken() produced duplicate token")
+		}
+		tokens[token] = true
+	}
+}
+
 func TestAuthHandler_CreateSession(t *testing.T) {
 	ah := &AuthHandler{
 		sessions: make(map[string]*Session),

@@ -647,6 +647,17 @@ main {
     margin: 0;
 }
 
+.template-resources {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.template-resources .form-group {
+    flex: 1;
+    min-width: 8rem;
+}
+
 .template-variables-section {
     margin-top: 1rem;
     padding-top: 1rem;
@@ -676,13 +687,24 @@ main {
 
 .template-variable-row {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.5rem;
     align-items: flex-start;
     margin-bottom: 0.5rem;
 }
 
-.template-variable-row input {
+.template-variable-row .sidecar-privileged {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.template-variable-row input,
+.template-variable-row select {
     flex: 1;
+    min-width: 6rem;
 }
 
 .template-variable-row .btn-remove-variable {
@@ -715,6 +737,69 @@ main {
 .detect-variables-status {
     font-size: 0.85rem;
     margin-top: 0.25rem;
+}
+
+/* Step 6 templates: numbered essentials reuse the .ut-step look from the labs
+   "Add Template" drawer; give stacked inputs inside a step some breathing room. */
+.template-row .ut-step-body > .ut-name-input + .ut-name-input,
+.template-row .ut-step-body > .ut-name-input + .form-row,
+.template-row .ut-step-body > .form-row {
+    margin-top: 0.5rem;
+}
+
+/* Collapsible "Advanced options" (per template) and "Credentials" disclosures.
+   Everything past the essentials lives here so the step opens calm, not crowded. */
+.template-advanced {
+    margin-top: 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.template-advanced-body {
+    padding-top: 0.5rem;
+}
+
+.template-advanced > summary {
+    padding: 0.75rem 0 0.25rem;
+    font-size: 0.875rem;
+}
+
+.template-advanced > summary,
+.wizard-credentials > summary {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--text);
+    list-style: none;
+}
+
+.wizard-credentials > summary {
+    font-size: 1rem;
+}
+
+.template-advanced > summary::-webkit-details-marker,
+.wizard-credentials > summary::-webkit-details-marker {
+    display: none;
+}
+
+.template-advanced > summary::before,
+.wizard-credentials > summary::before {
+    content: "\25B8";
+    color: var(--text-light);
+    transition: transform 0.15s ease;
+}
+
+.template-advanced[open] > summary::before,
+.wizard-credentials[open] > summary::before {
+    transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .template-advanced > summary::before,
+    .wizard-credentials > summary::before {
+        transition: none;
+    }
 }
 
 .form-actions {
@@ -3736,6 +3821,27 @@ select.loading {
     font-weight: 500;
 }
 
+/* The names already on the lab, shown under the target chip so a duplicate name
+   is visible before it is submitted. */
+.ut-drawer-context {
+    flex-wrap: wrap;
+}
+
+.ut-drawer-existing {
+    flex-basis: 100%;
+    color: var(--text-light);
+}
+
+/* The create-lab Step 6 choice cards are laid out for full page width; inside the
+   narrow drawer panel, stack them so each card keeps its title and description. */
+.ut-panel .button-group {
+    flex-wrap: wrap;
+}
+
+.ut-panel .source-button {
+    flex: 1 1 100%;
+}
+
 .ut-panel-header {
     display: flex;
     align-items: center;
@@ -5063,11 +5169,109 @@ details.credentials-box > :last-child {
 }
 
 /* ============================================
+   WORKSPACE TEMPLATES YAML EDITOR
+   ============================================ */
+
+.templates-yaml-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+}
+
+.templates-yaml-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.templates-yaml-validation:empty {
+    display: none;
+}
+
+/* Validation results must stay put and readable while the admin fixes the YAML;
+   the default toast is fixed-position and self-dismissing. */
+.templates-yaml-validation .toast {
+    position: static;
+    animation: none;
+    max-width: none;
+    margin-top: 0.75rem;
+}
+
+/* ============================================
+   DEVCONTAINER IMPORT
+   ============================================ */
+
+.devcontainer-import {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+    background: var(--surface);
+}
+
+.devcontainer-import-intro {
+    margin: 0 0 1rem;
+    font-size: 0.9rem;
+    color: var(--text-light);
+    line-height: 1.5;
+}
+
+.devcontainer-import-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.devcontainer-import-result:empty {
+    display: none;
+}
+
+.devcontainer-import-result .toast {
+    position: static;
+    animation: none;
+    max-width: none;
+    margin-top: 0.75rem;
+}
+
+.devcontainer-import-note {
+    margin: 0.75rem 0 0.25rem;
+    font-size: 0.875rem;
+    color: var(--text-light);
+}
+
+/* The warnings are the reason to import rather than hand-write: they must read as
+   a checklist, not as decoration. */
+.devcontainer-import-warnings {
+    margin: 0;
+    padding-left: 1.25rem;
+    font-size: 0.85rem;
+    color: #92400e;
+    line-height: 1.6;
+}
+
+.devcontainer-import-warnings code,
+.devcontainer-import-note code,
+.devcontainer-import-intro code {
+    background: var(--border);
+    border-radius: 4px;
+    padding: 0.1rem 0.3rem;
+    font-size: 0.9em;
+}
+
+/* ============================================
    UTILITY
    ============================================ */
 
 .label-invisible {
     visibility: hidden;
+}
+
+.file-input-hidden {
+    display: none;
 }
 
 /* ============================================
@@ -5596,4 +5800,211 @@ body.admin-page .wizard-footer {
 .lab-row-actions-inline .btn-icon-only .icon {
     width: 1.125rem;
     height: 1.125rem;
+}
+
+/* Lab credentials panel (registry / git tokens) */
+.secrets-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.secrets-summary {
+    cursor: pointer;
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    font-weight: 600;
+}
+
+.secrets-summary-title {
+    font-size: 1rem;
+}
+
+.secrets-summary-hint {
+    font-weight: 400;
+    font-size: 0.85rem;
+    opacity: 0.7;
+}
+
+.secrets-intro {
+    font-size: 0.85rem;
+    opacity: 0.8;
+    margin: 1rem 0;
+    max-width: 70ch;
+    line-height: 1.5;
+}
+
+.secrets-intro code {
+    background: var(--background);
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+}
+
+.secrets-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.secrets-empty {
+    font-size: 0.85rem;
+    opacity: 0.7;
+    margin: 0.5rem 0 1rem;
+}
+
+.secret-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    padding: 0.6rem 0.9rem;
+    background: var(--background);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.secret-name {
+    font-weight: 600;
+}
+
+.secret-kind {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.1rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    opacity: 0.8;
+}
+
+.secret-servers,
+.secret-username {
+    font-size: 0.85rem;
+    opacity: 0.75;
+}
+
+/* The reference an admin copies into their template. */
+.secret-ref {
+    margin-left: auto;
+    font-size: 0.8rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+
+.secrets-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.75rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.secrets-form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.secrets-form-row label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.7;
+}
+
+.secrets-form-row input,
+.secrets-form-row select {
+    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--background);
+    color: inherit;
+    font-size: 0.9rem;
+}
+
+/* Wizard credentials (registry / git tokens entered during lab creation) */
+.wizard-credentials {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+}
+
+.wizard-credentials-intro {
+    font-size: 0.85rem;
+    opacity: 0.8;
+    max-width: 70ch;
+    line-height: 1.5;
+    margin: 0.5rem 0 1rem;
+}
+
+.wizard-credentials-intro code {
+    background: var(--background);
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+}
+
+.credential-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.75rem;
+    padding: 0.9rem;
+    margin-bottom: 0.75rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.credential-row .form-group {
+    margin-bottom: 0;
+}
+
+/* Recreate prompt rows: the credential name is a title, its fields stacked below. */
+.credential-row-stacked {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.credential-row-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.credential-row-stacked .form-group input {
+    width: 100%;
+}
+
+/* Explanatory note for the recreate prompt's reschedule-deletion section */
+.recreate-deletion-note {
+    font-size: 0.8rem;
+    opacity: 0.8;
+    line-height: 1.5;
+    margin: 0 0 0.75rem;
+}
+
+/* Pending credentials banner in the lab secrets panel */
+.secrets-pending {
+    padding: 0.6rem 0.9rem;
+    margin-bottom: 1rem;
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--error) 12%, transparent);
+    border: 1px solid var(--error);
+    font-size: 0.85rem;
+}
+
+/* Recreate credential prompt actions */
+.credentials-modal-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1rem;
 }

@@ -12,7 +12,6 @@ EasyLab is a platform that helps you manage your lab environments. Provision lab
 
 For your students, they can access the student space to request a new development environment or to retrieve information about their environments.
 
-> Sample Coder templates: [yodamad-workshops/coder-templates](https://gitlab.com/yodamad-workshops/coder-templates)
 
 > Go to [Student documentation](student.md)
 

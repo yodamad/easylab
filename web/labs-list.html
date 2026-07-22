@@ -92,6 +92,12 @@
                                         <span class="tooltip">Download Kubeconfig</span>
                                     </a>
                                     {{end}}
+                                    <a href="/api/labs/templates/yaml?lab_id={{.ID}}&amp;download=1" class="btn btn-download btn-icon-only tooltip-trigger" title="Export this lab's workspace templates as YAML">
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                                        </svg>
+                                        <span class="tooltip">Export Templates YAML</span>
+                                    </a>
                                     {{if eq .Status "completed"}}
                                     <a href="/labs/{{.ID}}/workspaces" class="btn btn-info btn-icon-only tooltip-trigger" title="View and manage workspaces">
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
@@ -99,17 +105,17 @@
                                         </svg>
                                         <span class="tooltip">View Workspaces</span>
                                     </a>
-                                    <button type="button" class="btn btn-secondary btn-icon-only tooltip-trigger" title="Coder admin credentials" onclick="showCoderCredentials('{{.ID}}')">
+                                    <button type="button" class="btn btn-secondary btn-icon-only tooltip-trigger" title="Lab endpoint info" onclick="showCoderCredentials('{{.ID}}')">
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                         </svg>
-                                        <span class="tooltip">Coder Credentials</span>
+                                        <span class="tooltip">Lab Endpoint Info</span>
                                     </button>
-                                    <button type="button" class="btn btn-primary btn-icon-only tooltip-trigger" title="Upload a new template to this lab" onclick="showUploadTemplateModal('{{.ID}}', '{{.StackName}}')">
+                                    <button type="button" class="btn btn-primary btn-icon-only tooltip-trigger" title="Add a template to this lab" onclick="showUploadTemplateModal('{{.ID}}', '{{.StackName}}', '{{.WorkspaceTemplateNamesCSV}}')">
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                                         </svg>
-                                        <span class="tooltip">Upload Template</span>
+                                        <span class="tooltip">Add Template</span>
                                     </button>
                                     {{end}}
                                     {{if eq .Status "failed"}}
@@ -172,7 +178,7 @@
                         <svg class="ut-panel-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                         </svg>
-                        <h3 id="ut-panel-title" class="ut-panel-title">Upload Template</h3>
+                        <h3 id="ut-panel-title" class="ut-panel-title">Add Template</h3>
                     </div>
                     <button type="button" class="ut-panel-close" onclick="closeUploadTemplateModal()" title="Close" aria-label="Close">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
@@ -185,76 +191,245 @@
 
                 <div class="ut-panel-body">
                     <div id="upload-template-error" class="ut-alert ut-alert--error" style="display: none;"></div>
-                    <div id="upload-template-success" class="ut-alert ut-alert--success" style="display: none;"></div>
 
                     <form id="upload-template-form" onsubmit="submitUploadTemplate(event)" novalidate>
 
-                        <!-- Step 1 -->
+                        <!-- Mode selector: same three ways to define a workspace as lab creation -->
                         <div class="ut-step">
                             <div class="ut-step-header">
-                                <span class="ut-step-number" aria-hidden="true">1</span>
-                                <span class="ut-step-label">Template name</span>
+                                <span class="ut-step-label">How do you want to define this workspace?</span>
                             </div>
                             <div class="ut-step-body">
-                                <input type="text" id="upload-template-name" class="ut-name-input" placeholder="e.g. docker-workspace" autocomplete="off" required />
-                            </div>
-                        </div>
-
-                        <!-- Step 2 -->
-                        <div class="ut-step">
-                            <div class="ut-step-header">
-                                <span class="ut-step-number" aria-hidden="true">2</span>
-                                <span class="ut-step-label">Template file</span>
-                                <span class="ut-step-hint">.zip or .tf</span>
-                            </div>
-                            <div class="ut-step-body">
-                                <div class="ut-dropzone" id="ut-dropzone">
-                                    <input type="file" id="upload-template-file" class="file-input" accept=".zip,.tf">
-                                    <label for="upload-template-file" class="ut-dropzone-label">
-                                        <div class="ut-dropzone-icon-wrap">
-                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                                            </svg>
+                                <div class="button-group">
+                                    <button type="button" class="source-button selected" data-templates-mode="form" id="ut-templates-mode-form">
+                                        <span class="source-icon">&#128221;</span>
+                                        <div class="source-content">
+                                            <span class="source-title">Build with a form</span>
+                                            <span class="source-description">Fill in the fields</span>
                                         </div>
-                                        <span class="ut-dropzone-primary" id="upload-template-file-text">Drop file here</span>
-                                        <span class="ut-dropzone-secondary">or click to browse</span>
-                                    </label>
+                                    </button>
+                                    <button type="button" class="source-button" data-templates-mode="devcontainer" id="ut-templates-mode-devcontainer">
+                                        <span class="source-icon">&#128230;</span>
+                                        <div class="source-content">
+                                            <span class="source-title">From a devcontainer</span>
+                                            <span class="source-description">Import a repo's .devcontainer</span>
+                                        </div>
+                                    </button>
+                                    <button type="button" class="source-button" data-templates-mode="yaml" id="ut-templates-mode-yaml">
+                                        <span class="source-icon">&#128196;</span>
+                                        <div class="source-content">
+                                            <span class="source-title">Paste YAML</span>
+                                            <span class="source-description">Write it as YAML</span>
+                                        </div>
+                                    </button>
                                 </div>
+                                <input type="hidden" id="ut-templates-mode" name="templates_mode" value="form">
                             </div>
                         </div>
 
-                        <!-- Step 3 -->
-                        <div class="ut-step ut-step--variables">
-                            <div class="ut-step-header">
-                                <span class="ut-step-number" aria-hidden="true">3</span>
-                                <span class="ut-step-label">Variables</span>
-                                <span class="ut-optional-badge">optional</span>
-                                <div class="ut-step-actions">
-                                    <button type="button" class="ut-action-btn" id="upload-detect-variables-btn" onclick="detectUploadTemplateVariables()">
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                                        </svg>
-                                        Detect
-                                    </button>
-                                    <button type="button" class="ut-action-btn ut-action-btn--add" onclick="addUploadTemplateVariableRow()">
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                                        </svg>
-                                        Add
-                                    </button>
+                        <!-- Form mode -->
+                        <div id="ut-templates-form-mode">
+                            <div class="ut-template-fields" data-template-index="0">
+                                <div class="ut-step">
+                                    <div class="ut-step-header">
+                                        <span class="ut-step-number" aria-hidden="true">1</span>
+                                        <span class="ut-step-label">Template name</span>
+                                    </div>
+                                    <div class="ut-step-body">
+                                        <input type="text" name="template_0_name" data-field="name" class="ut-name-input" placeholder="e.g. docker-workspace" autocomplete="off" required />
+                                    </div>
                                 </div>
+                                <div class="ut-step">
+                                    <div class="ut-step-header">
+                                        <span class="ut-step-number" aria-hidden="true">2</span>
+                                        <span class="ut-step-label">Git repository</span>
+                                        <span class="ut-optional-badge">optional</span>
+                                    </div>
+                                    <div class="ut-step-body">
+                                        <input type="text" name="template_0_git_repo" data-field="git_repo" class="ut-name-input" placeholder="https://gitlab.com/user/repo.git" autocomplete="off" />
+                                        <div class="form-row">
+                                            <input type="text" name="template_0_git_branch" data-field="git_branch" class="ut-name-input" placeholder="branch (default branch)" autocomplete="off" />
+                                            <input type="text" name="template_0_git_folder" data-field="git_folder" class="ut-name-input" placeholder="subfolder to open" autocomplete="off" />
+                                        </div>
+                                    </div>
+                                </div>
+                                <details class="template-advanced">
+                                    <summary>Advanced options</summary>
+                                    <div class="template-advanced-body">
+                                        <div class="form-group">
+                                            <label>Git credential (Optional)</label>
+                                            <select name="template_0_git_auth_secret" data-field="git_auth_secret" class="template-git-cred-select">
+                                                <option value="">None</option>
+                                            </select>
+                                            <small>Credentials are configured when a lab is created; a private repository added here needs one that already exists on the lab.</small>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Image (Optional)</label>
+                                            <input type="text" name="template_0_image" data-field="image" placeholder="codercom/code-server:latest">
+                                            <small>Container image override. Defaults to the code-server image.</small>
+                                        </div>
+                                        <div class="template-resources">
+                                            <div class="form-group">
+                                                <label>CPU (Optional)</label>
+                                                <input type="text" name="template_0_cpu" data-field="cpu" placeholder="500m">
+                                            </div>
+                                            <div class="form-group">
+                                                <label>Memory (Optional)</label>
+                                                <input type="text" name="template_0_memory" data-field="memory" placeholder="1Gi">
+                                            </div>
+                                            <div class="form-group">
+                                                <label>Disk Size (Optional)</label>
+                                                <input type="text" name="template_0_disk_size" data-field="disk_size" placeholder="5Gi">
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Startup Script (Optional)</label>
+                                            <textarea name="template_0_startup_script" data-field="startup_script" rows="4" class="monospace" placeholder="# runs before the IDE starts"></textarea>
+                                            <small>Runs (best-effort) on start. code-server has passwordless sudo, so the script can install system packages with apt.</small>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Dotfiles Repository (Optional)</label>
+                                            <input type="text" name="template_0_dotfiles_repo" data-field="dotfiles_repo" placeholder="https://github.com/you/dotfiles">
+                                            <small>Cloned to ~/.dotfiles; its install.sh / setup.sh / bootstrap.sh is run if present.</small>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Extensions (Optional)</label>
+                                            <input type="text" name="template_0_extensions" data-field="extensions" placeholder="golang.go, ms-python.python">
+                                            <small>Comma-separated VS Code extension IDs installed on start.</small>
+                                        </div>
+                                        <div class="template-variables-section">
+                                            <div class="template-variables-header">
+                                                <label>Environment Variables</label>
+                                                <div class="template-variables-actions">
+                                                    <button type="button" class="btn btn-secondary btn-add-variable">+ Add Variable</button>
+                                                </div>
+                                            </div>
+                                            <small>Environment variables passed to the workspace container.</small>
+                                            <div class="template-variables-container"></div>
+                                        </div>
+                                        <div class="template-variables-section">
+                                            <div class="template-variables-header">
+                                                <label>Sidecars</label>
+                                                <div class="template-variables-actions">
+                                                    <button type="button" class="btn btn-secondary btn-add-sidecar">+ Add Sidecar</button>
+                                                </div>
+                                            </div>
+                                            <small>Extra containers in the pod (e.g. a database), reachable from the IDE at localhost:&lt;port&gt;.</small>
+                                            <div class="template-sidecars-container"></div>
+                                        </div>
+                                        <div class="template-variables-section">
+                                            <div class="template-variables-header">
+                                                <label>Mounts</label>
+                                                <div class="template-variables-actions">
+                                                    <button type="button" class="btn btn-secondary btn-add-mount">+ Add Mount</button>
+                                                </div>
+                                            </div>
+                                            <small>Mount an existing ConfigMap/Secret (in the workspace namespace) into the container.</small>
+                                            <div class="template-mounts-container"></div>
+                                        </div>
+                                    </div>
+                                </details>
                             </div>
-                            <div class="ut-step-body">
-                                <div id="upload-template-variables-container" class="ut-vars-container"></div>
+                        </div>
+
+                        <!-- Devcontainer mode -->
+                        <div id="ut-templates-devcontainer-mode" style="display: none;">
+                            <div class="devcontainer-import">
+                                <p class="devcontainer-import-intro">
+                                    Build the workspace from the workshop repository's <code>.devcontainer/devcontainer.json</code>.
+                                    Anything the builder cannot honour is written into a YAML document that opens for review before the template is added.
+                                </p>
+                                <div class="form-group">
+                                    <label>Read the devcontainer from</label>
+                                    <div class="button-group">
+                                        <button type="button" class="source-button selected" data-devcontainer-source="git" id="ut-dc-source-git">
+                                            <span class="source-icon">&#128279;</span>
+                                            <div class="source-content">
+                                                <span class="source-title">Git repository</span>
+                                                <span class="source-description">Clone the repo and read its devcontainer</span>
+                                            </div>
+                                        </button>
+                                        <button type="button" class="source-button" data-devcontainer-source="upload" id="ut-dc-source-upload">
+                                            <span class="source-icon">&#128228;</span>
+                                            <div class="source-content">
+                                                <span class="source-title">Upload</span>
+                                                <span class="source-description">A devcontainer.json or a repository .zip</span>
+                                            </div>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="ut-dc-git-repo">Workshop repository</label>
+                                        <input type="text" id="ut-dc-git-repo" placeholder="https://gitlab.com/org/workshop.git">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="ut-dc-git-branch">Branch</label>
+                                        <input type="text" id="ut-dc-git-branch" placeholder="default branch">
+                                    </div>
+                                </div>
+                                <div id="ut-dc-upload-row" class="form-group" style="display: none;">
+                                    <label for="ut-dc-file">devcontainer.json or repository .zip</label>
+                                    <input type="file" id="ut-dc-file" accept=".json,.zip">
+                                    <small>The repository field above is still used for the generated template's <code>git_repo</code>, since that is what students clone.</small>
+                                </div>
+                                <div id="ut-dc-git-auth-row" class="form-row">
+                                    <div class="form-group">
+                                        <label for="ut-dc-git-username">Username</label>
+                                        <input type="text" id="ut-dc-git-username" placeholder="oauth2" autocomplete="off">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="ut-dc-git-token">Access token</label>
+                                        <input type="password" id="ut-dc-git-token" autocomplete="off">
+                                        <small>Only if the repository is private. Used to read the devcontainer now and then discarded — it is not saved.</small>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="ut-dc-dir">Devcontainer folder</label>
+                                        <input type="text" id="ut-dc-dir" placeholder=".devcontainer">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="ut-dc-cache-repo">Cache registry</label>
+                                        <input type="text" id="ut-dc-cache-repo" placeholder="registry.example.com/easylab/cache">
+                                        <small>Required. Without it every student rebuilds the devcontainer from scratch.</small>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <small>code-server is injected into the built image, so it is independent of the devcontainer's base image. That base must be glibc — the injected IDE cannot run on Alpine/musl.</small>
+                                </div>
+                                <div class="devcontainer-import-actions">
+                                    <button type="button" id="ut-dc-import-btn" class="btn btn-primary btn-sm">Import</button>
+                                    <button type="button" id="ut-dc-review-yaml-btn" class="btn btn-secondary btn-sm" style="display: none;">Review generated YAML &rarr;</button>
+                                </div>
+                                <div id="ut-dc-result" class="devcontainer-import-result"></div>
+                            </div>
+                        </div>
+
+                        <!-- Paste YAML mode -->
+                        <div id="ut-templates-yaml-mode" style="display: none;">
+                            <div class="form-group">
+                                <div class="templates-yaml-header">
+                                    <label for="ut-templates-yaml">Workspace Templates YAML</label>
+                                    <div class="templates-yaml-actions">
+                                        <button type="button" id="ut-yaml-validate-btn" class="btn btn-secondary btn-sm">Validate</button>
+                                        <button type="button" id="ut-yaml-skeleton-btn" class="btn btn-secondary btn-sm">Insert skeleton</button>
+                                        <button type="button" id="ut-yaml-upload-btn" class="btn btn-secondary btn-sm">Upload file</button>
+                                        <input type="file" id="ut-yaml-file" accept=".yaml,.yml" class="file-input-hidden">
+                                    </div>
+                                </div>
+                                <textarea id="ut-templates-yaml" name="templates_yaml" rows="16" class="monospace" spellcheck="false"></textarea>
+                                <small>The YAML is used as-is when this mode is selected — the form fields are ignored. It may define more than one template.</small>
+                                <div id="ut-templates-yaml-validation" class="templates-yaml-validation"></div>
                             </div>
                         </div>
 
                         <div class="ut-footer">
                             <button type="submit" id="upload-template-submit-btn" class="ut-submit-btn">
                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                                 </svg>
-                                Upload Template
+                                Add Template
                             </button>
                         </div>
 
@@ -263,10 +438,30 @@
             </div>
         </div>
 
+        <div id="recreate-credentials-overlay" class="credentials-modal-overlay" onclick="closeRecreateCredentialsModal()" aria-hidden="true">
+            <div class="credentials-modal" onclick="event.stopPropagation()">
+                <div class="credentials-modal-header">
+                    <h3>Recreate lab</h3>
+                    <button type="button" class="credentials-modal-close" onclick="closeRecreateCredentialsModal()" title="Close" aria-label="Close">&times;</button>
+                </div>
+                <div class="credentials-modal-body">
+                    <form id="recreate-credentials-form">
+                        <input type="hidden" name="job_id" id="recreate-job-id">
+                        <div id="recreate-credentials-error" style="display: none;"></div>
+                        <div id="recreate-credentials-rows"></div>
+                        <div class="credentials-modal-actions">
+                            <button type="submit" class="btn btn-success btn-sm">Recreate lab</button>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="closeRecreateCredentialsModal()">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
         <div id="coder-credentials-overlay" class="credentials-modal-overlay" onclick="closeCoderCredentialsModal()" aria-hidden="true">
             <div class="credentials-modal" onclick="event.stopPropagation()">
                 <div class="credentials-modal-header">
-                    <h3>Coder Admin Credentials</h3>
+                    <h3>Lab Endpoint Info</h3>
                     <button type="button" class="credentials-modal-close" onclick="closeCoderCredentialsModal()" title="Close" aria-label="Close">&times;</button>
                 </div>
                 <div id="coder-credentials-content" class="credentials-modal-body">
@@ -274,25 +469,17 @@
                     <div id="coder-credentials-error" class="credentials-modal-error" style="display: none;"></div>
                     <div id="coder-credentials-fields" class="credentials-modal-fields" style="display: none;">
                         <div class="credentials-modal-row">
-                            <label for="coder-cred-url">URL</label>
+                            <label for="coder-cred-url">Workspace base URL</label>
                             <div class="credentials-modal-value-wrap">
                                 <input type="text" id="coder-cred-url" readonly class="credentials-modal-input" />
-                                <button type="button" class="btn btn-secondary credentials-copy-btn" onclick="openCoderUrlInNewTab()" title="Open in new tab">Open</button>
+                                <button type="button" class="btn btn-secondary credentials-copy-btn" onclick="copyCoderCredToClipboard('coder-cred-url', this)" title="Copy">Copy</button>
                             </div>
                         </div>
                         <div class="credentials-modal-row">
-                            <label for="coder-cred-email">Email</label>
+                            <label for="coder-cred-email">Namespace</label>
                             <div class="credentials-modal-value-wrap">
                                 <input type="text" id="coder-cred-email" readonly class="credentials-modal-input" />
                                 <button type="button" class="btn btn-secondary credentials-copy-btn" onclick="copyCoderCredToClipboard('coder-cred-email', this)" title="Copy">Copy</button>
-                            </div>
-                        </div>
-                        <div class="credentials-modal-row">
-                            <label for="coder-cred-password">Password</label>
-                            <div class="credentials-modal-value-wrap">
-                                <input type="password" id="coder-cred-password" readonly class="credentials-modal-input" />
-                                <button type="button" class="btn btn-secondary credentials-toggle-password" onclick="toggleCoderPasswordVisibility()" title="Show password" aria-label="Show password">Show</button>
-                                <button type="button" class="btn btn-secondary credentials-copy-btn" onclick="copyCoderCredToClipboard('coder-cred-password', this)" title="Copy">Copy</button>
                             </div>
                         </div>
                     </div>

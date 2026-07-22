@@ -2,14 +2,10 @@ package server
 
 import (
 	"context"
-	"easylab/coder"
 	"log"
-	"net/http"
 	"os"
 	"strconv"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // cleanupInterval returns the workspace cleanup interval, configurable via CLEANUP_INTERVAL_MINUTES env var.
@@ -45,25 +41,8 @@ func deletionRetryInterval() time.Duration {
 	return 2 * time.Hour
 }
 
-// coderReachabilityTimeout is the maximum time to wait when probing Coder before skipping cleanup for a job.
-const coderReachabilityTimeout = 5 * time.Second
-
-// isCoderReachable does a fast HEAD probe to the Coder health endpoint.
-// Returns false (and skips cleanup) when the server is down or the IP is gone.
-func isCoderReachable(coderURL string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), coderReachabilityTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, coderURL+"/healthz", nil)
-	if err != nil {
-		return false
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return false
-	}
-	resp.Body.Close()
-	return true
-}
+// clusterReachabilityTimeout bounds how long we probe the cluster API before skipping cleanup for a job.
+const clusterReachabilityTimeout = 5 * time.Second
 
 // StartWorkspaceCleanup starts a background goroutine that periodically deletes
 // workspaces that have exceeded their configured lifetime and destroys labs past
@@ -92,22 +71,26 @@ func (h *Handler) cleanupExpiredWorkspaces() {
 		if job.Status != JobStatusCompleted {
 			continue
 		}
-		if job.CoderURL == "" || job.Config == nil || job.Config.WorkspaceLifetimeHours <= 0 {
+		if job.Kubeconfig == "" || job.Config == nil || job.Config.WorkspaceLifetimeHours <= 0 {
 			continue
 		}
-		if !isCoderReachable(job.CoderURL) {
-			log.Printf("[cleanup] skipping job %s: Coder server unreachable (%s)", job.ID, job.CoderURL)
+
+		backend, err := h.newWorkspaceBackend(extractStringFromConfigValue(job.Kubeconfig), job.workspaceNamespace())
+		if err != nil {
+			log.Printf("[cleanup] skipping job %s: failed to build backend: %v", job.ID, err)
 			continue
 		}
+
+		reachCtx, cancel := context.WithTimeout(context.Background(), clusterReachabilityTimeout)
+		reachable := backend.Reachable(reachCtx)
+		cancel()
+		if !reachable {
+			log.Printf("[cleanup] skipping job %s: cluster API unreachable", job.ID)
+			continue
+		}
+
 		lifetime := time.Duration(job.Config.WorkspaceLifetimeHours) * time.Hour
-		coderConfig := coder.CoderClientConfig{
-			ServerURL:      job.CoderURL,
-			SessionToken:   job.CoderSessionToken,
-			OrganizationID: job.CoderOrganizationID,
-		}
-		adminEmail, adminPassword := job.coderCredentials()
-		workspaces, listCfg, err := coder.ListWorkspacesWithRetry(coderConfig, adminEmail, adminPassword, uuid.Nil, "")
-		coderConfig = listCfg
+		workspaces, err := backend.ListWorkspaces(context.Background(), job.ID)
 		if err != nil {
 			log.Printf("[cleanup] failed to list workspaces for job %s: %v", job.ID, err)
 			continue
@@ -125,7 +108,7 @@ func (h *Handler) cleanupExpiredWorkspaces() {
 			if time.Since(ws.CreatedAt) <= lifetime {
 				continue
 			}
-			wsID := ws.ID.String()
+			wsID := ws.ID
 
 			job.mu.RLock()
 			retry := job.DeletionRetries[wsID]
@@ -142,8 +125,7 @@ func (h *Handler) cleanupExpiredWorkspaces() {
 			}
 
 			log.Printf("[cleanup] deleting workspace %s (%s) in job %s: exceeded %dh lifetime", ws.Name, wsID, job.ID, job.Config.WorkspaceLifetimeHours)
-			delCfg, delErr := coder.DeleteWorkspaceWithRetry(coderConfig, adminEmail, adminPassword, ws.ID)
-			coderConfig = delCfg
+			delErr := backend.DeleteWorkspace(context.Background(), job.ID, wsID)
 			if delErr != nil {
 				log.Printf("[cleanup] failed to delete workspace %s: %v", wsID, delErr)
 				if ferr := h.jobManager.RecordDeletionFailure(job.ID, wsID, ws.Name, maxRetries); ferr != nil {
@@ -155,10 +137,6 @@ func (h *Handler) cleanupExpiredWorkspaces() {
 					log.Printf("[cleanup] failed to clear deletion retry for workspace %s: %v", wsID, cerr)
 				}
 			}
-		}
-		// Persist any refreshed admin token so future ticks and requests start valid.
-		if perr := h.jobManager.UpdateCoderSessionToken(job.ID, coderConfig.SessionToken); perr != nil {
-			log.Printf("[cleanup] failed to persist refreshed token for job %s: %v", job.ID, perr)
 		}
 		if deleted > 0 {
 			if err := h.jobManager.RecordCleanupEvent(job.ID, deleted); err != nil {

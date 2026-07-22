@@ -15,7 +15,6 @@ import (
 	"github.com/ovh/pulumi-ovh/sdk/v2/go/ovh/cloudproject"
 	k8s "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes"
 	k8score "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/core/v1"
-	"github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/helm/v3"
 	k8smeta "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/meta/v1"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 	"gopkg.in/yaml.v3"
@@ -82,9 +81,9 @@ func KubeconfigFromFile(kubeconfigPath string) (pulumi.StringOutput, error) {
 func InitNamespace(ctx *pulumi.Context, provider *k8s.Provider) (*k8score.Namespace, error) {
 	nsName := utils.CoderConfigOptional(ctx, utils.CoderNamespace)
 	if nsName == "" {
-		nsName = "coder"
+		nsName = "workshops"
 	}
-	namespace, err := k8score.NewNamespace(ctx, "coder", &k8score.NamespaceArgs{
+	namespace, err := k8score.NewNamespace(ctx, "workspace-namespace", &k8score.NamespaceArgs{
 		Metadata: &k8smeta.ObjectMetaArgs{
 			Name: pulumi.String(nsName),
 		},
@@ -93,21 +92,6 @@ func InitNamespace(ctx *pulumi.Context, provider *k8s.Provider) (*k8score.Namesp
 		return nil, fmt.Errorf("failed to create namespace: %w", err)
 	}
 	return namespace, nil
-}
-
-// GetExternalIP returns the LoadBalancer IP assigned to the Coder service.
-// kubeconfigOut is the kubeconfig content as a StringOutput, used to call the
-// Kubernetes API directly — bypassing the Pulumi provider's pending-initialisation
-// await which blocks indefinitely when OVHcloud sets ipMode:VIP on LoadBalancer services.
-func GetExternalIP(ctx *pulumi.Context, kubeconfigOut pulumi.StringOutput, coderRelease *helm.Release) (pulumi.StringOutput, error) {
-	nsName := utils.CoderConfigOptional(ctx, utils.CoderNamespace)
-	if nsName == "" {
-		nsName = "coder"
-	}
-
-	externalIP := GetServiceIP(kubeconfigOut, coderRelease.ResourceNames, nsName, "coder")
-	ctx.Export("externalIP", externalIP)
-	return externalIP, nil
 }
 
 // GetServiceIP returns the LoadBalancer IP of a Kubernetes service by calling the

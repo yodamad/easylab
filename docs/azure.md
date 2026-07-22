@@ -12,7 +12,7 @@ EasyLab supports Azure as a cloud provider, creating:
 
 - An **Azure Resource Group** per lab (`easylab-{stackName}`)
 - An **AKS cluster** with a node pool in the selected region
-- A **Coder** deployment on the cluster
+- Student **workspaces** running on the cluster, created on demand
 
 Networking is AKS-managed (Kubenet default). No custom VNet or subnet configuration is required.
 
@@ -121,14 +121,13 @@ After saving credentials, set up default regions and VM sizes:
 3. Choose **Microsoft Azure** as the cloud provider
 4. In the **Azure Region** step, choose the target region — VM sizes for the node pool load after a region is selected
 5. Configure the node pool (name, VM size, node counts)
-6. Complete the Coder configuration steps
+6. Complete the workspace and template steps (see [Workspace template examples](templates.md))
 7. Click **Create Lab**
 
 EasyLab will:
 - Create resource group `easylab-{stackName}` in the selected region
 - Provision an AKS cluster with the configured node pool
-- Deploy Coder via Helm
-- Return the Coder URL when complete
+- Prepare the cluster so student workspaces can be created on demand
 
 ## Cleanup
 

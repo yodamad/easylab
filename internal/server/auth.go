@@ -1043,3 +1043,27 @@ func GenerateSecurePassword() (string, error) {
 
 	return string(password), nil
 }
+
+// GenerateWorkspaceToken generates a strong random token for a workspace's IDE
+// connection. Unlike GenerateSecurePassword it stays within [0-9a-zA-Z]: the value
+// is the secret the student signs in with on code-server's login page and it
+// travels through a shell-quoted container bootstrap, so keeping it free of
+// symbols avoids a whole class of quoting problems. 24 alphanumerics keep well
+// over 128 bits of entropy.
+func GenerateWorkspaceToken() (string, error) {
+	const (
+		alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+		length   = 24
+	)
+
+	token := make([]byte, length)
+	for i := range token {
+		idx, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphabet))))
+		if err != nil {
+			return "", fmt.Errorf("failed to generate workspace token: %w", err)
+		}
+		token[i] = alphabet[idx.Int64()]
+	}
+
+	return string(token), nil
+}

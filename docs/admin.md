@@ -9,12 +9,12 @@ icon: lucide/shield-check
 As an admin (trainer, speaker, ...), you have access to the admin space to manage your labs:
 
 * [x] Create a new lab
-* [x] Define multiple Coder templates per lab (students get one workspace per template)
+* [x] Define multiple workspace templates per lab (students get one workspace per template)
 * [x] Dry run (preview) a lab before creating it
 * [x] Set/update credentials for the cloud providers
 * [x] Manage your labs
     * [x] See logs
-    * [x] Retrieve Coder admin credentials (URL, email, password) for completed labs
+    * [x] Retrieve endpoint info (workspace base URL, namespace) for completed labs
     * [x] Delete a lab
     * [x] Recreate a destroyed lab with the same configuration
     * [x] List workspaces
@@ -49,9 +49,9 @@ When you choose **Use Existing Cluster**, EasyLab skips cloud provider provision
 
 * No cloud provider credentials required
 * No network, cluster, or node pool configuration
-* The wizard goes directly to Coder setup and template selection
+* The wizard goes directly to workspace and template configuration
 
-The kubeconfig must have sufficient permissions to create namespaces and deploy Helm releases (Coder, PostgreSQL) in the cluster.
+The kubeconfig must have sufficient permissions to create namespaces, Deployments, Services, Ingresses and PersistentVolumeClaims, and (when a domain is set) to install the ingress-nginx and cert-manager Helm releases.
 
 ### On OVHcloud (Create New Infrastructure)
 
@@ -74,55 +74,258 @@ When creating new infrastructure, you choose OVHcloud as the cloud provider. Mos
     | | Min Node Count         | The minimum number of nodes in the node pool             |
     | | Max Node Count         | The maximum number of nodes in the node pool             |
 
-### Setup Coder instance
+### Configure workspaces
 
-You need to setup the secrets for the Coder instance:
+Student workspaces run as **code-server** pods provisioned directly on the
+lab's Kubernetes cluster — there is no separate IDE server or database to
+configure. On the **Workspace** step you only set:
 
-* [x] Coder Admin Password
-* [x] Coder Db Password
+* **Workspace Namespace** (optional) — the Kubernetes namespace student
+  workspaces are created in. Defaults to `workshops`.
 
-??? info "Others parameters can be overridden if needed"
+Then, on the **Templates** step, you define **one or more** workspace templates
+for the lab. Each template is a different workspace flavor that students can
+choose when requesting a workspace.
 
-    * `Coder Admin Email`: The email of the coder admin
-    * `Coder Version`: The version of the coder
-    * `Coder Db User`: The user of the coder database
-    * `Coder Db Password`: The password of the coder database
-    * `Coder Db Name`: The name of the coder database
-    * `Coder Template Name`: The name of the coder template
+![Workspace template selection](screens/templates.png)
 
-Then, you need to define **one or more** [Coder templates](https://coder.com/docs/admin/templates){target="_blank"} for the lab. Each template is a different workspace type (e.g. Docker, Go, Node) that students can choose when requesting a workspace.
+At the top of the step you choose **how** to define the workspace:
 
-![Coder template selection](screens/templates.png)
+* **Build with a form** — fill in the fields for each template (the default).
+* **From a devcontainer** — import a workshop repository's `.devcontainer`; see
+  [Workshops with a devcontainer](#workshops-with-a-devcontainer).
+* **Paste YAML** — edit the templates as YAML directly; see
+  [Editing templates as YAML](#editing-templates-as-yaml).
 
-Use **Add Template** to define additional templates. For each template you can:
+With **Build with a form**, each template shows two **essentials** up front and
+tucks the rest behind **Advanced options**, so simple labs stay simple. Use **Add
+Template** to define additional templates.
 
-* **Template name** — Name shown in Coder and in the student template selector.
-* **Source** — Either upload a file or use a Git repository.
+The **essentials**:
 
-**Upload:** a zip file containing the template and documentation, or a single `.tf` file.
+* **Template name** — Name shown in the student template selector.
+* **Git Repository** (optional) — a repo cloned into the workspace on first start (a persistent volume is provisioned automatically). The **branch** field clones a specific branch; **subfolder** opens a subdirectory of the repo.
 
-**Git:** provide the repository URL, optional folder path, and optional branch (default `main`).
+Under **Advanced options** (all optional):
 
-At least one template is required. Students can request **one workspace per template** within a lab, so multiple templates let them get multiple workspaces in the same environment (e.g. one Docker workspace and one Go workspace).
+* **Git credential** — the credential (from the **Credentials** section below) that unlocks a **private** Git Repository. Define a single git credential and it is wired into every template with a private repo automatically; add more than one and pick the right one per template here.
+* **Image** — a container image override. Defaults to `codercom/code-server:latest`.
+* **CPU / Memory / Disk Size** — resource requests for the workspace pod (e.g. `500m`, `1Gi`, `5Gi`).
+* **Startup Script** — shell commands run (best-effort) on start, *before* the IDE opens: install tools, configure the shell, run a bootstrap. Failures are shown in `kubectl logs` but never block the workspace from opening.
+* **Dotfiles Repository** — cloned to `~/.dotfiles`; its `install.sh` / `setup.sh` / `bootstrap.sh` is run if present.
+* **Extensions** — comma-separated VS Code extension IDs installed on start.
+* **Environment Variables** — passed to the workspace container.
+* **Sidecars** — extra containers in the workspace pod (name / image / ports / env), reachable from the IDE at `localhost:<port>` — e.g. a `postgres:16` database. Each sidecar can also be marked **privileged** and given extra **capabilities** (e.g. `SYS_ADMIN`) — needed to run **docker-in-docker** (see below).
+* **Mounts** — mount an existing **ConfigMap** or **Secret** into the workspace container. The referenced object **must already exist** in the workspace namespace, or the pod won't start.
+
+If no template is defined, a `default` code-server workspace is used.
+Students can request **one workspace per template** within a lab, so multiple
+templates let them get multiple workspaces in the same environment.
+
+A template can also build its workspace from a workshop repository's
+`devcontainer.json` instead of an **Image** — see
+[Workshops with a devcontainer](#workshops-with-a-devcontainer).
+
+#### Editing templates as YAML
+
+At the top of the **Templates** step, pick **Paste YAML** to edit the lab's
+workspace templates directly instead of filling in the form — useful for labs
+with several templates, for reusing a previous workshop, or for keeping the
+configuration in a git repository.
+
+```yaml
+workspace_templates:
+  - name: go-workshop
+    image: codercom/enterprise-base:ubuntu
+    git_repo: https://gitlab.com/user/workshop.git
+    git_branch: main
+    git_folder: exercises
+    cpu: "2"
+    memory: 4Gi
+    disk_size: 10Gi
+    startup_script: |
+      sudo apt-get update && sudo apt-get install -y jq
+    dotfiles_repo: https://github.com/you/dotfiles
+    extensions:
+      - golang.go
+    env:
+      DOCKER_HOST: tcp://localhost:2375
+    sidecars:
+      - name: db
+        image: postgres:16
+        ports: [5432]
+        env:
+          POSTGRES_PASSWORD: postgres
+        privileged: false
+        capabilities: [SYS_ADMIN]
+    mounts:
+      - type: configmap   # configmap | secret
+        name: my-config
+        path: /etc/config
+  - name: minimal
+```
+
+The keys are exactly the fields described above, and only `name` is required.
+
+* **Switching to Paste YAML** seeds the editor from whatever the form currently
+  holds, so you can fill in the easy parts first and then hand-edit. With nothing
+  filled in yet you get a commented skeleton listing every supported key.
+* **YAML is authoritative.** While **Paste YAML** is selected, the form fields are
+  ignored when the lab is created — switching back to **Build with a form** does
+  *not* carry your YAML edits over.
+* **Validate** checks the document without creating anything. Unknown keys are
+  rejected rather than ignored, so a typo like `imagee:` is reported instead of
+  silently dropping the image from the lab.
+* **Insert skeleton** replaces the editor with the commented template, and
+  **Upload file** loads a `.yaml` file from disk.
+* Invalid YAML fails the lab creation itself, so a broken document can never
+  produce a half-configured lab.
+
+To reuse the templates from an existing lab, use **Export Templates YAML** on the
+[labs list](#manage-your-labs) to download its `workspace-templates-<stack>.yaml`,
+then load it with **Upload file**. Only the templates are exported — credentials
+are never included.
+
+See [Workspace template examples](templates.md) for complete, copy-pasteable
+documents: git-backed workshops, database sidecars, docker-in-docker, mounts, and
+the gotchas each one comes with.
+
+#### Workshops with a devcontainer
+
+If the workshop repository already ships a `.devcontainer/devcontainer.json`, a
+template can build the workspace from it instead of naming an **Image**. The
+devcontainer is built inside each student's workspace on first start, so the
+workshop's own `Dockerfile` and `features` work as written.
+
+Choose **From a devcontainer** at the top of the **Templates** step:
+
+1. Choose **Git repository** (EasyLab clones the repo and finds the
+   `devcontainer.json`) or **Upload** (a `devcontainer.json`, or a repository
+   `.zip`).
+2. Fill in the **Cache registry**. If the devcontainer builds from a **private
+   base image** or pushes to a **private cache**, add a registry credential in the
+   **Credentials** section and choose it under **Registry credential for students**
+   — with a single registry credential it is applied automatically. envbuilder
+   pulls the base image (and pushes the cache) inside each student's pod with it;
+   without it the pull falls back to anonymous and the build fails.
+3. If the workshop repository is **private**, add a git token in the **Credentials**
+   section and choose it under **Git credential for students** — with a single git
+   credential it is applied automatically — so each student's workspace can clone
+   it. (The **Access token** field is separate — it only reads the devcontainer
+   during import and is discarded.)
+4. Click **Import**. EasyLab turns the devcontainer into a workspace template and
+   lists anything in it that will not take effect.
+5. Click **Review generated YAML** to open the result in the editor, adjust it if
+   needed, then finish the wizard.
+
+The import is a starting point, not a black box — what it produces is ordinary
+template YAML you can change.
+
+The image the devcontainer builds carries no IDE, so code-server is injected
+into it. This is independent of the devcontainer's own base image, with one
+catch — that base must be **glibc**-based, since code-server's bundled Node does
+not run on Alpine/musl. If the workspace container exits with `no such file or
+directory`, this is why.
+
+!!! danger "A cache registry is required"
+    Devcontainer templates must set `cache_repo`. Layers are cached there and
+    pushed after the first build, so the first workspace pays for the build and
+    the rest start from the cache. Without it every student rebuilds the whole
+    devcontainer from scratch, which turns a seconds-long start into a
+    minutes-long one for each of them.
+
+    Create the credentials Secret in the workspace namespace beforehand:
+
+    ```bash
+    kubectl create secret docker-registry regcred \
+      --docker-server=registry.example.com \
+      --docker-username=<user> \
+      --docker-password=<token> \
+      --namespace=workshops
+    ```
+
+    Then choose it under **Registry credential for students** (or leave the picker
+    on **Auto** if it is your only registry credential). A public cache registry
+    with a public base image needs no Secret.
+
+!!! warning "Not every devcontainer can be used"
+    Devcontainers built on **docker-compose** (`dockerComposeFile`) are rejected:
+    the workspace is built as a single image, not a set of orchestrated services.
+    A hand-written `sidecars:` block is the nearest equivalent. `forwardPorts`,
+    `mounts`, `privileged` and `postStartCommand` are also not applied — the
+    import lists them so you can decide what to do. See
+    [Devcontainer workshops](templates.md#devcontainer-workshops) for the full
+    breakdown of what is honoured.
+
+!!! tip "Installing system tools"
+    Startup scripts run as the workspace user, which has passwordless `sudo`, so `sudo apt-get install …` works. For anything slow or large, bake it into a **custom image** instead so students don't wait for it on every start, and set that image as the template **Image**:
+
+    ```dockerfile
+    FROM codercom/code-server:latest
+    USER root
+    RUN apt-get update && apt-get install -y golang nodejs && rm -rf /var/lib/apt/lists/*
+    USER coder
+    ```
+
+    Build, push to a registry your cluster can pull from, and set **Image** to it.
+
+!!! tip "Docker inside a workspace (docker-in-docker)"
+    Managed clusters (OVHcloud, AKS) run **containerd**, not Docker, so there is no host Docker socket to reuse. To give students a working `docker`, run a **Docker-in-Docker sidecar** and point the workspace CLI at it:
+
+    * **Sidecar** — name `docker`, image `docker:dind`, port `2375`, env `DOCKER_TLS_CERTDIR=` (empty, disables TLS), **privileged** ✅ (dind requires it; capability `SYS_ADMIN` alone is not enough for full dind).
+    * **Env** (on the template) — `DOCKER_HOST=tcp://localhost:2375`.
+    * **Startup Script** — install the CLI (`sudo` is available in the workspace):
+
+    ```bash
+    sudo apt-get update && sudo apt-get install -y docker.io
+    until docker info >/dev/null 2>&1; do sleep 2; done
+    ```
+
+    Each workspace then gets its **own isolated** Docker daemon. ⚠️ Privileged containers can escalate to the node — only enable this on a trusted workshop cluster you control. For an unprivileged alternative, use `docker:dind-rootless` with the right capabilities, or install a Sysbox/Kata RuntimeClass on the cluster.
 
 #### HTTPS Configuration (Optional)
 
-By default, Coder is exposed via a plain HTTP LoadBalancer IP. To expose it over HTTPS with a trusted TLS certificate, fill in the **HTTPS Configuration** section:
+A domain is optional. Without one, workspaces are still reachable — EasyLab falls
+back to [nip.io](https://nip.io) wildcard DNS over the ingress controller's
+LoadBalancer IP, serving each workspace at `http://{workspace}.{ingressIP}.nip.io`.
+That needs no DNS setup at all, which makes it convenient for quick or throwaway
+labs, but it is **plain HTTP with no TLS** — set a domain for anything real.
 
-* **Domain Name** — the FQDN you want Coder to be accessible at (e.g. `coder.example.com`). Leave blank to keep HTTP.
+* **Domain Name** — the base FQDN for the lab (e.g. `lab.example.com`). Each student workspace gets a subdomain (`{workspace}.{domain}`), served over HTTPS. Leave blank to use the nip.io fallback described above.
 * **ACME Email** — email address used for Let's Encrypt certificate notifications. Required when domain is set.
-* **Wildcard Domain** — optional, e.g. `*.coder.example.com`. Enables per-workspace URLs (requires a DNS provider configured below).
+* **Wildcard Domain** — optional, e.g. `*.lab.example.com`. Creates the wildcard DNS A-record so per-student subdomains resolve (requires a DNS provider configured below).
 
 ![DNS configuration](screens/dns-config.png)
 
-When a domain is set, the following additional components are deployed into the cluster:
+The following components are deployed into the cluster:
 
-* **ingress-nginx** — Kubernetes ingress controller (gets its own LoadBalancer IP, exported as `ingressIP`).
-* **cert-manager** — automates TLS certificate issuance from Let's Encrypt.
+* **ingress-nginx** — Kubernetes ingress controller (gets its own LoadBalancer IP, exported as `ingressIP`). Installed whether or not a domain is set, since the nip.io fallback routes through it too.
+* **cert-manager** — automates TLS certificate issuance from Let's Encrypt. Installed only when a domain is set; the nip.io fallback has no certificates to issue.
+
+!!! note "The nip.io fallback needs a routable LoadBalancer IP"
+    nip.io resolves an IP embedded in the hostname, so the fallback only applies when
+    the ingress controller has an external **IP**. On a cluster whose LoadBalancer
+    exposes a hostname instead, or with no ingress controller, workspaces stay
+    cluster-internal and the lab's base URL shows as empty.
 
 ![DNS configuration](screens/dns.png)
 
 After `pulumi up` completes, the stack output `ingressIP` is printed. **You must create a DNS A record** pointing `<domain> → <ingressIP>` in your DNS provider before the TLS certificate can be issued.
+
+!!! warning "TLS certificates and large labs"
+    Each student workspace obtains its **own** Let's Encrypt certificate for its
+    subdomain. Let's Encrypt limits issuance to about **50 certificates per week per
+    registered domain**, so a large lab (many students × templates) can exceed the
+    limit and some workspaces will fail to get TLS. Mitigations:
+
+    * Keep labs modest, or spread them across more than one domain.
+    * Use the Let's Encrypt **staging** issuer while testing (no rate limit; browsers show an untrusted cert).
+    * Front the lab with a **wildcard** certificate for `*.<domain>` (issued via DNS-01) so all workspaces share one certificate instead of one each.
+
+!!! note "Opening a workspace"
+    A workspace only shows the **Open** button once its IDE is actually serving (a
+    readiness probe gates it), so a workspace running a long startup script stays in
+    the "starting" state until setup finishes — avoiding a connection-refused click.
 
 #### DNS Provider (Optional)
 
@@ -132,6 +335,9 @@ Select a DNS provider to automate A-record creation and unlock wildcard certific
 |----------|---------------|
 | **OVH DNS** | OVH application key, secret, and consumer key with `/domain/zone/*` permissions |
 | **Azure DNS** | Azure service principal with `DNS Zone Contributor` role on the DNS zone resource group |
+
+!!! warning "DNS Zone is required"
+    When you select a DNS provider you **must** fill in the **DNS Zone** field with the parent zone that hosts your domain — for example, domain `ai-bb.yodamad.fr` belongs to zone `yodamad.fr`. The domain must sit inside the zone. Leaving the zone empty (or entering a zone the domain is not part of) is rejected as soon as you submit the form, before any infrastructure is provisioned.
 
 When a DNS provider is configured:
 
@@ -145,17 +351,13 @@ When a DNS provider is configured:
 !!! note "Azure DNS credentials"
     Create a service principal (`az ad sp create-for-rbac`) and assign it the `DNS Zone Contributor` role on the resource group that contains your Azure DNS zone. Azure DNS uses cert-manager's native solver — no additional webhook is required.
 
-### Template Variables
+### Environment Variables
 
-Coder templates can define Terraform `variable` blocks that need values at installation time. EasyLab supports setting these variables per template.
+Each workspace template can define environment variables passed to the workspace container.
 
-**Detect Variables** — Click the **Detect Variables** button on a template row to automatically scan the template source (uploaded file or Git repository) for Terraform variable definitions. EasyLab parses the `.tf` files, extracts all `variable` blocks, and shows each one as a name/value pair pre-filled with its default value (if any).
+**Manual entry** — Click **+ Add Variable** on a template row to add an environment variable name and value.
 
-**Manual entry** — Click **+ Add Variable** to manually add a variable name and value. This is useful when you already know the variables your template expects.
-
-![Template variables](screens/variables.png)
-
-Required variables (those without a default value in the `.tf` source) must be given a value before the template can be installed successfully. If a required variable is left empty, Coder will reject the template version during provisioning.
+![Environment variables](screens/variables.png)
 
 ### Cleaning Configuration (Step 8)
 
@@ -178,6 +380,9 @@ Set a **Date** (and optionally a **Time**) for the entire lab to be automaticall
 
 !!! note
     The cleanup service also runs scheduled lab deletion checks at the same interval as workspace cleanup. Set `CLEANUP_INTERVAL_MINUTES` to a lower value if you need finer-grained precision (default is 5 minutes).
+
+!!! note "Recreating a lab that had a deletion date"
+    When you **Recreate** a lab whose scheduled deletion date has already passed, EasyLab prompts you for a **new** deletion date before recreating. This prevents the recreated lab from being destroyed immediately by the cleanup service. Enter a future date, or leave it blank to keep the recreated lab running with no scheduled deletion.
 
 ## Dry run (preview before create)
 
@@ -217,38 +422,88 @@ You can see all the labs you have created with following information:
 * **Type** — Real run (🚀) or Dry run (🔍)
 * **Access to the creation logs**
 * **Access to the kubeconfig file** (for completed labs)
-* **Retrieve Coder credentials** — For completed labs, a **Coder admin credentials** button opens a modal with the Coder URL, admin email, and admin password. You can copy each value or show/hide the password. Use these to sign in to the Coder instance for that lab.
-* **Actions** — Destroy a lab; **Recreate** a destroyed lab with the same configuration (same Coder template, options, etc.)
+* **Lab endpoint info** — For completed labs, a **Lab endpoint info** button opens a read-only modal with the workspace base URL and the namespace student workspaces run in. Both values are copyable. An empty base URL means workspaces are only reachable in-cluster. This is reference information only — students reach their own workspace from the student portal.
+* **Actions** — Destroy a lab; **Recreate** a destroyed lab with the same configuration (same workspace templates, options, etc.)
 * **List of workspaces** created for this lab — delete workspaces one by one or in bulk
 * **Cleanup** - Display the cleanup policy for the lab (*i.e. after how many hours/days the workspaces will be deleted*)
 
 ![Lab Workspaces](screens/list-workspaces.png){width=350}
 
-## Workspace access reliability (Coder session tokens)
+### Add a template to an existing lab
 
-EasyLab talks to each lab's Coder instance with an admin token that it stores per
-lab. Plain Coder session tokens expire (governed by `CODER_SESSION_DURATION`),
-which previously caused students to hit a raw Coder `401 – Try logging in using
-'coder login'` when they opened a workspace on a lab created days earlier.
+Completed labs have an **Add Template** action that opens a side drawer for appending
+a workspace template without recreating the lab. It mirrors the wizard's **Workspace
+Templates** step, so you define the workspace the same three ways:
 
-This is now handled transparently, so students never see a Coder login error:
+* **Build with a form** — fill in the template name and git repository, with an
+  **Advanced options** section for image, CPU/memory/disk, startup script, dotfiles,
+  extensions, environment variables, sidecars, and mounts.
+* **From a devcontainer** — point at a workshop repository (or upload a
+  `devcontainer.json` / repository `.zip`); EasyLab reads the devcontainer, generates
+  the template YAML, and opens it for review before you add it.
+* **Paste YAML** — write (or **Validate**, or **Insert skeleton**) the template YAML
+  directly. The document may define more than one template, and all are appended.
 
-* **Long-lived admin token at provisioning** — when a lab is created, EasyLab mints
-  a long-lived admin API token (default lifetime **30 days**) instead of relying on
-  a short-lived session token.
-* **Automatic refresh + persistence** — if a stored token is ever rejected, EasyLab
-  silently re-authenticates with the stored admin credentials, retries the request,
-  and saves the refreshed token back to the lab. This also fixes labs that were
-  created before this behaviour existed, without re-provisioning.
+The drawer's context bar names the lab and lists the templates it already has, so a
+duplicate name is visible before you submit (a clash is rejected). On success a toast
+confirms the addition and the list refreshes.
 
-Operators can tune the token lifetime with these settings (defaults are sensible;
-no configuration is required):
+> Credentials for private registries and repositories are configured when the lab is
+> created (see below). A template added here can only reference a credential that
+> already exists on the lab.
 
-* `CODER_ADMIN_TOKEN_LIFETIME` (server env, Go duration such as `720h`) — the
-  lifetime requested for the admin token. Defaults to `720h` (30 days).
-* `coder:maxAdminTokenLifetime` (Pulumi config) — injected as
-  `CODER_MAX_ADMIN_TOKEN_LIFETIME` on the Coder deployment. Coder caps admin
-  (owner) tokens at **7 days** by default, so EasyLab raises this to the admin-token
-  lifetime automatically; override it only if you need a different maximum. If the
-  requested lifetime exceeds this cap, EasyLab falls back to short-lived tokens plus
-  automatic refresh.
+## Lab credentials (private registries and repositories)
+
+A lab whose workspaces use a private image or clone a private repository needs
+credentials. Add them at either of two points:
+
+* **During creation** — the **Workspace Templates** step of the wizard has a
+  *Credentials* section. Tokens entered there are held in memory and written to the
+  cluster the moment it finishes provisioning, before the lab reports ready.
+* **After the lab is up** — expand **Credentials** on the lab's **Workspaces** page.
+
+Two kinds:
+
+* **Container registry** — a server, username and token. Referenced from a
+  workspace template as `image_pull_secrets`, and by a devcontainer template as
+  `devcontainer.registry_auth_secret`.
+* **Git repository** — a username and token. Referenced from a workspace template
+  as `git_auth_secret`. In the wizard's **Build with a form** path a single git
+  credential is wired into every template with a private repo automatically; with
+  several, pick the one each template uses under its **Advanced options → Git
+  credential**. Leave the username blank and it defaults to `oauth2`, which is what
+  GitLab expects with a personal access token.
+
+The panel shows the exact line to paste into your template, and lists credentials
+created out of band with `kubectl` alongside the ones added here.
+
+How the token is handled, and what follows from it:
+
+* **It is written straight to the lab's cluster and not kept by EasyLab.** It is
+  never stored in the lab configuration, so it cannot appear in the job file, the
+  jobs API, or the templates export — a template names a credential, it never
+  contains one.
+* **The Secret lives in the cluster.** Entered in the wizard, a token waits in
+  memory only until provisioning finishes; entered on the Workspaces page, it is
+  written immediately. Either way EasyLab keeps no copy — which is why a wizard
+  token is lost if the server restarts mid-provisioning, and the lab then shows the
+  credential as pending rather than failing a student first.
+* **Destroying a lab destroys its credentials.** Recreating a lab prompts you to
+  re-enter the tokens, with the names and types carried over; a retried lab keeps
+  them.
+* **Saving over a name rotates it.** Running workspaces keep the old token until
+  they are recreated.
+* **A referenced-but-missing credential is flagged.** If a template names a
+  credential the cluster does not have, the Credentials panel says which one.
+
+Full reference, including the `kubectl` equivalents and the difference between
+`image_pull_secrets` and `devcontainer.registry_auth_secret`, is in
+[Workspace templates](templates.md#private-registries-and-repositories).
+
+## Workspace access
+
+Each student workspace is a code-server pod exposed (when a domain is
+configured) at `https://{workspace}.{domain}/`. Access is gated by a per-student
+**password** that EasyLab generates and shows to the student on the portal. The
+student enters it on code-server's own login page when they open their
+workspace, and EasyLab's own student authentication protects the portal itself.

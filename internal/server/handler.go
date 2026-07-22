@@ -1,22 +1,20 @@
 package server
 
 import (
-	"archive/zip"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
-	"easylab/coder"
+	"easylab/internal/providers/workspace"
 	"easylab/internal/tfparse"
-	"easylab/utils"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"html/template"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -30,22 +28,26 @@ import (
 
 	dnsregistry "easylab/internal/providers/dns"
 
-	"github.com/coder/coder/v2/codersdk"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/google/uuid"
 )
 
 // Handler handles HTTP requests
 type Handler struct {
-	jobManager                  *JobManager
-	pulumiExec                  *PulumiExecutor
-	templates                   map[string]*template.Template
-	templatesMu                 sync.RWMutex
-	credentialsManager          *CredentialsManager
-	ovhOptionsManager           *OVHOptionsManager
-	azureOptionsManager         *AzureOptionsManager
-	feedbackStore               *FeedbackStore
+	jobManager *JobManager
+	pulumiExec *PulumiExecutor
+	// newWorkspaceBackend builds the workspace backend for a lab from its kubeconfig
+	// and namespace. Overridable in tests to inject a fake backend.
+	newWorkspaceBackend func(kubeconfig, namespace string) (workspace.Backend, error)
+	templates           map[string]*template.Template
+	templatesMu         sync.RWMutex
+	credentialsManager  *CredentialsManager
+	ovhOptionsManager   *OVHOptionsManager
+	azureOptionsManager *AzureOptionsManager
+	feedbackStore       *FeedbackStore
+	// pendingSecrets holds credentials captured in the creation wizard until the
+	// lab's cluster exists to receive them (see pending_secrets.go).
+	pendingSecrets              *pendingSecretStore
 	azureADConfigurer           func(clientID, clientSecret, tenantID string)
 	classicLoginConfigurer      func(disabled bool)
 	adminGroupIDConfigurer      func(groupID string)
@@ -109,15 +111,24 @@ func atoiForm(s string) int {
 
 // NewHandler creates a new HTTP handler
 func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsManager *CredentialsManager, ovhOptionsManager *OVHOptionsManager, azureOptionsManager *AzureOptionsManager, feedbackStore *FeedbackStore) *Handler {
-	return &Handler{
+	h := &Handler{
 		jobManager:          jobManager,
 		pulumiExec:          pulumiExec,
+		newWorkspaceBackend: workspace.Default,
 		templates:           make(map[string]*template.Template),
 		credentialsManager:  credentialsManager,
 		ovhOptionsManager:   ovhOptionsManager,
 		azureOptionsManager: azureOptionsManager,
 		feedbackStore:       feedbackStore,
+		pendingSecrets:      newPendingSecretStore(),
 	}
+	// Credentials captured in the wizard are written once the lab's cluster is up.
+	// The executor owns that moment; the handler owns the cluster connection — so
+	// the executor calls back here rather than growing a backend of its own.
+	if pulumiExec != nil {
+		pulumiExec.afterProvision = h.applyPendingSecrets
+	}
+	return h
 }
 
 // deriveEncryptionKey derives a 32-byte AES-256 key from email and student password
@@ -218,122 +229,194 @@ func (h *Handler) getProviderCredentials(w http.ResponseWriter, providerName str
 	return creds, nil
 }
 
-// saveUploadedTemplateFiles handles multiple template file uploads and saves them to the job directory.
-// For each index i from 0 to count-1, tries to get template_file_i. Returns a slice of relative paths
-// (empty string for indices with no file uploaded).
-func (h *Handler) saveUploadedTemplateFiles(r *http.Request, jobDir string, count int) ([]string, error) {
-	paths := make([]string, count)
-	if err := os.MkdirAll(jobDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create job directory: %w", err)
-	}
-
-	for i := 0; i < count; i++ {
-		fieldName := fmt.Sprintf("template_file_%d", i)
-		file, header, err := r.FormFile(fieldName)
-		if err != nil {
-			if err == http.ErrMissingFile {
-				continue
-			}
-			return nil, fmt.Errorf("failed to get uploaded file %s: %w", fieldName, err)
-		}
-
-		filename := header.Filename
-		if !strings.HasSuffix(strings.ToLower(filename), ".zip") && !strings.HasSuffix(strings.ToLower(filename), ".tf") {
-			file.Close()
-			return nil, fmt.Errorf("invalid file type for template %d: only .zip and .tf files are allowed", i)
-		}
-
-		var destPath, finalPath string
-		if strings.HasSuffix(strings.ToLower(filename), ".tf") {
-			destPath = filepath.Join(jobDir, fmt.Sprintf("template_%d.tf", i))
-			finalPath = fmt.Sprintf("template_%d.zip", i)
-		} else {
-			destPath = filepath.Join(jobDir, fmt.Sprintf("template_%d.zip", i))
-			finalPath = fmt.Sprintf("template_%d.zip", i)
-		}
-
-		destFile, err := os.Create(destPath)
-		if err != nil {
-			file.Close()
-			return nil, fmt.Errorf("failed to create destination file: %w", err)
-		}
-		_, err = io.Copy(destFile, file)
-		destFile.Close()
-		file.Close()
-		if err != nil {
-			return nil, fmt.Errorf("failed to save uploaded file: %w", err)
-		}
-
-		if strings.HasSuffix(strings.ToLower(filename), ".tf") {
-			zipPath, err := utils.ZipTerraformFile(destPath)
-			if err != nil {
-				return nil, fmt.Errorf("failed to zip terraform file: %w", err)
-			}
-			os.Remove(destPath)
-			if !strings.HasPrefix(zipPath, jobDir) {
-				finalZipPath := filepath.Join(jobDir, finalPath)
-				if err := os.Rename(zipPath, finalZipPath); err != nil {
-					return nil, fmt.Errorf("failed to move zip file to job directory: %w", err)
-				}
-			}
-		}
-		paths[i] = finalPath
-	}
-	return paths, nil
-}
-
-// parseCoderTemplatesFromForm extracts Coder template entries from the form.
-// Expects template_N_name, template_N_source, template_file_N (for upload), template_N_git_repo, etc.
-func parseCoderTemplatesFromForm(r *http.Request, templateFilePaths []string) []CoderTemplate {
-	var templates []CoderTemplate
+// parseWorkspaceTemplatesFromForm extracts workspace template entries from the form.
+// Expects template_N_name, template_N_image, template_N_git_repo, template_N_cpu,
+// template_N_memory, template_N_disk_size, and repeated template_N_env_name /
+// template_N_env_value pairs.
+func parseWorkspaceTemplatesFromForm(r *http.Request) []WorkspaceTemplate {
+	var templates []WorkspaceTemplate
 	for i := 0; ; i++ {
 		name := getFormValue(r, fmt.Sprintf("template_%d_name", i))
 		if name == "" {
 			break
 		}
-		source := getFormValue(r, fmt.Sprintf("template_%d_source", i))
-		if source == "" {
-			source = "git" // default when nothing selected
-		}
-		t := CoderTemplate{
-			Name:      name,
-			Source:    source,
-			GitRepo:   getFormValue(r, fmt.Sprintf("template_%d_git_repo", i)),
-			GitFolder: getFormValue(r, fmt.Sprintf("template_%d_git_folder", i)),
-			GitBranch: getFormValue(r, fmt.Sprintf("template_%d_git_branch", i)),
-		}
-		if t.GitBranch == "" {
-			t.GitBranch = "main"
-		}
-		if source == "upload" && i < len(templateFilePaths) && templateFilePaths[i] != "" {
-			t.FilePath = templateFilePaths[i]
+		t := WorkspaceTemplate{
+			Name:          name,
+			IDE:           getFormValue(r, fmt.Sprintf("template_%d_ide", i)),
+			Image:         getFormValue(r, fmt.Sprintf("template_%d_image", i)),
+			GitRepo:       getFormValue(r, fmt.Sprintf("template_%d_git_repo", i)),
+			GitBranch:     getFormValue(r, fmt.Sprintf("template_%d_git_branch", i)),
+			GitFolder:     getFormValue(r, fmt.Sprintf("template_%d_git_folder", i)),
+			CPU:           getFormValue(r, fmt.Sprintf("template_%d_cpu", i)),
+			Memory:        getFormValue(r, fmt.Sprintf("template_%d_memory", i)),
+			DiskSize:      getFormValue(r, fmt.Sprintf("template_%d_disk_size", i)),
+			StartupScript: getFormValue(r, fmt.Sprintf("template_%d_startup_script", i)),
+			DotfilesRepo:  getFormValue(r, fmt.Sprintf("template_%d_dotfiles_repo", i)),
+			Extensions:    splitList(getFormValue(r, fmt.Sprintf("template_%d_extensions", i))),
+			GitAuthSecret: getFormValue(r, fmt.Sprintf("template_%d_git_auth_secret", i)),
 		}
 
-		varNames := r.Form[fmt.Sprintf("template_%d_var_name", i)]
-		varValues := r.Form[fmt.Sprintf("template_%d_var_value", i)]
-		if len(varNames) > 0 {
-			t.Variables = make(map[string]string)
-			for j, vn := range varNames {
-				vn = strings.TrimSpace(vn)
-				if vn == "" {
+		envNames := r.Form[fmt.Sprintf("template_%d_env_name", i)]
+		envValues := r.Form[fmt.Sprintf("template_%d_env_value", i)]
+		if len(envNames) > 0 {
+			t.Env = make(map[string]string)
+			for j, en := range envNames {
+				en = strings.TrimSpace(en)
+				if en == "" {
 					continue
 				}
-				vv := ""
-				if j < len(varValues) {
-					vv = varValues[j]
+				ev := ""
+				if j < len(envValues) {
+					ev = envValues[j]
 				}
-				t.Variables[vn] = vv
+				t.Env[en] = ev
 			}
 		}
+
+		t.Sidecars = parseSidecarsFromForm(r, i)
+		t.Mounts = parseMountsFromForm(r, i)
 
 		templates = append(templates, t)
 	}
 	return templates
 }
 
+// splitList splits a comma/newline-separated string into trimmed, non-empty items.
+func splitList(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	fields := strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == '\n' || r == '\r' })
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// parseSidecarsFromForm reads index-aligned template_N_sidecar_* arrays.
+// Ports are comma-separated ints; env is comma-separated KEY=VAL pairs.
+func parseSidecarsFromForm(r *http.Request, i int) []WorkspaceSidecar {
+	names := r.Form[fmt.Sprintf("template_%d_sidecar_name", i)]
+	images := r.Form[fmt.Sprintf("template_%d_sidecar_image", i)]
+	ports := r.Form[fmt.Sprintf("template_%d_sidecar_ports", i)]
+	envs := r.Form[fmt.Sprintf("template_%d_sidecar_env", i)]
+	privileged := r.Form[fmt.Sprintf("template_%d_sidecar_privileged", i)]
+	capabilities := r.Form[fmt.Sprintf("template_%d_sidecar_capabilities", i)]
+	var sidecars []WorkspaceSidecar
+	for j, n := range names {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		sc := WorkspaceSidecar{Name: n}
+		if j < len(images) {
+			sc.Image = strings.TrimSpace(images[j])
+		}
+		if j < len(ports) {
+			for _, p := range splitList(ports[j]) {
+				if n, err := strconv.Atoi(p); err == nil {
+					sc.Ports = append(sc.Ports, n)
+				}
+			}
+		}
+		if j < len(envs) {
+			for _, kv := range splitList(envs[j]) {
+				if k, v, ok := strings.Cut(kv, "="); ok {
+					if sc.Env == nil {
+						sc.Env = map[string]string{}
+					}
+					sc.Env[strings.TrimSpace(k)] = strings.TrimSpace(v)
+				}
+			}
+		}
+		if j < len(privileged) {
+			sc.Privileged = privileged[j] == "true"
+		}
+		if j < len(capabilities) {
+			sc.Capabilities = splitList(capabilities[j])
+		}
+		sidecars = append(sidecars, sc)
+	}
+	return sidecars
+}
+
+// parseMountsFromForm reads index-aligned template_N_mount_* arrays.
+func parseMountsFromForm(r *http.Request, i int) []WorkspaceMount {
+	types := r.Form[fmt.Sprintf("template_%d_mount_type", i)]
+	names := r.Form[fmt.Sprintf("template_%d_mount_name", i)]
+	paths := r.Form[fmt.Sprintf("template_%d_mount_path", i)]
+	var mounts []WorkspaceMount
+	for j, n := range names {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		m := WorkspaceMount{Name: n}
+		if j < len(types) {
+			m.Type = strings.TrimSpace(types[j])
+		}
+		if j < len(paths) {
+			m.Path = strings.TrimSpace(paths[j])
+		}
+		if m.Path == "" {
+			continue
+		}
+		mounts = append(mounts, m)
+	}
+	return mounts
+}
+
+// toWorkspaceSidecars maps server sidecar structs to backend types.
+func toWorkspaceSidecars(in []WorkspaceSidecar) []workspace.Sidecar {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]workspace.Sidecar, 0, len(in))
+	for _, s := range in {
+		out = append(out, workspace.Sidecar{
+			Name:         s.Name,
+			Image:        s.Image,
+			Ports:        s.Ports,
+			Env:          s.Env,
+			Privileged:   s.Privileged,
+			Capabilities: s.Capabilities,
+		})
+	}
+	return out
+}
+
+// toWorkspaceMounts maps server mount structs to backend types.
+func toWorkspaceMounts(in []WorkspaceMount) []workspace.Mount {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]workspace.Mount, 0, len(in))
+	for _, m := range in {
+		out = append(out, workspace.Mount{Type: m.Type, Name: m.Name, Path: m.Path})
+	}
+	return out
+}
+
+// toWorkspaceDevcontainer maps the template's devcontainer config to the backend
+// type. A disabled block is the same as none: the template's image is used.
+func toWorkspaceDevcontainer(in *DevcontainerConfig) *workspace.DevcontainerSpec {
+	if in == nil || !in.Enabled {
+		return nil
+	}
+	return &workspace.DevcontainerSpec{
+		Dir:                in.Dir,
+		CacheRepo:          in.CacheRepo,
+		RegistryAuthSecret: in.RegistryAuthSecret,
+		FallbackImage:      in.FallbackImage,
+		Insecure:           in.Insecure,
+	}
+}
+
 // createLabConfigFromForm creates a LabConfig from form data and provider credentials.
-// templateFilePaths contains saved file paths for upload-source templates (indexed by template order).
-func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds ProviderCredentials, templateFilePaths []string) *LabConfig {
+func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds ProviderCredentials) *LabConfig {
 	// Get stack name with default
 	stackName := r.FormValue("stack_name")
 	if stackName == "" {
@@ -342,25 +425,18 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 
 	useExistingCluster := r.FormValue("use_existing_cluster") == "true"
 
-	templates := parseCoderTemplatesFromForm(r, templateFilePaths)
+	templates := parseWorkspaceTemplatesFromForm(r)
 
 	config := &LabConfig{
-		StackName:               stackName,
-		UseExistingCluster:      useExistingCluster,
-		CoderGithubLoginEnabled: r.FormValue("coder_github_login_enabled") == "true",
+		StackName:          stackName,
+		UseExistingCluster: useExistingCluster,
 
-		CoderNamespace:     r.FormValue("coder_namespace"),
-		CoderAdminEmail:    r.FormValue("coder_admin_email"),
-		CoderAdminPassword: r.FormValue("coder_admin_password"),
-		CoderVersion:       r.FormValue("coder_version"),
-		CoderDbUser:        r.FormValue("coder_db_user"),
-		CoderDbPassword:    r.FormValue("coder_db_password"),
-		CoderDbName:        r.FormValue("coder_db_name"),
-		CoderTemplates:     templates,
+		WorkspaceNamespace: r.FormValue("workspace_namespace"),
+		WorkspaceTemplates: templates,
 
-		CoderDomain:         r.FormValue("coder_domain"),
-		CoderAcmeEmail:      r.FormValue("coder_acme_email"),
-		CoderWildcardDomain: r.FormValue("coder_wildcard_domain"),
+		Domain:         r.FormValue("domain"),
+		AcmeEmail:      r.FormValue("acme_email"),
+		WildcardDomain: r.FormValue("wildcard_domain"),
 
 		DNSProvider: r.FormValue("dns_provider"),
 		DNSZone:     r.FormValue("dns_zone"),
@@ -451,19 +527,37 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 		}
 	}
 
-	// Validate email if provided
-	if config.CoderAdminEmail != "" && !validateEmail(config.CoderAdminEmail) {
-		log.Printf("Warning: Invalid email format in CoderAdminEmail: %s", config.CoderAdminEmail)
+	// Validate ACME email if provided
+	if config.AcmeEmail != "" && !validateEmail(config.AcmeEmail) {
+		log.Printf("Warning: Invalid email format in AcmeEmail: %s", config.AcmeEmail)
 	}
 
-	// Validate Git repository URLs for git-source templates
-	for i, t := range config.CoderTemplates {
-		if t.Source == "git" && t.GitRepo != "" && !validateURL(t.GitRepo) {
+	// Validate Git repository URLs for workspace templates
+	for i, t := range config.WorkspaceTemplates {
+		if t.GitRepo != "" && !validateURL(t.GitRepo) {
 			log.Printf("Warning: Invalid Git repository URL for template %d: %s", i, t.GitRepo)
 		}
 	}
 
 	return config
+}
+
+// validateDNSConfig rejects a DNS-provider selection that cannot produce a valid
+// A record: a missing zone, or a domain that does not sit inside the zone. Without
+// this check the empty/mismatched zone only surfaces as an OVH 404 deep inside
+// pulumi up (coder/https.go strips the zone off the domain to derive the subdomain).
+func validateDNSConfig(cfg *LabConfig) error {
+	if cfg.DNSProvider == "" {
+		return nil
+	}
+	zone := strings.TrimSpace(cfg.DNSZone)
+	if zone == "" {
+		return fmt.Errorf("DNS Zone is required when a DNS provider is selected")
+	}
+	if cfg.Domain != "" && cfg.Domain != zone && !strings.HasSuffix(cfg.Domain, "."+zone) {
+		return fmt.Errorf("domain %q is not inside DNS zone %q", cfg.Domain, zone)
+	}
+	return nil
 }
 
 // executeLabJob creates a job and starts execution, returning the job ID and HTML response
@@ -654,6 +748,39 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 
 	useExistingCluster := r.FormValue("use_existing_cluster") == "true"
 
+	// Resolve the workspace templates up front: a mistake in the YAML editor must
+	// fail here, before any job or directory exists.
+	templates, err := workspaceTemplatesFromRequest(r)
+	if err != nil {
+		log.Printf("Invalid workspace templates YAML: %v", err)
+		h.renderHTMLError(w, "Invalid Workspace Templates YAML", err.Error())
+		return
+	}
+	// An admin who validates first sees these in the editor's toast; one who goes
+	// straight to Create does not, so leave a trail here. The message names the key
+	// and template, never the URL, which is what carries the token.
+	for _, warn := range gitCredentialWarnings(templates) {
+		log.Printf("Workspace template warning (%s): %s", warn.Key, warn.Message)
+	}
+
+	// Credentials the admin entered in the wizard. Parsed here so a mistake fails
+	// before any job exists; held aside and applied once the cluster is up (a lab
+	// has no cluster to receive them yet). A dry run provisions nothing, so it
+	// keeps none.
+	wizardSecrets, err := parseWizardSecrets(r)
+	if err != nil {
+		log.Printf("Invalid wizard credentials: %v", err)
+		h.renderHTMLError(w, "Invalid Credentials", err.Error())
+		return
+	}
+
+	// Form path only: with no per-template field naming a credential, point every
+	// template that clones a private repo at the wizard's git credential when there
+	// is exactly one. The YAML path names git_auth_secret itself and is authoritative.
+	if getFormValue(r, "templates_mode") != "yaml" {
+		autolinkGitCredential(templates, wizardSecrets)
+	}
+
 	var providerCreds ProviderCredentials
 	if !useExistingCluster {
 		// Get provider from form (default to "ovh" for backward compatibility)
@@ -670,53 +797,34 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 		}
 	}
 
-	// Create initial config (without template file paths yet)
-	initialConfig := h.createLabConfigFromForm(r, providerCreds, nil)
-	templates := initialConfig.GetCoderTemplates()
-	if len(templates) == 0 {
-		h.renderHTMLError(w, "Template Configuration Error", "At least one Coder template is required")
+	// Create the lab config from the form. Workspace templates are pure
+	// configuration (image + optional git repo + resources), so there are no
+	// files to upload.
+	initialConfig := h.createLabConfigFromForm(r, providerCreds)
+	initialConfig.WorkspaceTemplates = templates
+
+	// A DNS-provider selection with no (or a mismatched) zone can only fail deep
+	// inside pulumi up, after minutes of provisioning. Reject it here, before any
+	// job or job directory exists.
+	if err := validateDNSConfig(initialConfig); err != nil {
+		log.Printf("Invalid DNS configuration: %v", err)
+		h.renderHTMLError(w, "DNS Configuration Error", err.Error())
 		return
 	}
 
 	// Create job and job directory
 	jobID := h.jobManager.CreateJob(initialConfig)
+	// A dry run provisions no cluster, so its credentials would never be applied
+	// and would only sit in memory. Keep them only for a real run.
+	if !isDryRun {
+		h.pendingSecrets.Put(jobID, wizardSecrets)
+	}
 	jobDir := filepath.Join(h.pulumiExec.GetWorkDir(), jobID)
 	if err := os.MkdirAll(jobDir, 0755); err != nil {
 		log.Printf("Failed to create job directory: %v", err)
 		h.renderHTMLError(w, "Job Creation Error", "Failed to initialize job, please try again.")
 		return
 	}
-
-	// Save uploaded template files
-	templateFilePaths, err := h.saveUploadedTemplateFiles(r, jobDir, len(templates))
-	if err != nil {
-		log.Printf("Failed to save template files: %v", err)
-		h.renderHTMLError(w, "Template Upload Error", "Failed to save uploaded files, please try again.")
-		return
-	}
-
-	// Update config with saved file paths
-	initialConfig = h.createLabConfigFromForm(r, providerCreds, templateFilePaths)
-	templates = initialConfig.GetCoderTemplates()
-
-	// Validate each template: upload needs file, git needs repo URL
-	for i, t := range templates {
-		if t.Source == "upload" {
-			if t.FilePath == "" {
-				h.renderHTMLError(w, "Template Configuration Error", fmt.Sprintf("Template %d (%s): file upload is required when using upload source", i+1, t.Name))
-				return
-			}
-		} else if t.Source == "git" {
-			if t.GitRepo == "" {
-				h.renderHTMLError(w, "Template Configuration Error", fmt.Sprintf("Template %d (%s): repository URL is required when using Git source", i+1, t.Name))
-				return
-			}
-		}
-	}
-
-	h.updateJobConfig(jobID, func(config *LabConfig) {
-		config.CoderTemplates = initialConfig.CoderTemplates
-	})
 
 	// Handle kubeconfig for BYOK mode
 	if useExistingCluster {
@@ -920,8 +1028,8 @@ func (h *Handler) GetJobStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Show retry button if job failed
 	if status == JobStatusFailed {
-		statusHTML.WriteString(`<form hx-post="/api/jobs/` + jobID + `/retry" hx-target="#job-status" hx-swap="outerHTML" style="display: inline-block; margin-left: 1rem;">`)
-		statusHTML.WriteString(`<button type="submit" class="btn btn-primary">`)
+		statusHTML.WriteString(`<form style="display: inline-block; margin-left: 1rem;">`)
+		statusHTML.WriteString(`<button type="button" class="btn btn-primary" onclick="retryJob('` + jobID + `')">`)
 		statusHTML.WriteString(`<span class="btn-icon">🔄</span> Retry Job`)
 		statusHTML.WriteString(`</button>`)
 		statusHTML.WriteString(`</form>`)
@@ -1059,16 +1167,19 @@ func (h *Handler) DownloadKubeconfig(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(kubeconfig))
 }
 
-// GetCoderCredentials returns Coder admin URL, email, and password for a completed lab.
+// GetCoderCredentials returns the lab's public workspace base URL and the
+// namespace student workspaces run in for a completed lab. The route keeps its
+// historical name/path for backward compatibility; it no longer returns any
+// Coder admin credentials (Coder has been removed).
 func (h *Handler) GetCoderCredentials(w http.ResponseWriter, r *http.Request) {
 	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if len(pathParts) < 4 || pathParts[0] != "api" || pathParts[3] != "coder-credentials" {
-		log.Printf("Invalid path for coder credentials: %s", r.URL.Path)
+		log.Printf("Invalid path for lab credentials: %s", r.URL.Path)
 		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
 	}
 	if pathParts[1] != "jobs" && pathParts[1] != "labs" {
-		log.Printf("Invalid path for coder credentials: %s", r.URL.Path)
+		log.Printf("Invalid path for lab credentials: %s", r.URL.Path)
 		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
 	}
@@ -1083,12 +1194,12 @@ func (h *Handler) GetCoderCredentials(w http.ResponseWriter, r *http.Request) {
 
 	job.mu.RLock()
 	status := job.Status
-	coderURL := job.CoderURL
-	coderAdminEmail, coderAdminPassword := job.coderCredentials()
-	coderDomain := ""
+	domain := ""
 	if job.Config != nil {
-		coderDomain = job.Config.CoderDomain
+		domain = job.Config.Domain
 	}
+	kubeconfig := extractStringFromConfigValue(job.Kubeconfig)
+	namespace := job.workspaceNamespace()
 	job.mu.RUnlock()
 
 	if status != JobStatusCompleted {
@@ -1096,24 +1207,23 @@ func (h *Handler) GetCoderCredentials(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	coderURL = extractStringFromConfigValue(coderURL)
-
-	// When DNS is configured, always serve the HTTPS domain URL regardless of what
-	// was persisted in CoderURL (handles old jobs stored with the raw IP address).
-	if coderDomain != "" {
-		coderURL = "https://" + coderDomain
-	}
-
-	if coderURL == "" || coderAdminEmail == "" || coderAdminPassword == "" {
-		http.Error(w, "Coder configuration not available for this lab", http.StatusInternalServerError)
-		return
+	// Ask the backend where workspaces are actually served: a lab without a domain
+	// is exposed via nip.io on the ingress LoadBalancer IP, which is only known at
+	// runtime. An empty base URL means workspaces are in-cluster only.
+	baseURL := ""
+	if kubeconfig != "" {
+		backend, err := h.newWorkspaceBackend(kubeconfig, namespace)
+		if err != nil {
+			log.Printf("Failed to build workspace backend for lab %s: %v", jobID, err)
+		} else if d, scheme := backend.Routing(r.Context(), domain); d != "" {
+			baseURL = scheme + "://" + d
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
-		"url":      coderURL,
-		"email":    coderAdminEmail,
-		"password": coderAdminPassword,
+		"url":       baseURL,
+		"namespace": namespace,
 	})
 }
 
@@ -1131,7 +1241,9 @@ func (h *Handler) ServeStudentDashboard(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// ListLabTemplates returns the list of Coder templates available for a lab
+// ListLabTemplates returns the workspace templates configured for a lab.
+// Templates are pure configuration (no external API call): the template ID is
+// its name.
 func (h *Handler) ListLabTemplates(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1151,40 +1263,15 @@ func (h *Handler) ListLabTemplates(w http.ResponseWriter, r *http.Request) {
 
 	job.mu.RLock()
 	status := job.Status
-	coderURL := job.CoderURL
-	coderSessionToken := job.CoderSessionToken
-	coderOrganizationID := job.CoderOrganizationID
-	coderAdminEmail, coderAdminPassword := job.coderCredentials()
+	var templates []WorkspaceTemplate
+	if job.Config != nil {
+		templates = job.Config.GetWorkspaceTemplates()
+	}
 	job.mu.RUnlock()
 
 	if status != JobStatusCompleted {
 		http.Error(w, "Lab is not ready yet", http.StatusBadRequest)
 		return
-	}
-
-	coderURL = extractStringFromConfigValue(coderURL)
-	coderSessionToken = extractStringFromConfigValue(coderSessionToken)
-	coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
-
-	if coderURL == "" || coderSessionToken == "" || coderOrganizationID == "" || coderAdminEmail == "" || coderAdminPassword == "" {
-		http.Error(w, "Coder configuration not available for this lab", http.StatusInternalServerError)
-		return
-	}
-
-	coderConfig := coder.CoderClientConfig{
-		ServerURL:      coderURL,
-		SessionToken:   coderSessionToken,
-		OrganizationID: coderOrganizationID,
-	}
-
-	templates, refreshedConfig, err := coder.GetTemplatesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword)
-	if err != nil {
-		log.Printf("Failed to get templates for lab %s: %v", labID, err)
-		http.Error(w, "Failed to fetch templates", http.StatusInternalServerError)
-		return
-	}
-	if perr := h.jobManager.UpdateCoderSessionToken(labID, refreshedConfig.SessionToken); perr != nil {
-		log.Printf("ListLabTemplates: failed to persist refreshed token for lab %s: %v", labID, perr)
 	}
 
 	type templateOption struct {
@@ -1193,14 +1280,20 @@ func (h *Handler) ListLabTemplates(w http.ResponseWriter, r *http.Request) {
 	}
 	options := make([]templateOption, 0, len(templates))
 	for _, t := range templates {
-		options = append(options, templateOption{ID: t.ID.String(), Name: t.Name})
+		options = append(options, templateOption{ID: t.Name, Name: t.Name})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(options)
 }
 
-// UploadTemplateToLab uploads a zip file and creates a new Coder template in an existing lab.
+// UploadTemplateToLab appends one or more workspace templates to an existing lab's
+// configuration. It accepts the same payload the create-lab wizard sends — the
+// "Build with a form" fields (template_N_*), a "Paste YAML" document
+// (templates_yaml), or a devcontainer import (which the client turns into YAML) —
+// and falls back to the legacy flat template_* fields for older callers. The route
+// keeps its historical name for backward compatibility; it no longer uploads
+// Terraform files.
 func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1222,17 +1315,6 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 
 	job.mu.RLock()
 	status := job.Status
-	coderURL := job.CoderURL
-	coderSessionToken := job.CoderSessionToken
-	coderOrganizationID := job.CoderOrganizationID
-	coderAdminEmail, coderAdminPassword := job.coderCredentials()
-	var coderNamespace string
-	if job.Config != nil {
-		coderNamespace = job.Config.CoderNamespace
-	}
-	if coderNamespace == "" {
-		coderNamespace = "coder"
-	}
 	job.mu.RUnlock()
 
 	if status != JobStatusCompleted {
@@ -1240,120 +1322,98 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	coderURL = extractStringFromConfigValue(coderURL)
-	coderSessionToken = extractStringFromConfigValue(coderSessionToken)
-	coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
-
-	if coderURL == "" || coderSessionToken == "" || coderOrganizationID == "" || coderAdminEmail == "" || coderAdminPassword == "" {
-		http.Error(w, "Coder configuration not available for this lab", http.StatusInternalServerError)
-		return
-	}
-
-	if err := r.ParseMultipartForm(50 << 20); err != nil {
-		log.Printf("Failed to parse multipart form: %v", err)
+	// The drawer posts multipart FormData; ErrNotMultipart just means an older
+	// urlencoded caller, which ParseForm (called below via getFormValue) handles.
+	if err := r.ParseMultipartForm(32 << 20); err != nil && err != http.ErrNotMultipart {
+		log.Printf("Failed to parse form for lab %s: %v", jobID, err)
 		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
 		return
 	}
 
-	templateName := strings.TrimSpace(r.FormValue("template_name"))
-	if templateName == "" {
+	templates, err := templatesFromUploadRequest(r)
+	if err != nil {
+		// Resolve/parse failures are user-facing validation messages (bad YAML,
+		// bad URL) — safe to return and useful to the admin.
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(templates) == 0 {
 		http.Error(w, "template_name is required", http.StatusBadRequest)
 		return
 	}
-
-	file, header, err := r.FormFile("template_file")
-	if err != nil {
-		log.Printf("Failed to get template file: %v", err)
-		http.Error(w, "Failed to read uploaded file", http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
-
-	lowerName := strings.ToLower(header.Filename)
-	if !strings.HasSuffix(lowerName, ".zip") && !strings.HasSuffix(lowerName, ".tf") {
-		http.Error(w, "Only .zip or .tf files are allowed", http.StatusBadRequest)
+	if err := validateWorkspaceTemplates(templates); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	jobDir := filepath.Join(h.pulumiExec.GetWorkDir(), jobID)
-	if err := os.MkdirAll(jobDir, 0755); err != nil {
-		log.Printf("Failed to create job directory for %s: %v", jobID, err)
-		http.Error(w, "Failed to initialize job directory", http.StatusInternalServerError)
-		return
-	}
-	// Sanitize template name to avoid path traversal
-	safeName := filepath.Base(templateName)
-	zipPath := filepath.Join(jobDir, fmt.Sprintf("template-upload-%s.zip", safeName))
-	if !strings.HasPrefix(zipPath, jobDir) {
-		http.Error(w, "Invalid file path", http.StatusBadRequest)
-		return
-	}
-
-	if strings.HasSuffix(lowerName, ".tf") {
-		// Wrap the .tf file in a zip archive for Coder
-		if err := wrapTFInZip(file, header.Filename, zipPath); err != nil {
-			log.Printf("Failed to wrap .tf file for lab %s: %v", jobID, err)
-			http.Error(w, "Failed to package template file", http.StatusInternalServerError)
-			return
+	// Append to the lab config, rejecting a name that clashes with an existing
+	// template or another in the same batch, then persist.
+	var dupName string
+	h.updateJobConfig(jobID, func(config *LabConfig) {
+		existing := make(map[string]bool, len(config.WorkspaceTemplates))
+		for _, t := range config.WorkspaceTemplates {
+			existing[t.Name] = true
 		}
-	} else {
-		dst, err := os.Create(zipPath)
-		if err != nil {
-			log.Printf("Failed to save uploaded file: %v", err)
-			http.Error(w, "Failed to save uploaded file", http.StatusInternalServerError)
-			return
-		}
-		if _, err := io.Copy(dst, file); err != nil {
-			dst.Close()
-			log.Printf("Failed to write uploaded file: %v", err)
-			http.Error(w, "Failed to write uploaded file", http.StatusInternalServerError)
-			return
-		}
-		dst.Close()
-	}
-
-	varNames := r.Form["template_0_var_name"]
-	varValues := r.Form["template_0_var_value"]
-	var variables map[string]string
-	if len(varNames) > 0 {
-		variables = make(map[string]string, len(varNames))
-		for i, vn := range varNames {
-			vn = strings.TrimSpace(vn)
-			if vn == "" {
-				continue
+		for _, t := range templates {
+			if existing[t.Name] {
+				dupName = t.Name
+				return
 			}
-			vv := ""
-			if i < len(varValues) {
-				vv = varValues[i]
-			}
-			variables[vn] = vv
+			existing[t.Name] = true
 		}
-	}
-
-	coderConfig := coder.CoderClientConfig{
-		ServerURL:      coderURL,
-		SessionToken:   coderSessionToken,
-		OrganizationID: coderOrganizationID,
-	}
-
-	// Inject the namespace variable so workspace resources target the Coder deployment namespace.
-	if variables == nil {
-		variables = map[string]string{}
-	}
-	if _, hasNS := variables["namespace"]; !hasNS {
-		variables["namespace"] = coderNamespace
-	}
-
-	if err := coder.CreateTemplateStandalone(coderConfig, templateName, zipPath, variables, func(msg string) {
-		log.Printf("[UploadTemplate][%s] %s", jobID, msg)
-	}); err != nil {
-		log.Printf("Failed to create template for lab %s: %v", jobID, err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		config.WorkspaceTemplates = append(config.WorkspaceTemplates, templates...)
+	})
+	if dupName != "" {
+		http.Error(w, fmt.Sprintf("A template named %q already exists", dupName), http.StatusConflict)
 		return
 	}
+	if err := h.jobManager.SaveJob(jobID); err != nil {
+		log.Printf("Failed to persist templates for lab %s: %v", jobID, err)
+	}
 
+	names := make([]string, len(templates))
+	for i, t := range templates {
+		names[i] = t.Name
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "template": templateName})
+	// "template" (first name) is kept for backward compatibility with older clients.
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "template": names[0], "templates": names})
+}
+
+// templatesFromUploadRequest resolves the workspace templates to append to a lab.
+// It prefers the create-lab wizard's payload (templates_mode + template_N_* fields,
+// or templates_yaml) so the "Add Template" drawer matches lab creation, and falls
+// back to the legacy flat template_* fields so older callers keep working.
+func templatesFromUploadRequest(r *http.Request) ([]WorkspaceTemplate, error) {
+	if getFormValue(r, "template_0_name") != "" ||
+		getFormValue(r, "templates_mode") != "" ||
+		getFormValue(r, "templates_yaml") != "" {
+		return workspaceTemplatesFromRequest(r)
+	}
+
+	// Legacy: a single template described by flat template_* fields.
+	name := strings.TrimSpace(r.FormValue("template_name"))
+	if name == "" {
+		return nil, nil
+	}
+	tmpl := WorkspaceTemplate{
+		Name:          name,
+		IDE:           strings.TrimSpace(r.FormValue("template_ide")),
+		Image:         strings.TrimSpace(r.FormValue("template_image")),
+		GitRepo:       strings.TrimSpace(r.FormValue("template_git_repo")),
+		GitBranch:     strings.TrimSpace(r.FormValue("template_git_branch")),
+		GitFolder:     strings.TrimSpace(r.FormValue("template_git_folder")),
+		CPU:           strings.TrimSpace(r.FormValue("template_cpu")),
+		Memory:        strings.TrimSpace(r.FormValue("template_memory")),
+		DiskSize:      strings.TrimSpace(r.FormValue("template_disk_size")),
+		StartupScript: r.FormValue("template_startup_script"),
+		DotfilesRepo:  strings.TrimSpace(r.FormValue("template_dotfiles_repo")),
+		Extensions:    splitList(r.FormValue("template_extensions")),
+	}
+	if tmpl.GitRepo != "" && !validateURL(tmpl.GitRepo) {
+		return nil, fmt.Errorf("Invalid git repository URL")
+	}
+	return []WorkspaceTemplate{tmpl}, nil
 }
 
 // ListLabs returns a list of completed jobs (labs) available for workspace requests
@@ -1413,14 +1473,13 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	job.mu.RLock()
 	status := job.Status
-	coderURL := job.CoderURL
-	coderSessionToken := job.CoderSessionToken
-	coderOrganizationID := job.CoderOrganizationID
-	coderAdminEmail, coderAdminPassword := job.coderCredentials()
-	stackName := job.Config.StackName
-	coderDomain := ""
+	kubeconfig := extractStringFromConfigValue(job.Kubeconfig)
+	namespace := job.workspaceNamespace()
+	domain := ""
+	var templates []WorkspaceTemplate
 	if job.Config != nil {
-		coderDomain = job.Config.CoderDomain
+		domain = job.Config.Domain
+		templates = job.Config.GetWorkspaceTemplates()
 	}
 	job.mu.RUnlock()
 
@@ -1429,64 +1488,23 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Clean up any malformed ConfigValue JSON strings that might have been saved
-	coderURL = extractStringFromConfigValue(coderURL)
-	coderSessionToken = extractStringFromConfigValue(coderSessionToken)
-	coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
-
-	if coderDomain != "" {
-		coderURL = "https://" + coderDomain
-	}
-
-	if coderURL == "" || coderSessionToken == "" || coderOrganizationID == "" {
-		http.Error(w, "Coder configuration not available for this lab", http.StatusInternalServerError)
+	if kubeconfig == "" {
+		http.Error(w, "Lab cluster configuration not available", http.StatusInternalServerError)
 		return
 	}
 
-	if coderAdminEmail == "" || coderAdminPassword == "" {
-		http.Error(w, "Coder admin credentials not available for this lab", http.StatusInternalServerError)
-		return
-	}
-
-	// Generate secure password for student
-	password, err := GenerateSecurePassword()
+	// Generate the code-server password shown to the student. It stays within
+	// [0-9a-zA-Z-] (see GenerateWorkspaceToken) — plenty of entropy, and safe to
+	// carry through the shell-quoted container bootstrap.
+	password, err := GenerateWorkspaceToken()
 	if err != nil {
-		log.Printf("Failed to generate password: %v", err)
-		http.Error(w, "Failed to generate password", http.StatusInternalServerError)
+		log.Printf("Failed to generate workspace token: %v", err)
+		http.Error(w, "Failed to generate workspace token", http.StatusInternalServerError)
 		return
 	}
 
-	// Get username from email (before @)
-	username := strings.Split(email, "@")[0]
-	// Sanitize username (remove special characters)
-	username = strings.ToLower(strings.ReplaceAll(username, ".", "-"))
-
-	// Create Coder client config
-	coderConfig := coder.CoderClientConfig{
-		ServerURL:      coderURL,
-		SessionToken:   coderSessionToken,
-		OrganizationID: coderOrganizationID,
-	}
-
-	// Persist any refreshed admin token (the *WithRetry calls below re-login on an
-	// expired token and update coderConfig) so future requests and a server restart
-	// start from a valid token instead of the stale one minted at provisioning.
-	// No-op when nothing refreshed.
-	defer func() {
-		if perr := h.jobManager.UpdateCoderSessionToken(labID, coderConfig.SessionToken); perr != nil {
-			log.Printf("RequestWorkspace: failed to persist refreshed token for lab %s: %v", labID, perr)
-		}
-	}()
-
-	// Get available templates with automatic token refresh
-	templates, refreshedTmplCfg, err := coder.GetTemplatesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword)
-	coderConfig = refreshedTmplCfg
-	if err != nil {
-		log.Printf("Failed to get templates: %v", err)
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, `<div class="error-message">Failed to get templates: %s</div>`, template.HTMLEscapeString(err.Error()))
-		return
-	}
+	// Get sanitized username from email (before @) for use in resource names.
+	username := usernameFromEmail(email)
 
 	if len(templates) == 0 {
 		w.Header().Set("Content-Type", "text/html")
@@ -1494,19 +1512,14 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve template ID: use form value if provided and valid, otherwise first template
-	var templateID uuid.UUID
+	// Resolve the selected template by name (template_id is the template name);
+	// fall back to the first template.
+	selected := templates[0]
 	if templateIDStr != "" {
-		parsed, err := uuid.Parse(templateIDStr)
-		if err != nil {
-			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprintf(w, `<div class="error-message">Invalid template selection</div>`)
-			return
-		}
 		found := false
 		for _, t := range templates {
-			if t.ID == parsed {
-				templateID = parsed
+			if t.Name == templateIDStr {
+				selected = t
 				found = true
 				break
 			}
@@ -1516,220 +1529,122 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, `<div class="error-message">Selected template is not available in this lab</div>`)
 			return
 		}
-	} else {
-		templateID = templates[0].ID
 	}
 
-	// Resolve template name for workspace naming
-	var templateName string
-	for _, t := range templates {
-		if t.ID == templateID {
-			templateName = t.Name
-			break
-		}
-	}
-	if templateName == "" {
-		templateName = "default"
-	}
-
-	// Check if user already exists; reuse if so, create only if not found
-	var user codersdk.User
-	existingUser, lookupConfig, lookupErr := coder.GetUserByEmailWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, email)
-	if lookupErr == nil {
-		// User exists — reuse and update password so displayed credentials work
-		user = existingUser
-		coderConfig = lookupConfig
-		updatedConfig, pwdErr := coder.UpdateUserPasswordWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, user.ID.String(), password)
-		if pwdErr != nil {
-			log.Printf("Failed to update password for existing user: %v", pwdErr)
-			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprintf(w, `<div class="error-message">Failed to update credentials for existing account: %s</div>`, template.HTMLEscapeString(pwdErr.Error()))
-			return
-		}
-		coderConfig = updatedConfig
-	} else if errors.Is(lookupErr, coder.ErrUserNotFound) {
-		// User does not exist — create new user
-		var createErr error
-		user, coderConfig, createErr = coder.CreateUserWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, email, username, password)
-		if createErr != nil {
-			// Create failed — may be duplicate (race) or auth issue; try lookup by username
-			fallbackUser, fallbackConfig, fallbackErr := coder.GetUserByUsernameWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, username)
-			if fallbackErr != nil {
-				log.Printf("Failed to create or find user: create=%v, fallback=%v", createErr, fallbackErr)
-				w.Header().Set("Content-Type", "text/html")
-				fmt.Fprintf(w, `<div class="error-message">An account with this email already exists. Unable to create a workspace. Please contact the lab administrator.</div>`)
-				return
-			}
-			user = fallbackUser
-			coderConfig = fallbackConfig
-			// Update password so displayed credentials work
-			if updatedCfg, pwdErr := coder.UpdateUserPasswordWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, user.ID.String(), password); pwdErr != nil {
-				log.Printf("Failed to update password for fallback user: %v", pwdErr)
-			} else {
-				coderConfig = updatedCfg
-			}
-		}
-	} else {
-		// Lookup failed due to auth or other error — cannot verify or create
-		log.Printf("User lookup failed: %v", lookupErr)
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, `<div class="error-message">Unable to create workspace. Please try again or contact the lab administrator.</div>`)
-		return
-	}
-
-	// Determine workspace name (deterministic per student+lab+template)
-	workspaceName := buildWorkspaceName(stackName, labID, templateName)
-
-	// Check if the user already has a workspace with this name
-	var workspaceURL string
-	existingWS, updatedCfg, wsLookupErr := coder.GetWorkspaceByOwnerAndNameWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, user.ID.String(), workspaceName)
-	if wsLookupErr == nil {
-		// Workspace already exists — reuse it with fresh credentials
-		coderConfig = updatedCfg
-		workspaceURL = fmt.Sprintf("%s/@%s/%s", coderURL, user.Username, existingWS.Name)
-		log.Printf("Reusing existing workspace %s for user %s", existingWS.Name, email)
-
-		existingWSInfo := map[string]interface{}{
-			"email":              email,
-			"workspace_url":      workspaceURL,
-			"password":           password,
-			"encrypted_password": "",
-			"workspace_name":     existingWS.Name,
-			"lab_id":             labID,
-			"created_at":         time.Now().Format(time.RFC3339),
-		}
-		if existingWSInfoJSON, jsonErr := json.Marshal(existingWSInfo); jsonErr == nil {
-			isSecure := strings.HasPrefix(coderURL, "https://") || r.TLS != nil
-			cookieName := fmt.Sprintf("workspace_info_%s_%s", labID, existingWS.Name)
-			http.SetCookie(w, &http.Cookie{
-				Name:     cookieName,
-				Value:    url.QueryEscape(string(existingWSInfoJSON)),
-				Path:     "/",
-				MaxAge:   86400,
-				HttpOnly: false,
-				Secure:   isSecure,
-				SameSite: http.SameSiteLaxMode,
-			})
-			log.Printf("Set %s cookie for email: %s", cookieName, email)
-		}
-
-		existingWSInfoForClient := map[string]interface{}{
-			"email":          email,
-			"workspace_url":  workspaceURL,
-			"password":       password,
-			"workspace_name": existingWS.Name,
-			"lab_id":         labID,
-			"created_at":     time.Now().Format(time.RFC3339),
-		}
-		existingWSInfoJSON, _ := json.Marshal(existingWSInfoForClient)
-		existingWSInfoJSONEscaped := template.HTMLEscapeString(string(existingWSInfoJSON))
-
-		w.Header().Set("Content-Type", "text/html")
-		var existingResp strings.Builder
-		existingResp.WriteString(`<div class="success-message">`)
-		existingResp.WriteString(`<h3>⚠️ Workspace Already Exists</h3>`)
-		existingPollURL := fmt.Sprintf("/api/student/workspace/status?lab_id=%s&workspace_name=%s&owner_id=%s",
-			url.QueryEscape(labID), url.QueryEscape(existingWS.Name), url.QueryEscape(user.Username))
-		existingResp.WriteString(fmt.Sprintf(`<div class="workspace-ready-status workspace-ready-status--starting" data-poll-url="%s"><span class="workspace-status-spinner"></span><span>Checking workspace status...</span></div>`,
-			template.HTMLEscapeString(existingPollURL)))
-		existingResp.WriteString(`<details class="credentials-box">`)
-		existingResp.WriteString(`<summary>Your Workspace Credentials</summary>`)
-		existingResp.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Workspace URL:</label><div class="value"><a href="%s" target="_blank">%s</a></div></div>`, workspaceURL, workspaceURL))
-		existingResp.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Email:</label><div class="value">%s</div></div>`, template.HTMLEscapeString(email)))
-		existingResp.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Password:</label><div class="value">%s</div></div>`, template.HTMLEscapeString(password)))
-		existingResp.WriteString(`<p><strong>Important:</strong> Please save these credentials. You will need them to access your workspace.</p>`)
-		existingResp.WriteString(`<p><small>Your workspace information can be encrypted and saved locally. Click "Encrypt &amp; Save" below to store it securely.</small></p>`)
-		existingResp.WriteString(fmt.Sprintf(`<div data-workspace-info='%s' style="display:none;"></div>`, existingWSInfoJSONEscaped))
-		existingResp.WriteString(`<button onclick="encryptAndSaveWorkspaceInfo(this)" class="btn credentials-save-btn">Encrypt &amp; Save Workspace Info</button>`)
-		existingResp.WriteString(`</details>`)
-		existingResp.WriteString(`</div>`)
-		fmt.Fprint(w, existingResp.String())
-		return
-	}
-	if !errors.Is(wsLookupErr, coder.ErrWorkspaceNotFound) {
-		log.Printf("Failed to check for existing workspace: %v", wsLookupErr)
-		// Non-fatal: fall through and attempt creation
-	}
-
-	// Workspace not found — create it
-	workspace, createdCfg, err := coder.CreateWorkspaceWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, user.ID, templateID, workspaceName)
-	coderConfig = createdCfg
+	backend, err := h.newWorkspaceBackend(kubeconfig, namespace)
 	if err != nil {
-		log.Printf("Failed to create workspace: %v", err)
+		log.Printf("Failed to build workspace backend for lab %s: %v", labID, err)
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, `<div class="error-message">Failed to create workspace: %s</div>`, template.HTMLEscapeString(err.Error()))
+		fmt.Fprintf(w, `<div class="error-message">Unable to reach the lab cluster. Please contact the lab administrator.</div>`)
 		return
 	}
 
-	// Build workspace URL
-	workspaceURL = fmt.Sprintf("%s/@%s/%s", coderURL, user.Username, workspace.Name)
+	// A git-backed workspace needs a persistent volume to clone into; default one.
+	diskSize := selected.DiskSize
+	if diskSize == "" && selected.GitRepo != "" {
+		diskSize = "5Gi"
+	}
 
-	// Create workspace info structure for cookie
-	// Note: password will be encrypted client-side using email + student password
+	spec := workspace.Spec{
+		LabID:            labID,
+		Owner:            username,
+		Template:         selected.Name,
+		IDE:              selected.IDE,
+		Image:            selected.Image,
+		GitRepo:          selected.GitRepo,
+		GitBranch:        selected.GitBranch,
+		GitFolder:        selected.GitFolder,
+		CPU:              selected.CPU,
+		Memory:           selected.Memory,
+		DiskSize:         diskSize,
+		Env:              selected.Env,
+		StartupScript:    selected.StartupScript,
+		DotfilesRepo:     selected.DotfilesRepo,
+		Extensions:       selected.Extensions,
+		Sidecars:         toWorkspaceSidecars(selected.Sidecars),
+		Mounts:           toWorkspaceMounts(selected.Mounts),
+		ImagePullSecrets: selected.ImagePullSecrets,
+		GitAuthSecret:    selected.GitAuthSecret,
+		Devcontainer:     toWorkspaceDevcontainer(selected.Devcontainer),
+		Domain:           domain,
+		ClusterIssuer:    "letsencrypt-prod",
+		Token:            password,
+	}
+
+	ws, err := backend.EnsureWorkspace(r.Context(), spec)
+	if err != nil {
+		// The cause is for the admin, not the student: it can name the lab's
+		// credential Secrets, its namespace and its cluster, and there is nothing in
+		// it a student could act on anyway. It goes to the log; they get the same
+		// "ask your administrator" they get when the cluster is unreachable.
+		log.Printf("Failed to ensure workspace for %s in lab %s: %v", email, labID, err)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<div class="error-message">Could not create your workspace. Please contact the lab administrator.</div>`)
+		return
+	}
+
+	workspaceURL := ws.URL
+	workspaceName := ws.Name
+
+	// Create workspace info structure for the client-side encrypted cookie.
 	workspaceInfo := map[string]interface{}{
 		"email":              email,
 		"workspace_url":      workspaceURL,
-		"password":           password, // Will be encrypted client-side before storing in cookie
-		"encrypted_password": "",       // Will be set by client-side encryption
-		"workspace_name":     workspace.Name,
+		"password":           password, // code-server login password; encrypted client-side
+		"encrypted_password": "",
+		"workspace_name":     workspaceName,
 		"lab_id":             labID,
 		"created_at":         time.Now().Format(time.RFC3339),
 	}
-
-	// Encode workspace info as JSON
-	workspaceInfoJSON, err := json.Marshal(workspaceInfo)
-	if err != nil {
-		log.Printf("Failed to marshal workspace info: %v", err)
-		// Continue without cookie if marshaling fails
-	} else {
-		// Determine if we're using HTTPS (check if URL scheme is https or if request is secure)
-		isSecure := strings.HasPrefix(coderURL, "https://") || r.TLS != nil
-
-		// URL-encode the JSON string for cookie value (cookies need URL encoding for special characters)
-		cookieValue := url.QueryEscape(string(workspaceInfoJSON))
-
-		// Set per-workspace cookie with workspace info
-		cookieName := fmt.Sprintf("workspace_info_%s_%s", labID, workspace.Name)
-		cookie := &http.Cookie{
+	if workspaceInfoJSON, jsonErr := json.Marshal(workspaceInfo); jsonErr == nil {
+		isSecure := strings.HasPrefix(workspaceURL, "https://") || r.TLS != nil
+		cookieName := fmt.Sprintf("workspace_info_%s_%s", labID, workspaceName)
+		http.SetCookie(w, &http.Cookie{
 			Name:     cookieName,
-			Value:    cookieValue,
+			Value:    url.QueryEscape(string(workspaceInfoJSON)),
 			Path:     "/",
-			MaxAge:   86400, // 1 day in seconds
-			HttpOnly: false, // Allow JavaScript to read it
+			MaxAge:   86400,
+			HttpOnly: false,
 			Secure:   isSecure,
 			SameSite: http.SameSiteLaxMode,
-		}
-		http.SetCookie(w, cookie)
+		})
 		log.Printf("Set %s cookie for email: %s", cookieName, email)
+	} else {
+		log.Printf("Failed to marshal workspace info: %v", jsonErr)
 	}
 
-	// Return success response with credentials
-	// Include workspace info as JSON in a data attribute for client-side encryption
 	workspaceInfoForClient := map[string]interface{}{
 		"email":          email,
 		"workspace_url":  workspaceURL,
 		"password":       password,
-		"workspace_name": workspace.Name,
+		"workspace_name": workspaceName,
 		"lab_id":         labID,
 		"created_at":     time.Now().Format(time.RFC3339),
 	}
 	workspaceInfoJSONForClient, _ := json.Marshal(workspaceInfoForClient)
 	workspaceInfoJSONEscaped := template.HTMLEscapeString(string(workspaceInfoJSONForClient))
 
+	title := "✅ Workspace Created Successfully!"
+	if ws.Ready {
+		title = "✅ Workspace Ready!"
+	}
+
 	w.Header().Set("Content-Type", "text/html")
 	var response strings.Builder
 	response.WriteString(`<div class="success-message">`)
-	response.WriteString(`<h3>✅ Workspace Created Successfully!</h3>`)
-	pollURL := fmt.Sprintf("/api/student/workspace/status?lab_id=%s&workspace_name=%s&owner_id=%s",
-		url.QueryEscape(labID), url.QueryEscape(workspace.Name), url.QueryEscape(user.Username))
+	response.WriteString(fmt.Sprintf(`<h3>%s</h3>`, title))
+	pollURL := fmt.Sprintf("/api/student/workspace/status?lab_id=%s&workspace_name=%s",
+		url.QueryEscape(labID), url.QueryEscape(workspaceName))
 	response.WriteString(fmt.Sprintf(`<div class="workspace-ready-status workspace-ready-status--starting" data-poll-url="%s"><span class="workspace-status-spinner"></span><span>Workspace is starting, this may take a moment...</span></div>`,
 		template.HTMLEscapeString(pollURL)))
 	response.WriteString(`<details class="credentials-box">`)
 	response.WriteString(`<summary>Your Workspace Credentials</summary>`)
-	response.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Workspace URL:</label><div class="value"><a href="%s" target="_blank">%s</a></div></div>`, workspaceURL, workspaceURL))
+	if workspaceURL != "" {
+		response.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Workspace URL:</label><div class="value"><a href="%s" target="_blank">%s</a></div></div>`, workspaceURL, workspaceURL))
+	}
 	response.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Email:</label><div class="value">%s</div></div>`, template.HTMLEscapeString(email)))
-	response.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Password:</label><div class="value">%s</div></div>`, template.HTMLEscapeString(password)))
-	response.WriteString(`<p><strong>Important:</strong> Please save these credentials. You will need them to access your workspace.</p>`)
+	response.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Connection token:</label><div class="value">%s</div></div>`, template.HTMLEscapeString(password)))
+	response.WriteString(`<p><strong>Important:</strong> Please save these credentials. You will need the token to open your workspace.</p>`)
 	response.WriteString(`<p><small>Your workspace information can be encrypted and saved locally. Click "Encrypt & Save" below to store it securely.</small></p>`)
 	response.WriteString(fmt.Sprintf(`<div data-workspace-info='%s' style="display:none;"></div>`, workspaceInfoJSONEscaped))
 	response.WriteString(`<button onclick="encryptAndSaveWorkspaceInfo(this)" class="btn credentials-save-btn">Encrypt & Save Workspace Info</button>`)
@@ -1749,104 +1664,139 @@ func (h *Handler) WorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 
 	labID := r.URL.Query().Get("lab_id")
 	workspaceName := r.URL.Query().Get("workspace_name")
-	ownerID := r.URL.Query().Get("owner_id")
+	// The owner is always the authenticated student — never trusted from the client.
+	owner := usernameFromEmail(studentEmailFromContext(r))
 
-	if labID == "" || workspaceName == "" || ownerID == "" {
-		http.Error(w, "lab_id, workspace_name, and owner_id are required", http.StatusBadRequest)
+	if labID == "" || workspaceName == "" || owner == "" {
+		http.Error(w, "lab_id and workspace_name are required and you must be logged in", http.StatusBadRequest)
 		return
 	}
 
-	log.Printf("[debug] WorkspaceStatus called: lab_id=%s workspace=%s owner=%s", labID, workspaceName, ownerID)
-
 	job, exists := h.jobManager.GetJob(labID)
 	if !exists {
-		log.Printf("[debug] WorkspaceStatus: job not found for lab_id=%s", labID)
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, ownerID, "unknown", ""))
+		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, "unknown", ""))
 		return
 	}
 
 	job.mu.RLock()
-	coderURL := extractStringFromConfigValue(job.CoderURL)
-	coderSessionToken := extractStringFromConfigValue(job.CoderSessionToken)
-	coderOrganizationID := extractStringFromConfigValue(job.CoderOrganizationID)
-	coderAdminEmail := extractStringFromConfigValue(job.CoderAdminEmail)
-	coderAdminPassword := extractStringFromConfigValue(job.CoderAdminPassword)
-	// Fall back to LabConfig credentials for older persisted jobs where job-level fields may be empty.
-	if coderAdminEmail == "" && job.Config != nil {
-		coderAdminEmail = job.Config.CoderAdminEmail
-	}
-	if coderAdminPassword == "" && job.Config != nil {
-		coderAdminPassword = job.Config.CoderAdminPassword
-	}
-	wsCoderDomain := ""
-	if job.Config != nil {
-		wsCoderDomain = job.Config.CoderDomain
-	}
+	status := job.Status
+	kubeconfig := extractStringFromConfigValue(job.Kubeconfig)
+	namespace := job.workspaceNamespace()
 	job.mu.RUnlock()
 
-	if wsCoderDomain != "" {
-		coderURL = "https://" + wsCoderDomain
-	}
-
-	log.Printf("[debug] WorkspaceStatus: coderURL=%q hasToken=%v adminEmail=%q passwordLen=%d orgID=%q",
-		coderURL, coderSessionToken != "", coderAdminEmail, len(coderAdminPassword), coderOrganizationID)
-
-	if coderURL == "" || coderSessionToken == "" {
-		log.Printf("[debug] WorkspaceStatus: missing coderURL or sessionToken, returning checking")
+	if status != JobStatusCompleted || kubeconfig == "" {
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, ownerID, "checking", ""))
+		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, "checking", ""))
 		return
 	}
 
-	coderConfig := coder.CoderClientConfig{
-		ServerURL:      coderURL,
-		SessionToken:   coderSessionToken,
-		OrganizationID: coderOrganizationID,
-	}
-
-	workspace, refreshedCfg, err := coder.GetWorkspaceByOwnerAndNameWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, ownerID, workspaceName)
-	if perr := h.jobManager.UpdateCoderSessionToken(labID, refreshedCfg.SessionToken); perr != nil {
-		log.Printf("WorkspaceStatus: failed to persist refreshed token for lab %s: %v", labID, perr)
-	}
+	backend, err := h.newWorkspaceBackend(kubeconfig, namespace)
 	if err != nil {
-		log.Printf("[debug] WorkspaceStatus: lookup failed workspace=%s owner=%s error=%v", workspaceName, ownerID, err)
+		log.Printf("WorkspaceStatus: failed to build backend for lab %s: %v", labID, err)
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, ownerID, "checking", ""))
+		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, "checking", ""))
 		return
 	}
 
-	readiness := workspaceReadinessStatus(workspace)
-	for _, res := range workspace.LatestBuild.Resources {
-		for _, ag := range res.Agents {
-			log.Printf("[debug] WorkspaceStatus: agent=%s status=%s lifecycle=%s", ag.Name, ag.Status, ag.LifecycleState)
-			for _, app := range ag.Apps {
-				log.Printf("[debug] WorkspaceStatus:   app=%s health=%s", app.Slug, app.Health)
-			}
+	ws, err := backend.GetWorkspace(r.Context(), workspaceName)
+	// Authorization: a student may only see their own workspace.
+	if err != nil || ws.Owner != owner {
+		log.Printf("[debug] WorkspaceStatus: lookup/authz failed workspace=%s owner=%s error=%v", workspaceName, owner, err)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, "checking", ""))
+		return
+	}
+
+	readiness := ws.Phase
+	wsURL := ""
+	if ws.Ready {
+		if workspaceDNSReady(r.Context(), ws) {
+			readiness = "running"
+			// Route through the OpenWorkspace redirect endpoint so the connection token
+			// is appended at click time.
+			wsURL = fmt.Sprintf("/api/student/workspace/open?lab_id=%s&workspace_name=%s",
+				url.QueryEscape(labID), url.QueryEscape(ws.Name))
+		} else {
+			// The pod is up but the workspace hostname does not resolve yet — the DNS
+			// record created during provisioning is still propagating. Keep polling
+			// instead of handing the student a URL that would NXDOMAIN (which the
+			// browser then negatively caches, making the workspace look broken).
+			readiness = "dns_propagating"
 		}
 	}
-	log.Printf("[debug] WorkspaceStatus: workspace=%s buildStatus=%s readiness=%s",
-		workspaceName, workspace.LatestBuild.Status, readiness)
-
-	wsURL := ""
-	if readiness == "running" {
-		agentName := workspaceFirstAgentName(workspace)
-		// Route through the OpenWorkspace redirect endpoint so the session token is
-		// created fresh at the moment the student clicks (not at polling time). This
-		// maximises the session cookie lifetime and ensures the user is reactivated
-		// just before Coder processes the token.
-		wsURL = fmt.Sprintf("/api/student/workspace/open?lab_id=%s&workspace_name=%s&owner_id=%s&agent=%s",
-			url.QueryEscape(labID), url.QueryEscape(workspaceName),
-			url.QueryEscape(ownerID), url.QueryEscape(agentName))
-	}
 	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, ownerID, readiness, wsURL))
+	fmt.Fprint(w, buildWorkspaceStatusHTML(labID, ws.Name, readiness, wsURL))
 }
 
-// OpenWorkspace creates a fresh Coder session token for the student and redirects
-// them directly to code-server. Doing this at click time (rather than embedding a
-// stale token in the polling HTML) maximises the session cookie lifetime and
-// re-activates dormant users immediately before Coder validates the token.
+// dnsPropagationGrace bounds how long the student UI holds the "ready" signal back
+// while a freshly-created workspace hostname propagates through DNS. Past this
+// window we fail open and show the workspace as ready anyway, so a lab whose DNS
+// is managed manually (no provider automation) is never trapped in "propagating".
+const dnsPropagationGrace = 3 * time.Minute
+
+// dnsLookupTimeout caps a single reachability lookup so a slow resolver never
+// stalls the status poll.
+const dnsLookupTimeout = 2 * time.Second
+
+// hostResolver is the subset of *net.Resolver used to probe workspace DNS. It is a
+// package var so tests can substitute a deterministic resolver.
+type hostResolver interface {
+	LookupHost(ctx context.Context, host string) ([]string, error)
+}
+
+var workspaceDNSResolver hostResolver = net.DefaultResolver
+
+// workspaceDNSReady reports whether a pod-ready workspace's public hostname
+// resolves yet. A Deployment can report Ready seconds before the DNS A record
+// created during provisioning has propagated; opening the URL then yields
+// DNS_PROBE_FINISHED_NXDOMAIN. Gating the green "ready" state on resolution keeps
+// students from clicking too early. It fails open once dnsPropagationGrace has
+// elapsed so manually-managed DNS is never blocked forever, and returns true
+// immediately when there is no public host to resolve (in-cluster workspaces).
+func workspaceDNSReady(ctx context.Context, ws workspace.Workspace) bool {
+	host := hostFromWorkspaceURL(ws.URL)
+	if host == "" {
+		return true
+	}
+	if time.Since(ws.UpdatedAt) > dnsPropagationGrace {
+		return true
+	}
+	lctx, cancel := context.WithTimeout(ctx, dnsLookupTimeout)
+	defer cancel()
+	addrs, err := workspaceDNSResolver.LookupHost(lctx, host)
+	return err == nil && len(addrs) > 0
+}
+
+// hostFromWorkspaceURL extracts the hostname from a workspace base URL, returning
+// "" when there is no domain configured or the URL cannot be parsed.
+func hostFromWorkspaceURL(rawURL string) string {
+	if rawURL == "" {
+		return ""
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
+}
+
+// usernameInvalidChars matches characters not allowed in a DNS-1123 label.
+var usernameInvalidChars = regexp.MustCompile(`[^a-z0-9-]`)
+
+// usernameFromEmail derives the sanitized, DNS-1123-safe workspace username from
+// a student email. It matches the sanitization the kube backend applies to the
+// owner label, so it can be compared against Workspace.Owner for authorization.
+func usernameFromEmail(email string) string {
+	if email == "" {
+		return ""
+	}
+	local := strings.ToLower(strings.Split(email, "@")[0])
+	return strings.Trim(usernameInvalidChars.ReplaceAllString(local, "-"), "-")
+}
+
+// OpenWorkspace redirects the student to their code-server workspace, where they
+// sign in with the password shown in the portal.
 func (h *Handler) OpenWorkspace(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1855,11 +1805,11 @@ func (h *Handler) OpenWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	labID := r.URL.Query().Get("lab_id")
 	workspaceName := r.URL.Query().Get("workspace_name")
-	ownerID := r.URL.Query().Get("owner_id")
-	agentName := r.URL.Query().Get("agent")
+	// The owner is always the authenticated student — never trusted from the client.
+	owner := usernameFromEmail(studentEmailFromContext(r))
 
-	if labID == "" || workspaceName == "" || ownerID == "" || agentName == "" {
-		http.Error(w, "lab_id, workspace_name, owner_id, and agent are required", http.StatusBadRequest)
+	if labID == "" || workspaceName == "" || owner == "" {
+		http.Error(w, "lab_id and workspace_name are required and you must be logged in", http.StatusBadRequest)
 		return
 	}
 
@@ -1870,155 +1820,38 @@ func (h *Handler) OpenWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	job.mu.RLock()
-	coderURL := extractStringFromConfigValue(job.CoderURL)
-	coderSessionToken := extractStringFromConfigValue(job.CoderSessionToken)
-	coderAdminEmail, coderAdminPassword := job.coderCredentials()
-	wsCoderDomain := ""
-	if job.Config != nil {
-		wsCoderDomain = job.Config.CoderDomain
-	}
+	kubeconfig := extractStringFromConfigValue(job.Kubeconfig)
+	namespace := job.workspaceNamespace()
 	job.mu.RUnlock()
 
-	if wsCoderDomain != "" {
-		coderURL = "https://" + wsCoderDomain
-	}
-
-	if coderURL == "" || coderSessionToken == "" {
+	if kubeconfig == "" {
 		http.Error(w, "lab is not ready", http.StatusServiceUnavailable)
 		return
 	}
 
-	appPath := fmt.Sprintf("/@%s/%s.%s/apps/code-server/?folder=/workspaces",
-		ownerID, workspaceName, agentName)
-
-	studentKey, freshToken, err := createStudentAppToken(coderURL, coderSessionToken, coderAdminEmail, coderAdminPassword, ownerID)
+	backend, err := h.newWorkspaceBackend(kubeconfig, namespace)
 	if err != nil {
-		log.Printf("OpenWorkspace: failed to create token for %s: %v", ownerID, err)
-		http.Redirect(w, r, coderURL+"/login?redirect="+url.QueryEscape(appPath), http.StatusFound)
+		log.Printf("OpenWorkspace: failed to build backend for lab %s: %v", labID, err)
+		http.Error(w, "lab is not ready", http.StatusServiceUnavailable)
 		return
 	}
-	// Persist a refreshed admin token so future requests start from a valid token.
-	if freshToken != coderSessionToken {
-		if perr := h.jobManager.UpdateCoderSessionToken(labID, freshToken); perr != nil {
-			log.Printf("OpenWorkspace: failed to persist refreshed token for lab %s: %v", labID, perr)
-		}
+
+	ws, err := backend.GetWorkspace(r.Context(), workspaceName)
+	// Authorization: a student may only open their own workspace.
+	if err != nil || ws.Owner != owner || ws.OpenURL == "" {
+		log.Printf("OpenWorkspace: lookup/authz failed workspace=%s owner=%s in lab %s: %v", workspaceName, owner, labID, err)
+		http.Error(w, "workspace not available", http.StatusServiceUnavailable)
+		return
 	}
 
-	target := fmt.Sprintf("%s%s&%s=%s",
-		coderURL, appPath, codersdk.SessionTokenCookie, url.QueryEscape(studentKey))
-	http.Redirect(w, r, target, http.StatusFound)
-}
-
-// workspaceReadinessStatus derives a single readiness string from a workspace.
-// "running" is only returned when every agent has lifecycle_state=="ready" and
-// every app with a healthcheck is "healthy" (not still "initializing").
-func workspaceReadinessStatus(ws codersdk.Workspace) string {
-	buildStatus := string(ws.LatestBuild.Status)
-	if buildStatus != "running" {
-		return buildStatus
-	}
-
-	hasAgents := false
-	for _, resource := range ws.LatestBuild.Resources {
-		for _, agent := range resource.Agents {
-			hasAgents = true
-
-			// Hard failure: agent timed out connecting
-			if agent.Status == codersdk.WorkspaceAgentTimeout {
-				return "agents_failed"
-			}
-			// Hard failure: startup scripts failed or timed out
-			switch agent.LifecycleState {
-			case codersdk.WorkspaceAgentLifecycleStartTimeout, codersdk.WorkspaceAgentLifecycleStartError:
-				return "agents_failed"
-			}
-			// Startup scripts still running — agent not fully ready
-			if agent.LifecycleState != codersdk.WorkspaceAgentLifecycleReady {
-				return "agents_starting"
-			}
-			// Wait for any app healthchecks to pass
-			for _, app := range agent.Apps {
-				switch app.Health {
-				case codersdk.WorkspaceAppHealthInitializing:
-					return "agents_starting"
-				case codersdk.WorkspaceAppHealthUnhealthy:
-					return "agents_failed"
-				}
-			}
-		}
-	}
-
-	if !hasAgents {
-		return "agents_starting"
-	}
-	return "running"
-}
-
-// workspaceFirstAgentName returns the name of the first agent in the workspace resources.
-// Falls back to "main" when no agents are found (the conventional default name).
-func workspaceFirstAgentName(ws codersdk.Workspace) string {
-	for _, resource := range ws.LatestBuild.Resources {
-		for _, agent := range resource.Agents {
-			if agent.Name != "" {
-				return agent.Name
-			}
-		}
-	}
-	return "main"
-}
-
-// createStudentAppToken uses the admin session token to create a browser-session API key
-// scoped to the given student username. The returned key can be passed as
-// ?coder_session_token= on workspace app URLs so the student lands directly in
-// code-server without a login prompt (Coder reads the query param before proxying).
-// CreateAPIKey is used (not CreateToken) because Coder only sets a proper browser-session
-// cookie from browser-session-type keys; machine tokens created via CreateToken are not
-// accepted for browser sessions and cause 401s on subsequent API calls (/api/v2/users/me).
-// It self-heals when the stored admin token has expired: on failure it re-logins
-// with the admin credentials (via coder.RefreshToken), retries once, and returns
-// the refreshed token as freshToken so the caller can persist it. When no refresh
-// was needed, freshToken equals the passed-in adminToken.
-func createStudentAppToken(coderURL, adminToken, adminEmail, adminPassword, username string) (key, freshToken string, err error) {
-	parsedURL, parseErr := url.Parse(coderURL)
-	if parseErr != nil {
-		return "", adminToken, fmt.Errorf("failed to parse coder URL: %w", parseErr)
-	}
-	ctx := context.Background()
-
-	attempt := func(token string) (string, error) {
-		client := codersdk.New(parsedURL)
-		client.SetSessionToken(token)
-		// Coder marks users dormant after inactivity; reactivate before creating the key.
-		if _, statusErr := client.UpdateUserStatus(ctx, username, codersdk.UserStatusActive); statusErr != nil {
-			log.Printf("createStudentAppToken: could not reactivate user %s (continuing): %v", username, statusErr)
-		}
-		resp, apiErr := client.CreateAPIKey(ctx, username)
-		if apiErr != nil {
-			return "", apiErr
-		}
-		return resp.Key, nil
-	}
-
-	if key, err = attempt(adminToken); err == nil {
-		return key, adminToken, nil
-	}
-
-	// The stored admin token likely expired — refresh with admin credentials and
-	// retry once, so the student never sees a raw Coder 401.
-	log.Printf("createStudentAppToken: attempt failed, refreshing admin token: %v", err)
-	refreshed, refreshErr := coder.RefreshToken(coder.CoderClientConfig{ServerURL: coderURL, SessionToken: adminToken}, adminEmail, adminPassword)
-	if refreshErr != nil {
-		return "", adminToken, fmt.Errorf("failed to refresh admin token: %w", refreshErr)
-	}
-	if key, err = attempt(refreshed.SessionToken); err != nil {
-		return "", refreshed.SessionToken, fmt.Errorf("failed to create API key for %s after token refresh: %w", username, err)
-	}
-	return key, refreshed.SessionToken, nil
+	// OpenURL is the workspace base URL; code-server serves its login page there,
+	// where the student enters the token.
+	http.Redirect(w, r, ws.OpenURL, http.StatusFound)
 }
 
 // buildWorkspaceStatusHTML returns an HTML partial for the workspace readiness indicator.
 // When the workspace is running, the returned HTML has no HTMX polling attributes so polling stops.
-func buildWorkspaceStatusHTML(labID, workspaceName, ownerID, status, workspaceURL string) string {
+func buildWorkspaceStatusHTML(labID, workspaceName, status, workspaceURL string) string {
 	switch status {
 	case "running":
 		if workspaceURL != "" {
@@ -2031,14 +1864,16 @@ func buildWorkspaceStatusHTML(labID, workspaceName, ownerID, status, workspaceUR
 	case "canceled", "canceling":
 		return `<div class="workspace-ready-status workspace-ready-status--error"><span>⚠ Workspace startup was canceled.</span></div>`
 	default:
-		pollURL := fmt.Sprintf("/api/student/workspace/status?lab_id=%s&workspace_name=%s&owner_id=%s",
-			url.QueryEscape(labID), url.QueryEscape(workspaceName), url.QueryEscape(ownerID))
+		pollURL := fmt.Sprintf("/api/student/workspace/status?lab_id=%s&workspace_name=%s",
+			url.QueryEscape(labID), url.QueryEscape(workspaceName))
 		var message string
 		switch status {
 		case "checking", "":
 			message = "Checking workspace status..."
 		case "agents_starting":
 			message = "Workspace is provisioned, waiting for agent to be ready..."
+		case "dns_propagating":
+			message = "Workspace is up — waiting for DNS to propagate (this can take a minute)..."
 		default:
 			message = fmt.Sprintf("Workspace is %s, this may take a moment...", status)
 		}
@@ -2782,20 +2617,21 @@ func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
 
 	// Prepare lab data for template (without sensitive info)
 	type LabDisplay struct {
-		ID                     string
-		IDShort                string
-		Status                 string
-		CreatedAt              string
-		UpdatedAt              string
-		StackName              string
-		IsDryRun               bool
-		HasError               bool
-		ErrorMsg               string
-		HasKubeconfig          bool
-		IsDestroyed            bool
-		WorkspaceLifetimeHours int
-		LabDeletionDate        string
-		HasDeletionDate        bool
+		ID                        string
+		IDShort                   string
+		Status                    string
+		CreatedAt                 string
+		UpdatedAt                 string
+		StackName                 string
+		IsDryRun                  bool
+		HasError                  bool
+		ErrorMsg                  string
+		HasKubeconfig             bool
+		IsDestroyed               bool
+		WorkspaceLifetimeHours    int
+		LabDeletionDate           string
+		HasDeletionDate           bool
+		WorkspaceTemplateNamesCSV string
 	}
 
 	labsDisplay := make([]LabDisplay, 0, len(allJobs))
@@ -2823,23 +2659,30 @@ func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
 			labDeletionDate = job.Config.LabDeletionDate.Format("Jan 02, 2006 at 15:04")
 			hasLabDeletionDate = true
 		}
+		var templateNames []string
+		if job.Config != nil {
+			for _, t := range job.Config.WorkspaceTemplates {
+				templateNames = append(templateNames, t.Name)
+			}
+		}
 		job.mu.RUnlock()
 
 		labsDisplay = append(labsDisplay, LabDisplay{
-			ID:                     job.ID,
-			IDShort:                shortenLabID(job.ID),
-			Status:                 status,
-			CreatedAt:              createdAt,
-			UpdatedAt:              updatedAt,
-			StackName:              stackName,
-			IsDryRun:               isDryRun,
-			HasError:               hasError,
-			ErrorMsg:               errorMsg,
-			HasKubeconfig:          hasKubeconfig,
-			IsDestroyed:            isDestroyed,
-			WorkspaceLifetimeHours: workspaceLifetimeHours,
-			LabDeletionDate:        labDeletionDate,
-			HasDeletionDate:        hasLabDeletionDate,
+			ID:                        job.ID,
+			IDShort:                   shortenLabID(job.ID),
+			Status:                    status,
+			CreatedAt:                 createdAt,
+			UpdatedAt:                 updatedAt,
+			StackName:                 stackName,
+			IsDryRun:                  isDryRun,
+			HasError:                  hasError,
+			ErrorMsg:                  errorMsg,
+			HasKubeconfig:             hasKubeconfig,
+			IsDestroyed:               isDestroyed,
+			WorkspaceLifetimeHours:    workspaceLifetimeHours,
+			LabDeletionDate:           labDeletionDate,
+			HasDeletionDate:           hasLabDeletionDate,
+			WorkspaceTemplateNamesCSV: strings.Join(templateNames, ", "),
 		})
 	}
 
@@ -2871,20 +2714,8 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 	job.mu.RLock()
 	status := job.Status
-	coderURL := job.CoderURL
-	coderSessionToken := job.CoderSessionToken
-	coderOrganizationID := job.CoderOrganizationID
-	coderAdminEmail, coderAdminPassword := job.coderCredentials()
-	templateName := ""
-	if job.Config != nil {
-		templates := job.Config.GetCoderTemplates()
-		if len(templates) > 0 {
-			templateName = templates[0].Name
-		}
-		if templateName == "" {
-			templateName = job.Config.CoderTemplateName
-		}
-	}
+	kubeconfig := extractStringFromConfigValue(job.Kubeconfig)
+	namespace := job.workspaceNamespace()
 	stackName := ""
 	if job.Config != nil {
 		stackName = job.Config.StackName
@@ -2896,58 +2727,23 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Clean up any malformed ConfigValue JSON strings
-	coderURL = extractStringFromConfigValue(coderURL)
-	coderSessionToken = extractStringFromConfigValue(coderSessionToken)
-	coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
-
-	if coderURL == "" || coderSessionToken == "" || coderOrganizationID == "" {
-		http.Error(w, "Lab Coder configuration not available", http.StatusInternalServerError)
+	if kubeconfig == "" {
+		http.Error(w, "Lab cluster configuration not available", http.StatusInternalServerError)
 		return
 	}
 
-	// Get template ID from template name
-	coderConfig := coder.CoderClientConfig{
-		ServerURL:      coderURL,
-		SessionToken:   coderSessionToken,
-		OrganizationID: coderOrganizationID,
-	}
-
-	templates, tmplCfg, err := coder.GetTemplatesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword)
-	coderConfig = tmplCfg
+	backend, err := h.newWorkspaceBackend(kubeconfig, namespace)
 	if err != nil {
-		log.Printf("Failed to get templates: %v", err)
-		http.Error(w, "Failed to fetch templates", http.StatusInternalServerError)
+		log.Printf("ServeLabWorkspaces: failed to build backend for lab %s: %v", labID, err)
+		http.Error(w, "Failed to reach lab cluster", http.StatusInternalServerError)
 		return
 	}
 
-	var templateID uuid.UUID
-	found := false
-	for _, tmpl := range templates {
-		if tmpl.Name == templateName {
-			templateID = tmpl.ID
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		http.Error(w, "Template not found in Coder", http.StatusNotFound)
-		return
-	}
-
-	// Get workspaces for this template
-	workspaces, updatedConfig, err := coder.ListWorkspacesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, templateID, templateName)
+	workspaces, err := backend.ListWorkspaces(r.Context(), labID)
 	if err != nil {
 		log.Printf("Failed to list workspaces: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to list workspaces: %s", err.Error()), http.StatusInternalServerError)
+		http.Error(w, "Failed to list workspaces", http.StatusInternalServerError)
 		return
-	}
-
-	// Update config if token was refreshed, and persist it for future requests.
-	coderConfig = updatedConfig
-	if perr := h.jobManager.UpdateCoderSessionToken(labID, coderConfig.SessionToken); perr != nil {
-		log.Printf("ServeLabWorkspaces: failed to persist refreshed token for lab %s: %v", labID, perr)
 	}
 
 	// Prepare workspace data for template
@@ -2970,12 +2766,11 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 		if !ws.UpdatedAt.IsZero() {
 			updatedAt = ws.UpdatedAt.Format("2006-01-02 15:04:05")
 		}
-
 		workspacesDisplay = append(workspacesDisplay, WorkspaceDisplay{
-			ID:        ws.ID.String(),
+			ID:        ws.ID,
 			Name:      ws.Name,
-			Owner:     ws.OwnerName,
-			Status:    string(ws.LatestBuild.Job.Status),
+			Owner:     ws.Owner,
+			Status:    ws.Phase,
 			CreatedAt: createdAt,
 			UpdatedAt: updatedAt,
 		})
@@ -3011,20 +2806,8 @@ func (h *Handler) ListLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 	job.mu.RLock()
 	status := job.Status
-	coderURL := job.CoderURL
-	coderSessionToken := job.CoderSessionToken
-	coderOrganizationID := job.CoderOrganizationID
-	coderAdminEmail, coderAdminPassword := job.coderCredentials()
-	templateName := ""
-	if job.Config != nil {
-		templates := job.Config.GetCoderTemplates()
-		if len(templates) > 0 {
-			templateName = templates[0].Name
-		}
-		if templateName == "" {
-			templateName = job.Config.CoderTemplateName
-		}
-	}
+	kubeconfig := extractStringFromConfigValue(job.Kubeconfig)
+	namespace := job.workspaceNamespace()
 	job.mu.RUnlock()
 
 	if status != JobStatusCompleted {
@@ -3032,55 +2815,23 @@ func (h *Handler) ListLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Clean up any malformed ConfigValue JSON strings
-	coderURL = extractStringFromConfigValue(coderURL)
-	coderSessionToken = extractStringFromConfigValue(coderSessionToken)
-	coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
-
-	if coderURL == "" || coderSessionToken == "" || coderOrganizationID == "" {
-		http.Error(w, "Lab Coder configuration not available", http.StatusInternalServerError)
+	if kubeconfig == "" {
+		http.Error(w, "Lab cluster configuration not available", http.StatusInternalServerError)
 		return
 	}
 
-	// Get template ID from template name
-	coderConfig := coder.CoderClientConfig{
-		ServerURL:      coderURL,
-		SessionToken:   coderSessionToken,
-		OrganizationID: coderOrganizationID,
-	}
-
-	templates, tmplCfg, err := coder.GetTemplatesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword)
-	coderConfig = tmplCfg
+	backend, err := h.newWorkspaceBackend(kubeconfig, namespace)
 	if err != nil {
-		log.Printf("Failed to get templates: %v", err)
-		http.Error(w, "Failed to fetch templates", http.StatusInternalServerError)
+		log.Printf("ListLabWorkspaces: failed to build backend for lab %s: %v", labID, err)
+		http.Error(w, "Failed to reach lab cluster", http.StatusInternalServerError)
 		return
 	}
 
-	var templateID uuid.UUID
-	found := false
-	for _, tmpl := range templates {
-		if tmpl.Name == templateName {
-			templateID = tmpl.ID
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		http.Error(w, "Template not found in Coder", http.StatusNotFound)
-		return
-	}
-
-	// Get workspaces for this template
-	workspaces, updatedConfig, err := coder.ListWorkspacesWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, templateID, templateName)
+	workspaces, err := backend.ListWorkspaces(r.Context(), labID)
 	if err != nil {
 		log.Printf("Failed to list workspaces: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to list workspaces: %s", err.Error()), http.StatusInternalServerError)
+		http.Error(w, "Failed to list workspaces", http.StatusInternalServerError)
 		return
-	}
-	if perr := h.jobManager.UpdateCoderSessionToken(labID, updatedConfig.SessionToken); perr != nil {
-		log.Printf("ListLabWorkspaces: failed to persist refreshed token for lab %s: %v", labID, perr)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -3135,49 +2886,30 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 
 		job.mu.RLock()
-		coderURL := job.CoderURL
-		coderSessionToken := job.CoderSessionToken
-		coderOrganizationID := job.CoderOrganizationID
-		coderAdminEmail, coderAdminPassword := job.coderCredentials()
+		kubeconfig := extractStringFromConfigValue(job.Kubeconfig)
+		namespace := job.workspaceNamespace()
 		job.mu.RUnlock()
 
-		// Clean up any malformed ConfigValue JSON strings
-		coderURL = extractStringFromConfigValue(coderURL)
-		coderSessionToken = extractStringFromConfigValue(coderSessionToken)
-		coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
-
-		coderConfig := coder.CoderClientConfig{
-			ServerURL:      coderURL,
-			SessionToken:   coderSessionToken,
-			OrganizationID: coderOrganizationID,
+		backend, err := h.newWorkspaceBackend(kubeconfig, namespace)
+		if err != nil {
+			log.Printf("DeleteWorkspace: failed to build backend for lab %s: %v", labID, err)
+			writeJSONError(w, http.StatusInternalServerError, "Failed to reach lab cluster")
+			return
 		}
 
-		var errors []string
-		for _, wsIDStr := range workspaceIDs {
-			wsID, err := uuid.Parse(wsIDStr)
-			if err != nil {
-				errors = append(errors, fmt.Sprintf("Invalid workspace ID %s: %v", wsIDStr, err))
-				continue
-			}
-
-			var delCfg coder.CoderClientConfig
-			delCfg, err = coder.DeleteWorkspaceWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, wsID)
-			coderConfig = delCfg
-			if err != nil {
-				errors = append(errors, fmt.Sprintf("Failed to delete workspace %s: %v", wsIDStr, err))
+		var delErrors []string
+		for _, wsID := range workspaceIDs {
+			if err := backend.DeleteWorkspace(r.Context(), labID, wsID); err != nil {
+				delErrors = append(delErrors, fmt.Sprintf("Failed to delete workspace %s: %v", wsID, err))
 			}
 		}
-		// Persist any refreshed admin token for future requests.
-		if perr := h.jobManager.UpdateCoderSessionToken(labID, coderConfig.SessionToken); perr != nil {
-			log.Printf("DeleteWorkspace: failed to persist refreshed token for lab %s: %v", labID, perr)
-		}
 
-		if len(errors) > 0 {
+		if len(delErrors) > 0 {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusPartialContent)
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"success": false,
-				"errors":  errors,
+				"errors":  delErrors,
 			})
 			return
 		}
@@ -3203,12 +2935,6 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	workspaceID, err := uuid.Parse(workspaceIDStr)
-	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, "Invalid workspace ID")
-		return
-	}
-
 	labID := r.FormValue("lab_id")
 	if labID == "" {
 		// Try to extract from URL path
@@ -3229,30 +2955,20 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	job.mu.RLock()
-	coderURL := job.CoderURL
-	coderSessionToken := job.CoderSessionToken
-	coderOrganizationID := job.CoderOrganizationID
-	coderAdminEmail, coderAdminPassword := job.coderCredentials()
+	kubeconfig := extractStringFromConfigValue(job.Kubeconfig)
+	namespace := job.workspaceNamespace()
 	job.mu.RUnlock()
 
-	// Clean up any malformed ConfigValue JSON strings
-	coderURL = extractStringFromConfigValue(coderURL)
-	coderSessionToken = extractStringFromConfigValue(coderSessionToken)
-	coderOrganizationID = extractStringFromConfigValue(coderOrganizationID)
-
-	coderConfig := coder.CoderClientConfig{
-		ServerURL:      coderURL,
-		SessionToken:   coderSessionToken,
-		OrganizationID: coderOrganizationID,
-	}
-
-	updatedConfig, err := coder.DeleteWorkspaceWithRetry(coderConfig, coderAdminEmail, coderAdminPassword, workspaceID)
-	if perr := h.jobManager.UpdateCoderSessionToken(labID, updatedConfig.SessionToken); perr != nil {
-		log.Printf("DeleteWorkspace: failed to persist refreshed token for lab %s: %v", labID, perr)
-	}
+	backend, err := h.newWorkspaceBackend(kubeconfig, namespace)
 	if err != nil {
+		log.Printf("DeleteWorkspace: failed to build backend for lab %s: %v", labID, err)
+		writeJSONError(w, http.StatusInternalServerError, "Failed to reach lab cluster")
+		return
+	}
+
+	if err := backend.DeleteWorkspace(r.Context(), labID, workspaceIDStr); err != nil {
 		log.Printf("Failed to delete workspace: %v", err)
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to delete workspace: %s", err.Error()))
+		writeJSONError(w, http.StatusInternalServerError, "Failed to delete workspace")
 		return
 	}
 
@@ -3338,6 +3054,37 @@ func (h *Handler) DestroyStack(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, fmt.Sprintf("/admin?job=%s", jobID), http.StatusSeeOther)
 }
 
+// parseRecreateDeletionDate reads the deletion schedule the admin entered in the
+// recreate prompt. A blank date means "no automatic deletion" and returns
+// (nil, nil). A date is rejected unless it is in the future: the destroyed lab's
+// original date is already in the past, and reusing any past date would make the
+// recreated lab vanish on the very next cleanup tick — the bug this prompt exists
+// to prevent. Field names mirror the creation wizard (lab_deletion_date /
+// lab_deletion_time).
+func parseRecreateDeletionDate(r *http.Request) (*time.Time, error) {
+	dateStr := strings.TrimSpace(r.FormValue("lab_deletion_date"))
+	if dateStr == "" {
+		return nil, nil
+	}
+	d, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		return nil, fmt.Errorf("the deletion date is not a valid date")
+	}
+	hour, minute := 23, 59
+	if timeStr := strings.TrimSpace(r.FormValue("lab_deletion_time")); timeStr != "" {
+		t, err := time.Parse("15:04", timeStr)
+		if err != nil {
+			return nil, fmt.Errorf("the deletion time is not a valid time")
+		}
+		hour, minute = t.Hour(), t.Minute()
+	}
+	deletion := time.Date(d.Year(), d.Month(), d.Day(), hour, minute, 0, 0, time.Local)
+	if !deletion.After(time.Now()) {
+		return nil, fmt.Errorf("the deletion date must be in the future")
+	}
+	return &deletion, nil
+}
+
 // RecreateLab handles recreating a lab from a destroyed job
 func (h *Handler) RecreateLab(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -3392,6 +3139,20 @@ func (h *Handler) RecreateLab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A lab with a scheduled deletion date was destroyed with that date now in the
+	// past. Reusing it would delete the recreated lab on the very next cleanup tick,
+	// so the admin re-enters a fresh date in the recreate prompt. A blank date
+	// disables automatic deletion; a past date is rejected.
+	if config.LabDeletionDate != nil {
+		newDeletion, err := parseRecreateDeletionDate(r)
+		if err != nil {
+			log.Printf("Invalid recreate deletion date for job %s: %v", jobID, err)
+			h.renderHTMLError(w, "Invalid Deletion Date", err.Error())
+			return
+		}
+		config.LabDeletionDate = newDeletion
+	}
+
 	// Get OVH credentials only when not using existing cluster (BYOK doesn't need them)
 	if !config.UseExistingCluster {
 		ovhCreds, err := h.getOVHCredentials(w)
@@ -3406,41 +3167,29 @@ func (h *Handler) RecreateLab(w http.ResponseWriter, r *http.Request) {
 		config.OvhEndpoint = ovhCreds.Endpoint
 	}
 
+	// Tokens the admin re-entered in the recreate prompt. The old cluster's
+	// Secrets went with it, so recreation is the one moment they must be supplied
+	// again. Parsed before the job exists so a mistake does not leave a half-made
+	// lab behind.
+	recreateSecrets, err := parseWizardSecrets(r)
+	if err != nil {
+		log.Printf("Invalid recreate credentials: %v", err)
+		h.renderHTMLError(w, "Invalid Credentials", err.Error())
+		return
+	}
+
 	// Create new job with the same configuration
 	newJobID := h.jobManager.CreateJob(config)
+	h.pendingSecrets.Put(newJobID, recreateSecrets)
 	log.Printf("Recreating lab from destroyed job %s as new job: %s", jobID, newJobID)
 
-	// Copy uploaded template files from old job directory to new job directory
-	oldJobDir := filepath.Join(h.pulumiExec.GetWorkDir(), jobID)
+	// Prepare the new job directory. Workspace templates are pure configuration,
+	// so there are no template files to copy over.
 	newJobDir := filepath.Join(h.pulumiExec.GetWorkDir(), newJobID)
 	if err := os.MkdirAll(newJobDir, 0755); err != nil {
 		log.Printf("Failed to create new job directory for %s: %v", newJobID, err)
 		http.Error(w, "Failed to prepare job directory", http.StatusInternalServerError)
 		return
-	}
-	for _, t := range config.GetCoderTemplates() {
-		if t.Source == "upload" && t.FilePath != "" {
-			src := filepath.Join(oldJobDir, t.FilePath)
-			dst := filepath.Join(newJobDir, t.FilePath)
-			if copyErr := func() error {
-				in, err := os.Open(src)
-				if err != nil {
-					return fmt.Errorf("open source: %w", err)
-				}
-				defer in.Close()
-				out, err := os.Create(dst)
-				if err != nil {
-					return fmt.Errorf("create dest: %w", err)
-				}
-				defer out.Close()
-				_, err = io.Copy(out, in)
-				return err
-			}(); copyErr != nil {
-				log.Printf("Failed to copy template file %s for recreated job %s: %v", t.FilePath, newJobID, copyErr)
-				http.Error(w, "Failed to copy template file", http.StatusInternalServerError)
-				return
-			}
-		}
 	}
 
 	// Start Pulumi execution in a goroutine
@@ -3675,6 +3424,8 @@ func (h *Handler) DeleteLab(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Failed to remove lab: %v", err), http.StatusInternalServerError)
 		return
 	}
+	// Drop any credentials still waiting for a cluster that will now never exist.
+	h.pendingSecrets.Discard(labID)
 
 	http.Redirect(w, r, "/labs", http.StatusSeeOther)
 }
@@ -4000,25 +3751,4 @@ func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		log.Printf("failed to encode stats response: %v", err)
 	}
-}
-
-// wrapTFInZip writes the contents of src (a .tf file) into a new zip archive at zipPath.
-func wrapTFInZip(src io.Reader, tfFileName string, zipPath string) error {
-	out, err := os.Create(zipPath)
-	if err != nil {
-		return fmt.Errorf("failed to create zip: %w", err)
-	}
-	defer out.Close()
-
-	zw := zip.NewWriter(out)
-	defer zw.Close()
-
-	entry, err := zw.Create(filepath.Base(tfFileName))
-	if err != nil {
-		return fmt.Errorf("failed to create zip entry: %w", err)
-	}
-	if _, err := io.Copy(entry, src); err != nil {
-		return fmt.Errorf("failed to write tf content to zip: %w", err)
-	}
-	return nil
 }

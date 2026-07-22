@@ -16,7 +16,7 @@ When enabled, a **Sign in with Microsoft** button appears on the student login p
 
 1. The student clicks **Sign in with Microsoft** and is redirected to Microsoft's login page.
 2. After a successful Microsoft login, EasyLab creates a local session using the student's email address.
-3. When the student first requests a workspace, a Coder account is provisioned automatically using that email address and a server-generated password — identical to the password-based flow. Azure AD is never configured on Coder itself.
+3. When the student first requests a workspace, the workspace is provisioned automatically for that email address with a server-generated access secret — identical to the password-based flow. Azure AD is never configured on the workspaces themselves.
 
 ![Student Microsoft login](screens/student-login-microsoft.png){ width=300 }
 
