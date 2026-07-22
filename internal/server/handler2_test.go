@@ -557,13 +557,8 @@ func TestHandler_RequestWorkspace_MissingEmail(t *testing.T) {
 	h.RequestWorkspace(w, req)
 	// "invalid" is not a valid email, should fail
 	// Can't easily test the success case without Coder
-<<<<<<< HEAD
-=======
-<<<<<<< Updated upstream
 }
-=======
->>>>>>> bcfd3a5 (feat: list templates in a lab)
-}
+
 // The lab's public base URL is resolved through the workspace backend: a lab with
 // no domain of its own is exposed via nip.io on the ingress LoadBalancer IP, which
 // is only known at runtime.
@@ -606,8 +601,6 @@ func TestGetCoderCredentials_BaseURL(t *testing.T) {
 		})
 	}
 }
-<<<<<<< HEAD
-=======
 
 // --- OpenWorkspace auto-login ---
 
@@ -666,5 +659,3 @@ func TestHandler_OpenWorkspace_WrongOwner(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, w.Code)
 	assert.NotContains(t, w.Body.String(), "secret-token-123")
 }
->>>>>>> Stashed changes
->>>>>>> bcfd3a5 (feat: list templates in a lab)

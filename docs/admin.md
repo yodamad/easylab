@@ -429,12 +429,6 @@ You can see all the labs you have created with following information:
 
 ![Lab Workspaces](screens/list-workspaces.png){width=350}
 
-<<<<<<< HEAD
-### Add a template to an existing lab
-=======
-<<<<<<< Updated upstream
-## Workspace access reliability (Coder session tokens)
-=======
 ### Templates on a lab
 
 The **View Workspaces** page shows a **Templates on this lab** panel above the
@@ -456,8 +450,6 @@ workspaces.
 > this resolves on its own.
 
 ### Add a template to an existing lab
->>>>>>> Stashed changes
->>>>>>> bcfd3a5 (feat: list templates in a lab)
 
 Completed labs have an **Add Template** action that opens a side drawer for appending
 a workspace template without recreating the lab. It mirrors the wizard's **Workspace

@@ -45,16 +45,6 @@ const (
 	// may not reuse it).
 	workspaceContainerName = "workspace"
 
-<<<<<<< HEAD
-	labelManagedBy   = "app.kubernetes.io/managed-by"
-	labelLabID       = "easylab.io/lab-id"
-	labelOwner       = "easylab.io/owner"
-	labelName        = "app.kubernetes.io/name"
-	annotationIDE    = "easylab.io/ide"
-	annotationToken  = "easylab.io/token"
-	annotationDomain = "easylab.io/domain"
-	annotationScheme = "easylab.io/scheme"
-=======
 	labelManagedBy     = "app.kubernetes.io/managed-by"
 	labelLabID         = "easylab.io/lab-id"
 	labelOwner         = "easylab.io/owner"
@@ -64,7 +54,6 @@ const (
 	annotationDomain   = "easylab.io/domain"
 	annotationScheme   = "easylab.io/scheme"
 	annotationTemplate = "easylab.io/template"
->>>>>>> bcfd3a5 (feat: list templates in a lab)
 
 	managedByValue = "easylab"
 
@@ -474,18 +463,11 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 			Namespace: b.namespace,
 			Labels:    labels,
 			Annotations: map[string]string{
-<<<<<<< HEAD
-				annotationDomain: spec.Domain,
-				annotationScheme: scheme,
-				annotationIDE:    p.kind,
-				annotationToken:  spec.Token,
-=======
 				annotationDomain:   spec.Domain,
 				annotationScheme:   scheme,
 				annotationIDE:      p.kind,
 				annotationToken:    spec.Token,
 				annotationTemplate: spec.Template,
->>>>>>> bcfd3a5 (feat: list templates in a lab)
 			},
 		},
 		Spec: appsv1.DeploymentSpec{
@@ -993,10 +975,7 @@ func (b *Backend) toWorkspace(dep *appsv1.Deployment, domain, token string) work
 		OpenURL:   openURL,
 		Token:     token,
 		IDE:       ide,
-<<<<<<< HEAD
-=======
 		Template:  dep.Annotations[annotationTemplate],
->>>>>>> bcfd3a5 (feat: list templates in a lab)
 		CreatedAt: dep.CreationTimestamp.Time,
 		UpdatedAt: deploymentUpdatedAt(dep),
 		Ready:     ready,

@@ -1574,11 +1574,6 @@ func TestHandler_SetClassicAdminLoginConfigurer(t *testing.T) {
 		t.Error("classicAdminLoginConfigurer callback was not called")
 	}
 }
-<<<<<<< HEAD
-=======
-<<<<<<< Updated upstream
-=======
->>>>>>> bcfd3a5 (feat: list templates in a lab)
 
 func TestValidateDNSConfig(t *testing.T) {
 	tests := []struct {
@@ -1719,8 +1714,6 @@ func TestWorkspaceDNSReady(t *testing.T) {
 		})
 	}
 }
-<<<<<<< HEAD
-=======
 
 func TestBuildTemplateStatus(t *testing.T) {
 	templates := []WorkspaceTemplate{
@@ -1812,5 +1805,3 @@ func TestBuildTemplateStatus_DisplayFields(t *testing.T) {
 	// A devcontainer template with no image is labelled "devcontainer".
 	assert.Equal(t, "devcontainer", statuses[2].Image)
 }
->>>>>>> Stashed changes
->>>>>>> bcfd3a5 (feat: list templates in a lab)

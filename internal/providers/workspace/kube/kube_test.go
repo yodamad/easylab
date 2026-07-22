@@ -298,8 +298,6 @@ func TestEnsureWorkspace_CreatesResources(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
-=======
 // TestEnsureWorkspace_AttributesTemplate pins that the template a workspace was
 // created from survives the round-trip: it is returned by EnsureWorkspace and
 // read back out of the cluster by ListWorkspaces, so the admin UI can correlate
@@ -334,7 +332,6 @@ func TestEnsureWorkspace_AttributesTemplate(t *testing.T) {
 	}
 }
 
->>>>>>> bcfd3a5 (feat: list templates in a lab)
 func TestEnsureWorkspace_Idempotent(t *testing.T) {
 	b, cs := newTestBackend()
 	ctx := context.Background()
