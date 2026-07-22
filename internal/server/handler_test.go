@@ -1574,6 +1574,11 @@ func TestHandler_SetClassicAdminLoginConfigurer(t *testing.T) {
 		t.Error("classicAdminLoginConfigurer callback was not called")
 	}
 }
+<<<<<<< HEAD
+=======
+<<<<<<< Updated upstream
+=======
+>>>>>>> bcfd3a5 (feat: list templates in a lab)
 
 func TestValidateDNSConfig(t *testing.T) {
 	tests := []struct {
@@ -1714,3 +1719,98 @@ func TestWorkspaceDNSReady(t *testing.T) {
 		})
 	}
 }
+<<<<<<< HEAD
+=======
+
+func TestBuildTemplateStatus(t *testing.T) {
+	templates := []WorkspaceTemplate{
+		{Name: "python", Image: "python:3.12"},
+		{Name: "go", IDE: "openvscode"},
+		{Name: "devc", Devcontainer: &DevcontainerConfig{}},
+	}
+
+	tests := []struct {
+		name             string
+		templates        []WorkspaceTemplate
+		workspaces       []workspace.Workspace
+		wantCounts       map[string]int
+		wantHasRunning   map[string]bool
+		wantUnattributed int
+	}{
+		{
+			name:             "no workspaces",
+			templates:        templates,
+			workspaces:       nil,
+			wantCounts:       map[string]int{"python": 0, "go": 0, "devc": 0},
+			wantHasRunning:   map[string]bool{"python": false, "go": false, "devc": false},
+			wantUnattributed: 0,
+		},
+		{
+			name:      "multiple per template",
+			templates: templates,
+			workspaces: []workspace.Workspace{
+				{ID: "ws-1", Template: "python"},
+				{ID: "ws-2", Template: "python"},
+				{ID: "ws-3", Template: "go"},
+			},
+			wantCounts:       map[string]int{"python": 2, "go": 1, "devc": 0},
+			wantHasRunning:   map[string]bool{"python": true, "go": true, "devc": false},
+			wantUnattributed: 0,
+		},
+		{
+			name:      "unattributed workspaces",
+			templates: templates,
+			workspaces: []workspace.Workspace{
+				{ID: "ws-1", Template: "python"},
+				{ID: "ws-2", Template: ""},        // pre-attribution workspace
+				{ID: "ws-3", Template: "removed"}, // template no longer configured
+			},
+			wantCounts:       map[string]int{"python": 1, "go": 0, "devc": 0},
+			wantHasRunning:   map[string]bool{"python": true, "go": false, "devc": false},
+			wantUnattributed: 2,
+		},
+		{
+			name:             "no templates, workspaces all unattributed",
+			templates:        nil,
+			workspaces:       []workspace.Workspace{{ID: "ws-1", Template: "x"}},
+			wantCounts:       map[string]int{},
+			wantHasRunning:   map[string]bool{},
+			wantUnattributed: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			statuses, unattributed := buildTemplateStatus(tt.templates, tt.workspaces)
+
+			require.Len(t, statuses, len(tt.templates))
+			assert.Equal(t, tt.wantUnattributed, unattributed)
+
+			for _, s := range statuses {
+				assert.Equal(t, tt.wantCounts[s.Name], s.RunningCount, "count for %s", s.Name)
+				assert.Equal(t, tt.wantHasRunning[s.Name], s.HasRunning, "hasRunning for %s", s.Name)
+				assert.NotEmpty(t, s.IDE, "IDE should default for %s", s.Name)
+			}
+		})
+	}
+}
+
+func TestBuildTemplateStatus_DisplayFields(t *testing.T) {
+	statuses, _ := buildTemplateStatus([]WorkspaceTemplate{
+		{Name: "python", Image: "python:3.12"},
+		{Name: "legacy-ide", IDE: "openvscode"},
+		{Name: "devc", Devcontainer: &DevcontainerConfig{}},
+	}, nil)
+
+	require.Len(t, statuses, 3)
+	// Explicit image is preserved; code-server is the normalized IDE.
+	assert.Equal(t, "python:3.12", statuses[0].Image)
+	assert.Equal(t, workspace.DefaultIDEKind, statuses[0].IDE)
+	// Legacy openvscode is normalized to code-server.
+	assert.Equal(t, workspace.DefaultIDEKind, statuses[1].IDE)
+	// A devcontainer template with no image is labelled "devcontainer".
+	assert.Equal(t, "devcontainer", statuses[2].Image)
+}
+>>>>>>> Stashed changes
+>>>>>>> bcfd3a5 (feat: list templates in a lab)

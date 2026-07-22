@@ -298,6 +298,43 @@ func TestEnsureWorkspace_CreatesResources(t *testing.T) {
 	}
 }
 
+<<<<<<< HEAD
+=======
+// TestEnsureWorkspace_AttributesTemplate pins that the template a workspace was
+// created from survives the round-trip: it is returned by EnsureWorkspace and
+// read back out of the cluster by ListWorkspaces, so the admin UI can correlate
+// running workspaces with configured templates.
+func TestEnsureWorkspace_AttributesTemplate(t *testing.T) {
+	b, _ := newTestBackend()
+	ctx := context.Background()
+
+	created, err := b.EnsureWorkspace(ctx, workspace.Spec{
+		LabID:    "job-1",
+		Owner:    "alice",
+		Template: "python-lab",
+		Domain:   "lab.example.com",
+		Token:    "t",
+	})
+	if err != nil {
+		t.Fatalf("EnsureWorkspace error: %v", err)
+	}
+	if created.Template != "python-lab" {
+		t.Errorf("EnsureWorkspace template = %q, want %q", created.Template, "python-lab")
+	}
+
+	list, err := b.ListWorkspaces(ctx, "job-1")
+	if err != nil {
+		t.Fatalf("ListWorkspaces error: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("ListWorkspaces returned %d workspaces, want 1", len(list))
+	}
+	if list[0].Template != "python-lab" {
+		t.Errorf("ListWorkspaces template = %q, want %q", list[0].Template, "python-lab")
+	}
+}
+
+>>>>>>> bcfd3a5 (feat: list templates in a lab)
 func TestEnsureWorkspace_Idempotent(t *testing.T) {
 	b, cs := newTestBackend()
 	ctx := context.Background()

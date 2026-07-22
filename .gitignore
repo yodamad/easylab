@@ -57,5 +57,9 @@ site/
 # Claude
 .claude/
 
+<<<<<<< HEAD
 # Test data
+=======
+# Test folder
+>>>>>>> bcfd3a5 (feat: list templates in a lab)
 internal/server/job-*

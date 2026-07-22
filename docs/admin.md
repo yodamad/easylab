@@ -429,7 +429,35 @@ You can see all the labs you have created with following information:
 
 ![Lab Workspaces](screens/list-workspaces.png){width=350}
 
+<<<<<<< HEAD
 ### Add a template to an existing lab
+=======
+<<<<<<< Updated upstream
+## Workspace access reliability (Coder session tokens)
+=======
+### Templates on a lab
+
+The **View Workspaces** page shows a **Templates on this lab** panel above the
+workspace list. It lists every template configured on the lab, with its IDE and
+image (or `devcontainer` when the workspace is built from a devcontainer), and a
+badge telling you which templates currently have running student workspaces:
+
+* **● N running** — N live workspaces were created from that template.
+* **none** — the template is configured but no student has an active workspace
+  from it yet.
+
+Use the **Refresh** button to update the counts as students start and stop
+workspaces.
+
+> Attribution applies to workspaces **created after this feature shipped**. Any
+> workspace that was already running beforehand has no template recorded and is
+> reported as a small "not attributed to a template" note; it is attributed once
+> the workspace is recreated. Because workspaces are cleaned up on their lifetime,
+> this resolves on its own.
+
+### Add a template to an existing lab
+>>>>>>> Stashed changes
+>>>>>>> bcfd3a5 (feat: list templates in a lab)
 
 Completed labs have an **Add Template** action that opens a side drawer for appending
 a workspace template without recreating the lab. It mirrors the wizard's **Workspace

@@ -18,6 +18,11 @@
         <div class="workspaces-page-container">
 
         <div>
+<<<<<<< HEAD
+=======
+<<<<<<< Updated upstream
+=======
+>>>>>>> bcfd3a5 (feat: list templates in a lab)
             <details class="secrets-section">
                 <summary class="secrets-summary">
                     <span class="secrets-summary-title">Credentials</span>
@@ -66,6 +71,39 @@
                 </form>
             </details>
 
+<<<<<<< HEAD
+=======
+            {{if .Templates}}
+            <div class="templates-panel">
+                <div class="templates-panel-header">
+                    <h2 class="templates-panel-title">Templates on this lab</h2>
+                    <span class="templates-panel-hint">{{len .Templates}} configured</span>
+                </div>
+                <div class="templates-grid">
+                    {{range .Templates}}
+                    <div class="template-status-card">
+                        <div class="template-status-info">
+                            <span class="template-status-name">{{.Name}}</span>
+                            <span class="template-status-meta">{{.IDE}}{{if .Image}} · {{.Image}}{{end}}</span>
+                        </div>
+                        {{if .HasRunning}}
+                        <span class="template-run-badge is-running">● {{.RunningCount}} running</span>
+                        {{else}}
+                        <span class="template-run-badge is-idle">none</span>
+                        {{end}}
+                    </div>
+                    {{end}}
+                </div>
+                {{if gt .Unattributed 0}}
+                <p class="templates-unattributed-note">
+                    {{.Unattributed}} running workspace(s) aren't attributed to a template — they were created before template tracking was added and will be attributed once recreated.
+                </p>
+                {{end}}
+            </div>
+            {{end}}
+
+>>>>>>> Stashed changes
+>>>>>>> bcfd3a5 (feat: list templates in a lab)
             {{if .Workspaces}}
             <div class="stats-bar">
                 <div class="stats-item">

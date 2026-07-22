@@ -5801,6 +5801,11 @@ body.admin-page .wizard-footer {
     width: 1.125rem;
     height: 1.125rem;
 }
+<<<<<<< HEAD
+=======
+<<<<<<< Updated upstream
+=======
+>>>>>>> bcfd3a5 (feat: list templates in a lab)
 
 /* Lab credentials panel (registry / git tokens) */
 .secrets-section {
@@ -6008,3 +6013,102 @@ body.admin-page .wizard-footer {
     gap: 0.75rem;
     margin-top: 1rem;
 }
+<<<<<<< HEAD
+=======
+
+/* Templates on this lab panel (workspaces page) */
+.templates-panel {
+    margin: 1.25rem 0;
+    padding: 1rem 1.25rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.templates-panel-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.templates-panel-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text);
+    margin: 0;
+}
+
+.templates-panel-hint {
+    font-size: 0.8rem;
+    color: var(--text-light);
+}
+
+.templates-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 0.75rem;
+}
+
+.template-status-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.6rem 0.85rem;
+    background: var(--background);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.template-status-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+}
+
+.template-status-name {
+    font-weight: 600;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.template-status-meta {
+    font-size: 0.78rem;
+    color: var(--text-light);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.template-run-badge {
+    flex-shrink: 0;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.template-run-badge.is-running {
+    background: color-mix(in srgb, var(--success) 15%, transparent);
+    color: var(--success-hover);
+}
+
+.template-run-badge.is-idle {
+    background: var(--surface);
+    color: var(--text-light);
+    border: 1px solid var(--border);
+}
+
+.templates-unattributed-note {
+    margin: 0.75rem 0 0;
+    font-size: 0.8rem;
+    color: var(--text-light);
+}
+>>>>>>> Stashed changes
+>>>>>>> bcfd3a5 (feat: list templates in a lab)

@@ -2,6 +2,8 @@ package server
 
 import (
 	"bytes"
+	"context"
+	"easylab/internal/providers/workspace"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
@@ -555,6 +557,12 @@ func TestHandler_RequestWorkspace_MissingEmail(t *testing.T) {
 	h.RequestWorkspace(w, req)
 	// "invalid" is not a valid email, should fail
 	// Can't easily test the success case without Coder
+<<<<<<< HEAD
+=======
+<<<<<<< Updated upstream
+}
+=======
+>>>>>>> bcfd3a5 (feat: list templates in a lab)
 }
 // The lab's public base URL is resolved through the workspace backend: a lab with
 // no domain of its own is exposed via nip.io on the ingress LoadBalancer IP, which
@@ -598,3 +606,65 @@ func TestGetCoderCredentials_BaseURL(t *testing.T) {
 		})
 	}
 }
+<<<<<<< HEAD
+=======
+
+// --- OpenWorkspace auto-login ---
+
+// openWorkspaceHandler wires a completed lab whose backend returns ws, and returns
+// the handler plus the lab id so tests can drive OpenWorkspace.
+func openWorkspaceHandler(t *testing.T, ws workspace.Workspace) (*Handler, string) {
+	t.Helper()
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test", WorkspaceNamespace: "workshops"})
+	jm.UpdateJobStatus(id, JobStatusCompleted)
+	job, _ := jm.GetJob(id)
+	job.mu.Lock()
+	job.Kubeconfig = "fake-kubeconfig"
+	job.mu.Unlock()
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	useFakeBackend(h, &fakeBackend{getWS: &ws})
+	return h, id
+}
+
+// OpenWorkspace serves a self-submitting form that POSTs the token to code-server's
+// /login, so the student is authenticated without retyping the password.
+func TestHandler_OpenWorkspace_AutoLoginForm(t *testing.T) {
+	h, id := openWorkspaceHandler(t, workspace.Workspace{
+		Name: "ws-student", Owner: "student", OpenURL: "https://ws.example.com/", Token: "secret-token-123",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/student/workspace/open?lab_id="+id+"&workspace_name=ws-student", nil)
+	req = req.WithContext(context.WithValue(req.Context(), studentEmailContextKey, "student@example.com"))
+	w := httptest.NewRecorder()
+	h.OpenWorkspace(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
+	body := w.Body.String()
+	// Posts the token to code-server's /login endpoint on the student's behalf.
+	assert.Contains(t, body, `action="https://ws.example.com/login"`)
+	assert.Contains(t, body, `method="POST"`)
+	assert.Contains(t, body, `name="password" value="secret-token-123"`)
+	// The token must never end up in a URL (query string), only in the POST body.
+	assert.NotContains(t, body, "login?")
+}
+
+// A student may only open their own workspace; a foreign owner yields no page and
+// never leaks the token.
+func TestHandler_OpenWorkspace_WrongOwner(t *testing.T) {
+	h, id := openWorkspaceHandler(t, workspace.Workspace{
+		Name: "ws-other", Owner: "other", OpenURL: "https://ws.example.com/", Token: "secret-token-123",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/student/workspace/open?lab_id="+id+"&workspace_name=ws-other", nil)
+	req = req.WithContext(context.WithValue(req.Context(), studentEmailContextKey, "student@example.com"))
+	w := httptest.NewRecorder()
+	h.OpenWorkspace(w, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.NotContains(t, w.Body.String(), "secret-token-123")
+}
+>>>>>>> Stashed changes
+>>>>>>> bcfd3a5 (feat: list templates in a lab)

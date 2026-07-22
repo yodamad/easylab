@@ -68,7 +68,15 @@ Each card shows:
 * **Lab ID** — the lab this workspace belongs to
 * **Created at** — when the workspace was created
 
+<<<<<<< HEAD
 An **Open Code Server** button is available on each card header. Click it to open your code-server directly in a new tab — EasyLab resolves the workspace URL automatically so you don't need to copy it manually. code-server asks for a password on first open: paste the **Password** from this card.
+=======
+<<<<<<< Updated upstream
+An **Open Code Server** button is available on each card header. Click it to open your code-server directly in a new tab — EasyLab resolves the workspace URL automatically so you don't need to copy it manually.
+=======
+An **Open Code Server** button is available on each card header. Click it to open your code-server directly in a new tab — EasyLab resolves the workspace URL automatically so you don't need to copy it manually, and signs you in for you, so you land straight in the IDE without retyping the password. The **Password** is still shown on the card in case you open the workspace URL directly, where code-server asks for it on its login page.
+>>>>>>> Stashed changes
+>>>>>>> bcfd3a5 (feat: list templates in a lab)
 
 ### Encrypting and decrypting credentials
 

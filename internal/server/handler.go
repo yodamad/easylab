@@ -1729,6 +1729,15 @@ func (h *Handler) WorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, buildWorkspaceStatusHTML(labID, ws.Name, readiness, wsURL))
 }
 
+<<<<<<< HEAD
+=======
+<<<<<<< Updated upstream
+// OpenWorkspace creates a fresh Coder session token for the student and redirects
+// them directly to code-server. Doing this at click time (rather than embedding a
+// stale token in the polling HTML) maximises the session cookie lifetime and
+// re-activates dormant users immediately before Coder validates the token.
+=======
+>>>>>>> bcfd3a5 (feat: list templates in a lab)
 // dnsPropagationGrace bounds how long the student UI holds the "ready" signal back
 // while a freshly-created workspace hostname propagates through DNS. Past this
 // window we fail open and show the workspace as ready anyway, so a lab whose DNS
@@ -1795,8 +1804,36 @@ func usernameFromEmail(email string) string {
 	return strings.Trim(usernameInvalidChars.ReplaceAllString(local, "-"), "-")
 }
 
+<<<<<<< HEAD
 // OpenWorkspace redirects the student to their code-server workspace, where they
 // sign in with the password shown in the portal.
+=======
+// autoLoginPage is a self-submitting form that logs a student into their
+// code-server workspace. code-server has no password-in-URL support, so instead
+// of dropping the student on its login screen we POST the workspace token to
+// /login on their behalf; code-server sets its session cookie and lands them
+// straight in the IDE. The token only ever travels in a POST body, never a URL.
+var autoLoginPage = template.Must(template.New("workspaceAutoLogin").Parse(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Opening your workspace…</title>
+</head>
+<body onload="document.getElementById('login').submit()">
+<p>Opening your workspace…</p>
+<form id="login" method="POST" action="{{.LoginURL}}">
+<input type="hidden" name="password" value="{{.Token}}">
+<noscript><button type="submit">Continue to your workspace</button></noscript>
+</form>
+</body>
+</html>`))
+
+// OpenWorkspace logs the student into their code-server workspace: rather than
+// redirecting to code-server's login page, it serves a self-submitting form that
+// POSTs the workspace token to /login, so the student lands in the IDE without
+// retyping the password shown in the portal.
+>>>>>>> Stashed changes
+>>>>>>> bcfd3a5 (feat: list templates in a lab)
 func (h *Handler) OpenWorkspace(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1844,9 +1881,136 @@ func (h *Handler) OpenWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+<<<<<<< HEAD
 	// OpenURL is the workspace base URL; code-server serves its login page there,
 	// where the student enters the token.
 	http.Redirect(w, r, ws.OpenURL, http.StatusFound)
+=======
+<<<<<<< Updated upstream
+	target := fmt.Sprintf("%s%s&%s=%s",
+		coderURL, appPath, codersdk.SessionTokenCookie, url.QueryEscape(studentKey))
+	http.Redirect(w, r, target, http.StatusFound)
+}
+
+// workspaceReadinessStatus derives a single readiness string from a workspace.
+// "running" is only returned when every agent has lifecycle_state=="ready" and
+// every app with a healthcheck is "healthy" (not still "initializing").
+func workspaceReadinessStatus(ws codersdk.Workspace) string {
+	buildStatus := string(ws.LatestBuild.Status)
+	if buildStatus != "running" {
+		return buildStatus
+	}
+
+	hasAgents := false
+	for _, resource := range ws.LatestBuild.Resources {
+		for _, agent := range resource.Agents {
+			hasAgents = true
+
+			// Hard failure: agent timed out connecting
+			if agent.Status == codersdk.WorkspaceAgentTimeout {
+				return "agents_failed"
+			}
+			// Hard failure: startup scripts failed or timed out
+			switch agent.LifecycleState {
+			case codersdk.WorkspaceAgentLifecycleStartTimeout, codersdk.WorkspaceAgentLifecycleStartError:
+				return "agents_failed"
+			}
+			// Startup scripts still running — agent not fully ready
+			if agent.LifecycleState != codersdk.WorkspaceAgentLifecycleReady {
+				return "agents_starting"
+			}
+			// Wait for any app healthchecks to pass
+			for _, app := range agent.Apps {
+				switch app.Health {
+				case codersdk.WorkspaceAppHealthInitializing:
+					return "agents_starting"
+				case codersdk.WorkspaceAppHealthUnhealthy:
+					return "agents_failed"
+				}
+			}
+		}
+	}
+
+	if !hasAgents {
+		return "agents_starting"
+	}
+	return "running"
+}
+
+// workspaceFirstAgentName returns the name of the first agent in the workspace resources.
+// Falls back to "main" when no agents are found (the conventional default name).
+func workspaceFirstAgentName(ws codersdk.Workspace) string {
+	for _, resource := range ws.LatestBuild.Resources {
+		for _, agent := range resource.Agents {
+			if agent.Name != "" {
+				return agent.Name
+			}
+		}
+	}
+	return "main"
+}
+
+// createStudentAppToken uses the admin session token to create a browser-session API key
+// scoped to the given student username. The returned key can be passed as
+// ?coder_session_token= on workspace app URLs so the student lands directly in
+// code-server without a login prompt (Coder reads the query param before proxying).
+// CreateAPIKey is used (not CreateToken) because Coder only sets a proper browser-session
+// cookie from browser-session-type keys; machine tokens created via CreateToken are not
+// accepted for browser sessions and cause 401s on subsequent API calls (/api/v2/users/me).
+// It self-heals when the stored admin token has expired: on failure it re-logins
+// with the admin credentials (via coder.RefreshToken), retries once, and returns
+// the refreshed token as freshToken so the caller can persist it. When no refresh
+// was needed, freshToken equals the passed-in adminToken.
+func createStudentAppToken(coderURL, adminToken, adminEmail, adminPassword, username string) (key, freshToken string, err error) {
+	parsedURL, parseErr := url.Parse(coderURL)
+	if parseErr != nil {
+		return "", adminToken, fmt.Errorf("failed to parse coder URL: %w", parseErr)
+	}
+	ctx := context.Background()
+
+	attempt := func(token string) (string, error) {
+		client := codersdk.New(parsedURL)
+		client.SetSessionToken(token)
+		// Coder marks users dormant after inactivity; reactivate before creating the key.
+		if _, statusErr := client.UpdateUserStatus(ctx, username, codersdk.UserStatusActive); statusErr != nil {
+			log.Printf("createStudentAppToken: could not reactivate user %s (continuing): %v", username, statusErr)
+		}
+		resp, apiErr := client.CreateAPIKey(ctx, username)
+		if apiErr != nil {
+			return "", apiErr
+		}
+		return resp.Key, nil
+	}
+
+	if key, err = attempt(adminToken); err == nil {
+		return key, adminToken, nil
+	}
+
+	// The stored admin token likely expired — refresh with admin credentials and
+	// retry once, so the student never sees a raw Coder 401.
+	log.Printf("createStudentAppToken: attempt failed, refreshing admin token: %v", err)
+	refreshed, refreshErr := coder.RefreshToken(coder.CoderClientConfig{ServerURL: coderURL, SessionToken: adminToken}, adminEmail, adminPassword)
+	if refreshErr != nil {
+		return "", adminToken, fmt.Errorf("failed to refresh admin token: %w", refreshErr)
+	}
+	if key, err = attempt(refreshed.SessionToken); err != nil {
+		return "", refreshed.SessionToken, fmt.Errorf("failed to create API key for %s after token refresh: %w", username, err)
+	}
+	return key, refreshed.SessionToken, nil
+=======
+	// ws.OpenURL is the workspace base URL (ending in "/"); code-server's login
+	// endpoint lives at /login. Serve the self-submitting form there so the token
+	// is posted on the student's behalf instead of asked for on the login page.
+	loginURL := strings.TrimRight(ws.OpenURL, "/") + "/login"
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := autoLoginPage.Execute(w, struct {
+		LoginURL string
+		Token    string
+	}{LoginURL: loginURL, Token: ws.Token}); err != nil {
+		log.Printf("OpenWorkspace: failed to render auto-login page for lab %s: %v", labID, err)
+	}
+>>>>>>> Stashed changes
+>>>>>>> bcfd3a5 (feat: list templates in a lab)
 }
 
 // buildWorkspaceStatusHTML returns an HTML partial for the workspace readiness indicator.
@@ -2694,6 +2858,59 @@ func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
 	h.serveTemplate(w, "labs-list.html", data)
 }
 
+// TemplateStatus summarizes a configured workspace template and how many live
+// student workspaces on the lab were created from it.
+type TemplateStatus struct {
+	Name         string
+	IDE          string
+	Image        string
+	RunningCount int
+	HasRunning   bool
+}
+
+// buildTemplateStatus correlates a lab's configured templates with the live
+// workspaces on its cluster. For each template it reports how many running
+// workspaces were created from it (matched via Workspace.Template). Workspaces
+// whose Template is empty or does not match a configured template — for example
+// ones created before template attribution was added — are counted in
+// unattributed rather than dropped.
+func buildTemplateStatus(templates []WorkspaceTemplate, workspaces []workspace.Workspace) (statuses []TemplateStatus, unattributed int) {
+	known := make(map[string]bool, len(templates))
+	for _, t := range templates {
+		known[t.Name] = true
+	}
+
+	counts := make(map[string]int, len(templates))
+	for _, ws := range workspaces {
+		if ws.Template != "" && known[ws.Template] {
+			counts[ws.Template]++
+			continue
+		}
+		unattributed++
+	}
+
+	statuses = make([]TemplateStatus, 0, len(templates))
+	for _, t := range templates {
+		ide := t.IDE
+		if ide == "" || ide == workspace.IDEOpenVSCode {
+			ide = workspace.DefaultIDEKind
+		}
+		image := t.Image
+		if image == "" && t.Devcontainer != nil {
+			image = "devcontainer"
+		}
+		n := counts[t.Name]
+		statuses = append(statuses, TemplateStatus{
+			Name:         t.Name,
+			IDE:          ide,
+			Image:        image,
+			RunningCount: n,
+			HasRunning:   n > 0,
+		})
+	}
+	return statuses, unattributed
+}
+
 // ServeLabWorkspaces serves the workspaces page for a lab
 func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 	// Extract lab ID from path like /labs/{id}/workspaces
@@ -2717,8 +2934,10 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 	kubeconfig := extractStringFromConfigValue(job.Kubeconfig)
 	namespace := job.workspaceNamespace()
 	stackName := ""
+	var templates []WorkspaceTemplate
 	if job.Config != nil {
 		stackName = job.Config.StackName
+		templates = job.Config.GetWorkspaceTemplates()
 	}
 	job.mu.RUnlock()
 
@@ -2776,11 +2995,15 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	templateStatuses, unattributed := buildTemplateStatus(templates, workspaces)
+
 	data := map[string]interface{}{
-		"LabID":      labID,
-		"StackName":  stackName,
-		"Workspaces": workspacesDisplay,
-		"Count":      len(workspacesDisplay),
+		"LabID":        labID,
+		"StackName":    stackName,
+		"Workspaces":   workspacesDisplay,
+		"Count":        len(workspacesDisplay),
+		"Templates":    templateStatuses,
+		"Unattributed": unattributed,
 	}
 
 	h.serveTemplate(w, "lab-workspaces.html", data)
