@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +40,21 @@ func waitForJobsTerminal(jm *JobManager, timeout time.Duration) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+// bgJobTempDir returns a temp dir for a test that starts a background Pulumi job.
+// Waiting for a terminal status is not enough to know the goroutine is done:
+// PulumiExecutor.Preview sets the status (SetError / UpdateJobStatus) and only
+// then calls SaveJob and runs its deferred Writer.Flush and Cleanup. Those writes
+// land while t.TempDir's cleanup is walking the directory, which fails the test
+// with "TempDir RemoveAll cleanup: ... directory not empty". Removal here is
+// best-effort, so a straggling write cannot fail an otherwise passing test.
+func bgJobTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "easylab-bgjob-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
 }
 
 // --- writeJSONError tests ---
@@ -380,8 +396,8 @@ func TestHandler_CreateLab_BYOKGitTemplate_MultipartForm(t *testing.T) {
 }
 
 func TestHandler_DryRunLab_BYOKGitTemplate_MultipartForm(t *testing.T) {
-	jm := NewJobManager(t.TempDir())
-	pe := NewPulumiExecutor(jm, t.TempDir())
+	jm := NewJobManager(bgJobTempDir(t))
+	pe := NewPulumiExecutor(jm, bgJobTempDir(t))
 	h := NewHandler(jm, pe, NewCredentialsManager(), nil, nil, nil)
 
 	var buf bytes.Buffer
@@ -400,6 +416,11 @@ func TestHandler_DryRunLab_BYOKGitTemplate_MultipartForm(t *testing.T) {
 	h.DryRunLab(wr, req)
 	body := wr.Body.String()
 	assert.True(t, strings.Contains(body, "job") || strings.Contains(body, "Dry Run") || strings.Contains(body, "Job Created"))
+
+	// Wait for background goroutine to finish before t.TempDir cleanup runs.
+	// Without this, the goroutine may still be writing job subdirectories when
+	// cleanup tries to remove the temp dir, causing ENOTEMPTY.
+	waitForJobsTerminal(jm, 5*time.Second)
 }
 
 // --- ServeCredentials ---
