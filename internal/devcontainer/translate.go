@@ -204,6 +204,11 @@ var (
 	slugTrim    = regexp.MustCompile(`^-+|-+$`)
 )
 
+// Slugify normalises a name typed by an admin into a template name, so a name
+// they choose themselves lands under the same restrictions as one taken from the
+// devcontainer.
+func Slugify(s string) string { return slugify(s) }
+
 // slugify turns a devcontainer's display name into a template name. Template
 // names reach Kubernetes resource names via the workspace backend, so the result
 // is restricted to what a DNS-1123 label allows.

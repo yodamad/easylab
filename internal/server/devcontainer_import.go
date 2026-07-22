@@ -158,7 +158,14 @@ func devcontainerClientError(err error) string {
 // the sizing and extensions envbuilder ignores, and the cache settings. The
 // image, Dockerfile and features stay in the repo, where envbuilder reads them.
 func devcontainerTemplate(res devcontainer.Result, r *http.Request) WorkspaceTemplate {
-	name := res.Name
+	// The admin's own name wins over the devcontainer's. A devcontainer's "name" is
+	// a display string, often left at whatever the repo was scaffolded with, so
+	// deriving the template name from it alone gives every import in a lab the same
+	// name — and names must be unique within a lab.
+	name := devcontainer.Slugify(getFormValue(r, "template_name"))
+	if name == "" {
+		name = res.Name
+	}
 	if name == "" {
 		name = fallbackDevcontainerTemplateName
 	}

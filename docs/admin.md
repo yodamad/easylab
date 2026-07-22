@@ -199,23 +199,28 @@ workshop's own `Dockerfile` and `features` work as written.
 
 Choose **From a devcontainer** at the top of the **Templates** step:
 
-1. Choose **Git repository** (EasyLab clones the repo and finds the
+1. Give the workspace a **Template name** — this is how students see it, and it
+   must be unique within the lab. It is lowercased with dashes for anything else,
+   so `Day Two` becomes `day-two`. The devcontainer's own `name` is only a display
+   string and is often identical across repositories, so importing two of them
+   without naming them yourself would collide.
+2. Choose **Git repository** (EasyLab clones the repo and finds the
    `devcontainer.json`) or **Upload** (a `devcontainer.json`, or a repository
    `.zip`).
-2. Fill in the **Cache registry**. If the devcontainer builds from a **private
+3. Fill in the **Cache registry**. If the devcontainer builds from a **private
    base image** or pushes to a **private cache**, add a registry credential in the
    **Credentials** section and choose it under **Registry credential for students**
    — with a single registry credential it is applied automatically. envbuilder
    pulls the base image (and pushes the cache) inside each student's pod with it;
    without it the pull falls back to anonymous and the build fails.
-3. If the workshop repository is **private**, add a git token in the **Credentials**
+4. If the workshop repository is **private**, add a git token in the **Credentials**
    section and choose it under **Git credential for students** — with a single git
    credential it is applied automatically — so each student's workspace can clone
    it. (The **Access token** field is separate — it only reads the devcontainer
    during import and is discarded.)
-4. Click **Import**. EasyLab turns the devcontainer into a workspace template and
+5. Click **Import**. EasyLab turns the devcontainer into a workspace template and
    lists anything in it that will not take effect.
-5. Click **Review generated YAML** to open the result in the editor, adjust it if
+6. Click **Review generated YAML** to open the result in the editor, adjust it if
    needed, then finish the wizard.
 
 The import is a starting point, not a black box — what it produces is ordinary
@@ -458,9 +463,11 @@ Templates** step, so you define the workspace the same three ways:
 * **Build with a form** — fill in the template name and git repository, with an
   **Advanced options** section for image, CPU/memory/disk, startup script, dotfiles,
   extensions, environment variables, sidecars, and mounts.
-* **From a devcontainer** — point at a workshop repository (or upload a
-  `devcontainer.json` / repository `.zip`); EasyLab reads the devcontainer, generates
-  the template YAML, and opens it for review before you add it.
+* **From a devcontainer** — name the template, then point at a workshop repository
+  (or upload a `devcontainer.json` / repository `.zip`); EasyLab reads the
+  devcontainer, generates the template YAML, and opens it for review before you add
+  it. The name is required here too, so an import cannot silently reuse the name of
+  a template already on the lab.
 * **Paste YAML** — write (or **Validate**, or **Insert skeleton**) the template YAML
   directly. The document may define more than one template, and all are appended.
 

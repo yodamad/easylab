@@ -546,6 +546,68 @@ func TestDetectDevcontainer_IDEIsCarriedIntoTheTemplate(t *testing.T) {
 	assert.Equal(t, "code-server", templates[0].IDE)
 }
 
+func TestDetectDevcontainer_TemplateNameIsChosenByTheAdmin(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		templateName string
+		expected     string
+	}{
+		// Two devcontainer imports into one lab both carry the repo's own display
+		// name, and duplicate names are rejected — so the admin's name has to win.
+		{name: "overrides the devcontainer name", templateName: "day-two", expected: "name: day-two"},
+		// The name reaches Kubernetes resource names, so what is typed is normalised
+		// the same way a name read from the devcontainer is.
+		{name: "is slugified", templateName: "Day Two!", expected: "name: day-two"},
+		// An older client posts no name at all: the devcontainer's own name still
+		// applies rather than the import failing.
+		{name: "falls back to the devcontainer name", templateName: "", expected: "name: go-workshop"},
+		// Nothing left to slugify falls through to the devcontainer name too.
+		{name: "falls back when nothing survives slugification", templateName: "***", expected: "name: go-workshop"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			form := url.Values{
+				"git_repo":   {"https://gitlab.com/org/workshop.git"},
+				"cache_repo": {"registry.example.com/cache"},
+			}
+			if tt.templateName != "" {
+				form.Set("template_name", tt.templateName)
+			}
+
+			got := postDevcontainerUpload(t, "devcontainer.json",
+				[]byte(`{"name":"Go Workshop","image":"golang:1.22"}`), form)
+
+			assert.Contains(t, got.TemplatesYAML, tt.expected)
+
+			templates, err := parseWorkspaceTemplatesYAML(got.TemplatesYAML)
+			require.NoError(t, err)
+			require.Len(t, templates, 1)
+			assert.Equal(t, tt.expected, "name: "+templates[0].Name)
+		})
+	}
+}
+
+func TestDetectDevcontainer_UnnamedDevcontainerKeepsTheFallbackName(t *testing.T) {
+	t.Parallel()
+
+	// A devcontainer with no name and no name from the admin still has to produce a
+	// template: a name is required for the YAML to validate.
+	got := postDevcontainerUpload(t, "devcontainer.json", []byte(`{"image":"golang:1.22"}`), url.Values{
+		"git_repo":   {"https://gitlab.com/org/workshop.git"},
+		"cache_repo": {"registry.example.com/cache"},
+	})
+
+	templates, err := parseWorkspaceTemplatesYAML(got.TemplatesYAML)
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	assert.Equal(t, fallbackDevcontainerTemplateName, templates[0].Name)
+}
+
 func TestDetectDevcontainer_NoIDESelectionStaysUnset(t *testing.T) {
 	t.Parallel()
 

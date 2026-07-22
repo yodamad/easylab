@@ -1944,7 +1944,16 @@ const btnRunDevcontainerImport = document.getElementById('btn-run-devcontainer-i
 if (btnRunDevcontainerImport) {
     btnRunDevcontainerImport.addEventListener('click', function() {
         const fileInput = document.getElementById('devcontainer_file');
+        // Asked for rather than derived from the devcontainer: its "name" is a display
+        // string many repos leave at a scaffolded default, which would give every
+        // imported template the same name.
+        const templateName = ((document.getElementById('devcontainer_template_name') || {}).value || '').trim();
+        if (!templateName) {
+            devcontainerImportMessage('error', 'Template name is required.');
+            return;
+        }
         const body = new FormData();
+        body.append('template_name', templateName);
         body.append('source', devcontainerSource);
         body.append('git_repo', (document.getElementById('devcontainer_git_repo') || {}).value || '');
         body.append('git_branch', (document.getElementById('devcontainer_git_branch') || {}).value || '');

@@ -514,7 +514,14 @@ function utRunDevcontainerImport() {
     var yamlArea = utEl('ut-templates-yaml');
     var reviewBtn = utEl('ut-dc-review-yaml-btn');
 
+    // Asked for rather than derived from the devcontainer: its "name" is a display
+    // string many repos leave at a scaffolded default, which would give every
+    // imported template the same name — and names must be unique within a lab.
+    var templateName = ((utEl('ut-dc-template-name') || {}).value || '').trim();
+    if (!templateName) { utDcMessage('error', 'Template name is required.'); return; }
+
     var body = new FormData();
+    body.append('template_name', templateName);
     body.append('source', _utDcSource);
     body.append('git_repo', (utEl('ut-dc-git-repo') || {}).value || '');
     body.append('git_branch', (utEl('ut-dc-git-branch') || {}).value || '');
@@ -639,10 +646,15 @@ function utInitDrawer() {
     if (modeForm) modeForm.addEventListener('click', function () { utSetTemplatesMode('form'); });
     var modeDc = utEl('ut-templates-mode-devcontainer');
     if (modeDc) modeDc.addEventListener('click', function () {
-        // The form's git repo usually already points at the workshop repo.
+        // The form's git repo usually already points at the workshop repo, and its
+        // name is the one the admin had in mind — carry both across rather than
+        // making them retype after switching mode.
         var dcRepo = utEl('ut-dc-git-repo');
         var formRepo = document.querySelector('#ut-templates-form-mode [name="template_0_git_repo"]');
         if (dcRepo && !dcRepo.value && formRepo && formRepo.value) dcRepo.value = formRepo.value;
+        var dcName = utEl('ut-dc-template-name');
+        var formName = document.querySelector('#ut-templates-form-mode [name="template_0_name"]');
+        if (dcName && !dcName.value && formName && formName.value) dcName.value = formName.value;
         utSetTemplatesMode('devcontainer');
     });
     var modeYaml = utEl('ut-templates-mode-yaml');

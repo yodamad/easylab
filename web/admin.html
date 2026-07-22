@@ -530,6 +530,12 @@
                                 </p>
 
                                 <div class="form-group">
+                                    <label for="devcontainer_template_name">Template name</label>
+                                    <input type="text" id="devcontainer_template_name" placeholder="e.g. go-workshop" autocomplete="off" required>
+                                    <small>How students see this workspace. Lowercased, with dashes for anything else. Must be unique within the lab — the devcontainer's own <code>name</code> is a display string that is often the same across repos.</small>
+                                </div>
+
+                                <div class="form-group">
                                     <label>Read the devcontainer from</label>
                                     <div class="button-group">
                                         <button type="button" class="source-button selected" data-devcontainer-source="git" id="devcontainer-source-git">
