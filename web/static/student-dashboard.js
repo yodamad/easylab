@@ -109,23 +109,25 @@ function toggleWorkspacesPanel() {
     }
 }
 
-function toggleWorkspaceCard(labId) {
-    const card = document.getElementById(`workspace-card-${labId}`);
-    const body = document.getElementById(`workspace-body-${labId}`);
-    if (!card || !body) return;
-
-    if (card.classList.contains('collapsed')) {
-        card.classList.remove('collapsed');
-        body.style.maxHeight = body.scrollHeight + 'px';
-    } else {
-        body.style.maxHeight = body.scrollHeight + 'px';
-        requestAnimationFrame(() => { body.style.maxHeight = '0'; });
-        card.classList.add('collapsed');
-    }
+// formatWorkspaceDate turns an ISO timestamp into a compact "Mon DD, YYYY · HH:MM"
+// label in the viewer's locale. Returns '' when the value is missing or unparseable.
+function formatWorkspaceDate(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const date = d.toLocaleDateString(undefined, { month: 'short', day: '2-digit', year: 'numeric' });
+    const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+    return `${date} · ${time}`;
 }
 
+// copyIconSvg is the inline clipboard glyph shared by every copy button.
+const copyIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="copy-icon">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+</svg>`;
+
 function renderWorkspaceCard(info, labId) {
-    const createdAt = new Date(info.created_at).toLocaleString();
+    const createdAt = formatWorkspaceDate(info.created_at) || new Date(info.created_at).toLocaleString();
+    const deletionAt = formatWorkspaceDate(info.deletion_at);
     const isEncrypted = info.encrypted_password && !info.password;
     const safeLab = escapeHtml(labId);
     const safeUrl = escapeHtml(info.workspace_url);
@@ -134,42 +136,35 @@ function renderWorkspaceCard(info, labId) {
 
     const ownerID = info.email.split('@')[0].toLowerCase().replace(/\./g, '-');
 
+    const expiryPill = deletionAt ? `
+                <div class="workspace-expiry-pill" title="This workspace is deleted automatically">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="workspace-expiry-icon" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span class="workspace-expiry-label">Auto-deletes</span>
+                    <span class="workspace-expiry-date">${escapeHtml(deletionAt)}</span>
+                </div>` : '';
+
     return `
-        <div class="workspace-card collapsible-card collapsed" id="workspace-card-${safeLab}">
-            <div class="workspace-card-header" onclick="toggleWorkspaceCard('${safeLab}')">
-                <h3>${safeName}</h3>
-                <div class="workspace-card-actions">
-                    <button onclick="event.stopPropagation(); openCodeServer('${escapeHtml(info.lab_id)}', '${escapeHtml(info.workspace_name)}', '${escapeHtml(ownerID)}')" class="student-btn student-btn-small" title="Open code-server">Open Code Server</button>
-                    ${isEncrypted ? '' : `<button onclick="event.stopPropagation(); encryptSingleWorkspace('${safeLab}')" class="student-btn student-btn-small" title="Encrypt password">Encrypt</button>`}
-                    <button onclick="event.stopPropagation(); clearWorkspaceInfo('${safeLab}')" class="student-btn student-btn-danger student-btn-small" title="Remove">Clear</button>
-                    <button class="collapsible-toggle" type="button" aria-label="Toggle workspace details">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="chevron-icon">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                        </svg>
-                    </button>
-                </div>
+        <div class="workspace-card" id="workspace-card-${safeLab}">
+            <div class="workspace-card-top">
+                <h3 class="workspace-card-title">${safeName}</h3>
+                <button onclick="openCodeServer('${escapeHtml(info.lab_id)}', '${escapeHtml(info.workspace_name)}', '${escapeHtml(ownerID)}')" class="student-btn student-btn-small workspace-card-open" title="Open code-server">Open Code Server</button>
             </div>
-            <div class="workspace-card-body collapsible-content" style="max-height: 0;" id="workspace-body-${safeLab}">
+            ${expiryPill}
+            <div class="workspace-card-details">
                 <div class="student-credential-item">
                     <label>Workspace URL:</label>
                     <div class="student-credential-item-value credential-with-copy">
                         <a href="${info.workspace_url}" target="_blank">${safeUrl}</a>
-                        <button class="copy-btn" data-copy-text="${safeUrl}" title="Copy URL">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="copy-icon">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                            </svg>
-                        </button>
+                        <button class="copy-btn" data-copy-text="${safeUrl}" title="Copy URL">${copyIconSvg}</button>
                     </div>
                 </div>
                 <div class="student-credential-item">
                     <label>Email:</label>
                     <div class="student-credential-item-value credential-with-copy">
                         <span>${safeEmail}</span>
-                        <button class="copy-btn" data-copy-text="${safeEmail}" title="Copy Email">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="copy-icon">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                            </svg>
-                        </button>
+                        <button class="copy-btn" data-copy-text="${safeEmail}" title="Copy Email">${copyIconSvg}</button>
                     </div>
                 </div>
                 <div class="student-credential-item">
@@ -177,11 +172,7 @@ function renderWorkspaceCard(info, labId) {
                     <div class="student-credential-item-value credential-with-copy ${isEncrypted ? 'encrypted-state' : ''}" id="workspace-password-display-${safeLab}">
                         ${info.password ?
                             `<span class="password-value">${escapeHtml(info.password)}</span>
-                             <button class="copy-btn" data-copy-text="${escapeHtml(info.password)}" title="Copy Password">
-                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="copy-icon">
-                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                                 </svg>
-                             </button>` :
+                             <button class="copy-btn" data-copy-text="${escapeHtml(info.password)}" title="Copy Password">${copyIconSvg}</button>` :
                             `<em class="encrypted-indicator">Encrypted - click to decrypt</em>`}
                     </div>
                     ${isEncrypted ?
@@ -189,12 +180,15 @@ function renderWorkspaceCard(info, labId) {
                         ''}
                 </div>
                 <div class="student-credential-item">
-                    <label>Lab ID:</label>
-                    <div class="student-credential-item-value">${safeLab}</div>
-                </div>
-                <div class="student-credential-item">
                     <label>Created At:</label>
                     <div class="student-credential-item-value">${createdAt}</div>
+                </div>
+            </div>
+            <div class="workspace-card-meta">
+                <span class="workspace-card-labid">Lab: ${safeLab}</span>
+                <div class="workspace-card-footer-actions">
+                    ${isEncrypted ? '' : `<button onclick="encryptSingleWorkspace('${safeLab}')" class="student-btn student-btn-small" title="Encrypt password">Encrypt</button>`}
+                    <button onclick="clearWorkspaceInfo('${safeLab}')" class="student-btn student-btn-danger student-btn-small" title="Remove">Clear</button>
                 </div>
             </div>
         </div>
@@ -400,7 +394,8 @@ async function saveWorkspaceInfoWithEncryption(workspaceInfo) {
             encrypted_password: encryptedPassword,
             workspace_name: workspaceInfo.workspace_name,
             lab_id: workspaceInfo.lab_id,
-            created_at: workspaceInfo.created_at
+            created_at: workspaceInfo.created_at,
+            deletion_at: workspaceInfo.deletion_at
         };
 
         const cookieName = `workspace_info_${workspaceInfo.lab_id}_${workspaceInfo.workspace_name}`;
@@ -585,7 +580,7 @@ function loadLabs() {
             data.forEach(lab => {
                 const option = document.createElement('option');
                 option.value = lab.id;
-                option.textContent = `${lab.config.stack_name || lab.id} (${lab.status})`;
+                option.textContent = `${lab.config.stack_name || lab.id}`;
                 select.appendChild(option);
             });
         })

@@ -59,14 +59,15 @@ When you have saved at least one workspace, the **My Workspaces** panel appears 
 
 ### Workspace cards
 
-Each card shows:
+Each card shows all of its details at a glance — no expanding needed:
 
 * **Workspace name** — the name assigned to your workspace
+* **Auto-deletion date** — when your workspace will be deleted automatically, shown as an amber *"⏳ Auto-deletes …"* badge with the date and hour. It only appears when the lab schedules a deletion (either a per-workspace lifetime or a lab-wide end date); if the lab sets no expiry, no badge is shown. Save anything you want to keep before this time.
 * **Workspace URL** — direct link to your code-server workspace (with a copy button)
 * **Email** — the email used to create the workspace (with a copy button)
 * **Password** — your workspace password, encrypted or in clear text (with a copy button)
-* **Lab ID** — the lab this workspace belongs to
 * **Created at** — when the workspace was created
+* **Lab** — the lab this workspace belongs to
 
 An **Open Code Server** button is available on each card header. Click it to open your code-server directly in a new tab — EasyLab resolves the workspace URL automatically so you don't need to copy it manually, and signs you in for you, so you land straight in the IDE without retyping the password. The **Password** is still shown on the card in case you open the workspace URL directly, where code-server asks for it on its login page.
 
