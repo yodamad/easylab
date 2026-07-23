@@ -1621,6 +1621,21 @@ func TestValidateDNSConfig(t *testing.T) {
 			config:  &LabConfig{DNSProvider: "ovh", DNSZone: "yodamad.fr", Domain: "notyodamad.fr"},
 			wantErr: true,
 		},
+		{
+			name:    "domain with no provider stays valid (manual DNS is allowed)",
+			config:  &LabConfig{DNSProvider: "", DNSZone: "", Domain: "ai-bb.yodamad.fr"},
+			wantErr: false,
+		},
+		{
+			name:    "ExternalDNS without a domain is rejected",
+			config:  &LabConfig{DNSProvider: "ovh", DNSZone: "yodamad.fr", Domain: "", UseExternalDNS: true},
+			wantErr: true,
+		},
+		{
+			name:    "ExternalDNS with a domain inside the zone is valid",
+			config:  &LabConfig{DNSProvider: "ovh", DNSZone: "yodamad.fr", Domain: "ai-bb.yodamad.fr", UseExternalDNS: true},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1634,6 +1649,77 @@ func TestValidateDNSConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLabConfigWarnings(t *testing.T) {
+	tests := []struct {
+		name         string
+		config       *LabConfig
+		wantCount    int
+		wantContains string
+	}{
+		{
+			name:      "nil config warns about nothing",
+			config:    nil,
+			wantCount: 0,
+		},
+		{
+			name:      "no domain means nip.io routing, nothing to warn about",
+			config:    &LabConfig{Domain: "", DNSProvider: ""},
+			wantCount: 0,
+		},
+		{
+			name:      "domain with a DNS provider is fully automated",
+			config:    &LabConfig{Domain: "ai-bb.yodamad.fr", DNSProvider: "ovh", DNSZone: "yodamad.fr"},
+			wantCount: 0,
+		},
+		{
+			name:         "domain without a DNS provider warns about the wildcard record",
+			config:       &LabConfig{Domain: "ai-bb.yodamad.fr", DNSProvider: ""},
+			wantCount:    2,
+			wantContains: "*.ai-bb.yodamad.fr",
+		},
+		{
+			name:         "the certificate limit is called out too",
+			config:       &LabConfig{Domain: "ai-bb.yodamad.fr", DNSProvider: ""},
+			wantCount:    2,
+			wantContains: "50 per registered domain",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			warnings := labConfigWarnings(tt.config)
+			require.Len(t, warnings, tt.wantCount)
+			if tt.wantContains != "" {
+				assert.Contains(t, strings.Join(warnings, " "), tt.wantContains)
+			}
+		})
+	}
+}
+
+func TestRenderConfigWarnings(t *testing.T) {
+	t.Run("no warnings renders nothing", func(t *testing.T) {
+		t.Parallel()
+		assert.Empty(t, renderConfigWarnings(nil))
+		assert.Empty(t, renderConfigWarnings([]string{}))
+	})
+
+	t.Run("warnings render inside the warning-message block", func(t *testing.T) {
+		t.Parallel()
+		html := renderConfigWarnings([]string{"first", "second"})
+		assert.Contains(t, html, `class="warning-message"`)
+		assert.Contains(t, html, "<li>first</li>")
+		assert.Contains(t, html, "<li>second</li>")
+	})
+
+	t.Run("warning text is escaped", func(t *testing.T) {
+		t.Parallel()
+		html := renderConfigWarnings([]string{`<script>alert(1)</script>`})
+		assert.NotContains(t, html, "<script>")
+		assert.Contains(t, html, "&lt;script&gt;")
+	})
 }
 
 func TestHostFromWorkspaceURL(t *testing.T) {
@@ -1804,4 +1890,74 @@ func TestBuildTemplateStatus_DisplayFields(t *testing.T) {
 	assert.Equal(t, workspace.DefaultIDEKind, statuses[1].IDE)
 	// A devcontainer template with no image is labelled "devcontainer".
 	assert.Equal(t, "devcontainer", statuses[2].Image)
+}
+
+func TestWorkspaceDeletionTime(t *testing.T) {
+	t.Parallel()
+
+	created := time.Date(2026, time.July, 23, 9, 0, 0, 0, time.UTC)
+	labDate := time.Date(2026, time.July, 24, 15, 4, 0, 0, time.UTC)
+	// A lab deletion date that lands before the lifetime would.
+	earlierLabDate := time.Date(2026, time.July, 23, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name          string
+		lifetimeHours int
+		labDeletion   *time.Time
+		want          *time.Time
+	}{
+		{
+			name:          "lifetime only",
+			lifetimeHours: 8,
+			labDeletion:   nil,
+			want:          timePtr(created.Add(8 * time.Hour)),
+		},
+		{
+			name:          "lab date only",
+			lifetimeHours: 0,
+			labDeletion:   &labDate,
+			want:          &labDate,
+		},
+		{
+			name:          "both set, lifetime is earlier",
+			lifetimeHours: 8, // created + 8h = 17:00 on Jul 23, before labDate (Jul 24)
+			labDeletion:   &labDate,
+			want:          timePtr(created.Add(8 * time.Hour)),
+		},
+		{
+			name:          "both set, lab date is earlier",
+			lifetimeHours: 8, // created + 8h = 17:00 on Jul 23, after earlierLabDate (12:00)
+			labDeletion:   &earlierLabDate,
+			want:          &earlierLabDate,
+		},
+		{
+			name:          "neither set",
+			lifetimeHours: 0,
+			labDeletion:   nil,
+			want:          nil,
+		},
+		{
+			name:          "zero lifetime is ignored",
+			lifetimeHours: 0,
+			labDeletion:   &labDate,
+			want:          &labDate,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := workspaceDeletionTime(created, tt.lifetimeHours, tt.labDeletion)
+			if tt.want == nil {
+				require.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			require.True(t, got.Equal(*tt.want), "got %s, want %s", got, tt.want)
+		})
+	}
+}
+
+func timePtr(t time.Time) *time.Time {
+	return &t
 }

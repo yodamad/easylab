@@ -298,7 +298,16 @@ labs, but it is **plain HTTP with no TLS** — set a domain for anything real.
 
 * **Domain Name** — the base FQDN for the lab (e.g. `lab.example.com`). Each student workspace gets a subdomain (`{workspace}.{domain}`), served over HTTPS. Leave blank to use the nip.io fallback described above.
 * **ACME Email** — email address used for Let's Encrypt certificate notifications. Required when domain is set.
-* **Wildcard Domain** — optional, e.g. `*.lab.example.com`. Creates the wildcard DNS A-record so per-student subdomains resolve (requires a DNS provider configured below).
+* **Wildcard Domain** — optional, e.g. `*.lab.example.com`. Overrides the wildcard record derived from the domain above; leave blank unless you need a different base. With a DNS provider configured the wildcard record is created automatically, so this field is rarely needed.
+
+!!! warning "A domain with no DNS provider needs a wildcard record you create yourself"
+    Workspace URLs are `{workspace}.{domain}`, so **nothing resolves without a wildcard
+    record**. If you set a domain but leave the DNS provider as *None*, EasyLab cannot
+    create that record for you — you must add `*.<domain> → <ingressIP>` in your DNS
+    zone once the lab is provisioned. Until you do, workspace URLs return NXDOMAIN and
+    their certificates stay pending forever, because cert-manager's HTTP-01 self-check
+    fails on the very same lookup. The lab creation form warns you when it sees this
+    combination.
 
 ![DNS configuration](screens/dns-config.png)
 
@@ -318,14 +327,18 @@ The following components are deployed into the cluster:
 After `pulumi up` completes, the stack output `ingressIP` is printed. **You must create a DNS A record** pointing `<domain> → <ingressIP>` in your DNS provider before the TLS certificate can be issued.
 
 !!! warning "TLS certificates and large labs"
-    Each student workspace obtains its **own** Let's Encrypt certificate for its
-    subdomain. Let's Encrypt limits issuance to about **50 certificates per week per
-    registered domain**, so a large lab (many students × templates) can exceed the
-    limit and some workspaces will fail to get TLS. Mitigations:
+    **Without a DNS provider**, each student workspace obtains its **own** Let's Encrypt
+    certificate for its subdomain. Let's Encrypt limits issuance to about **50
+    certificates per week per registered domain** — and that budget is shared across
+    every subdomain of it, including services unrelated to EasyLab. A large lab (many
+    students × templates) can exceed the limit, and some workspaces then fail to get
+    TLS. Mitigations:
 
+    * **Configure a DNS provider** (below). EasyLab then issues a single wildcard
+      certificate for `*.<domain>` that every workspace shares — one certificate per
+      lab instead of one per workspace. This is the recommended fix.
     * Keep labs modest, or spread them across more than one domain.
     * Use the Let's Encrypt **staging** issuer while testing (no rate limit; browsers show an untrusted cert).
-    * Front the lab with a **wildcard** certificate for `*.<domain>` (issued via DNS-01) so all workspaces share one certificate instead of one each.
 
 !!! note "Opening a workspace"
     A workspace only shows the **Open** button once its IDE is actually serving (a
@@ -347,14 +360,36 @@ Select a DNS provider to automate A-record creation and unlock wildcard certific
 When a DNS provider is configured:
 
 1. EasyLab automatically creates the A record `<domain> → <ingressIP>` during deployment.
-2. cert-manager uses DNS-01 (instead of HTTP-01) to prove domain ownership, which supports wildcard certificates.
-3. The wildcard A record `*.<domain>` is also created if a **Wildcard Domain** is set.
+2. The wildcard A record `*.<domain> → <ingressIP>` is created too, so every student workspace subdomain resolves without any manual DNS work.
+3. cert-manager uses DNS-01 (instead of HTTP-01) to prove domain ownership, which supports wildcard certificates.
+4. A single **wildcard certificate** for `*.<domain>` is issued into the workspace namespace, and every workspace ingress is served from it. No workspace requests a certificate of its own, so the Let's Encrypt weekly limit stops being a concern — and because the certificate already exists, workspaces are reachable over HTTPS as soon as their pod is ready, with no ACME wait.
+
+##### ExternalDNS (Optional)
+
+Some DNS administrators will not hand out a wildcard record. Tick **Use ExternalDNS
+instead of a wildcard record** to install
+[ExternalDNS](https://kubernetes-sigs.github.io/external-dns/) into the cluster
+instead: it watches the workspace ingresses and creates one DNS record per workspace,
+removing each one when its workspace goes away.
+
+Both supported DNS providers work with it — Azure DNS at ExternalDNS's *Stable* support
+tier, OVHcloud at *Beta*. It reuses the same credentials you entered above, so there is
+nothing extra to configure. Note that OVH needs the `POST /domain/zone/*/refresh` right
+in addition to the `/domain/zone/*` record rights.
+
+Trade-offs versus the wildcard record:
+
+* Records appear roughly a minute after a workspace starts (ExternalDNS's sync interval, plus DNS TTL) rather than resolving instantly. The student portal already accounts for this — it withholds the **Open** button until the hostname actually resolves, so nobody clicks too early.
+* It adds a component to the cluster and holds a copy of the DNS credentials in its own namespace.
+
+The wildcard **certificate** is unaffected either way: it is issued through DNS-01 TXT
+records written by cert-manager, independently of what creates the A records.
 
 !!! note "OVH DNS credentials"
     The OVH credentials for DNS management may differ from your cloud project credentials. Create a separate OVH application at <https://www.ovh.com/auth/api/createApp> with access to the `/domain/zone/*` endpoints.
 
 !!! note "Azure DNS credentials"
-    Create a service principal (`az ad sp create-for-rbac`) and assign it the `DNS Zone Contributor` role on the resource group that contains your Azure DNS zone. Azure DNS uses cert-manager's native solver — no additional webhook is required.
+    Create a service principal (`az ad sp create-for-rbac`) and assign it the `DNS Zone Contributor` role on the resource group that contains your Azure DNS zone. Azure DNS uses cert-manager's native solver — no additional webhook is required. If you also enable ExternalDNS, the same service principal needs `Reader` on that resource group on top of `DNS Zone Contributor`.
 
 ### Environment Variables
 

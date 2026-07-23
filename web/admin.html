@@ -398,7 +398,12 @@
                         <div class="form-group">
                             <label for="wildcard_domain">Wildcard Domain (Optional)</label>
                             <input type="text" id="wildcard_domain" name="wildcard_domain" placeholder="*.coder.example.com">
-                            <small>Enables per-workspace URLs (e.g. <code>myworkspace.coder.example.com</code>). Requires a DNS provider configured below.</small>
+                            <small>Overrides the wildcard record derived from the domain above. Leave blank unless you need a different base &mdash; with a DNS provider configured, the wildcard record is created automatically.</small>
+                        </div>
+                        <div class="warning-message" id="dns-manual-warning" style="display: none;">
+                            <h3>DNS will not be managed for you</h3>
+                            <p>Workspace URLs are <code>{workspace}.{domain}</code>, so you must create a wildcard <code>A</code> record for <code id="dns-warning-record">*.your-domain</code> pointing at the lab's ingress IP once it is provisioned &mdash; otherwise workspace URLs will not resolve and their certificates stay pending.</p>
+                            <p>Each workspace will also request its own Let's Encrypt certificate, capped at 50 per registered domain per week. Selecting a DNS provider below issues a single wildcard certificate instead.</p>
                         </div>
 
                         <h3 class="subsection-title">DNS Provider (Optional)</h3>
@@ -466,6 +471,14 @@
                                 <input type="password" id="dns_cred_azureClientSecret" name="dns_cred_azureClientSecret">
                             </div>
                             <small>Service principal must have <code>DNS Zone Contributor</code> role on the DNS zone resource group.</small>
+                        </div>
+
+                        <div class="form-group" id="external_dns_group" style="display:none">
+                            <label for="use_external_dns">
+                                <input type="checkbox" id="use_external_dns" name="use_external_dns" value="true">
+                                Use ExternalDNS instead of a wildcard record
+                            </label>
+                            <small>Installs ExternalDNS in the cluster to create and delete one DNS record per workspace, rather than a single wildcard record covering all of them. Use this when your DNS administrator will not grant a wildcard. Records appear about a minute after a workspace starts; the student portal waits for the hostname to resolve before showing it as ready.</small>
                         </div>
                     </div>
                 </section>

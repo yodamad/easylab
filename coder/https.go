@@ -2,6 +2,7 @@ package coder
 
 import (
 	"fmt"
+	"strings"
 
 	dnsregistry "easylab/internal/providers/dns"
 	internalK8s "easylab/k8s"
@@ -18,13 +19,17 @@ import (
 
 // SetupHTTPS installs ingress-nginx and cert-manager and creates a Let's Encrypt
 // ClusterIssuer, plus (when a DNS provider is configured) the DNS A-records that
-// let per-student workspace subdomains resolve. Per-student ingresses are created
-// at runtime by the server; this function only provisions the shared TLS/ingress
-// infrastructure. Returns the ingress-nginx release and the LoadBalancer IP
-// assigned to the ingress-nginx controller service.
+// let per-student workspace subdomains resolve and the wildcard certificate they
+// are served with. Per-student ingresses are created at runtime by the server;
+// this function only provisions the shared TLS/ingress infrastructure. Returns
+// the ingress-nginx release and the LoadBalancer IP assigned to the ingress-nginx
+// controller service.
 // kubeconfigOut is the kubeconfig file content as a StringOutput, used to read
 // the LoadBalancer IP directly from the Kubernetes API (avoiding the Pulumi
 // provider's await which blocks on OVHcloud's ipMode:VIP).
+// workspaceNs is the namespace student workspaces are created in: the wildcard
+// certificate must live there, because an ingress can only reference a TLS secret
+// in its own namespace. It may be nil when the namespace is not managed here.
 //
 // If coder:domain is not set, only ingress-nginx is installed: the server then
 // exposes workspaces over plain HTTP via nip.io on the returned LoadBalancer IP,
@@ -33,6 +38,7 @@ func SetupHTTPS(
 	ctx *pulumi.Context,
 	k8sProvider *k8s.Provider,
 	kubeconfigOut pulumi.StringOutput,
+	workspaceNs *k8score.Namespace,
 ) (*helmv3.Release, pulumi.StringOutput, error) {
 	domain := utils.CoderConfigOptional(ctx, utils.CoderDomain)
 
@@ -135,6 +141,7 @@ func SetupHTTPS(
 	ingressIPResolved := false
 
 	dnsProviderName := utils.DNSConfigOptional(ctx, utils.DNSProviderKey)
+	useExternalDNS := utils.DNSConfigOptional(ctx, utils.DNSExternalDNS) == "true"
 	certDeps := []pulumi.Resource{}
 	if certManagerRelease != nil {
 		certDeps = append(certDeps, certManagerRelease)
@@ -218,19 +225,28 @@ func SetupHTTPS(
 		}
 		ingressIPResolved = true
 
-		// Create A record automatically
-		subdomain := domain
-		if zone != "" && len(subdomain) > len(zone)+1 {
-			subdomain = subdomain[:len(subdomain)-len(zone)-1]
-		}
+		// The base record: no workspace ingress advertises it, so ExternalDNS would
+		// never create it — it is always ours to make.
+		subdomain := subdomainOf(domain, zone)
 		if aErr := dnsProvider.CreateARecord(ctx, zone, subdomain, ingressIP, certDeps); aErr != nil {
 			return nil, pulumi.StringOutput{}, aErr
 		}
 
-		// Create wildcard A record if configured
-		wildcardDomain := utils.CoderConfigOptional(ctx, utils.CoderWildcardDomain)
-		if wildcardDomain != "" {
-			if aErr := dnsProvider.CreateARecord(ctx, zone, "*"+"."+subdomain, ingressIP, certDeps); aErr != nil {
+		// Workspace hosts are always "{name}.{domain}", so the wildcard record is
+		// what makes any of them resolve — it is not optional. The one case that
+		// does not need it is ExternalDNS, which creates a record per workspace
+		// ingress instead.
+		//
+		// coder:wildcardDomain used to be the switch that turned this record on,
+		// which meant a lab could be deployed with a domain and no way to reach any
+		// workspace. It is now an override of the record name for the labs that set
+		// it, and the record is created either way.
+		if !useExternalDNS {
+			wildcardRecord := wildcardOf(subdomain)
+			if override := utils.CoderConfigOptional(ctx, utils.CoderWildcardDomain); override != "" {
+				wildcardRecord = subdomainOf(override, zone)
+			}
+			if aErr := dnsProvider.CreateARecord(ctx, zone, wildcardRecord, ingressIP, certDeps); aErr != nil {
 				return nil, pulumi.StringOutput{}, aErr
 			}
 		}
@@ -243,7 +259,7 @@ func SetupHTTPS(
 		}
 	}
 
-	_, err := apiextensions.NewCustomResource(ctx, "letsencrypt-prod-issuer", &apiextensions.CustomResourceArgs{
+	issuer, err := apiextensions.NewCustomResource(ctx, "letsencrypt-prod-issuer", &apiextensions.CustomResourceArgs{
 		ApiVersion: pulumi.String("cert-manager.io/v1"),
 		Kind:       pulumi.String("ClusterIssuer"),
 		Metadata: &metav1.ObjectMetaArgs{
@@ -266,9 +282,36 @@ func SetupHTTPS(
 		return nil, pulumi.StringOutput{}, fmt.Errorf("failed to create ClusterIssuer: %w", err)
 	}
 
-	// Per-student workspace ingresses are created at runtime by the server (each
-	// requests its own TLS certificate via the ClusterIssuer above), so no shared
-	// Coder ingress is created here.
+	// Per-student workspace ingresses are created at runtime by the server. With a
+	// DNS provider they share the wildcard certificate created below; without one
+	// each requests its own certificate through the ClusterIssuer above. No shared
+	// Coder ingress is created here either way.
+	//
+	// The wildcard certificate needs a DNS-01 challenge — Let's Encrypt does not
+	// issue wildcards over HTTP-01 — so it is only possible with a DNS provider.
+	// It is worth the trouble: one certificate covers every workspace, which keeps
+	// a workshop clear of Let's Encrypt's limit of 50 certificates per registered
+	// domain per week, and workspaces come up already served over TLS instead of
+	// waiting on an ACME round trip.
+	if dnsProviderName != "" {
+		// The certificate is issued by the ClusterIssuer, into the workspace
+		// namespace: both have to exist first.
+		wildcardDeps := make([]pulumi.Resource, 0, len(certDeps)+2)
+		wildcardDeps = append(wildcardDeps, certDeps...)
+		wildcardDeps = append(wildcardDeps, issuer)
+		if workspaceNs != nil {
+			wildcardDeps = append(wildcardDeps, workspaceNs)
+		}
+		if certErr := createWildcardCertificate(ctx, k8sProvider, workspaceNamespace(ctx), domain, wildcardDeps); certErr != nil {
+			return nil, pulumi.StringOutput{}, certErr
+		}
+
+		if useExternalDNS {
+			if edErr := setupExternalDNS(ctx, k8sProvider, dnsProviderName, domain, certDeps); edErr != nil {
+				return nil, pulumi.StringOutput{}, edErr
+			}
+		}
+	}
 
 	// For HTTP-01 (no DNS provider), GetIngressIP hasn't been called yet.
 	// Resolve it here after all setup is complete, giving the cloud provider
@@ -282,6 +325,72 @@ func SetupHTTPS(
 	}
 
 	return ingressRelease, ingressIP, nil
+}
+
+// WildcardTLSSecretName is the secret the wildcard certificate is written to, in
+// the workspace namespace. The server hands the same name to workspace ingresses
+// so they are served from it instead of requesting a certificate each.
+const WildcardTLSSecretName = "easylab-wildcard-tls"
+
+// subdomainOf reduces an FQDN to the record name relative to its DNS zone:
+// ("lab.example.com", "example.com") -> "lab". A domain that is not inside the
+// zone, or an empty zone, is returned unchanged — validateDNSConfig rejects that
+// combination before a lab is ever deployed.
+func subdomainOf(domain, zone string) string {
+	if zone == "" || !strings.HasSuffix(domain, "."+zone) {
+		return domain
+	}
+	return strings.TrimSuffix(domain, "."+zone)
+}
+
+// wildcardOf returns the wildcard form of a record name, matching every
+// single-label host under it: "lab" -> "*.lab".
+func wildcardOf(subdomain string) string {
+	return "*." + subdomain
+}
+
+// workspaceNamespace returns the namespace student workspaces run in. It mirrors
+// the default in k8s.InitNamespace, which is what actually creates it.
+func workspaceNamespace(ctx *pulumi.Context) string {
+	if ns := utils.CoderConfigOptional(ctx, utils.CoderNamespace); ns != "" {
+		return ns
+	}
+	return "workshops"
+}
+
+// createWildcardCertificate requests a single certificate covering the lab domain
+// and every host directly under it. It is created in the workspace namespace
+// because an ingress may only reference a TLS secret in its own namespace.
+func createWildcardCertificate(
+	ctx *pulumi.Context,
+	k8sProvider *k8s.Provider,
+	nsName string,
+	domain string,
+	deps []pulumi.Resource,
+) error {
+	_, err := apiextensions.NewCustomResource(ctx, "workspace-wildcard-certificate", &apiextensions.CustomResourceArgs{
+		ApiVersion: pulumi.String("cert-manager.io/v1"),
+		Kind:       pulumi.String("Certificate"),
+		Metadata: &metav1.ObjectMetaArgs{
+			Name:      pulumi.String(WildcardTLSSecretName),
+			Namespace: pulumi.String(nsName),
+		},
+		OtherFields: map[string]any{
+			"spec": map[string]any{
+				"secretName": WildcardTLSSecretName,
+				"dnsNames":   []any{domain, wildcardOf(domain)},
+				"issuerRef": map[string]any{
+					"name":  "letsencrypt-prod",
+					"kind":  "ClusterIssuer",
+					"group": "cert-manager.io",
+				},
+			},
+		},
+	}, pulumi.Provider(k8sProvider), pulumi.DependsOn(deps))
+	if err != nil {
+		return fmt.Errorf("failed to create wildcard certificate: %w", err)
+	}
+	return nil
 }
 
 // GetIngressIP returns the LoadBalancer IP assigned to the ingress-nginx controller service.

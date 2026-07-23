@@ -768,6 +768,37 @@ function handleDNSProviderChange() {
     if (zoneInput) zoneInput.required = !!provider;
     if (ovhFields) ovhFields.style.display = provider === 'ovh' ? '' : 'none';
     if (azureFields) azureFields.style.display = provider === 'azure' ? '' : 'none';
+
+    // ExternalDNS replaces the wildcard record, so it only means anything once a
+    // provider is there to create records with.
+    const externalDNSGroup = document.getElementById('external_dns_group');
+    if (externalDNSGroup) externalDNSGroup.style.display = provider ? '' : 'none';
+    if (!provider) {
+        const externalDNS = document.getElementById('use_external_dns');
+        if (externalDNS) externalDNS.checked = false;
+    }
+
+    updateDNSManualWarning();
+}
+
+// Warn when a lab has a domain but no DNS provider: it deploys fine, then every
+// workspace URL fails to resolve because nothing ever creates the wildcard record.
+function updateDNSManualWarning() {
+    const warning = document.getElementById('dns-manual-warning');
+    if (!warning) return;
+
+    const domainInput = document.getElementById('domain');
+    const providerSelect = document.getElementById('dns_provider');
+    const domain = domainInput ? domainInput.value.trim() : '';
+    const provider = providerSelect ? providerSelect.value : '';
+
+    const show = domain !== '' && provider === '';
+    warning.style.display = show ? '' : 'none';
+
+    if (show) {
+        const record = document.getElementById('dns-warning-record');
+        if (record) record.textContent = '*.' + domain;
+    }
 }
 
 // Fetch Azure VM sizes for the selected location
@@ -1038,6 +1069,13 @@ document.addEventListener('DOMContentLoaded', function() {
         dnsProviderSelect.addEventListener('change', handleDNSProviderChange);
         // Apply initial state (all DNS fields hidden by default)
         handleDNSProviderChange();
+    }
+
+    // The domain drives the same warning, and it sits in an earlier wizard step
+    // than the DNS provider select.
+    const domainInput = document.getElementById('domain');
+    if (domainInput) {
+        domainInput.addEventListener('input', updateDNSManualWarning);
     }
 
     // Reload flavors when region selection changes (OVH)

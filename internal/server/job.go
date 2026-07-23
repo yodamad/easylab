@@ -255,6 +255,11 @@ type LabConfig struct {
 	DNSProvider    string            `json:"dns_provider,omitempty"`
 	DNSZone        string            `json:"dns_zone,omitempty"`
 	DNSCredentials map[string]string `json:"dns_credentials,omitempty"`
+
+	// UseExternalDNS swaps the wildcard A record for ExternalDNS, which watches the
+	// workspace ingresses and maintains one record per workspace. For zones where a
+	// wildcard record is not available. Requires DNSProvider.
+	UseExternalDNS bool `json:"use_external_dns,omitempty"`
 }
 
 // GetWorkspaceTemplates returns the lab's workspace templates. When none are

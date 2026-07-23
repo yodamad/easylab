@@ -8,6 +8,8 @@ import (
 
 	"easylab/internal/providers/workspace"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -529,6 +531,65 @@ func TestEnsureWorkspace_NoDomainSkipsIngress(t *testing.T) {
 	ings, _ := cs.NetworkingV1().Ingresses("workshops").List(ctx, metav1.ListOptions{})
 	if len(ings.Items) != 0 {
 		t.Errorf("expected no ingress when domain is empty, got %d", len(ings.Items))
+	}
+}
+
+// A lab with a DNS provider gets one wildcard certificate at provisioning, and
+// every workspace is served from it. A lab without one falls back to a
+// per-workspace certificate requested through the ClusterIssuer.
+func TestEnsureWorkspace_IngressTLSSource(t *testing.T) {
+	const issuerAnnotation = "cert-manager.io/cluster-issuer"
+
+	tests := []struct {
+		name              string
+		wildcardTLSSecret string
+		clusterIssuer     string
+		wantSecret        string
+		wantIssuer        string
+	}{
+		{
+			name:              "wildcard secret is used directly, no certificate requested",
+			wildcardTLSSecret: "easylab-wildcard-tls",
+			clusterIssuer:     "letsencrypt-prod",
+			wantSecret:        "easylab-wildcard-tls",
+			wantIssuer:        "",
+		},
+		{
+			name:              "without a wildcard secret the ingress requests its own",
+			wildcardTLSSecret: "",
+			clusterIssuer:     "letsencrypt-prod",
+			wantSecret:        "", // per-workspace, name derived below
+			wantIssuer:        "letsencrypt-prod",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			b, cs := newTestBackend()
+			ctx := context.Background()
+
+			ws, err := b.EnsureWorkspace(ctx, workspace.Spec{
+				LabID:             "job-1",
+				Owner:             "alice",
+				Token:             "t",
+				Domain:            "lab.example.com",
+				ClusterIssuer:     tt.clusterIssuer,
+				WildcardTLSSecret: tt.wildcardTLSSecret,
+			})
+			require.NoError(t, err)
+
+			ing, err := cs.NetworkingV1().Ingresses("workshops").Get(ctx, ws.Name, metav1.GetOptions{})
+			require.NoError(t, err)
+			require.Len(t, ing.Spec.TLS, 1)
+
+			wantSecret := tt.wantSecret
+			if wantSecret == "" {
+				wantSecret = ws.Name + "-tls"
+			}
+			assert.Equal(t, wantSecret, ing.Spec.TLS[0].SecretName)
+			assert.Equal(t, tt.wantIssuer, ing.Annotations[issuerAnnotation])
+		})
 	}
 }
 

@@ -1363,6 +1363,9 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 			configCommand{"dns:provider", config.DNSProvider, false},
 			configCommand{"dns:zone", config.DNSZone, false},
 		)
+		if config.UseExternalDNS {
+			commands = append(commands, configCommand{"dns:externalDns", "true", false})
+		}
 		if dnsP, _ := dnsregistry.Get(config.DNSProvider); dnsP != nil {
 			for _, f := range dnsP.GetCredentialFields() {
 				val := config.DNSCredentials[f.Name]

@@ -155,6 +155,11 @@ func CoderAdminTokenLifetime() time.Duration {
 const DNSGroup = "dns"
 const DNSProviderKey = "provider"
 const DNSZone = "zone"
+
+// DNSExternalDNS opts a lab into ExternalDNS: instead of one wildcard A record
+// covering every workspace subdomain, ExternalDNS watches the workspace ingresses
+// and creates/deletes a record per workspace. Set to "true" to enable.
+const DNSExternalDNS = "externalDns"
 const DNSOvhAppKey = "ovhAppKey"
 const DNSOvhAppSecret = "ovhAppSecret"
 const DNSOvhConsumerKey = "ovhConsumerKey"

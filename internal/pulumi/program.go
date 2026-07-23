@@ -132,7 +132,8 @@ func CreateLabProgram(jobDir string) pulumi.RunFunc {
 		}
 
 		utils.LogInfo(ctx, "Creating workspace namespace...")
-		if _, err := k8s.InitNamespace(ctx, k8sProvider); err != nil {
+		workspaceNs, err := k8s.InitNamespace(ctx, k8sProvider)
+		if err != nil {
 			return fmt.Errorf("failed to create namespace: %w", err)
 		}
 
@@ -140,8 +141,9 @@ func CreateLabProgram(jobDir string) pulumi.RunFunc {
 		// server creates at runtime can be routed. With a domain this also brings up
 		// cert-manager + the ClusterIssuer + DNS records for TLS; without one the
 		// server falls back to plain HTTP via nip.io on the LoadBalancer IP, which
-		// still needs the controller.
-		_, ingressIP, httpsErr := coder.SetupHTTPS(ctx, k8sProvider, kubeconfigOut)
+		// still needs the controller. The workspace namespace is passed through
+		// because the wildcard certificate has to be created inside it.
+		_, ingressIP, httpsErr := coder.SetupHTTPS(ctx, k8sProvider, kubeconfigOut, workspaceNs)
 		if httpsErr != nil {
 			return fmt.Errorf("failed to setup HTTPS ingress: %w", httpsErr)
 		}

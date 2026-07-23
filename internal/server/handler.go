@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"easylab/coder"
 	dnsregistry "easylab/internal/providers/dns"
 
 	"github.com/go-git/go-git/v5"
@@ -438,8 +439,9 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 		AcmeEmail:      r.FormValue("acme_email"),
 		WildcardDomain: r.FormValue("wildcard_domain"),
 
-		DNSProvider: r.FormValue("dns_provider"),
-		DNSZone:     r.FormValue("dns_zone"),
+		DNSProvider:    r.FormValue("dns_provider"),
+		DNSZone:        r.FormValue("dns_zone"),
+		UseExternalDNS: r.FormValue("use_external_dns") == "true",
 	}
 
 	installNginx := r.FormValue("install_nginx_ingress") == "true"
@@ -557,7 +559,38 @@ func validateDNSConfig(cfg *LabConfig) error {
 	if cfg.Domain != "" && cfg.Domain != zone && !strings.HasSuffix(cfg.Domain, "."+zone) {
 		return fmt.Errorf("domain %q is not inside DNS zone %q", cfg.Domain, zone)
 	}
+	if cfg.UseExternalDNS && cfg.Domain == "" {
+		return fmt.Errorf("ExternalDNS requires a domain")
+	}
 	return nil
+}
+
+// labConfigWarnings reports configurations that deploy successfully but do not
+// work, so the admin hears about them at creation time rather than from a student.
+// These are warnings, not errors: managing DNS by hand outside EasyLab is a
+// legitimate setup, and refusing it would break existing labs.
+func labConfigWarnings(cfg *LabConfig) []string {
+	var warnings []string
+	if cfg == nil || cfg.Domain == "" {
+		return nil
+	}
+
+	if cfg.DNSProvider == "" {
+		// Workspace hostnames are "{workspace}.{domain}", so without a wildcard
+		// record none of them resolve — and cert-manager's HTTP-01 self-check fails
+		// on the same lookup, leaving every workspace certificate pending.
+		warnings = append(warnings, fmt.Sprintf(
+			"No DNS provider selected: create a wildcard A record %q pointing at the lab's ingress IP, "+
+				"or workspace URLs will not resolve and their certificates will stay pending.",
+			"*."+cfg.Domain))
+
+		// Per-workspace certificates are only used on this path; the wildcard
+		// certificate needs a DNS-01 challenge, which needs a DNS provider.
+		warnings = append(warnings, "Without a DNS provider each workspace requests its own Let's Encrypt "+
+			"certificate, which is capped at 50 per registered domain per week across every subdomain.")
+	}
+
+	return warnings
 }
 
 // executeLabJob creates a job and starts execution, returning the job ID and HTML response
@@ -851,9 +884,26 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 
 	_, html := h.executeLabJobWithID(initialConfig, isDryRun, jobID)
 
-	// Return job status div for HTMX to display with proper polling
+	// Return job status div for HTMX to display with proper polling, preceded by
+	// any warning about a configuration that deploys but will not work.
 	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprint(w, renderConfigWarnings(labConfigWarnings(initialConfig)))
 	fmt.Fprint(w, html)
+}
+
+// renderConfigWarnings renders lab configuration warnings as an HTML fragment,
+// returning "" when there is nothing to warn about.
+func renderConfigWarnings(warnings []string) string {
+	if len(warnings) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="warning-message"><h3>Check your DNS setup</h3><ul>`)
+	for _, warning := range warnings {
+		fmt.Fprintf(&b, `<li>%s</li>`, template.HTMLEscapeString(warning))
+	}
+	b.WriteString(`</ul></div>`)
+	return b.String()
 }
 
 // readKubeconfigFromForm reads kubeconfig content from either a file upload or textarea
@@ -1435,6 +1485,26 @@ func (h *Handler) ListLabs(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(completedLabs)
 }
 
+// workspaceDeletionTime returns the moment a workspace will be automatically
+// deleted, or nil when nothing is scheduled. A workspace disappears at the
+// earliest of two independent cleanup triggers (see internal/server/cleanup.go):
+// its own lifetime (createdAt + lifetimeHours, only when lifetimeHours > 0) and
+// the lab-wide deletion date (which already carries an hour). When both apply,
+// whichever comes first wins.
+func workspaceDeletionTime(createdAt time.Time, lifetimeHours int, labDeletionDate *time.Time) *time.Time {
+	var deletion *time.Time
+	if lifetimeHours > 0 {
+		t := createdAt.Add(time.Duration(lifetimeHours) * time.Hour)
+		deletion = &t
+	}
+	if labDeletionDate != nil {
+		if deletion == nil || labDeletionDate.Before(*deletion) {
+			deletion = labDeletionDate
+		}
+	}
+	return deletion
+}
+
 // RequestWorkspace handles workspace request from students
 func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -1476,9 +1546,15 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	kubeconfig := extractStringFromConfigValue(job.Kubeconfig)
 	namespace := job.workspaceNamespace()
 	domain := ""
+	dnsProvider := ""
+	lifetimeHours := 0
+	var labDeletionDate *time.Time
 	var templates []WorkspaceTemplate
 	if job.Config != nil {
 		domain = job.Config.Domain
+		dnsProvider = job.Config.DNSProvider
+		lifetimeHours = job.Config.WorkspaceLifetimeHours
+		labDeletionDate = job.Config.LabDeletionDate
 		templates = job.Config.GetWorkspaceTemplates()
 	}
 	job.mu.RUnlock()
@@ -1571,6 +1647,16 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		Token:            password,
 	}
 
+	// A lab with a DNS provider got a wildcard certificate at provisioning: serve
+	// every workspace from it rather than having each request its own. That keeps a
+	// workshop clear of Let's Encrypt's 50-certificates-per-registered-domain weekly
+	// limit and skips the ACME round trip, so workspaces are reachable over HTTPS as
+	// soon as the pod is up. Without a DNS provider there is no wildcard certificate
+	// (it needs a DNS-01 challenge), and ClusterIssuer above stays the fallback.
+	if dnsProvider != "" {
+		spec.WildcardTLSSecret = coder.WildcardTLSSecretName
+	}
+
 	ws, err := backend.EnsureWorkspace(r.Context(), spec)
 	if err != nil {
 		// The cause is for the admin, not the student: it can name the lab's
@@ -1586,6 +1672,15 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	workspaceURL := ws.URL
 	workspaceName := ws.Name
 
+	// Compute a single creation timestamp and the workspace's scheduled auto-deletion
+	// time (nil when neither a per-workspace lifetime nor a lab deletion date applies),
+	// so the student portal can show the student when the workspace will disappear.
+	createdAt := time.Now()
+	deletionAtStr := ""
+	if deletionAt := workspaceDeletionTime(createdAt, lifetimeHours, labDeletionDate); deletionAt != nil {
+		deletionAtStr = deletionAt.Format(time.RFC3339)
+	}
+
 	// Create workspace info structure for the client-side encrypted cookie.
 	workspaceInfo := map[string]interface{}{
 		"email":              email,
@@ -1594,7 +1689,8 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		"encrypted_password": "",
 		"workspace_name":     workspaceName,
 		"lab_id":             labID,
-		"created_at":         time.Now().Format(time.RFC3339),
+		"created_at":         createdAt.Format(time.RFC3339),
+		"deletion_at":        deletionAtStr,
 	}
 	if workspaceInfoJSON, jsonErr := json.Marshal(workspaceInfo); jsonErr == nil {
 		isSecure := strings.HasPrefix(workspaceURL, "https://") || r.TLS != nil
@@ -1619,7 +1715,8 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		"password":       password,
 		"workspace_name": workspaceName,
 		"lab_id":         labID,
-		"created_at":     time.Now().Format(time.RFC3339),
+		"created_at":     createdAt.Format(time.RFC3339),
+		"deletion_at":    deletionAtStr,
 	}
 	workspaceInfoJSONForClient, _ := json.Marshal(workspaceInfoForClient)
 	workspaceInfoJSONEscaped := template.HTMLEscapeString(string(workspaceInfoJSONForClient))
