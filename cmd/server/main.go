@@ -266,6 +266,7 @@ func main() {
 	mux.HandleFunc("/admin/auth/azure/callback", authHandler.HandleAdminAzureADCallback)
 	mux.HandleFunc("/student/logout", authHandler.HandleStudentLogout)
 	mux.HandleFunc("/student/dashboard", authHandler.RequireStudentAuth(handler.ServeStudentDashboard))
+	mux.HandleFunc("/student/workspaces", authHandler.RequireStudentAuth(handler.ServeStudentWorkspaces))
 	mux.HandleFunc("/student/feedback", authHandler.RequireStudentAuth(handler.ServeFeedback))
 	mux.HandleFunc("/api/student/labs", authHandler.RequireStudentAuth(handler.ListLabs))
 	mux.HandleFunc("/api/student/labs/templates", authHandler.RequireStudentAuth(handler.ListLabTemplates))

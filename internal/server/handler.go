@@ -703,20 +703,21 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 
 	// Map filename to full path
 	templatePaths := map[string]string{
-		"index.html":             "web/index.html",
-		"admin.html":             "web/admin.html",
-		"student-dashboard.html": "web/student-dashboard.html",
-		"student-feedback.html":  "web/student-feedback.html",
-		"admin-feedback.html":    "web/admin-feedback.html",
-		"credentials.html":       "web/credentials.html",
-		"ovh-credentials.html":   "web/ovh-credentials.html", // Keep for backward compatibility
-		"ovh-options.html":       "web/ovh-options.html",
-		"azure-options.html":     "web/azure-options.html",
-		"azure-provider.html":    "web/azure-provider.html",
-		"azure-ad.html":          "web/azure-ad.html",
-		"labs-list.html":         "web/labs-list.html",
-		"lab-workspaces.html":    "web/lab-workspaces.html",
-		"admin-stats.html":       "web/admin-stats.html",
+		"index.html":              "web/index.html",
+		"admin.html":              "web/admin.html",
+		"student-dashboard.html":  "web/student-dashboard.html",
+		"student-workspaces.html": "web/student-workspaces.html",
+		"student-feedback.html":   "web/student-feedback.html",
+		"admin-feedback.html":     "web/admin-feedback.html",
+		"credentials.html":        "web/credentials.html",
+		"ovh-credentials.html":    "web/ovh-credentials.html", // Keep for backward compatibility
+		"ovh-options.html":        "web/ovh-options.html",
+		"azure-options.html":      "web/azure-options.html",
+		"azure-provider.html":     "web/azure-provider.html",
+		"azure-ad.html":           "web/azure-ad.html",
+		"labs-list.html":          "web/labs-list.html",
+		"lab-workspaces.html":     "web/lab-workspaces.html",
+		"admin-stats.html":        "web/admin-stats.html",
 	}
 
 	tmplPath, ok := templatePaths[filename]
@@ -1291,6 +1292,21 @@ func (h *Handler) ServeStudentDashboard(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// ServeStudentWorkspaces serves the "My Workspaces" page, which lists the workspaces
+// a student has saved locally. The list itself is rendered client-side from cookies;
+// the page only needs the student's identity for the header.
+func (h *Handler) ServeStudentWorkspaces(w http.ResponseWriter, r *http.Request) {
+	email := studentEmailFromContext(r)
+	initial := "?"
+	if len(email) > 0 {
+		initial = strings.ToUpper(string(email[0]))
+	}
+	h.serveTemplate(w, "student-workspaces.html", map[string]interface{}{
+		"Email":   email,
+		"Initial": initial,
+	})
+}
+
 // ListLabTemplates returns the workspace templates configured for a lab.
 // Templates are pure configuration (no external API call): the template ID is
 // its name.
@@ -1548,6 +1564,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	domain := ""
 	dnsProvider := ""
 	lifetimeHours := 0
+	labName := ""
 	var labDeletionDate *time.Time
 	var templates []WorkspaceTemplate
 	if job.Config != nil {
@@ -1555,6 +1572,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		dnsProvider = job.Config.DNSProvider
 		lifetimeHours = job.Config.WorkspaceLifetimeHours
 		labDeletionDate = job.Config.LabDeletionDate
+		labName = job.Config.StackName
 		templates = job.Config.GetWorkspaceTemplates()
 	}
 	job.mu.RUnlock()
@@ -1689,6 +1707,8 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		"encrypted_password": "",
 		"workspace_name":     workspaceName,
 		"lab_id":             labID,
+		"lab_name":           labName,
+		"template":           selected.Name,
 		"created_at":         createdAt.Format(time.RFC3339),
 		"deletion_at":        deletionAtStr,
 	}
@@ -1715,6 +1735,8 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		"password":       password,
 		"workspace_name": workspaceName,
 		"lab_id":         labID,
+		"lab_name":       labName,
+		"template":       selected.Name,
 		"created_at":     createdAt.Format(time.RFC3339),
 		"deletion_at":    deletionAtStr,
 	}
@@ -1746,6 +1768,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	response.WriteString(fmt.Sprintf(`<div data-workspace-info='%s' style="display:none;"></div>`, workspaceInfoJSONEscaped))
 	response.WriteString(`<button onclick="encryptAndSaveWorkspaceInfo(this)" class="btn credentials-save-btn">Encrypt & Save Workspace Info</button>`)
 	response.WriteString(`</details>`)
+	response.WriteString(`<a href="/student/workspaces" class="btn workspace-view-all-link">View my workspaces →</a>`)
 	response.WriteString(`</div>`)
 
 	fmt.Fprint(w, response.String())

@@ -2491,13 +2491,20 @@ select.loading {
     margin-bottom: 0;
 }
 
-/* Header row: workspace name + primary open action */
-.workspace-card-top {
+/* Header row: click to expand/collapse. Name + lab/template chips on the left,
+   the primary open action and a chevron on the right. */
+.workspace-card-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 0.75rem;
     flex-wrap: wrap;
+    cursor: pointer;
+    user-select: none;
+}
+
+.workspace-card-heading {
+    min-width: 0;
 }
 
 .workspace-card-title {
@@ -2507,9 +2514,64 @@ select.loading {
     word-break: break-all;
 }
 
+.workspace-card-subtitle {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    margin-top: 0.375rem;
+}
+
+.workspace-card-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.3rem;
+    padding: 0.15rem 0.55rem;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 0.75rem;
+    color: var(--text);
+    word-break: break-all;
+}
+
+.workspace-card-chip-key {
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--text-light);
+}
+
+.workspace-card-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+}
+
 .workspace-card-open {
     margin-top: 0;
     flex-shrink: 0;
+}
+
+.workspace-card .collapsible-toggle {
+    background: none;
+    border: none;
+    padding: 0.25rem;
+    cursor: pointer;
+    color: var(--text-light);
+    display: inline-flex;
+    align-items: center;
+}
+
+.workspace-card .collapsible-toggle .chevron-icon {
+    width: 1.25rem;
+    height: 1.25rem;
+    transition: transform 0.28s ease;
+}
+
+.workspace-card:not(.collapsed) .collapsible-toggle .chevron-icon {
+    transform: rotate(180deg);
 }
 
 /* Signature element: amber auto-deletion pill (reuses the site deletion motif) */
@@ -2549,7 +2611,23 @@ select.loading {
     white-space: nowrap;
 }
 
-/* Details: every field visible at a glance, no expanding required */
+/* Collapsible body: animates open/closed with a grid-rows transition that works
+   regardless of the content's height. */
+.workspace-card-collapsible {
+    display: grid;
+    grid-template-rows: 1fr;
+    transition: grid-template-rows 0.28s ease;
+}
+
+.workspace-card.collapsed .workspace-card-collapsible {
+    grid-template-rows: 0fr;
+}
+
+.workspace-card-collapsible-inner {
+    overflow: hidden;
+    min-height: 0;
+}
+
 .workspace-card-details {
     margin-top: 0.875rem;
     display: grid;
@@ -2560,33 +2638,100 @@ select.loading {
     margin-bottom: 0;
 }
 
-/* Meta footer: lab id caption + secondary actions */
-.workspace-card-meta {
+/* Secondary actions, revealed with the rest of the details */
+.workspace-card-footer-actions {
     display: flex;
-    justify-content: space-between;
+    gap: 0.5rem;
     align-items: center;
-    gap: 0.75rem;
+    justify-content: flex-end;
     flex-wrap: wrap;
     margin-top: 0.875rem;
     padding-top: 0.75rem;
     border-top: 1px solid var(--border);
 }
 
-.workspace-card-labid {
-    font-size: 0.75rem;
-    color: var(--text-light);
-    font-family: monospace;
-    word-break: break-all;
+.workspace-card-footer-actions .student-btn-small {
+    margin-top: 0;
 }
 
-.workspace-card-footer-actions {
+@media (prefers-reduced-motion: reduce) {
+    .workspace-card-collapsible,
+    .workspace-card .collapsible-toggle .chevron-icon {
+        transition: none;
+    }
+}
+
+/* My Workspaces page: header row (title + count on the left, actions on the right) */
+.student-workspaces-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.25rem;
+}
+
+.student-workspaces-head-titles {
+    display: flex;
+    align-items: baseline;
+    gap: 0.625rem;
+    flex-wrap: wrap;
+}
+
+.student-workspaces-head-titles h2 {
+    margin: 0;
+}
+
+.student-workspaces-sub {
+    font-size: 0.8125rem;
+    color: var(--text-light);
+    font-weight: 500;
+}
+
+.student-workspaces-head-actions {
     display: flex;
     gap: 0.5rem;
     align-items: center;
+    flex-wrap: wrap;
 }
 
-.workspace-card-footer-actions .student-btn-small {
+.student-workspaces-head-actions .student-btn {
     margin-top: 0;
+}
+
+/* Empty state shown on the My Workspaces page when nothing has been saved yet */
+.student-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 2.5rem 1.5rem;
+    gap: 0.5rem;
+}
+
+.student-empty-icon {
+    width: 3rem;
+    height: 3rem;
+    color: var(--student-color);
+    margin-bottom: 0.25rem;
+}
+
+.student-empty-state h3 {
+    margin: 0;
+    color: var(--text);
+    font-size: 1.125rem;
+}
+
+.student-empty-state p {
+    margin: 0 0 0.75rem;
+    color: var(--text-light);
+    max-width: 30rem;
+}
+
+/* "View my workspaces" link shown after a workspace is created on the request page */
+.workspace-view-all-link {
+    display: inline-block;
+    margin-top: 1rem;
 }
 
 /* Collapsible card styles */

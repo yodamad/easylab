@@ -29,7 +29,7 @@ If the organiser has also enabled **Disable password login for students**, the p
 
 ## Request a new development environment
 
-The request a new development environment page is the main page of the student space. It allows you to request a new development environment.
+The **Request a workspace** page is where you land after login. It allows you to request a new development environment. Your existing workspaces live on a separate **My Workspaces** page — reach it any time from the link in the header — so this page stays focused on the single task of requesting one.
 
 You need to provide:
 
@@ -40,7 +40,7 @@ Your email address is automatically filled in from your login session and is not
 
 Then, you'll get all information needed to connect to your workspace!
 
-Just use the provided link and credentials to connect to your workspace.
+Just use the provided link and credentials to connect to your workspace. A **View my workspaces →** link takes you to the My Workspaces page, where the new workspace is already listed.
 
 !!! info "Waiting for DNS"
     Right after a workspace starts you may briefly see *"Workspace is up — waiting for DNS to propagate..."*. On a lab with a public domain, the workspace address is created in DNS when the environment is provisioned and can take up to a minute to become resolvable. EasyLab holds back the **Open** button until the address actually resolves, so you are not handed a link that fails with `DNS_PROBE_FINISHED_NXDOMAIN`. When the button turns green, the workspace is reachable.
@@ -55,21 +55,26 @@ You can store the workspace information in a secured cookie in your browser to b
 
 ## My Workspaces
 
-When you have saved at least one workspace, the **My Workspaces** panel appears at the top of the student portal. It displays a card for each workspace you have requested — across different labs and different templates within the same lab. Only workspaces matching your logged-in email are shown.
+**My Workspaces** is its own page, reached from the link in the header (or the **View my workspaces →** link shown after you request one). It displays a card for each workspace you have requested — across different labs and different templates within the same lab. Only workspaces matching your logged-in email are shown. When you have none yet, the page invites you to request your first one.
 
 ### Workspace cards
 
-Each card shows all of its details at a glance — no expanding needed:
+Each card is collapsed by default and expands when you click its header (or the chevron), so a long list stays scannable. Even collapsed, a card always shows the essentials — its name, the **lab** and **template** it uses, and its auto-deletion badge — so you can tell workspaces apart without opening them.
+
+Collapsed, each card shows:
 
 * **Workspace name** — the name assigned to your workspace
+* **Lab** and **Template** — the lab and workspace template this environment was created from, shown as small chips
 * **Auto-deletion date** — when your workspace will be deleted automatically, shown as an amber *"⏳ Auto-deletes …"* badge with the date and hour. It only appears when the lab schedules a deletion (either a per-workspace lifetime or a lab-wide end date); if the lab sets no expiry, no badge is shown. Save anything you want to keep before this time.
+
+Expand the card to reveal the rest:
+
 * **Workspace URL** — direct link to your code-server workspace (with a copy button)
 * **Email** — the email used to create the workspace (with a copy button)
 * **Password** — your workspace password, encrypted or in clear text (with a copy button)
 * **Created at** — when the workspace was created
-* **Lab** — the lab this workspace belongs to
 
-An **Open Code Server** button is available on each card header. Click it to open your code-server directly in a new tab — EasyLab resolves the workspace URL automatically so you don't need to copy it manually, and signs you in for you, so you land straight in the IDE without retyping the password. The **Password** is still shown on the card in case you open the workspace URL directly, where code-server asks for it on its login page.
+An **Open Code Server** button is available on each card header — you don't need to expand the card to use it. Click it to open your code-server directly in a new tab — EasyLab resolves the workspace URL automatically so you don't need to copy it manually, and signs you in for you, so you land straight in the IDE without retyping the password. The **Password** is still shown on the card in case you open the workspace URL directly, where code-server asks for it on its login page.
 
 ### Encrypting and decrypting credentials
 

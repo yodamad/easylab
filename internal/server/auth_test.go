@@ -909,6 +909,14 @@ func TestProtectedStudentEndpoints_Unauthenticated(t *testing.T) {
 			wantLoc:  "/student/login",
 		},
 		{
+			name:     "/student/workspaces",
+			method:   "GET",
+			path:     "/student/workspaces",
+			handler:  ah.RequireStudentAuth(h.ServeStudentWorkspaces),
+			wantCode: http.StatusSeeOther,
+			wantLoc:  "/student/login",
+		},
+		{
 			name:     "/api/student/labs",
 			method:   "GET",
 			path:     "/api/student/labs",
@@ -964,6 +972,13 @@ func TestProtectedStudentEndpoints_Authenticated(t *testing.T) {
 			method:   "GET",
 			path:     "/student/dashboard",
 			handler:  ah.RequireStudentAuth(h.ServeStudentDashboard),
+			wantCode: http.StatusOK,
+		},
+		{
+			name:     "/student/workspaces",
+			method:   "GET",
+			path:     "/student/workspaces",
+			handler:  ah.RequireStudentAuth(h.ServeStudentWorkspaces),
 			wantCode: http.StatusOK,
 		},
 		{
