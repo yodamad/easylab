@@ -533,6 +533,53 @@
                             <input type="hidden" id="templates_mode" name="templates_mode" value="form">
                         </div>
 
+                        <details class="wizard-credentials">
+                            <summary>
+                                <span class="wizard-credentials-title">Registry &amp; Git credentials</span>
+                                <span class="wizard-credentials-hint">Optional — define private tokens your templates can reference</span>
+                            </summary>
+                            <p class="wizard-credentials-intro">
+                                Add a registry or git token here if a template below references one
+                                (<code>image_pull_secrets</code>, <code>git_auth_secret</code>, or a
+                                devcontainer <code>registry_auth_secret</code>). Tokens are written to the
+                                lab's cluster once it is provisioned and are not stored anywhere else.
+                            </p>
+                            <div id="wizard-credentials-container"></div>
+                            <button type="button" id="btn-add-credential" class="btn btn-secondary btn-sm">
+                                <span class="btn-icon">+</span> Add Credential
+                            </button>
+                        </details>
+
+                        <!-- Credential row template (hidden, cloned by JS) -->
+                        <template id="credential-row-tmpl">
+                            <div class="credential-row">
+                                <div class="form-group">
+                                    <label>Type</label>
+                                    <select name="secret_kind" class="credential-kind">
+                                        <option value="registry">Container registry</option>
+                                        <option value="git">Git repository</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Name</label>
+                                    <input type="text" name="secret_name" placeholder="regcred">
+                                </div>
+                                <div class="form-group credential-server">
+                                    <label>Server</label>
+                                    <input type="text" name="secret_server" placeholder="registry.example.com">
+                                </div>
+                                <div class="form-group">
+                                    <label>Username</label>
+                                    <input type="text" name="secret_username" placeholder="oauth2" autocomplete="off">
+                                </div>
+                                <div class="form-group">
+                                    <label>Token</label>
+                                    <input type="password" name="secret_token" autocomplete="off">
+                                </div>
+                                <button type="button" class="btn btn-danger btn-sm btn-remove-credential" title="Remove credential">Remove</button>
+                            </div>
+                        </template>
+
                         <div id="templates-devcontainer-mode" style="display: none;">
                             <div id="devcontainer-import" class="devcontainer-import">
                                 <p class="devcontainer-import-intro">
@@ -585,18 +632,6 @@
                                     <small>The repository field above is still used for the generated template's <code>git_repo</code>, since that is what students clone.</small>
                                 </div>
 
-                                <div id="devcontainer-git-auth-row" class="form-row">
-                                    <div class="form-group">
-                                        <label for="devcontainer_git_username">Username</label>
-                                        <input type="text" id="devcontainer_git_username" placeholder="oauth2" autocomplete="off">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="devcontainer_git_token">Access token</label>
-                                        <input type="password" id="devcontainer_git_token" autocomplete="off">
-                                        <small>Only if the repository is private. Used to read the devcontainer now and then discarded — it is not saved. To give students access, add a git credential in the <strong>Credentials</strong> section below and pick it under <strong>Git credential for students</strong>.</small>
-                                    </div>
-                                </div>
-
                                 <div class="form-row">
                                     <div class="form-group">
                                         <label for="devcontainer_dir">Devcontainer folder</label>
@@ -614,11 +649,11 @@
                                 </div>
 
                                 <div class="form-group">
-                                    <label for="devcontainer_git_auth_secret">Git credential for students (Optional)</label>
+                                    <label for="devcontainer_git_auth_secret">Git credential (Optional)</label>
                                     <select id="devcontainer_git_auth_secret" class="template-git-cred-select">
                                         <option value="">None</option>
                                     </select>
-                                    <small>If the workshop repository is private, the credential (from the <strong>Credentials</strong> section) each student's workspace clones it with. With a single git credential this is applied automatically. Separate from the access token above, which only reads the devcontainer during import.</small>
+                                    <small>If the workshop repository is <strong>private</strong>, the git credential (from the <strong>Credentials</strong> section above) used to read the devcontainer during import and, baked into the generated template, to clone the repo in each student's workspace. With a single git credential this is applied automatically.</small>
                                 </div>
                                 <div class="form-group">
                                     <label for="devcontainer_registry_auth_secret">Registry credential for students (Optional)</label>
@@ -886,50 +921,6 @@
                             </div>
                         </template>
                     </div>
-
-                    <details class="wizard-credentials">
-                        <summary>Credentials (optional)</summary>
-                        <p class="wizard-credentials-intro">
-                            Add a registry or git token here if a template above references one
-                            (<code>image_pull_secrets</code>, <code>git_auth_secret</code>, or a
-                            devcontainer <code>registry_auth_secret</code>). Tokens are written to the
-                            lab's cluster once it is provisioned and are not stored anywhere else.
-                        </p>
-                        <div id="wizard-credentials-container"></div>
-                        <button type="button" id="btn-add-credential" class="btn btn-secondary btn-sm">
-                            <span class="btn-icon">+</span> Add Credential
-                        </button>
-                    </details>
-
-                    <!-- Credential row template (hidden, cloned by JS) -->
-                    <template id="credential-row-tmpl">
-                        <div class="credential-row">
-                            <div class="form-group">
-                                <label>Type</label>
-                                <select name="secret_kind" class="credential-kind">
-                                    <option value="registry">Container registry</option>
-                                    <option value="git">Git repository</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label>Name</label>
-                                <input type="text" name="secret_name" placeholder="regcred">
-                            </div>
-                            <div class="form-group credential-server">
-                                <label>Server</label>
-                                <input type="text" name="secret_server" placeholder="registry.example.com">
-                            </div>
-                            <div class="form-group">
-                                <label>Username</label>
-                                <input type="text" name="secret_username" placeholder="oauth2" autocomplete="off">
-                            </div>
-                            <div class="form-group">
-                                <label>Token</label>
-                                <input type="password" name="secret_token" autocomplete="off">
-                            </div>
-                            <button type="button" class="btn btn-danger btn-sm btn-remove-credential" title="Remove credential">Remove</button>
-                        </div>
-                    </template>
                 </section>
 
                 <!-- Step 7: Lifecycle (cleanup + deletion scheduling) -->

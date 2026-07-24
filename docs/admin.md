@@ -108,7 +108,7 @@ The **essentials**:
 
 Under **Advanced options** (all optional):
 
-* **Git credential** — the credential (from the **Credentials** section below) that unlocks a **private** Git Repository. Define a single git credential and it is wired into every template with a private repo automatically; add more than one and pick the right one per template here.
+* **Git credential** — the credential (from the **Credentials** section at the top of the step) that unlocks a **private** Git Repository. Define a single git credential and it is wired into every template with a private repo automatically; add more than one and pick the right one per template here.
 * **Image** — a container image override. Defaults to `codercom/code-server:latest`.
 * **CPU / Memory / Disk Size** — resource requests for the workspace pod (e.g. `500m`, `1Gi`, `5Gi`).
 * **Startup Script** — shell commands run (best-effort) on start, *before* the IDE opens: install tools, configure the shell, run a bootstrap. Failures are shown in `kubectl logs` but never block the workspace from opening.
@@ -214,10 +214,9 @@ Choose **From a devcontainer** at the top of the **Templates** step:
    pulls the base image (and pushes the cache) inside each student's pod with it;
    without it the pull falls back to anonymous and the build fails.
 4. If the workshop repository is **private**, add a git token in the **Credentials**
-   section and choose it under **Git credential for students** — with a single git
-   credential it is applied automatically — so each student's workspace can clone
-   it. (The **Access token** field is separate — it only reads the devcontainer
-   during import and is discarded.)
+   section and choose it under **Git credential** — with a single git credential it is
+   applied automatically. The same credential reads the devcontainer during import and,
+   baked into the template, clones the repo in each student's workspace.
 5. Click **Import**. EasyLab turns the devcontainer into a workspace template and
    lists anything in it that will not take effect.
 6. Click **Review generated YAML** to open the result in the editor, adjust it if
@@ -520,8 +519,8 @@ A lab whose workspaces use a private image or clone a private repository needs
 credentials. Add them at either of two points:
 
 * **During creation** — the **Workspace Templates** step of the wizard has a
-  *Credentials* section. Tokens entered there are held in memory and written to the
-  cluster the moment it finishes provisioning, before the lab reports ready.
+  *Credentials* section at the top. Tokens entered there are held in memory and written
+  to the cluster the moment it finishes provisioning, before the lab reports ready.
 * **After the lab is up** — expand **Credentials** on the lab's **Workspaces** page.
 
 Two kinds:

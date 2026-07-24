@@ -1364,6 +1364,28 @@ function refreshRegistryCredentialOptions() {
     });
 }
 
+// The username/token of a defined git credential, looked up by name. The devcontainer
+// import reuses it to read a private repo, so the admin enters the token once (in the
+// Credentials section) rather than retyping it just to read the devcontainer. Empty
+// when the name is unset or unmatched, so a public repo still clones anonymously.
+function gitCredentialAuthByName(name) {
+    const empty = { username: '', token: '' };
+    if (!name || !credentialsContainer) return empty;
+    let found = empty;
+    credentialsContainer.querySelectorAll('.credential-row').forEach(row => {
+        const kind = row.querySelector('.credential-kind');
+        const nameInput = row.querySelector('[name="secret_name"]');
+        if (!kind || kind.value !== 'git' || !nameInput || nameInput.value.trim() !== name) return;
+        const userInput = row.querySelector('[name="secret_username"]');
+        const tokenInput = row.querySelector('[name="secret_token"]');
+        found = {
+            username: userInput ? userInput.value : '',
+            token: tokenInput ? tokenInput.value : '',
+        };
+    });
+    return found;
+}
+
 function toggleCredentialServer(row) {
     const kind = row.querySelector('.credential-kind');
     const serverGroup = row.querySelector('.credential-server');
@@ -1910,7 +1932,6 @@ if (btnUploadTemplatesYaml && templatesYamlFileInput) {
 // while there is still something to do about them.
 const devcontainerImportResult = document.getElementById('devcontainer-import-result');
 const devcontainerUploadRow = document.getElementById('devcontainer-upload-row');
-const devcontainerGitAuthRow = document.getElementById('devcontainer-git-auth-row');
 const devcontainerSourceGitBtn = document.getElementById('devcontainer-source-git');
 const devcontainerSourceUploadBtn = document.getElementById('devcontainer-source-upload');
 let devcontainerSource = 'git';
@@ -1920,9 +1941,6 @@ function setDevcontainerSource(source) {
     if (devcontainerSourceGitBtn) devcontainerSourceGitBtn.classList.toggle('selected', devcontainerSource === 'git');
     if (devcontainerSourceUploadBtn) devcontainerSourceUploadBtn.classList.toggle('selected', devcontainerSource === 'upload');
     if (devcontainerUploadRow) devcontainerUploadRow.style.display = devcontainerSource === 'upload' ? '' : 'none';
-    // An upload is read straight from the file: there is no clone to authenticate,
-    // so offering a token would only invite pasting one for nothing.
-    if (devcontainerGitAuthRow) devcontainerGitAuthRow.style.display = devcontainerSource === 'git' ? '' : 'none';
 }
 
 if (devcontainerSourceGitBtn) {
@@ -2024,9 +2042,13 @@ if (btnRunDevcontainerImport) {
             if (names.length === 1) gitAuthSecret = names[0];
         }
         body.append('git_auth_secret', gitAuthSecret);
-        // Request-scoped: authenticates this clone only, and is never persisted.
-        body.append('git_username', (document.getElementById('devcontainer_git_username') || {}).value || '');
-        body.append('git_token', (document.getElementById('devcontainer_git_token') || {}).value || '');
+        // Read the private repo with the same git credential the students get: look up
+        // the resolved credential's username/token from the Credentials section. Empty
+        // when none is defined, so a public repo still clones anonymously. Request-scoped
+        // on the server — used for this clone only and never persisted.
+        const gitAuth = gitCredentialAuthByName(gitAuthSecret);
+        body.append('git_username', gitAuth.username);
+        body.append('git_token', gitAuth.token);
 
         if (devcontainerSource === 'upload') {
             const file = fileInput && fileInput.files[0];

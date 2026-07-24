@@ -776,6 +776,7 @@ main {
 
 .wizard-credentials > summary {
     font-size: 1rem;
+    flex-wrap: wrap;
 }
 
 .template-advanced > summary::-webkit-details-marker,
@@ -6171,9 +6172,21 @@ body.admin-page .wizard-footer {
 
 /* Wizard credentials (registry / git tokens entered during lab creation) */
 .wizard-credentials {
-    margin-top: 1.5rem;
-    padding-top: 1.5rem;
-    border-top: 1px solid var(--border);
+    margin: 1.5rem 0;
+    padding: 1rem 1.25rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.wizard-credentials-title {
+    font-weight: 600;
+}
+
+.wizard-credentials-hint {
+    font-size: 0.8rem;
+    color: var(--text-light);
+    font-weight: 400;
 }
 
 .wizard-credentials-intro {
