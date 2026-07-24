@@ -251,7 +251,23 @@ const wizard = {
                 valid = false;
             }
         });
-        return valid;
+        if (!valid) return false;
+
+        // In devcontainer mode the admin must run the import before continuing:
+        // it is what generates the workspace YAML the lab is created from. The
+        // template name is the only required field, so without this gate the
+        // wizard would advance — and the lab be created — with no workspace.
+        if (this.currentStep === 6) {
+            const devcontainerBtn = document.getElementById('templates-mode-devcontainer');
+            const yamlTextarea = document.getElementById('templates_yaml');
+            if (devcontainerBtn && devcontainerBtn.classList.contains('selected') &&
+                (!yamlTextarea || !yamlTextarea.value.trim())) {
+                alert('Click "Import" to read the devcontainer before you continue — it generates the workspace the lab is created from.');
+                return false;
+            }
+        }
+
+        return true;
     },
 
     canGoToStep(stepNum) {

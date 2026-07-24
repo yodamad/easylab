@@ -217,8 +217,10 @@ Choose **From a devcontainer** at the top of the **Templates** step:
    section and choose it under **Git credential** — with a single git credential it is
    applied automatically. The same credential reads the devcontainer during import and,
    baked into the template, clones the repo in each student's workspace.
-5. Click **Import**. EasyLab turns the devcontainer into a workspace template and
-   lists anything in it that will not take effect.
+5. Click **Import** — this step is required. EasyLab turns the devcontainer into a
+   workspace template and lists anything in it that will not take effect. The wizard
+   will not advance to the next step until the import has run, since the import is
+   what generates the workspace the lab is created from.
 6. Click **Review generated YAML** to open the result in the editor, adjust it if
    needed, then finish the wizard.
 

@@ -5466,6 +5466,14 @@ details.credentials-box > :last-child {
     flex-wrap: wrap;
 }
 
+/* Calls out that Import gates the wizard, so the admin does not fill the fields
+   and click Next expecting to have moved on. */
+.devcontainer-import-hint {
+    margin: 0.5rem 0 0;
+    font-size: 0.85rem;
+    color: var(--text-light);
+}
+
 .devcontainer-import-result:empty {
     display: none;
 }
