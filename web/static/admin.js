@@ -1834,12 +1834,20 @@ function setTemplatesMode(mode) {
     if (templatesFormMode) templatesFormMode.style.display = useForm ? '' : 'none';
     if (templatesDevcontainerMode) templatesDevcontainerMode.style.display = mode === 'devcontainer' ? '' : 'none';
     if (templatesYamlMode) templatesYamlMode.style.display = mode === 'yaml' ? '' : 'none';
-    // Hiding the wizard is not enough: its inputs would still be submitted, and a
+    // Hiding a section is not enough: its inputs would still be submitted, and a
     // `required` field that is hidden but empty blocks submission with an error the
-    // admin cannot see. Disabling takes them out of the form entirely.
+    // admin cannot see (the browser cannot focus a display:none control to report
+    // it). Disabling takes the inactive section's inputs out of the form entirely.
+    // The devcontainer section carries a required template name, so it must be
+    // disabled whenever the admin is in the form or yaml editor.
     if (templatesFormMode) {
         templatesFormMode.querySelectorAll('input, select, textarea').forEach(el => {
             el.disabled = !useForm;
+        });
+    }
+    if (templatesDevcontainerMode) {
+        templatesDevcontainerMode.querySelectorAll('input, select, textarea').forEach(el => {
+            el.disabled = mode !== 'devcontainer';
         });
     }
     if (templatesYamlTextarea) templatesYamlTextarea.disabled = useForm;
