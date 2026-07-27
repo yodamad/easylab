@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -1165,6 +1166,32 @@ func TestCreateLabConfigFromForm_BasicOVH(t *testing.T) {
 	}
 }
 
+func TestCreateLabConfigFromForm_Description(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "plain description", input: "Kubernetes 101 workshop", want: "Kubernetes 101 workshop"},
+		{name: "trims surrounding whitespace", input: "  spaced out  ", want: "spaced out"},
+		{name: "empty stays empty", input: "", want: ""},
+	}
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/", nil)
+			req.Form = map[string][]string{
+				"stack_name":  {"my-stack"},
+				"description": {tt.input},
+			}
+			cfg := h.createLabConfigFromForm(req, nil)
+			if cfg.Description != tt.want {
+				t.Errorf("Description = %q, want %q", cfg.Description, tt.want)
+			}
+		})
+	}
+}
+
 func TestCreateLabConfigFromForm_BYOK(t *testing.T) {
 	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
 	req := httptest.NewRequest("POST", "/", nil)
@@ -1373,6 +1400,94 @@ func TestParseWorkspaceTemplatesFromForm_GitAuthSecret(t *testing.T) {
 	templates := parseWorkspaceTemplatesFromForm(req)
 	assert.Len(t, templates, 1)
 	assert.Equal(t, "gitcred", templates[0].GitAuthSecret)
+}
+
+func TestParseWorkspaceTemplatesFromForm_Description(t *testing.T) {
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"template_0_name":        {"go-tmpl"},
+		"template_0_description": {"  Go 1.26 + Postgres  "},
+	}
+	templates := parseWorkspaceTemplatesFromForm(req)
+	assert.Len(t, templates, 1)
+	assert.Equal(t, "Go 1.26 + Postgres", templates[0].Description)
+}
+
+func TestShortRepoName(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"empty", "", ""},
+		{"https with .git", "https://gitlab.com/group/api-workshop.git", "api-workshop"},
+		{"https without .git", "https://gitlab.com/group/data-lab", "data-lab"},
+		{"trailing slash", "https://gitlab.com/group/web-starter/", "web-starter"},
+		{"ssh scp form", "git@gitlab.com:group/platform-lab.git", "platform-lab"},
+		{"nested subgroups", "https://gitlab.com/g/sub/deep/repo.git", "repo"},
+		{"surrounding whitespace", "  https://x/y/repo.git  ", "repo"},
+		{"bare name", "repo", "repo"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := shortRepoName(tt.input); got != tt.want {
+				t.Errorf("shortRepoName(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTemplateResourceSummary(t *testing.T) {
+	tests := []struct {
+		name string
+		tpl  WorkspaceTemplate
+		want string
+	}{
+		{"both", WorkspaceTemplate{CPU: "1", Memory: "2Gi"}, "1 · 2Gi"},
+		{"cpu only", WorkspaceTemplate{CPU: "500m"}, "500m"},
+		{"memory only", WorkspaceTemplate{Memory: "4Gi"}, "4Gi"},
+		{"neither", WorkspaceTemplate{}, ""},
+		{"trims whitespace", WorkspaceTemplate{CPU: " 2 ", Memory: " 4Gi "}, "2 · 4Gi"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := templateResourceSummary(tt.tpl); got != tt.want {
+				t.Errorf("templateResourceSummary(%+v) = %q, want %q", tt.tpl, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestListLabTemplates_EnrichedFields(t *testing.T) {
+	jm := NewJobManager("")
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	id := jm.CreateJob(&LabConfig{
+		StackName: "lab",
+		WorkspaceTemplates: []WorkspaceTemplate{{
+			Name:        "go-postgres",
+			Description: "Go 1.26 with a Postgres sidecar",
+			CPU:         "1",
+			Memory:      "2Gi",
+			GitRepo:     "https://gitlab.com/group/api-workshop.git",
+		}},
+	})
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusCompleted))
+
+	rec := httptest.NewRecorder()
+	h.ListLabTemplates(rec, httptest.NewRequest(http.MethodGet, "/api/student/labs/templates?lab_id="+id, nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Len(t, got, 1)
+	assert.Equal(t, "go-postgres", got[0]["id"])
+	assert.Equal(t, "go-postgres", got[0]["name"])
+	assert.Equal(t, "Go 1.26 with a Postgres sidecar", got[0]["description"])
+	assert.Equal(t, "code-server", got[0]["ide"])
+	assert.Equal(t, "1 · 2Gi", got[0]["resources"])
+	assert.Equal(t, "api-workshop", got[0]["repo"])
 }
 
 func TestParseWorkspaceTemplatesFromForm_MultipleTemplates(t *testing.T) {

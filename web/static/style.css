@@ -2349,6 +2349,169 @@ body.student-dashboard-page {
     display: none;
 }
 
+/* Student template picker — selectable tiles (replaces the template dropdown).
+   Each tile reads like an environment label: a monospace name, the description,
+   and a quiet meta row (IDE / resources / repo). */
+.template-picker-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.template-picker-head label {
+    margin-bottom: 0;
+}
+
+.template-picker-count {
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 0.78rem;
+    color: var(--text-light);
+}
+
+.template-tiles {
+    display: grid;
+    gap: 0.7rem;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+}
+
+.template-tiles-status {
+    grid-column: 1 / -1;
+    margin: 0;
+    padding: 0.85rem 0;
+    font-size: 0.9rem;
+    color: var(--text-light);
+}
+
+.template-tiles-status--error {
+    color: var(--error);
+}
+
+.template-tile {
+    position: relative;
+    display: block;
+    cursor: pointer;
+    margin: 0;
+    background: var(--surface);
+    border: 2px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.9rem 1rem;
+    transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.template-tile:hover {
+    border-color: var(--student-color);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow);
+}
+
+.template-tile input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.template-tile-name {
+    display: block;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text);
+    padding-right: 1.75rem;
+    word-break: break-word;
+}
+
+.template-tile-desc {
+    display: block;
+    margin-top: 0.35rem;
+    font-size: 0.85rem;
+    color: var(--text-light);
+    line-height: 1.45;
+}
+
+.template-tile-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.6rem;
+}
+
+.template-tile-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 0.7rem;
+    color: var(--text-light);
+    background: var(--background);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.2rem 0.5rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.template-tile-chip-key {
+    color: var(--secondary-color);
+}
+
+.template-tile-check {
+    position: absolute;
+    top: 0.85rem;
+    right: 0.85rem;
+    width: 1.2rem;
+    height: 1.2rem;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    background: var(--background);
+    display: grid;
+    place-items: center;
+    color: #fff;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.template-tile-check svg {
+    width: 0.7rem;
+    height: 0.7rem;
+    opacity: 0;
+    transform: scale(0.6);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.template-tile.is-selected,
+.template-tile:has(input:checked) {
+    border-color: var(--student-color);
+    background: rgba(72, 187, 120, 0.1);
+}
+
+.template-tile.is-selected .template-tile-check,
+.template-tile:has(input:checked) .template-tile-check {
+    background: var(--student-color);
+    border-color: var(--student-color);
+}
+
+.template-tile.is-selected .template-tile-check svg,
+.template-tile:has(input:checked) .template-tile-check svg {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.template-tile:has(input:focus-visible) {
+    border-color: var(--student-color);
+    box-shadow: 0 0 0 3px rgba(72, 187, 120, 0.1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .template-tile,
+    .template-tile-check,
+    .template-tile-check svg {
+        transition: none;
+    }
+    .template-tile:hover {
+        transform: none;
+    }
+}
+
 /* Lab select loading shimmer */
 select.loading {
     color: transparent;
@@ -5985,6 +6148,16 @@ body.admin-page .wizard-footer {
     color: var(--text-light);
 }
 
+.lab-description {
+    display: block;
+    margin-top: 0.25rem;
+    font-size: 0.8125rem;
+    color: var(--text-light);
+    max-width: 22rem;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
 /* Date column */
 .lab-col-date {
     white-space: nowrap;
@@ -6325,6 +6498,14 @@ body.admin-page .wizard-footer {
 .template-status-name {
     font-weight: 600;
     color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.template-status-description {
+    font-size: 0.8rem;
+    color: var(--text-light);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

@@ -77,6 +77,7 @@
                     <div class="template-status-card">
                         <div class="template-status-info">
                             <span class="template-status-name">{{.Name}}</span>
+                            {{if .Description}}<span class="template-status-description">{{.Description}}</span>{{end}}
                             <span class="template-status-meta">{{.IDE}}{{if .Image}} · {{.Image}}{{end}}</span>
                         </div>
                         {{if .HasRunning}}

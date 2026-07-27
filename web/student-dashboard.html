@@ -86,11 +86,12 @@
                         </div>
 
                         <div class="student-form-group template-group-hidden" id="template-select-group">
-                            <label for="template_id">Select Template *</label>
-                            <select id="template_id" name="template_id" required>
-                                <option value="">Select a lab first...</option>
-                            </select>
-                            <small>Choose the workspace template (environment type)</small>
+                            <div class="template-picker-head">
+                                <label id="template-picker-label">Select Template *</label>
+                                <span class="template-picker-count" id="template-picker-count"></span>
+                            </div>
+                            <div class="template-tiles" id="template-tiles" role="radiogroup" aria-labelledby="template-picker-label"></div>
+                            <small>Choose the workspace template for your workspace</small>
                         </div>
 
                         <button type="submit" class="student-btn" id="submit-btn">Request Workspace</button>

@@ -243,6 +243,7 @@ func parseWorkspaceTemplatesFromForm(r *http.Request) []WorkspaceTemplate {
 		}
 		t := WorkspaceTemplate{
 			Name:          name,
+			Description:   strings.TrimSpace(getFormValue(r, fmt.Sprintf("template_%d_description", i))),
 			IDE:           getFormValue(r, fmt.Sprintf("template_%d_ide", i)),
 			Image:         getFormValue(r, fmt.Sprintf("template_%d_image", i)),
 			GitRepo:       getFormValue(r, fmt.Sprintf("template_%d_git_repo", i)),
@@ -430,6 +431,7 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 
 	config := &LabConfig{
 		StackName:          stackName,
+		Description:        strings.TrimSpace(r.FormValue("description")),
 		UseExistingCluster: useExistingCluster,
 
 		WorkspaceNamespace: r.FormValue("workspace_namespace"),
@@ -1341,16 +1343,63 @@ func (h *Handler) ListLabTemplates(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type templateOption struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Description string `json:"description,omitempty"`
+		IDE         string `json:"ide,omitempty"`
+		Resources   string `json:"resources,omitempty"`
+		Repo        string `json:"repo,omitempty"`
 	}
 	options := make([]templateOption, 0, len(templates))
 	for _, t := range templates {
-		options = append(options, templateOption{ID: t.Name, Name: t.Name})
+		ide := t.IDE
+		if ide == "" || ide == workspace.IDEOpenVSCode {
+			ide = workspace.DefaultIDEKind
+		}
+		options = append(options, templateOption{
+			ID:          t.Name,
+			Name:        t.Name,
+			Description: t.Description,
+			IDE:         ide,
+			Resources:   templateResourceSummary(t),
+			Repo:        shortRepoName(t.GitRepo),
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(options)
+}
+
+// templateResourceSummary renders a compact "CPU · Memory" string for a template's
+// resource requests, omitting whichever field is empty. Returns "" when neither is set.
+func templateResourceSummary(t WorkspaceTemplate) string {
+	cpu := strings.TrimSpace(t.CPU)
+	mem := strings.TrimSpace(t.Memory)
+	switch {
+	case cpu != "" && mem != "":
+		return cpu + " · " + mem
+	case cpu != "":
+		return cpu
+	default:
+		return mem
+	}
+}
+
+// shortRepoName extracts a display name from a git URL — the last path segment with
+// any trailing slash and ".git" suffix removed (e.g.
+// "https://gitlab.com/group/api-workshop.git" -> "api-workshop"). Returns "" for an
+// empty input.
+func shortRepoName(gitRepo string) string {
+	s := strings.TrimSpace(gitRepo)
+	if s == "" {
+		return ""
+	}
+	s = strings.TrimSuffix(s, "/")
+	s = strings.TrimSuffix(s, ".git")
+	if i := strings.LastIndexAny(s, "/:"); i >= 0 {
+		s = s[i+1:]
+	}
+	return s
 }
 
 // UploadTemplateToLab appends one or more workspace templates to an existing lab's
@@ -2773,6 +2822,7 @@ func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
 		CreatedAt                 string
 		UpdatedAt                 string
 		StackName                 string
+		Description               string
 		IsDryRun                  bool
 		HasError                  bool
 		ErrorMsg                  string
@@ -2789,8 +2839,10 @@ func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
 		job.mu.RLock()
 		status := string(job.Status)
 		stackName := ""
+		description := ""
 		if job.Config != nil {
 			stackName = job.Config.StackName
+			description = job.Config.Description
 		}
 		isDryRun := job.Status == JobStatusDryRunCompleted
 		hasError := job.Error != ""
@@ -2824,6 +2876,7 @@ func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
 			CreatedAt:                 createdAt,
 			UpdatedAt:                 updatedAt,
 			StackName:                 stackName,
+			Description:               description,
 			IsDryRun:                  isDryRun,
 			HasError:                  hasError,
 			ErrorMsg:                  errorMsg,
@@ -2848,6 +2901,7 @@ func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
 // student workspaces on the lab were created from it.
 type TemplateStatus struct {
 	Name         string
+	Description  string
 	IDE          string
 	Image        string
 	RunningCount int
@@ -2888,6 +2942,7 @@ func buildTemplateStatus(templates []WorkspaceTemplate, workspaces []workspace.W
 		n := counts[t.Name]
 		statuses = append(statuses, TemplateStatus{
 			Name:         t.Name,
+			Description:  t.Description,
 			IDE:          ide,
 			Image:        image,
 			RunningCount: n,

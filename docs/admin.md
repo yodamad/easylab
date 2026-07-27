@@ -28,6 +28,11 @@ As an admin (trainer, speaker, ...), you have access to the admin space to manag
 
 ![Steps](screens/steps.png)
 
+Start by naming the lab:
+
+* **Lab Name** (required) — a unique name used as the prefix for all cloud resources (letters, numbers, hyphens and underscores only).
+* **Description** (optional) — a free-text summary of what the lab is for (e.g. *Kubernetes 101 workshop, June 2025 cohort*). It is shown in the [labs list](#manage-your-labs) to help you tell labs apart.
+
 First you need to choose how to provide the Kubernetes cluster:
 
 * [x] [Create New Infrastructure](#on-ovhcloud) — Provision a new cluster on a cloud provider (OVHcloud)
@@ -104,6 +109,7 @@ Template** to define additional templates.
 The **essentials**:
 
 * **Template name** — Name shown in the student template selector.
+* **Description** (optional) — a free-text summary of what the template provides (e.g. *Go 1.26 + Postgres*). Shown next to the template name in the lab's **Templates** panel.
 * **Git Repository** (optional) — a repo cloned into the workspace on first start (a persistent volume is provisioned automatically). The **branch** field clones a specific branch; **subfolder** opens a subdirectory of the repo.
 
 Under **Advanced options** (all optional):

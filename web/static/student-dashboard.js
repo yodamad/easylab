@@ -55,21 +55,43 @@ async function encryptAndSaveWorkspaceInfo(button) {
 
 function setupLabTemplateHandlers() {
     const labSelect = document.getElementById('lab_id');
-    const templateSelect = document.getElementById('template_id');
+    const tilesContainer = document.getElementById('template-tiles');
     const templateGroup = document.getElementById('template-select-group');
+    const countEl = document.getElementById('template-picker-count');
+    const submitBtn = document.getElementById('submit-btn');
 
-    if (!labSelect || !templateSelect || !templateGroup) return;
+    if (!labSelect || !tilesContainer || !templateGroup) return;
+
+    function setSubmitEnabled(enabled) {
+        if (submitBtn) submitBtn.disabled = !enabled;
+    }
+
+    function showStatus(message, isError) {
+        tilesContainer.innerHTML = '';
+        const p = document.createElement('p');
+        p.className = 'template-tiles-status' + (isError ? ' template-tiles-status--error' : '');
+        p.textContent = message;
+        tilesContainer.appendChild(p);
+        if (countEl) countEl.textContent = '';
+    }
+
+    // Nothing can be requested until a template is chosen — the picker starts hidden.
+    setSubmitEnabled(false);
 
     labSelect.addEventListener('change', function() {
         const labId = this.value;
-        templateSelect.innerHTML = '<option value="">Loading templates...</option>';
-        templateGroup.classList.add('template-group-hidden');
-        templateSelect.removeAttribute('required');
 
         if (!labId) {
-            templateSelect.innerHTML = '<option value="">Select a lab first...</option>';
+            templateGroup.classList.add('template-group-hidden');
+            tilesContainer.innerHTML = '';
+            if (countEl) countEl.textContent = '';
+            setSubmitEnabled(false);
             return;
         }
+
+        templateGroup.classList.remove('template-group-hidden');
+        showStatus('Loading templates…', false);
+        setSubmitEnabled(false);
 
         fetch('/api/student/labs/templates?lab_id=' + encodeURIComponent(labId))
             .then(response => {
@@ -79,38 +101,104 @@ function setupLabTemplateHandlers() {
                 return response.json();
             })
             .then(templates => {
-                templateSelect.innerHTML = '';
-
-                if (templates.length === 0) {
-                    templateSelect.innerHTML = '<option value="">No templates available</option>';
-                    return;
-                }
-
-                if (templates.length === 1) {
-                    const opt = document.createElement('option');
-                    opt.value = templates[0].id;
-                    opt.textContent = templates[0].name;
-                    opt.selected = true;
-                    templateSelect.appendChild(opt);
-                } else {
-                    templateSelect.innerHTML = '<option value="">Choose a template...</option>';
-                    templates.forEach(t => {
-                        const opt = document.createElement('option');
-                        opt.value = t.id;
-                        opt.textContent = t.name;
-                        templateSelect.appendChild(opt);
-                    });
-                }
-
-                templateGroup.classList.remove('template-group-hidden');
-                templateSelect.setAttribute('required', 'required');
-                advanceStep(2);
+                renderTemplates(templates);
             })
             .catch(error => {
                 console.error('Error loading templates:', error);
-                templateSelect.innerHTML = '<option value="">Error loading templates</option>';
+                showStatus("Couldn't load templates. Choose the lab again to retry.", true);
+                setSubmitEnabled(false);
             });
     });
+
+    function renderTemplates(templates) {
+        if (!Array.isArray(templates) || templates.length === 0) {
+            showStatus('No templates available for this lab.', false);
+            setSubmitEnabled(false);
+            return;
+        }
+
+        const single = templates.length === 1;
+        tilesContainer.innerHTML = '';
+        templates.forEach((t, i) => tilesContainer.appendChild(renderTile(t, single && i === 0)));
+        if (countEl) countEl.textContent = single ? '1 available' : templates.length + ' available';
+
+        // A lone template is pre-selected, so the request is ready right away;
+        // otherwise the student must pick one first.
+        setSubmitEnabled(single);
+        tilesContainer.querySelectorAll('input[name="template_id"]').forEach(radio => {
+            radio.addEventListener('change', function() {
+                // Mirror the checked state as a class so the selected styling holds up
+                // even where :has() isn't supported.
+                tilesContainer.querySelectorAll('.template-tile').forEach(tile => tile.classList.remove('is-selected'));
+                this.closest('.template-tile').classList.add('is-selected');
+                setSubmitEnabled(true);
+            });
+        });
+
+        advanceStep(2);
+    }
+}
+
+// renderTile builds one selectable template card from a template option returned by
+// /api/student/labs/templates. Built with DOM APIs (not innerHTML) so admin-authored
+// names and descriptions can never break out into markup.
+function renderTile(t, checked) {
+    const label = document.createElement('label');
+    label.className = 'template-tile';
+
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.name = 'template_id';
+    input.value = t.id;
+    if (checked) {
+        input.checked = true;
+        label.classList.add('is-selected');
+    }
+    label.appendChild(input);
+
+    const check = document.createElement('span');
+    check.className = 'template-tile-check';
+    check.setAttribute('aria-hidden', 'true');
+    check.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5l4 4 8-9"/></svg>';
+    label.appendChild(check);
+
+    const name = document.createElement('span');
+    name.className = 'template-tile-name';
+    name.textContent = t.name;
+    label.appendChild(name);
+
+    if (t.description) {
+        const desc = document.createElement('span');
+        desc.className = 'template-tile-desc';
+        desc.textContent = t.description;
+        label.appendChild(desc);
+    }
+
+    const chips = [];
+    if (t.ide) chips.push(['', t.ide]);
+    if (t.resources) chips.push(['cpu', t.resources]);
+    if (t.repo) chips.push(['repo', t.repo]);
+    if (chips.length) {
+        const meta = document.createElement('span');
+        meta.className = 'template-tile-meta';
+        chips.forEach(pair => {
+            const chip = document.createElement('span');
+            chip.className = 'template-tile-chip';
+            if (pair[0]) {
+                const key = document.createElement('span');
+                key.className = 'template-tile-chip-key';
+                key.textContent = pair[0];
+                chip.appendChild(key);
+                chip.appendChild(document.createTextNode(' ' + pair[1]));
+            } else {
+                chip.textContent = pair[1];
+            }
+            meta.appendChild(chip);
+        });
+        label.appendChild(meta);
+    }
+
+    return label;
 }
 
 function loadLabs() {

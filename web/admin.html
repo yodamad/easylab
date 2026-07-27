@@ -80,6 +80,12 @@
                         </div>
 
                         <div class="form-group">
+                            <label for="description">Description</label>
+                            <textarea id="description" name="description" rows="2" placeholder="Optional — what this lab is for (e.g. Kubernetes 101 workshop, June 2025 cohort)"></textarea>
+                            <small>Free-text summary of the lab's purpose. Shown in the labs list.</small>
+                        </div>
+
+                        <div class="form-group">
                             <label>Cluster Mode *</label>
                             <div class="button-group">
                                 <button type="button" class="source-button" data-cluster-mode="new" id="cluster-mode-new" onclick="wizard.setClusterMode(false)">
@@ -711,6 +717,7 @@
                                             </div>
                                             <div class="ut-step-body">
                                                 <input type="text" name="template_0_name" data-field="name" class="ut-name-input" value="default" required>
+                                                <input type="text" name="template_0_description" data-field="description" class="ut-name-input" placeholder="Description (optional) — what this template provides">
                                             </div>
                                         </div>
                                         <div class="ut-step">
@@ -826,6 +833,7 @@
                                         </div>
                                         <div class="ut-step-body">
                                             <input type="text" name="template_0_name" data-field="name" class="ut-name-input" value="default" required>
+                                            <input type="text" name="template_0_description" data-field="description" class="ut-name-input" placeholder="Description (optional) — what this template provides">
                                         </div>
                                     </div>
                                     <div class="ut-step">

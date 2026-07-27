@@ -69,15 +69,17 @@ type Job struct {
 // sizing, and environment provisioning (startup script, dotfiles, extensions,
 // sidecars, and ConfigMap/Secret mounts) applied to the student's pod.
 type WorkspaceTemplate struct {
-	Name      string            `json:"name"`
-	Image     string            `json:"image,omitempty"`
-	GitRepo   string            `json:"git_repo,omitempty"`
-	GitBranch string            `json:"git_branch,omitempty"`
-	GitFolder string            `json:"git_folder,omitempty"`
-	CPU       string            `json:"cpu,omitempty"`
-	Memory    string            `json:"memory,omitempty"`
-	DiskSize  string            `json:"disk_size,omitempty"`
-	Env       map[string]string `json:"env,omitempty"`
+	Name string `json:"name"`
+	// Description is a free-text, human-readable summary of what the template provides.
+	Description string            `json:"description,omitempty"`
+	Image       string            `json:"image,omitempty"`
+	GitRepo     string            `json:"git_repo,omitempty"`
+	GitBranch   string            `json:"git_branch,omitempty"`
+	GitFolder   string            `json:"git_folder,omitempty"`
+	CPU         string            `json:"cpu,omitempty"`
+	Memory      string            `json:"memory,omitempty"`
+	DiskSize    string            `json:"disk_size,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
 
 	// IDE selects the workspace IDE base. Only "code-server" is supported, so this
 	// is optional and normally left empty; the retired "openvscode" value is still
@@ -183,6 +185,9 @@ type WorkspaceMount struct {
 type LabConfig struct {
 	// Pulumi Stack Name
 	StackName string `json:"stack_name"`
+
+	// Description is a free-text, human-readable summary of the lab's purpose.
+	Description string `json:"description,omitempty"`
 
 	// Cloud Provider
 	Provider string `json:"provider"` // "ovh", "aws", "azure", etc.

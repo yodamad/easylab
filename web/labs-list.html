@@ -53,6 +53,7 @@
                             </td>
                             <td>
                                 {{if .StackName}}<span class="lab-name">{{.StackName}}</span>{{else}}<span class="lab-name-empty">—</span>{{end}}
+                                {{if .Description}}<span class="lab-description">{{.Description}}</span>{{end}}
                             </td>
                             <td class="lab-col-date">{{.CreatedAt}}</td>
                             <td>
