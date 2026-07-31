@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	_ "easylab/internal/providers/workspace/kube" // register the kube workspace backend
 	"easylab/internal/server"
 	"easylab/utils"
@@ -94,22 +95,66 @@ func loadEnvFile(envFile string) error {
 	return nil
 }
 
+// generatedKeyFileName is the file, inside dataDir, that holds an
+// auto-generated LAB_DATA_ENCRYPTION_KEY when the operator hasn't provided
+// one explicitly. Reusing this file across restarts keeps previously
+// persisted encrypted job data decryptable.
+const generatedKeyFileName = ".encryption_key"
+
+// loadOrGenerateEncryptionKey returns the raw (decoded) key to use when
+// LAB_DATA_ENCRYPTION_KEY is not set in the environment. It reuses a
+// previously generated key file under dataDir if present, otherwise it
+// generates a new random 32-byte key and persists it there (mode 0600) so
+// subsequent restarts pick up the same key.
+func loadOrGenerateEncryptionKey(dataDir string) ([]byte, error) {
+	keyPath := filepath.Join(dataDir, generatedKeyFileName)
+
+	if existing, err := os.ReadFile(keyPath); err == nil {
+		key, decodeErr := base64.StdEncoding.DecodeString(strings.TrimSpace(string(existing)))
+		if decodeErr != nil {
+			return nil, fmt.Errorf("existing generated key file %s is not valid base64: %w", keyPath, decodeErr)
+		}
+		log.Printf("[STARTUP] LAB_DATA_ENCRYPTION_KEY not set; reusing previously generated key from %s", keyPath)
+		return key, nil
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to read generated key file %s: %w", keyPath, err)
+	}
+
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return nil, fmt.Errorf("failed to generate encryption key: %w", err)
+	}
+	encoded := base64.StdEncoding.EncodeToString(key)
+	if err := os.WriteFile(keyPath, []byte(encoded), 0600); err != nil {
+		return nil, fmt.Errorf("failed to persist generated encryption key to %s: %w", keyPath, err)
+	}
+	log.Printf("[STARTUP] LAB_DATA_ENCRYPTION_KEY not set; generated a new key and saved it to %s. For production, set LAB_DATA_ENCRYPTION_KEY explicitly from a managed secret store instead of relying on this file.", keyPath)
+	return key, nil
+}
+
 // initDataEncryption configures at-rest encryption for persisted job files from
 // LAB_DATA_ENCRYPTION_KEY (base64-encoded 32 bytes / AES-256). When persistence
-// is enabled (dataDir is set), the key is mandatory: persisted job files carry
-// kubeconfigs and DNS credentials, so the process refuses to start without it.
-// Generate a key with: openssl rand -base64 32
+// is enabled (dataDir is set) and no key is provided, one is generated and
+// persisted under dataDir (see loadOrGenerateEncryptionKey) so the server can
+// still start and encrypted data remains decryptable across restarts.
 func initDataEncryption(dataDir string) error {
 	raw := strings.TrimSpace(os.Getenv("LAB_DATA_ENCRYPTION_KEY"))
+	var key []byte
 	if raw == "" {
 		if dataDir == "" {
 			return nil // persistence disabled, no key needed
 		}
-		return fmt.Errorf("LAB_DATA_ENCRYPTION_KEY is required when a data directory is configured (persisted job files hold secrets). Generate one with: openssl rand -base64 32")
-	}
-	key, err := base64.StdEncoding.DecodeString(raw)
-	if err != nil {
-		return fmt.Errorf("LAB_DATA_ENCRYPTION_KEY must be base64-encoded: %w", err)
+		generated, err := loadOrGenerateEncryptionKey(dataDir)
+		if err != nil {
+			return fmt.Errorf("failed to obtain data encryption key: %w", err)
+		}
+		key = generated
+	} else {
+		decoded, err := base64.StdEncoding.DecodeString(raw)
+		if err != nil {
+			return fmt.Errorf("LAB_DATA_ENCRYPTION_KEY must be base64-encoded: %w", err)
+		}
+		key = decoded
 	}
 	if err := server.InitDataEncryption(key); err != nil {
 		return fmt.Errorf("invalid LAB_DATA_ENCRYPTION_KEY: %w", err)

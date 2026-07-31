@@ -1,6 +1,8 @@
 package main
 
 import (
+	"easylab/internal/server"
+	"encoding/base64"
 	"errors"
 	"os"
 	"path/filepath"
@@ -455,4 +457,86 @@ func TestLoadEnvFile_OnlyCommentsAndEmptyLines(t *testing.T) {
 	// No environment variables should be set
 	// This is a sanity check - we can't easily verify no vars were set
 	// but we can verify the function doesn't error
+}
+
+func TestInitDataEncryption_NoDataDirNoKey(t *testing.T) {
+	t.Setenv("LAB_DATA_ENCRYPTION_KEY", "")
+
+	if err := initDataEncryption(""); err != nil {
+		t.Fatalf("initDataEncryption(\"\") error = %v, want nil (persistence disabled)", err)
+	}
+}
+
+func TestInitDataEncryption_GeneratesAndPersistsKey(t *testing.T) {
+	t.Setenv("LAB_DATA_ENCRYPTION_KEY", "")
+	tmpDir := t.TempDir()
+	t.Cleanup(func() { _ = server.InitDataEncryption(nil) })
+
+	if err := initDataEncryption(tmpDir); err != nil {
+		t.Fatalf("initDataEncryption() with no key set error = %v, want nil (key should be generated)", err)
+	}
+
+	keyPath := filepath.Join(tmpDir, generatedKeyFileName)
+	raw, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatalf("expected generated key file at %s, read error: %v", keyPath, err)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatalf("generated key file content is not valid base64: %v", err)
+	}
+	if len(decoded) != 32 {
+		t.Fatalf("generated key length = %d, want 32", len(decoded))
+	}
+}
+
+func TestInitDataEncryption_ReusesGeneratedKeyAcrossRestarts(t *testing.T) {
+	t.Setenv("LAB_DATA_ENCRYPTION_KEY", "")
+	tmpDir := t.TempDir()
+	t.Cleanup(func() { _ = server.InitDataEncryption(nil) })
+
+	if err := initDataEncryption(tmpDir); err != nil {
+		t.Fatalf("first initDataEncryption() error = %v", err)
+	}
+	firstKey, err := os.ReadFile(filepath.Join(tmpDir, generatedKeyFileName))
+	if err != nil {
+		t.Fatalf("failed to read generated key after first start: %v", err)
+	}
+
+	// Simulate a restart: same dataDir, key still unset in the environment.
+	if err := initDataEncryption(tmpDir); err != nil {
+		t.Fatalf("second initDataEncryption() error = %v", err)
+	}
+	secondKey, err := os.ReadFile(filepath.Join(tmpDir, generatedKeyFileName))
+	if err != nil {
+		t.Fatalf("failed to read generated key after second start: %v", err)
+	}
+
+	if string(firstKey) != string(secondKey) {
+		t.Fatalf("generated key changed across restarts: previously persisted encrypted data would become undecryptable")
+	}
+}
+
+func TestInitDataEncryption_ExplicitKeyTakesPrecedence(t *testing.T) {
+	tmpDir := t.TempDir()
+	key := make([]byte, 32)
+	t.Setenv("LAB_DATA_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(key))
+	t.Cleanup(func() { _ = server.InitDataEncryption(nil) })
+
+	if err := initDataEncryption(tmpDir); err != nil {
+		t.Fatalf("initDataEncryption() with explicit key error = %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(tmpDir, generatedKeyFileName)); !os.IsNotExist(err) {
+		t.Fatalf("expected no generated key file when LAB_DATA_ENCRYPTION_KEY is explicitly set, stat err = %v", err)
+	}
+}
+
+func TestInitDataEncryption_InvalidExplicitKey(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LAB_DATA_ENCRYPTION_KEY", "not-valid-base64!!!")
+
+	if err := initDataEncryption(tmpDir); err == nil {
+		t.Fatal("initDataEncryption() with invalid base64 key error = nil, want error")
+	}
 }
