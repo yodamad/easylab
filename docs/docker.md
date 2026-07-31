@@ -55,6 +55,11 @@ The application can be configured using the following environment variables:
 - `WORK_DIR`: Directory for job workspaces (default: /app/jobs)
 - `DATA_DIR`: Directory for persisting job data (default: /app/data)
 - `CLEANUP_INTERVAL_MINUTES`: How often (in minutes) the cleanup service checks for expired workspaces and scheduled lab deletions (default: 5)
+- `LAB_DATA_ENCRYPTION_KEY` **(required when `DATA_DIR` is set)**: base64-encoded 32-byte key (AES-256) used to encrypt secrets at rest in persisted job files — cluster kubeconfigs and DNS provider credentials. The server **refuses to start** when a data directory is configured but this key is missing. Generate one with `openssl rand -base64 32` and keep it stable: rotating the key makes previously-encrypted kubeconfigs unreadable, so you must destroy/recreate affected labs after a change.
+- `PULUMI_CONFIG_PASSPHRASE` (recommended): passphrase Pulumi uses to encrypt secrets in local stack state. If unset it defaults to the insecure literal `passphrase`; set a strong value. The server logs a `[SECURITY]` warning at startup while the default is in use (existing stacks stay decryptable).
+
+!!! note "Provider credentials are not written to lab state"
+    OVHcloud and Azure API credentials are held in memory only (from the environment variables below or the admin UI) and are **never** persisted in job files. When a lab is destroyed, recreated, or retried, the credentials are re-read from the in-memory store, so they must be available (typically via the `OVH_*` / `AZURE_*` environment variables) at that time.
 
 **Azure AD student login** (optional — all three required to enable):
 

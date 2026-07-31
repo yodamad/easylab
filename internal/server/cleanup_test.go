@@ -347,7 +347,14 @@ func TestCleanupExpiredLabs_MarksRunningForPastDate(t *testing.T) {
 	id := jm.CreateJob(&LabConfig{StackName: "test", LabDeletionDate: &past})
 	jm.UpdateJobStatus(id, JobStatusCompleted)
 
-	h := NewHandler(jm, &PulumiExecutor{jobManager: jm}, NewCredentialsManager(), nil, nil, nil)
+	// Provider credentials are re-fetched from the credential store before an
+	// auto-destroy, so they must be configured for the lab to be scheduled.
+	cm := NewCredentialsManager()
+	require.NoError(t, cm.SetCredentials(&OVHCredentials{
+		ApplicationKey: "ak", ApplicationSecret: "as", ConsumerKey: "ck",
+		ServiceName: "svc", Endpoint: "ovh-eu",
+	}))
+	h := NewHandler(jm, &PulumiExecutor{jobManager: jm}, cm, nil, nil, nil)
 	h.cleanupExpiredLabs()
 
 	job, _ := jm.GetJob(id)
@@ -355,4 +362,23 @@ func TestCleanupExpiredLabs_MarksRunningForPastDate(t *testing.T) {
 	status := job.Status
 	job.mu.RUnlock()
 	assert.Equal(t, JobStatusRunning, status, "job past deletion date should be marked Running immediately")
+}
+
+func TestCleanupExpiredLabs_SkipsWhenNoCredentials(t *testing.T) {
+	t.Parallel()
+	past := time.Now().Add(-1 * time.Hour)
+	jm := NewJobManager("")
+	// An OVH lab whose provider credentials are not available (e.g. entered via
+	// the UI and lost on restart) must not be auto-destroyed without them.
+	id := jm.CreateJob(&LabConfig{StackName: "test", Provider: "ovh", LabDeletionDate: &past})
+	jm.UpdateJobStatus(id, JobStatusCompleted)
+
+	h := NewHandler(jm, &PulumiExecutor{jobManager: jm}, NewCredentialsManager(), nil, nil, nil)
+	h.cleanupExpiredLabs()
+
+	job, _ := jm.GetJob(id)
+	job.mu.RLock()
+	status := job.Status
+	job.mu.RUnlock()
+	assert.Equal(t, JobStatusCompleted, status, "job must be left for retry, not marked Running, when credentials are missing")
 }

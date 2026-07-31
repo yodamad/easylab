@@ -2076,3 +2076,64 @@ func TestWorkspaceDeletionTime(t *testing.T) {
 func timePtr(t time.Time) *time.Time {
 	return &t
 }
+
+func TestRehydrateProviderCredentials_OVH(t *testing.T) {
+	cm := NewCredentialsManager()
+	require.NoError(t, cm.SetCredentials(&OVHCredentials{
+		ApplicationKey: "ak", ApplicationSecret: "as", ConsumerKey: "ck",
+		ServiceName: "svc", Endpoint: "ovh-eu",
+	}))
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, cm, nil, nil, nil)
+
+	config := &LabConfig{Provider: "ovh"}
+	require.NoError(t, h.rehydrateProviderCredentials(config))
+	assert.Equal(t, "as", config.OvhApplicationSecret)
+	assert.Equal(t, "ck", config.OvhConsumerKey)
+	assert.Equal(t, "ovh-eu", config.OvhEndpoint)
+}
+
+func TestRehydrateProviderCredentials_Azure(t *testing.T) {
+	cm := NewCredentialsManager()
+	require.NoError(t, cm.SetCredentials(&AzureCredentials{
+		ClientID: "cid", ClientSecret: "csec", TenantID: "tid", SubscriptionID: "sid",
+	}))
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, cm, nil, nil, nil)
+
+	config := &LabConfig{Provider: "azure"}
+	require.NoError(t, h.rehydrateProviderCredentials(config))
+	assert.Equal(t, "csec", config.AzureClientSecret)
+	assert.Equal(t, "cid", config.AzureClientID)
+}
+
+func TestRehydrateProviderCredentials_BYOKNoop(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	config := &LabConfig{UseExistingCluster: true, Provider: "ovh"}
+	require.NoError(t, h.rehydrateProviderCredentials(config))
+	assert.Empty(t, config.OvhApplicationSecret)
+}
+
+func TestRehydrateProviderCredentials_MissingReturnsError(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	require.Error(t, h.rehydrateProviderCredentials(&LabConfig{Provider: "ovh"}))
+}
+
+func TestGetJobStatusJSON_RedactsSecrets(t *testing.T) {
+	jm := NewJobManager("")
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	id := jm.CreateJob(&LabConfig{
+		StackName:            "lab",
+		OvhApplicationSecret: "app-secret-value",
+		ExternalKubeconfig:   "external-kc",
+	})
+	require.NoError(t, jm.SetKubeconfig(id, "provisioned-kc"))
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusCompleted))
+
+	rec := httptest.NewRecorder()
+	h.GetJobStatusJSON(rec, httptest.NewRequest(http.MethodGet, "/api/jobs/"+id+"/status", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	for _, secret := range []string{"app-secret-value", "provisioned-kc", "external-kc"} {
+		assert.NotContains(t, body, secret, "status JSON must not leak %q", secret)
+	}
+}

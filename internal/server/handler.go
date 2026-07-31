@@ -230,6 +230,49 @@ func (h *Handler) getProviderCredentials(w http.ResponseWriter, providerName str
 	return creds, nil
 }
 
+// rehydrateProviderCredentials repopulates the provider API credentials on a
+// LabConfig from the in-memory CredentialsManager. Credentials are no longer
+// persisted with the job, so any operation that runs Pulumi against a lab loaded
+// from disk (destroy, recreate, retry, and the background auto-deletion) must
+// call this first. It returns a plain error rather than writing an HTTP
+// response, so it is usable from both HTTP handlers and the cleanup goroutine.
+//
+// A BYO-Kubernetes lab needs no provider credentials, so it is a no-op.
+func (h *Handler) rehydrateProviderCredentials(config *LabConfig) error {
+	if config == nil || config.UseExistingCluster {
+		return nil
+	}
+
+	provider := config.Provider
+	if provider == "" {
+		provider = "ovh" // Default to OVH for backward compatibility
+	}
+
+	switch provider {
+	case "ovh":
+		creds, err := h.credentialsManager.GetOVHCredentials()
+		if err != nil {
+			return fmt.Errorf("OVH credentials not configured: %w", err)
+		}
+		config.OvhApplicationKey = creds.ApplicationKey
+		config.OvhApplicationSecret = creds.ApplicationSecret
+		config.OvhConsumerKey = creds.ConsumerKey
+		config.OvhServiceName = creds.ServiceName
+		config.OvhEndpoint = creds.Endpoint
+	case "azure":
+		creds, err := h.credentialsManager.GetAzureCredentials()
+		if err != nil {
+			return fmt.Errorf("Azure credentials not configured: %w", err)
+		}
+		config.AzureClientID = creds.ClientID
+		config.AzureClientSecret = creds.ClientSecret
+		config.AzureTenantID = creds.TenantID
+		config.AzureSubscriptionID = creds.SubscriptionID
+	}
+
+	return nil
+}
+
 // parseWorkspaceTemplatesFromForm extracts workspace template entries from the form.
 // Expects template_N_name, template_N_image, template_N_git_repo, template_N_cpu,
 // template_N_memory, template_N_disk_size, and repeated template_N_env_name /
@@ -1137,8 +1180,17 @@ func (h *Handler) GetJobStatusJSON(w http.ResponseWriter, r *http.Request) {
 	job.mu.RLock()
 	defer job.mu.RUnlock()
 
+	// Redact credentials and kubeconfigs from the status response — the raw job
+	// carries provider secrets and cluster-admin kubeconfigs that must not leave.
+	sanitized, err := job.sanitizedCopy(false)
+	if err != nil {
+		log.Printf("Failed to sanitize job %s for status response: %v", jobID, err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(job)
+	json.NewEncoder(w).Encode(sanitized)
 }
 
 // ServeStatic serves static files
@@ -3288,6 +3340,18 @@ func (h *Handler) DestroyStack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Provider credentials are not persisted with the job — repopulate them from
+	// the in-memory credential store so the destroy has cloud API access. A no-op
+	// for BYO-Kubernetes labs.
+	job.mu.RLock()
+	config := job.Config
+	job.mu.RUnlock()
+	if err := h.rehydrateProviderCredentials(config); err != nil {
+		log.Printf("Failed to load provider credentials to destroy job %s: %v", jobID, err)
+		h.renderHTMLError(w, "Credentials Not Configured", "Please configure your cloud provider credentials before destroying this lab.", `<a href="/credentials" class="btn btn-primary">Configure Credentials</a>`)
+		return
+	}
+
 	// Start destruction in a goroutine
 	go func() {
 		log.Printf("Starting stack destruction for job: %s, stack: %s", jobID, stackName)
@@ -3417,18 +3481,13 @@ func (h *Handler) RecreateLab(w http.ResponseWriter, r *http.Request) {
 		config.LabDeletionDate = newDeletion
 	}
 
-	// Get OVH credentials only when not using existing cluster (BYOK doesn't need them)
-	if !config.UseExistingCluster {
-		ovhCreds, err := h.getOVHCredentials(w)
-		if err != nil {
-			return
-		}
-		// Update config with current credentials (in case they changed)
-		config.OvhApplicationKey = ovhCreds.ApplicationKey
-		config.OvhApplicationSecret = ovhCreds.ApplicationSecret
-		config.OvhConsumerKey = ovhCreds.ConsumerKey
-		config.OvhServiceName = ovhCreds.ServiceName
-		config.OvhEndpoint = ovhCreds.Endpoint
+	// Provider credentials are not persisted with the job — repopulate them from
+	// the in-memory credential store before provisioning (covers OVH and Azure).
+	// A no-op for BYO-Kubernetes labs.
+	if err := h.rehydrateProviderCredentials(config); err != nil {
+		log.Printf("Failed to load provider credentials for job %s: %v", jobID, err)
+		h.renderHTMLError(w, "Credentials Not Configured", "Please configure your cloud provider credentials before continuing.", `<a href="/credentials" class="btn btn-primary">Configure Credentials</a>`)
+		return
 	}
 
 	// Tokens the admin re-entered in the recreate prompt. The old cluster's
@@ -3522,18 +3581,13 @@ func (h *Handler) RetryJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get OVH credentials only when not using existing cluster (BYOK doesn't need them)
-	if !config.UseExistingCluster {
-		ovhCreds, err := h.getOVHCredentials(w)
-		if err != nil {
-			return
-		}
-		// Update config with current credentials (in case they changed)
-		config.OvhApplicationKey = ovhCreds.ApplicationKey
-		config.OvhApplicationSecret = ovhCreds.ApplicationSecret
-		config.OvhConsumerKey = ovhCreds.ConsumerKey
-		config.OvhServiceName = ovhCreds.ServiceName
-		config.OvhEndpoint = ovhCreds.Endpoint
+	// Provider credentials are not persisted with the job — repopulate them from
+	// the in-memory credential store before provisioning (covers OVH and Azure).
+	// A no-op for BYO-Kubernetes labs.
+	if err := h.rehydrateProviderCredentials(config); err != nil {
+		log.Printf("Failed to load provider credentials for job %s: %v", jobID, err)
+		h.renderHTMLError(w, "Credentials Not Configured", "Please configure your cloud provider credentials before continuing.", `<a href="/credentials" class="btn btn-primary">Configure Credentials</a>`)
+		return
 	}
 
 	// Reset job for retry

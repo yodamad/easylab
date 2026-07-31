@@ -479,6 +479,86 @@ func (jm *JobManager) ResetJobForRetry(id string) error {
 	return nil
 }
 
+// sanitizedCopy returns a copy of the job safe to persist or expose outside the
+// running process. Provider API credentials (OVH/Azure) are always stripped —
+// they are re-fetched from the in-memory CredentialsManager when a Pulumi
+// operation needs them. The remaining secrets that must survive a restart
+// (kubeconfigs and DNS credentials) are encrypted when encryptSecrets is true
+// (on-disk persistence) and blanked when false (API responses). The receiver and
+// its config are not mutated.
+//
+// Callers must hold j.mu (a read lock is sufficient); slices/maps are shared by
+// reference and only read, so the copy must be marshalled before the lock is
+// released.
+func (j *Job) sanitizedCopy(encryptSecrets bool) (*Job, error) {
+	// Build field-by-field rather than dereferencing j so the embedded mutex is
+	// not copied (go vet copylocks).
+	cp := &Job{
+		ID:                 j.ID,
+		Status:             j.Status,
+		CreatedAt:          j.CreatedAt,
+		UpdatedAt:          j.UpdatedAt,
+		Output:             j.Output,
+		Error:              j.Error,
+		CleanupEvents:      j.CleanupEvents,
+		WorkspaceSnapshots: j.WorkspaceSnapshots,
+		DeletionRetries:    j.DeletionRetries,
+	}
+
+	// atRest encrypts when persisting and blanks when exposing via the API.
+	atRest := func(s string) (string, error) {
+		if !encryptSecrets {
+			return "", nil
+		}
+		return encryptSecret(s)
+	}
+
+	kc, err := atRest(j.Kubeconfig)
+	if err != nil {
+		return nil, err
+	}
+	cp.Kubeconfig = kc
+
+	if j.Config != nil {
+		cfg := *j.Config
+		// Provider credentials are never persisted or exposed.
+		cfg.OvhApplicationKey = ""
+		cfg.OvhApplicationSecret = ""
+		cfg.OvhConsumerKey = ""
+		cfg.OvhServiceName = ""
+		cfg.OvhEndpoint = ""
+		cfg.AzureClientID = ""
+		cfg.AzureClientSecret = ""
+		cfg.AzureTenantID = ""
+		cfg.AzureSubscriptionID = ""
+
+		ek, err := atRest(cfg.ExternalKubeconfig)
+		if err != nil {
+			return nil, err
+		}
+		cfg.ExternalKubeconfig = ek
+
+		if len(j.Config.DNSCredentials) > 0 {
+			if encryptSecrets {
+				dns := make(map[string]string, len(j.Config.DNSCredentials))
+				for k, v := range j.Config.DNSCredentials {
+					ev, encErr := encryptSecret(v)
+					if encErr != nil {
+						return nil, encErr
+					}
+					dns[k] = ev
+				}
+				cfg.DNSCredentials = dns
+			} else {
+				cfg.DNSCredentials = nil
+			}
+		}
+		cp.Config = &cfg
+	}
+
+	return cp, nil
+}
+
 // SaveJob persists a completed job to disk
 func (jm *JobManager) SaveJob(id string) error {
 	if jm.dataDir == "" {
@@ -502,25 +582,33 @@ func (jm *JobManager) SaveJob(id string) error {
 		return nil
 	}
 
-	// Create jobs directory if it doesn't exist
+	// Create jobs directory if it doesn't exist. 0700: job files carry
+	// (encrypted) kubeconfigs, so the directory is not world-traversable.
 	jobsDir := filepath.Join(jm.dataDir, "jobs")
-	if err := os.MkdirAll(jobsDir, 0755); err != nil {
+	if err := os.MkdirAll(jobsDir, 0700); err != nil {
 		return fmt.Errorf("failed to create jobs directory: %w", err)
 	}
 
-	// Marshal job to JSON
+	// Marshal a sanitized copy: provider credentials are stripped and the
+	// kubeconfigs / DNS credentials are encrypted at rest. Done under the read
+	// lock because the copy shares slices with the live job.
 	job.mu.RLock()
-	jobData, err := json.MarshalIndent(job, "", "  ")
+	sanitized, err := job.sanitizedCopy(true)
+	var jobData []byte
+	if err == nil {
+		jobData, err = json.MarshalIndent(sanitized, "", "  ")
+	}
 	job.mu.RUnlock()
 	if err != nil {
 		return fmt.Errorf("failed to marshal job: %w", err)
 	}
 
-	// Write atomically: write to temp file, then rename
+	// Write atomically: write to temp file, then rename. 0600: the file contains
+	// encrypted secret material and must not be world-readable.
 	jobFile := filepath.Join(jobsDir, fmt.Sprintf("%s.json", id))
 	tmpFile := jobFile + ".tmp"
 
-	if err := os.WriteFile(tmpFile, jobData, 0644); err != nil {
+	if err := os.WriteFile(tmpFile, jobData, 0600); err != nil {
 		return fmt.Errorf("failed to write job file: %w", err)
 	}
 
@@ -578,6 +666,33 @@ func (jm *JobManager) LoadJobs() error {
 		// Initialise maps that may be absent in jobs persisted before this field was added.
 		if job.DeletionRetries == nil {
 			job.DeletionRetries = make(map[string]*WorkspaceDeletionRetry)
+		}
+
+		// Decrypt secrets encrypted at rest back to plaintext for in-memory use.
+		// Values persisted before encryption (no enc: prefix) pass through
+		// unchanged. A decryption failure means the file is unreadable with the
+		// current key — skip the job rather than load corrupt state.
+		if kc, decErr := decryptSecret(job.Kubeconfig); decErr != nil {
+			log.Printf("Warning: failed to decrypt kubeconfig in job file %s: %v", jobFile, decErr)
+			continue
+		} else {
+			job.Kubeconfig = kc
+		}
+		if job.Config != nil {
+			if ek, decErr := decryptSecret(job.Config.ExternalKubeconfig); decErr != nil {
+				log.Printf("Warning: failed to decrypt external kubeconfig in job file %s: %v", jobFile, decErr)
+				continue
+			} else {
+				job.Config.ExternalKubeconfig = ek
+			}
+			for k, v := range job.Config.DNSCredentials {
+				dv, decErr := decryptSecret(v)
+				if decErr != nil {
+					log.Printf("Warning: failed to decrypt DNS credential %q in job file %s: %v", k, jobFile, decErr)
+					continue
+				}
+				job.Config.DNSCredentials[k] = dv
+			}
 		}
 
 		// Add to jobs map

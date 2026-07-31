@@ -6,6 +6,7 @@ import (
 	_ "easylab/internal/providers/workspace/kube" // register the kube workspace backend
 	"easylab/internal/server"
 	"easylab/utils"
+	"encoding/base64"
 	"flag"
 	"fmt"
 	"log"
@@ -90,6 +91,30 @@ func loadEnvFile(envFile string) error {
 	}
 
 	log.Printf("[STARTUP] Loaded %d environment variables from %s", loadedCount, envFile)
+	return nil
+}
+
+// initDataEncryption configures at-rest encryption for persisted job files from
+// LAB_DATA_ENCRYPTION_KEY (base64-encoded 32 bytes / AES-256). When persistence
+// is enabled (dataDir is set), the key is mandatory: persisted job files carry
+// kubeconfigs and DNS credentials, so the process refuses to start without it.
+// Generate a key with: openssl rand -base64 32
+func initDataEncryption(dataDir string) error {
+	raw := strings.TrimSpace(os.Getenv("LAB_DATA_ENCRYPTION_KEY"))
+	if raw == "" {
+		if dataDir == "" {
+			return nil // persistence disabled, no key needed
+		}
+		return fmt.Errorf("LAB_DATA_ENCRYPTION_KEY is required when a data directory is configured (persisted job files hold secrets). Generate one with: openssl rand -base64 32")
+	}
+	key, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return fmt.Errorf("LAB_DATA_ENCRYPTION_KEY must be base64-encoded: %w", err)
+	}
+	if err := server.InitDataEncryption(key); err != nil {
+		return fmt.Errorf("invalid LAB_DATA_ENCRYPTION_KEY: %w", err)
+	}
+	log.Printf("[STARTUP] Job data at-rest encryption enabled")
 	return nil
 }
 
@@ -181,6 +206,15 @@ func main() {
 	parallelStart := time.Now()
 	wg.Wait()
 	log.Printf("[STARTUP] Parallel component initialization took %v", time.Since(parallelStart))
+
+	// Initialize at-rest encryption for persisted job files before any job is
+	// loaded or saved. Mandatory when persistence is enabled.
+	if err := initDataEncryption(*dataDir); err != nil {
+		log.Fatalf("%v", err)
+	}
+	if p := os.Getenv("PULUMI_CONFIG_PASSPHRASE"); p == "" || p == "passphrase" {
+		log.Printf("[SECURITY] PULUMI_CONFIG_PASSPHRASE is unset or the insecure default \"passphrase\" — set a strong value to protect secrets in Pulumi stack state. Existing stacks remain decryptable.")
+	}
 
 	// Initialize OVH options manager (depends on credentialsManager)
 	ovhOptionsStart := time.Now()

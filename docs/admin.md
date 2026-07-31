@@ -451,7 +451,7 @@ Cloud provider credentials and options are accessed from the **Provider** dropdo
 
 Each provider page has two tabs:
 
-* **Credentials** — enter and save the API credentials for the provider. Credentials are stored in memory only and are cleared on application restart. When using **Use Existing Cluster**, no cloud credentials are required.
+* **Credentials** — enter and save the API credentials for the provider. Credentials are stored in memory only and are cleared on application restart; they are **never written to lab state on disk**. Because of this, they are re-read from the in-memory store whenever a lab is destroyed, recreated, or retried, so the credentials must be available at that time (for example provided via the `OVH_*` / `AZURE_*` environment variables so they survive a restart). When using **Use Existing Cluster**, no cloud credentials are required.
 * **Options** — configure available regions and compute flavors/VM sizes for the lab creation wizard. Use **Refresh** to fetch the latest data from the provider API.
 
 For OVHcloud-specific setup, see [OVHcloud configuration](ovhcloud.md). For Azure-specific setup, see [Azure configuration](azure.md).

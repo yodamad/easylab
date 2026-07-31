@@ -105,6 +105,9 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 | `resources.limits.memory` | Memory limit | `4096Mi` |
 | `resources.limits.cpu` | CPU limit | `3000m` |
 
+!!! warning "Data encryption key is required with persistence"
+    Because `config.dataDir` is set by default, persisted job files hold cluster kubeconfigs and DNS credentials. The pod **must** receive a `LAB_DATA_ENCRYPTION_KEY` environment variable (a base64-encoded 32-byte key, e.g. from `openssl rand -base64 32`) — the server refuses to start without it. Provide it through your secret / pod environment and keep it stable across upgrades, or previously-encrypted kubeconfigs become unreadable and the affected labs must be recreated. Setting a strong `PULUMI_CONFIG_PASSPHRASE` is likewise recommended (see [Docker — Environment Variables](docker.md#environment-variables) for details on both). Provider API credentials are held in memory only and are never written to lab state.
+
 ### Optional infrastructure components
 
 By default, the chart assumes nginx-ingress and cert-manager are **already installed** in your cluster. If they are not, you can let the chart install them:

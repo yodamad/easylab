@@ -372,6 +372,148 @@ func TestJobManager_SaveJob_NotFound(t *testing.T) {
 	}
 }
 
+func TestSaveJob_RedactsCredsAndEncryptsKubeconfig(t *testing.T) {
+	if err := InitDataEncryption(testKey); err != nil {
+		t.Fatalf("InitDataEncryption: %v", err)
+	}
+	defer InitDataEncryption(nil)
+
+	tempDir := t.TempDir()
+	jm := NewJobManager(tempDir)
+
+	config := &LabConfig{
+		StackName:            "lab",
+		Provider:             "ovh",
+		OvhApplicationKey:    "app-key",
+		OvhApplicationSecret: "app-secret-value",
+		OvhConsumerKey:       "consumer-key",
+		AzureClientSecret:    "azure-secret",
+		ExternalKubeconfig:   "external-kubeconfig-contents",
+		DNSCredentials:       map[string]string{"applicationSecret": "dns-secret"},
+	}
+	jobID := jm.CreateJob(config)
+	if err := jm.SetKubeconfig(jobID, "provisioned-kubeconfig-contents"); err != nil {
+		t.Fatalf("SetKubeconfig: %v", err)
+	}
+	jm.UpdateJobStatus(jobID, JobStatusCompleted)
+
+	if err := jm.SaveJob(jobID); err != nil {
+		t.Fatalf("SaveJob: %v", err)
+	}
+
+	jobFile := filepath.Join(tempDir, "jobs", jobID+".json")
+
+	// The file must not be world-readable.
+	info, err := os.Stat(jobFile)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0600 {
+		t.Errorf("job file mode = %o, want 0600", perm)
+	}
+
+	raw, err := os.ReadFile(jobFile)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	onDisk := string(raw)
+
+	// No cleartext secret value may appear on disk.
+	for _, secret := range []string{
+		"app-key", "app-secret-value", "consumer-key", "azure-secret",
+		"provisioned-kubeconfig-contents", "external-kubeconfig-contents", "dns-secret",
+	} {
+		if strings.Contains(onDisk, secret) {
+			t.Errorf("persisted job file contains cleartext secret %q", secret)
+		}
+	}
+	// Kubeconfig/DNS fields are still present, but encrypted.
+	if !strings.Contains(onDisk, encPrefix) {
+		t.Errorf("expected encrypted (%s) values in persisted job file", encPrefix)
+	}
+}
+
+func TestLoadJobs_DecryptsKubeconfigAndDropsCreds(t *testing.T) {
+	if err := InitDataEncryption(testKey); err != nil {
+		t.Fatalf("InitDataEncryption: %v", err)
+	}
+	defer InitDataEncryption(nil)
+
+	tempDir := t.TempDir()
+
+	jm1 := NewJobManager(tempDir)
+	config := &LabConfig{
+		StackName:            "roundtrip-lab",
+		Provider:             "ovh",
+		OvhApplicationSecret: "app-secret-value",
+		ExternalKubeconfig:   "external-kc",
+		DNSCredentials:       map[string]string{"applicationSecret": "dns-secret"},
+	}
+	jobID := jm1.CreateJob(config)
+	if err := jm1.SetKubeconfig(jobID, "provisioned-kc"); err != nil {
+		t.Fatalf("SetKubeconfig: %v", err)
+	}
+	jm1.UpdateJobStatus(jobID, JobStatusCompleted)
+	if err := jm1.SaveJob(jobID); err != nil {
+		t.Fatalf("SaveJob: %v", err)
+	}
+
+	jm2 := NewJobManager(tempDir)
+	if err := jm2.LoadJobs(); err != nil {
+		t.Fatalf("LoadJobs: %v", err)
+	}
+	loaded, ok := jm2.GetJob(jobID)
+	if !ok {
+		t.Fatalf("job %s not loaded", jobID)
+	}
+
+	// Kubeconfigs and DNS credentials decrypt back to plaintext for in-memory use.
+	if loaded.Kubeconfig != "provisioned-kc" {
+		t.Errorf("Kubeconfig = %q, want plaintext round-trip", loaded.Kubeconfig)
+	}
+	if loaded.Config.ExternalKubeconfig != "external-kc" {
+		t.Errorf("ExternalKubeconfig = %q, want plaintext round-trip", loaded.Config.ExternalKubeconfig)
+	}
+	if got := loaded.Config.DNSCredentials["applicationSecret"]; got != "dns-secret" {
+		t.Errorf("DNS credential = %q, want plaintext round-trip", got)
+	}
+	// Provider credentials were never persisted.
+	if loaded.Config.OvhApplicationSecret != "" {
+		t.Errorf("OvhApplicationSecret = %q, want empty (not persisted)", loaded.Config.OvhApplicationSecret)
+	}
+}
+
+func TestLoadJobs_PlaintextBackwardCompatible(t *testing.T) {
+	if err := InitDataEncryption(testKey); err != nil {
+		t.Fatalf("InitDataEncryption: %v", err)
+	}
+	defer InitDataEncryption(nil)
+
+	tempDir := t.TempDir()
+	jobsDir := filepath.Join(tempDir, "jobs")
+	if err := os.MkdirAll(jobsDir, 0700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// A job file written before at-rest encryption existed: plaintext kubeconfig,
+	// no enc: prefix. It must still load.
+	legacy := `{"id":"job-legacy","status":"completed","kubeconfig":"legacy-plaintext-kc","config":{"stack_name":"legacy"}}`
+	if err := os.WriteFile(filepath.Join(jobsDir, "job-legacy.json"), []byte(legacy), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	jm := NewJobManager(tempDir)
+	if err := jm.LoadJobs(); err != nil {
+		t.Fatalf("LoadJobs: %v", err)
+	}
+	loaded, ok := jm.GetJob("job-legacy")
+	if !ok {
+		t.Fatalf("legacy job not loaded")
+	}
+	if loaded.Kubeconfig != "legacy-plaintext-kc" {
+		t.Errorf("legacy Kubeconfig = %q, want plaintext passthrough", loaded.Kubeconfig)
+	}
+}
+
 func TestJobManager_LoadJobs(t *testing.T) {
 	tempDir := t.TempDir()
 

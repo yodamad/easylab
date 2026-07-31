@@ -164,6 +164,15 @@ func (h *Handler) cleanupExpiredLabs() {
 		}
 		jobID := job.ID
 		log.Printf("[cleanup] scheduling automatic lab deletion for job %s (deletion date: %s)", jobID, job.Config.LabDeletionDate.Format("2006-01-02"))
+		// Provider credentials are not persisted with the job — repopulate them
+		// from the in-memory credential store before this non-interactive destroy.
+		// If they are unavailable (e.g. entered via the UI and lost on restart),
+		// skip this tick rather than run a credential-less destroy that would
+		// orphan cloud resources; the status stays Completed so it retries later.
+		if err := h.rehydrateProviderCredentials(job.Config); err != nil {
+			log.Printf("[cleanup] cannot auto-delete job %s: %v; will retry next cycle", jobID, err)
+			continue
+		}
 		// Mark as running immediately to prevent duplicate destroy on the next tick.
 		if err := h.jobManager.UpdateJobStatus(jobID, JobStatusRunning); err != nil {
 			log.Printf("[cleanup] failed to mark job %s as running before deletion: %v", jobID, err)
