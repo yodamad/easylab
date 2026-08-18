@@ -142,6 +142,10 @@ func SetupHTTPS(
 
 	dnsProviderName := utils.DNSConfigOptional(ctx, utils.DNSProviderKey)
 	useExternalDNS := utils.DNSConfigOptional(ctx, utils.DNSExternalDNS) == "true"
+	// Declared here (rather than inside the DNS-01 block below) so the second
+	// dnsProviderName != "" block further down — which wires up ExternalDNS — can
+	// also see it.
+	var zone string
 	certDeps := []pulumi.Resource{}
 	if certManagerRelease != nil {
 		certDeps = append(certDeps, certManagerRelease)
@@ -159,7 +163,7 @@ func SetupHTTPS(
 			return nil, pulumi.StringOutput{}, secretErr
 		}
 
-		zone := utils.DNSConfigOptional(ctx, utils.DNSZone)
+		zone = utils.DNSConfigOptional(ctx, utils.DNSZone)
 
 		webhookSolver, webhookRelease, setupErr := dnsProvider.SetupCertManagerDNS01(
 			ctx, k8sProvider, zone, credSecret, certDeps,
@@ -307,7 +311,7 @@ func SetupHTTPS(
 		}
 
 		if useExternalDNS {
-			if edErr := setupExternalDNS(ctx, k8sProvider, dnsProviderName, domain, certDeps); edErr != nil {
+			if edErr := setupExternalDNS(ctx, k8sProvider, dnsProviderName, zone, certDeps); edErr != nil {
 				return nil, pulumi.StringOutput{}, edErr
 			}
 		}

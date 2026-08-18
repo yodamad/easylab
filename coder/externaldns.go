@@ -36,11 +36,14 @@ const azureConfigMountPath = "/etc/kubernetes"
 //
 // It does not affect certificates: the wildcard certificate is issued through
 // DNS-01 TXT records written by cert-manager, whatever creates the A records.
+//
+// zone is the DNS zone ExternalDNS is scoped to (dns:zone), not the lab's
+// domain — see the domainFilters comment below for why that distinction matters.
 func setupExternalDNS(
 	ctx *pulumi.Context,
 	k8sProvider *k8s.Provider,
 	providerName string,
-	domain string,
+	zone string,
 	deps []pulumi.Resource,
 ) error {
 	ns, err := k8score.NewNamespace(ctx, "external-dns-ns", &k8score.NamespaceArgs{
@@ -69,8 +72,14 @@ func setupExternalDNS(
 	values := pulumi.Map{
 		"provider": pulumi.Map{"name": pulumi.String(providerName)},
 		// Only ingresses: the workspace Service is ClusterIP and carries no hostname.
-		"sources":       pulumi.Array{pulumi.String("ingress")},
-		"domainFilters": pulumi.Array{pulumi.String(domain)},
+		"sources": pulumi.Array{pulumi.String("ingress")},
+		// The filter has to be the DNS zone itself, not the lab's subdomain: the
+		// OVH/Azure providers list the account's zones and keep only the ones this
+		// filter matches as a suffix. A lab domain like "lab.example.com" is a
+		// suffix of the zone "example.com", not the other way around, so passing
+		// the lab domain here makes every zone lookup come back empty and
+		// ExternalDNS silently never creates a single record.
+		"domainFilters": pulumi.Array{pulumi.String(zone)},
 		// "sync" lets ExternalDNS delete records for workspaces that are gone. It
 		// only ever touches records its TXT registry marks as its own, so the base
 		// A record created by Pulumi and cert-manager's DNS-01 TXT records are safe.
