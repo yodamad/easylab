@@ -297,26 +297,56 @@ directory`, this is why.
 
 #### HTTPS Configuration (Optional)
 
-A domain is optional. Without one, workspaces are still reachable — EasyLab falls
-back to [nip.io](https://nip.io) wildcard DNS over the ingress controller's
-LoadBalancer IP, serving each workspace at `http://{workspace}.{ingressIP}.nip.io`.
-That needs no DNS setup at all, which makes it convenient for quick or throwaway
-labs, but it is **plain HTTP with no TLS** — set a domain for anything real.
+The wizard step asks one question — **"How will students reach their workspaces?"** —
+with three choices:
 
-* **Domain Name** — the base FQDN for the lab (e.g. `lab.example.com`). Each student workspace gets a subdomain (`{workspace}.{domain}`), served over HTTPS. Leave blank to use the nip.io fallback described above.
-* **ACME Email** — email address used for Let's Encrypt certificate notifications. Required when domain is set.
-* **Wildcard Domain** — optional, e.g. `*.lab.example.com`. Overrides the wildcard record derived from the domain above; leave blank unless you need a different base. With a DNS provider configured the wildcard record is created automatically, so this field is rarely needed.
+* **Quick start** — no domain. Workspaces fall back to [nip.io](https://nip.io)
+  wildcard DNS over the ingress controller's LoadBalancer IP, serving each workspace at
+  `http://{workspace}.{ingressIP}.nip.io`. Needs no DNS setup at all, which makes it
+  convenient for quick or throwaway labs, but it is **plain HTTP with no TLS**.
+* **Custom domain — automatic** (recommended) — you own a domain and also configure a
+  [DNS provider](#dns-provider-optional) below. EasyLab creates the DNS records and a
+  single wildcard TLS certificate for you.
+* **Custom domain — manual DNS** — you own a domain but manage DNS yourself. See the
+  warning below before picking this for a large lab.
 
-!!! warning "A domain with no DNS provider needs a wildcard record you create yourself"
+Picking either custom-domain option reveals:
+
+* **Domain Name** — the base FQDN for the lab (e.g. `lab.example.com`). Each student workspace gets a subdomain (`{workspace}.{domain}`), served over HTTPS.
+* **Contact email** — used only if a Let's Encrypt certificate needs attention; not shown to students.
+
+!!! warning "Manual DNS needs a wildcard record you create yourself"
     Workspace URLs are `{workspace}.{domain}`, so **nothing resolves without a wildcard
-    record**. If you set a domain but leave the DNS provider as *None*, EasyLab cannot
-    create that record for you — you must add `*.<domain> → <ingressIP>` in your DNS
-    zone once the lab is provisioned. Until you do, workspace URLs return NXDOMAIN and
-    their certificates stay pending forever, because cert-manager's HTTP-01 self-check
-    fails on the very same lookup. The lab creation form warns you when it sees this
-    combination.
+    record**. With "Custom domain — manual DNS", EasyLab cannot create that record for
+    you — you must add `*.<domain> → <ingressIP>` in your DNS zone once the lab is
+    provisioned. Until you do, workspace URLs return NXDOMAIN and their certificates
+    stay pending forever, because cert-manager's HTTP-01 self-check fails on the very
+    same lookup. The wizard shows this same guidance inline as soon as you pick that
+    option.
 
 ![DNS configuration](screens/dns-config.png)
+
+Two infrastructure toggles sit in the main flow, not tucked behind a click, so you
+can find them even if you're just skimming: **Ingress Controller** (always shown) and
+**cert-manager** (shown once a custom domain is selected — it has nothing to do in
+Quick start mode). Both default to "install a new one"; switch to "use existing" if
+your cluster already has one, and a namespace/service-name override appears.
+
+!!! note "Reusing cert-manager across labs on the same cluster"
+    Picking **Use existing cert-manager** together with **Custom domain — automatic**
+    reveals **Is DNS-01 already set up on this cert-manager?**. Choose **Already
+    configured** if an earlier lab on this same cluster already created the
+    `letsencrypt-prod` ClusterIssuer, DNS-01 webhook, and credential secret — EasyLab
+    then skips recreating them (which would otherwise conflict) and reuses them as-is.
+    You still fill in the DNS provider, zone, and credentials below: this lab still
+    needs its own DNS A-record created, since every lab has its own domain and ingress
+    IP. Leave it on **Set it up for me** (the default) for the first lab on a cluster,
+    or if you're not sure.
+
+An **Advanced options** section holds the **Wildcard Domain** override. It only
+appears for **Custom domain — automatic** with the **Wildcard record** DNS strategy
+(see [ExternalDNS](#externaldns-optional) below) — that override has no effect in any
+other mode, so the wizard hides it rather than show a field that silently does nothing.
 
 The following components are deployed into the cluster:
 
@@ -354,7 +384,7 @@ After `pulumi up` completes, the stack output `ingressIP` is printed. **You must
 
 #### DNS Provider (Optional)
 
-Select a DNS provider to automate A-record creation and unlock wildcard certificates (DNS-01 challenge):
+Shown once you pick **Custom domain — automatic**. Select a DNS provider to automate A-record creation and unlock wildcard certificates (DNS-01 challenge):
 
 | Provider | Setup required |
 |----------|---------------|
@@ -373,8 +403,9 @@ When a DNS provider is configured:
 
 ##### ExternalDNS (Optional)
 
-Some DNS administrators will not hand out a wildcard record. Tick **Use ExternalDNS
-instead of a wildcard record** to install
+Some DNS administrators will not hand out a wildcard record. Once a DNS provider is
+selected, a **DNS record strategy** choice appears below the credential fields —
+**Wildcard record** (default) or **ExternalDNS**. Picking **ExternalDNS** installs
 [ExternalDNS](https://kubernetes-sigs.github.io/external-dns/) into the cluster
 instead: it watches the workspace ingresses and creates one DNS record per workspace,
 removing each one when its workspace goes away.

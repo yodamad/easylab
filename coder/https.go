@@ -142,6 +142,11 @@ func SetupHTTPS(
 
 	dnsProviderName := utils.DNSConfigOptional(ctx, utils.DNSProviderKey)
 	useExternalDNS := utils.DNSConfigOptional(ctx, utils.DNSExternalDNS) == "true"
+	// An earlier lab already created the ClusterIssuer, DNS-01 webhook, and DNS
+	// credential secret on this same cert-manager: skip recreating them and just
+	// reuse them by their well-known names. This lab's own A-records still need
+	// creating, since every lab has its own domain and ingress IP.
+	skipClusterIssuer := utils.DNSConfigOptional(ctx, utils.DNSAlreadyConfigured) == "true" && dnsProviderName != ""
 	// Declared here (rather than inside the DNS-01 block below) so the second
 	// dnsProviderName != "" block further down — which wires up ExternalDNS — can
 	// also see it.
@@ -157,68 +162,70 @@ func SetupHTTPS(
 			return nil, pulumi.StringOutput{}, fmt.Errorf("unknown DNS provider %q: %w", dnsProviderName, lookupErr)
 		}
 
-		// Store DNS credentials in a Kubernetes Secret for cert-manager webhook
-		credSecret, secretErr := createDNSCredentialSecret(ctx, k8sProvider, certManagerNsName, dnsProviderName, dnsProvider)
-		if secretErr != nil {
-			return nil, pulumi.StringOutput{}, secretErr
-		}
-
 		zone = utils.DNSConfigOptional(ctx, utils.DNSZone)
 
-		webhookSolver, webhookRelease, setupErr := dnsProvider.SetupCertManagerDNS01(
-			ctx, k8sProvider, zone, credSecret, certDeps,
-		)
-		if setupErr != nil {
-			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to setup DNS-01 solver: %w", setupErr)
-		}
-		if webhookRelease != nil {
-			certDeps = append(certDeps, webhookRelease)
-		}
+		if !skipClusterIssuer {
+			// Store DNS credentials in a Kubernetes Secret for cert-manager webhook
+			credSecret, secretErr := createDNSCredentialSecret(ctx, k8sProvider, certManagerNsName, dnsProviderName, dnsProvider)
+			if secretErr != nil {
+				return nil, pulumi.StringOutput{}, secretErr
+			}
 
-		// Grant the webhook SA permission to read secrets in the cert-manager namespace.
-		// cert-manager passes ResourceNamespace=cert-manager for ClusterIssuer challenges,
-		// so credentials must live there and the webhook must be able to read them.
-		webhookRole, rbacErr := rbacv1.NewRole(ctx, "cert-manager-webhook-ovh-secret-reader", &rbacv1.RoleArgs{
-			Metadata: &metav1.ObjectMetaArgs{
-				Name:      pulumi.String("cert-manager-webhook-ovh-secret-reader"),
-				Namespace: pulumi.String(certManagerNsName),
-			},
-			Rules: rbacv1.PolicyRuleArray{
-				&rbacv1.PolicyRuleArgs{
-					ApiGroups: pulumi.StringArray{pulumi.String("")},
-					Resources: pulumi.StringArray{pulumi.String("secrets")},
-					Verbs:     pulumi.StringArray{pulumi.String("get"), pulumi.String("list")},
+			webhookSolver, webhookRelease, setupErr := dnsProvider.SetupCertManagerDNS01(
+				ctx, k8sProvider, zone, credSecret, certDeps,
+			)
+			if setupErr != nil {
+				return nil, pulumi.StringOutput{}, fmt.Errorf("failed to setup DNS-01 solver: %w", setupErr)
+			}
+			if webhookRelease != nil {
+				certDeps = append(certDeps, webhookRelease)
+			}
+
+			// Grant the webhook SA permission to read secrets in the cert-manager namespace.
+			// cert-manager passes ResourceNamespace=cert-manager for ClusterIssuer challenges,
+			// so credentials must live there and the webhook must be able to read them.
+			webhookRole, rbacErr := rbacv1.NewRole(ctx, "cert-manager-webhook-ovh-secret-reader", &rbacv1.RoleArgs{
+				Metadata: &metav1.ObjectMetaArgs{
+					Name:      pulumi.String("cert-manager-webhook-ovh-secret-reader"),
+					Namespace: pulumi.String(certManagerNsName),
 				},
-			},
-		}, pulumi.Provider(k8sProvider), pulumi.DependsOn(certDeps))
-		if rbacErr != nil {
-			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to create webhook RBAC role: %w", rbacErr)
-		}
-
-		_, rbacErr = rbacv1.NewRoleBinding(ctx, "cert-manager-webhook-ovh-secret-reader", &rbacv1.RoleBindingArgs{
-			Metadata: &metav1.ObjectMetaArgs{
-				Name:      pulumi.String("cert-manager-webhook-ovh-secret-reader"),
-				Namespace: pulumi.String(certManagerNsName),
-			},
-			RoleRef: &rbacv1.RoleRefArgs{
-				ApiGroup: pulumi.String("rbac.authorization.k8s.io"),
-				Kind:     pulumi.String("Role"),
-				Name:     pulumi.String("cert-manager-webhook-ovh-secret-reader"),
-			},
-			Subjects: rbacv1.SubjectArray{
-				&rbacv1.SubjectArgs{
-					Kind:      pulumi.String("ServiceAccount"),
-					Name:      pulumi.String("cert-manager-webhook-ovh"),
-					Namespace: pulumi.String("cert-manager-webhook-ovh"),
+				Rules: rbacv1.PolicyRuleArray{
+					&rbacv1.PolicyRuleArgs{
+						ApiGroups: pulumi.StringArray{pulumi.String("")},
+						Resources: pulumi.StringArray{pulumi.String("secrets")},
+						Verbs:     pulumi.StringArray{pulumi.String("get"), pulumi.String("list")},
+					},
 				},
-			},
-		}, pulumi.Provider(k8sProvider), pulumi.DependsOn([]pulumi.Resource{webhookRole}))
-		if rbacErr != nil {
-			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to create webhook RBAC role binding: %w", rbacErr)
-		}
-		certDeps = append(certDeps, webhookRole)
+			}, pulumi.Provider(k8sProvider), pulumi.DependsOn(certDeps))
+			if rbacErr != nil {
+				return nil, pulumi.StringOutput{}, fmt.Errorf("failed to create webhook RBAC role: %w", rbacErr)
+			}
 
-		solverSpec = map[string]any{"dns01": map[string]any(webhookSolver)}
+			_, rbacErr = rbacv1.NewRoleBinding(ctx, "cert-manager-webhook-ovh-secret-reader", &rbacv1.RoleBindingArgs{
+				Metadata: &metav1.ObjectMetaArgs{
+					Name:      pulumi.String("cert-manager-webhook-ovh-secret-reader"),
+					Namespace: pulumi.String(certManagerNsName),
+				},
+				RoleRef: &rbacv1.RoleRefArgs{
+					ApiGroup: pulumi.String("rbac.authorization.k8s.io"),
+					Kind:     pulumi.String("Role"),
+					Name:     pulumi.String("cert-manager-webhook-ovh-secret-reader"),
+				},
+				Subjects: rbacv1.SubjectArray{
+					&rbacv1.SubjectArgs{
+						Kind:      pulumi.String("ServiceAccount"),
+						Name:      pulumi.String("cert-manager-webhook-ovh"),
+						Namespace: pulumi.String("cert-manager-webhook-ovh"),
+					},
+				},
+			}, pulumi.Provider(k8sProvider), pulumi.DependsOn([]pulumi.Resource{webhookRole}))
+			if rbacErr != nil {
+				return nil, pulumi.StringOutput{}, fmt.Errorf("failed to create webhook RBAC role binding: %w", rbacErr)
+			}
+			certDeps = append(certDeps, webhookRole)
+
+			solverSpec = map[string]any{"dns01": map[string]any(webhookSolver)}
+		}
 
 		// Resolve the LoadBalancer IP here — after the webhook Helm install, which
 		// takes several minutes and gives the cloud provider time to assign the IP.
@@ -263,27 +270,35 @@ func SetupHTTPS(
 		}
 	}
 
-	issuer, err := apiextensions.NewCustomResource(ctx, "letsencrypt-prod-issuer", &apiextensions.CustomResourceArgs{
-		ApiVersion: pulumi.String("cert-manager.io/v1"),
-		Kind:       pulumi.String("ClusterIssuer"),
-		Metadata: &metav1.ObjectMetaArgs{
-			Name: pulumi.String("letsencrypt-prod"),
-		},
-		OtherFields: map[string]any{
-			"spec": map[string]any{
-				"acme": map[string]any{
-					"server": "https://acme-v02.api.letsencrypt.org/directory",
-					"email":  acmeEmail,
-					"privateKeySecretRef": map[string]any{
-						"name": "letsencrypt-prod",
+	// Skipped when skipClusterIssuer is set: the ClusterIssuer already exists,
+	// created by an earlier lab sharing this cert-manager. createWildcardCertificate
+	// and per-workspace ingresses (handler.go) reference it by the same well-known
+	// name ("letsencrypt-prod") either way, so nothing else needs to change.
+	var issuer *apiextensions.CustomResource
+	if !skipClusterIssuer {
+		var issuerErr error
+		issuer, issuerErr = apiextensions.NewCustomResource(ctx, "letsencrypt-prod-issuer", &apiextensions.CustomResourceArgs{
+			ApiVersion: pulumi.String("cert-manager.io/v1"),
+			Kind:       pulumi.String("ClusterIssuer"),
+			Metadata: &metav1.ObjectMetaArgs{
+				Name: pulumi.String("letsencrypt-prod"),
+			},
+			OtherFields: map[string]any{
+				"spec": map[string]any{
+					"acme": map[string]any{
+						"server": "https://acme-v02.api.letsencrypt.org/directory",
+						"email":  acmeEmail,
+						"privateKeySecretRef": map[string]any{
+							"name": "letsencrypt-prod",
+						},
+						"solvers": []any{solverSpec},
 					},
-					"solvers": []any{solverSpec},
 				},
 			},
-		},
-	}, pulumi.Provider(k8sProvider), pulumi.DependsOn(certDeps))
-	if err != nil {
-		return nil, pulumi.StringOutput{}, fmt.Errorf("failed to create ClusterIssuer: %w", err)
+		}, pulumi.Provider(k8sProvider), pulumi.DependsOn(certDeps))
+		if issuerErr != nil {
+			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to create ClusterIssuer: %w", issuerErr)
+		}
 	}
 
 	// Per-student workspace ingresses are created at runtime by the server. With a
@@ -299,10 +314,13 @@ func SetupHTTPS(
 	// waiting on an ACME round trip.
 	if dnsProviderName != "" {
 		// The certificate is issued by the ClusterIssuer, into the workspace
-		// namespace: both have to exist first.
+		// namespace: both have to exist first. With skipClusterIssuer there is no
+		// Pulumi-tracked issuer resource to depend on — it already exists.
 		wildcardDeps := make([]pulumi.Resource, 0, len(certDeps)+2)
 		wildcardDeps = append(wildcardDeps, certDeps...)
-		wildcardDeps = append(wildcardDeps, issuer)
+		if issuer != nil {
+			wildcardDeps = append(wildcardDeps, issuer)
+		}
 		if workspaceNs != nil {
 			wildcardDeps = append(wildcardDeps, workspaceNs)
 		}

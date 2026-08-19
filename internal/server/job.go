@@ -265,6 +265,12 @@ type LabConfig struct {
 	// workspace ingresses and maintains one record per workspace. For zones where a
 	// wildcard record is not available. Requires DNSProvider.
 	UseExternalDNS bool `json:"use_external_dns,omitempty"`
+
+	// DNSAlreadyConfigured skips creating the ClusterIssuer, DNS-01 webhook, and
+	// DNS credential secret, reusing the ones an earlier lab already created on
+	// this same cert-manager. This lab's own A-records are still created. Only
+	// meaningful with DNSProvider set and cert-manager not being freshly installed.
+	DNSAlreadyConfigured bool `json:"dns_already_configured,omitempty"`
 }
 
 // GetWorkspaceTemplates returns the lab's workspace templates. When none are

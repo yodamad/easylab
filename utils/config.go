@@ -160,6 +160,11 @@ const DNSZone = "zone"
 // covering every workspace subdomain, ExternalDNS watches the workspace ingresses
 // and creates/deletes a record per workspace. Set to "true" to enable.
 const DNSExternalDNS = "externalDns"
+
+// DNSAlreadyConfigured skips creating the ClusterIssuer, DNS-01 webhook, and DNS
+// credential secret, reusing the ones an earlier lab already created on this same
+// cert-manager. Set to "true" to enable; only meaningful with DNSProviderKey set.
+const DNSAlreadyConfigured = "alreadyConfigured"
 const DNSOvhAppKey = "ovhAppKey"
 const DNSOvhAppSecret = "ovhAppSecret"
 const DNSOvhConsumerKey = "ovhConsumerKey"

@@ -320,9 +320,36 @@
                 <section class="wizard-step" data-step="4">
                     <div class="step-header">
                         <h2>DNS &amp; HTTPS Configuration</h2>
-                        <p class="section-description">Configure TLS, ingress controller, and DNS automation</p>
+                        <p class="section-description">Choose how students will reach their workspaces.</p>
                     </div>
                     <div class="step-content">
+
+                        <div class="form-group">
+                            <label>How will students reach their workspaces?</label>
+                            <div class="button-group">
+                                <button type="button" class="source-button selected" id="domain-mode-quickstart-btn" data-domain-mode="quickstart">
+                                    <span class="source-icon">&#9889;</span>
+                                    <div class="source-content">
+                                        <span class="source-title">Quick start</span>
+                                        <span class="source-description">No domain needed &mdash; EasyLab generates a URL for each workspace</span>
+                                    </div>
+                                </button>
+                                <button type="button" class="source-button" id="domain-mode-auto-btn" data-domain-mode="auto">
+                                    <span class="source-icon">&#128274;</span>
+                                    <div class="source-content">
+                                        <span class="source-title">Custom domain &mdash; automatic <span class="badge-recommended">Recommended</span></span>
+                                        <span class="source-description">Point a domain you own; DNS and HTTPS are handled for you</span>
+                                    </div>
+                                </button>
+                                <button type="button" class="source-button" id="domain-mode-manual-btn" data-domain-mode="manual">
+                                    <span class="source-icon">&#128295;</span>
+                                    <div class="source-content">
+                                        <span class="source-title">Custom domain &mdash; manual DNS</span>
+                                        <span class="source-description">Point a domain you own; you create the DNS records yourself</span>
+                                    </div>
+                                </button>
+                            </div>
+                        </div>
 
                         <div class="form-group">
                             <label>Ingress Controller</label>
@@ -359,133 +386,181 @@
                             </div>
                         </div>
 
-                        <div class="form-group">
-                            <label>cert-manager</label>
-                            <div class="button-group">
-                                <button type="button" class="source-button selected" id="certmanager-install-btn" data-certmanager-mode="install">
-                                    <span class="source-icon">&#128274;</span>
-                                    <div class="source-content">
-                                        <span class="source-title">Install cert-manager</span>
-                                        <span class="source-description">Deploy cert-manager for automated TLS certificates</span>
-                                    </div>
-                                </button>
-                                <button type="button" class="source-button" id="certmanager-existing-btn" data-certmanager-mode="existing">
-                                    <span class="source-icon">&#9881;</span>
-                                    <div class="source-content">
-                                        <span class="source-title">Use existing cert-manager</span>
-                                        <span class="source-description">cert-manager is already installed</span>
-                                    </div>
-                                </button>
-                            </div>
-                            <input type="hidden" id="install_cert_manager" name="install_cert_manager" value="true">
-                        </div>
-                        <div id="certmanager-existing-fields" style="display: none;">
-                            <div class="form-group">
-                                <label for="cert_manager_namespace">cert-manager Namespace</label>
-                                <input type="text" id="cert_manager_namespace" name="cert_manager_namespace" placeholder="cert-manager">
-                                <small>Namespace where cert-manager is installed. Defaults to <code>cert-manager</code>.</small>
+                        <div id="domain-fields-block" style="display: none;">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="domain">Domain Name</label>
+                                    <input type="text" id="domain" name="domain" placeholder="coder.example.com">
+                                    <small>FQDN used for workspace HTTPS, e.g. <code>coder.example.com</code>.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="acme_email">Contact email</label>
+                                    <input type="email" id="acme_email" name="acme_email" placeholder="you@example.com">
+                                    <small>Only used if a certificate needs attention &mdash; not shown to students.</small>
+                                </div>
                             </div>
                         </div>
 
-                        <h3 class="subsection-title">HTTPS (Optional)</h3>
-                        <p class="section-description">Leave blank to serve workspaces over plain HTTP via nip.io on the ingress LoadBalancer IP (no DNS setup, no TLS). When a domain is set, TLS is configured via Let's Encrypt.</p>
-                        <div class="form-row">
+                        <div id="certmanager-toggle-group" style="display: none;">
                             <div class="form-group">
-                                <label for="domain">Domain Name</label>
-                                <input type="text" id="domain" name="domain" placeholder="coder.example.com">
-                                <small>FQDN for workspace HTTPS. After deployment, point an A record to the printed <code>ingressIP</code>.</small>
+                                <label>cert-manager</label>
+                                <div class="button-group">
+                                    <button type="button" class="source-button selected" id="certmanager-install-btn" data-certmanager-mode="install">
+                                        <span class="source-icon">&#128274;</span>
+                                        <div class="source-content">
+                                            <span class="source-title">Install cert-manager</span>
+                                            <span class="source-description">Deploy cert-manager for automated TLS certificates</span>
+                                        </div>
+                                    </button>
+                                    <button type="button" class="source-button" id="certmanager-existing-btn" data-certmanager-mode="existing">
+                                        <span class="source-icon">&#9881;</span>
+                                        <div class="source-content">
+                                            <span class="source-title">Use existing cert-manager</span>
+                                            <span class="source-description">cert-manager is already installed</span>
+                                        </div>
+                                    </button>
+                                </div>
+                                <input type="hidden" id="install_cert_manager" name="install_cert_manager" value="true">
                             </div>
-                            <div class="form-group">
-                                <label for="acme_email">ACME Email</label>
-                                <input type="email" id="acme_email" name="acme_email" placeholder="you@example.com">
-                                <small>Required when domain is set. Used for Let's Encrypt certificate notifications.</small>
+                            <div id="certmanager-existing-fields" style="display: none;">
+                                <div class="form-group">
+                                    <label for="cert_manager_namespace">cert-manager Namespace</label>
+                                    <input type="text" id="cert_manager_namespace" name="cert_manager_namespace" placeholder="cert-manager">
+                                    <small>Namespace where cert-manager is installed. Defaults to <code>cert-manager</code>.</small>
+                                </div>
                             </div>
                         </div>
-                        <div class="form-group">
-                            <label for="wildcard_domain">Wildcard Domain (Optional)</label>
-                            <input type="text" id="wildcard_domain" name="wildcard_domain" placeholder="*.coder.example.com">
-                            <small>Overrides the wildcard record derived from the domain above. Leave blank unless you need a different base &mdash; with a DNS provider configured, the wildcard record is created automatically.</small>
+
+                        <div id="dns-provider-block" style="display: none;">
+                            <h3 class="subsection-title">Where is this domain's DNS hosted?</h3>
+                            <p class="section-description">EasyLab creates the DNS records and one HTTPS certificate that covers every workspace automatically.</p>
+                            <div class="form-group">
+                                <label for="dns_provider">DNS Provider</label>
+                                <select id="dns_provider" name="dns_provider">
+                                    <option value="">Select a provider&hellip;</option>
+                                    <option value="ovh">OVH DNS</option>
+                                    <option value="azure">Azure DNS</option>
+                                </select>
+                            </div>
+                            <div class="form-group" id="dns_zone_group" style="display:none">
+                                <label for="dns_zone">DNS Zone</label>
+                                <input type="text" id="dns_zone" name="dns_zone" placeholder="example.com">
+                                <small>The DNS zone that contains the domain above.</small>
+                            </div>
+
+                            <div class="form-group" id="dns-already-configured-group" style="display: none;">
+                                <label>Is DNS-01 already set up on this cert-manager?</label>
+                                <div class="button-group">
+                                    <button type="button" class="source-button selected" id="dns-already-configured-no-btn" data-dns-already-configured="false">
+                                        <span class="source-icon">&#128274;</span>
+                                        <div class="source-content">
+                                            <span class="source-title">Set it up for me</span>
+                                            <span class="source-description">No DNS-01 issuer for this domain exists yet on this cert-manager</span>
+                                        </div>
+                                    </button>
+                                    <button type="button" class="source-button" id="dns-already-configured-yes-btn" data-dns-already-configured="true">
+                                        <span class="source-icon">&#9989;</span>
+                                        <div class="source-content">
+                                            <span class="source-title">Already configured</span>
+                                            <span class="source-description">An earlier lab on this cluster already set this up</span>
+                                        </div>
+                                    </button>
+                                </div>
+                                <input type="hidden" id="dns_already_configured" name="dns_already_configured" value="false">
+                                <small>EasyLab will skip creating the ClusterIssuer, DNS-01 webhook, and credential secret, and reuse the existing ones. DNS credentials below are still needed to create this lab's own DNS record.</small>
+                            </div>
+
+                            <div id="dns-ovh-fields" style="display:none">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="dns_cred_ovhAppKey">OVH Application Key</label>
+                                        <input type="text" id="dns_cred_ovhAppKey" name="dns_cred_ovhAppKey" placeholder="your-app-key">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="dns_cred_ovhAppSecret">OVH Application Secret</label>
+                                        <input type="password" id="dns_cred_ovhAppSecret" name="dns_cred_ovhAppSecret">
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="dns_cred_ovhConsumerKey">OVH Consumer Key</label>
+                                        <input type="password" id="dns_cred_ovhConsumerKey" name="dns_cred_ovhConsumerKey">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="dns_cred_ovhEndpoint">OVH Endpoint (Optional)</label>
+                                        <input type="text" id="dns_cred_ovhEndpoint" name="dns_cred_ovhEndpoint" placeholder="ovh-eu">
+                                    </div>
+                                </div>
+                                <small>OVH application must have <code>/domain/zone/*</code> permissions. Enables wildcard TLS and automated A-record creation.</small>
+                            </div>
+
+                            <div id="dns-azure-fields" style="display:none">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="dns_cred_azureTenantId">Azure Tenant ID</label>
+                                        <input type="text" id="dns_cred_azureTenantId" name="dns_cred_azureTenantId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="dns_cred_azureSubscriptionId">Azure Subscription ID</label>
+                                        <input type="text" id="dns_cred_azureSubscriptionId" name="dns_cred_azureSubscriptionId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="dns_cred_azureResourceGroup">Resource Group</label>
+                                        <input type="text" id="dns_cred_azureResourceGroup" name="dns_cred_azureResourceGroup" placeholder="my-dns-resource-group">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="dns_cred_azureClientId">Client ID (Service Principal)</label>
+                                        <input type="text" id="dns_cred_azureClientId" name="dns_cred_azureClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="dns_cred_azureClientSecret">Client Secret</label>
+                                    <input type="password" id="dns_cred_azureClientSecret" name="dns_cred_azureClientSecret">
+                                </div>
+                                <small>Service principal must have <code>DNS Zone Contributor</code> role on the DNS zone resource group.</small>
+                            </div>
+
+                            <div class="form-group" id="external_dns_group" style="display:none">
+                                <label>DNS record strategy</label>
+                                <div class="button-group">
+                                    <button type="button" class="source-button selected" id="dns-record-wildcard-btn" data-dns-record-mode="wildcard">
+                                        <span class="source-icon">&#127760;</span>
+                                        <div class="source-content">
+                                            <span class="source-title">Wildcard record</span>
+                                            <span class="source-description">One DNS record covers every workspace subdomain</span>
+                                        </div>
+                                    </button>
+                                    <button type="button" class="source-button" id="dns-record-externaldns-btn" data-dns-record-mode="externaldns">
+                                        <span class="source-icon">&#128260;</span>
+                                        <div class="source-content">
+                                            <span class="source-title">ExternalDNS</span>
+                                            <span class="source-description">One record per workspace &mdash; use if your DNS admin won't grant a wildcard</span>
+                                        </div>
+                                    </button>
+                                </div>
+                                <input type="hidden" id="use_external_dns" name="use_external_dns" value="false">
+                                <small>With ExternalDNS, records appear about a minute after a workspace starts; the student portal waits for the hostname to resolve before showing it as ready.</small>
+                            </div>
                         </div>
+
                         <div class="warning-message" id="dns-manual-warning" style="display: none;">
-                            <h3>DNS will not be managed for you</h3>
-                            <p>Workspace URLs are <code>{workspace}.{domain}</code>, so you must create a wildcard <code>A</code> record for <code id="dns-warning-record">*.your-domain</code> pointing at the lab's ingress IP once it is provisioned &mdash; otherwise workspace URLs will not resolve and their certificates stay pending.</p>
-                            <p>Each workspace will also request its own Let's Encrypt certificate, capped at 50 per registered domain per week. Selecting a DNS provider below issues a single wildcard certificate instead.</p>
+                            <h3>What you'll need to do</h3>
+                            <p>Workspace URLs are <code>{workspace}.{domain}</code>, so once the lab is provisioned, create a wildcard <code>A</code> record for <code id="dns-warning-record">*.your-domain</code> pointing at the lab's ingress IP &mdash; otherwise workspace URLs won't resolve and their certificates will stay pending.</p>
+                            <p>Each workspace also requests its own Let's Encrypt certificate, capped at 50 per registered domain per week. Pick &ldquo;Custom domain &mdash; automatic&rdquo; above to get one shared wildcard certificate instead.</p>
                         </div>
 
-                        <h3 class="subsection-title">DNS Provider (Optional)</h3>
-                        <p class="section-description">Automates DNS A-record creation and enables wildcard TLS certificates via DNS-01 challenge.</p>
-                        <div class="form-group">
-                            <label for="dns_provider">DNS Provider</label>
-                            <select id="dns_provider" name="dns_provider">
-                                <option value="">None (configure DNS manually)</option>
-                                <option value="ovh">OVH DNS</option>
-                                <option value="azure">Azure DNS</option>
-                            </select>
-                        </div>
-                        <div class="form-group" id="dns_zone_group" style="display:none">
-                            <label for="dns_zone">DNS Zone</label>
-                            <input type="text" id="dns_zone" name="dns_zone" placeholder="example.com">
-                            <small>The DNS zone that contains the domain above.</small>
-                        </div>
-                        <div id="dns-ovh-fields" style="display:none">
-                            <div class="form-row">
+                        <details class="template-advanced" id="dns-advanced-options" style="display: none;">
+                            <summary>Advanced options</summary>
+                            <div class="template-advanced-body">
                                 <div class="form-group">
-                                    <label for="dns_cred_ovhAppKey">OVH Application Key</label>
-                                    <input type="text" id="dns_cred_ovhAppKey" name="dns_cred_ovhAppKey" placeholder="your-app-key">
-                                </div>
-                                <div class="form-group">
-                                    <label for="dns_cred_ovhAppSecret">OVH Application Secret</label>
-                                    <input type="password" id="dns_cred_ovhAppSecret" name="dns_cred_ovhAppSecret">
+                                    <label for="wildcard_domain">Wildcard Domain (Optional)</label>
+                                    <input type="text" id="wildcard_domain" name="wildcard_domain" placeholder="*.coder.example.com">
+                                    <small>Overrides the wildcard record derived from the domain above. Leave blank unless you need a different base.</small>
                                 </div>
                             </div>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="dns_cred_ovhConsumerKey">OVH Consumer Key</label>
-                                    <input type="password" id="dns_cred_ovhConsumerKey" name="dns_cred_ovhConsumerKey">
-                                </div>
-                                <div class="form-group">
-                                    <label for="dns_cred_ovhEndpoint">OVH Endpoint (Optional)</label>
-                                    <input type="text" id="dns_cred_ovhEndpoint" name="dns_cred_ovhEndpoint" placeholder="ovh-eu">
-                                </div>
-                            </div>
-                            <small>OVH application must have <code>/domain/zone/*</code> permissions. Enables wildcard TLS and automated A-record creation.</small>
-                        </div>
-
-                        <div id="dns-azure-fields" style="display:none">
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="dns_cred_azureTenantId">Azure Tenant ID</label>
-                                    <input type="text" id="dns_cred_azureTenantId" name="dns_cred_azureTenantId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
-                                </div>
-                                <div class="form-group">
-                                    <label for="dns_cred_azureSubscriptionId">Azure Subscription ID</label>
-                                    <input type="text" id="dns_cred_azureSubscriptionId" name="dns_cred_azureSubscriptionId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
-                                </div>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="dns_cred_azureResourceGroup">Resource Group</label>
-                                    <input type="text" id="dns_cred_azureResourceGroup" name="dns_cred_azureResourceGroup" placeholder="my-dns-resource-group">
-                                </div>
-                                <div class="form-group">
-                                    <label for="dns_cred_azureClientId">Client ID (Service Principal)</label>
-                                    <input type="text" id="dns_cred_azureClientId" name="dns_cred_azureClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
-                                </div>
-                            </div>
-                            <div class="form-group">
-                                <label for="dns_cred_azureClientSecret">Client Secret</label>
-                                <input type="password" id="dns_cred_azureClientSecret" name="dns_cred_azureClientSecret">
-                            </div>
-                            <small>Service principal must have <code>DNS Zone Contributor</code> role on the DNS zone resource group.</small>
-                        </div>
-
-                        <div class="form-group" id="external_dns_group" style="display:none">
-                            <label for="use_external_dns">
-                                <input type="checkbox" id="use_external_dns" name="use_external_dns" value="true">
-                                Use ExternalDNS instead of a wildcard record
-                            </label>
-                            <small>Installs ExternalDNS in the cluster to create and delete one DNS record per workspace, rather than a single wildcard record covering all of them. Use this when your DNS administrator will not grant a wildcard. Records appear about a minute after a workspace starts; the student portal waits for the hostname to resolve before showing it as ready.</small>
-                        </div>
+                        </details>
                     </div>
                 </section>
 

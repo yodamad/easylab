@@ -484,9 +484,10 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 		AcmeEmail:      r.FormValue("acme_email"),
 		WildcardDomain: r.FormValue("wildcard_domain"),
 
-		DNSProvider:    r.FormValue("dns_provider"),
-		DNSZone:        r.FormValue("dns_zone"),
-		UseExternalDNS: r.FormValue("use_external_dns") == "true",
+		DNSProvider:          r.FormValue("dns_provider"),
+		DNSZone:              r.FormValue("dns_zone"),
+		UseExternalDNS:       r.FormValue("use_external_dns") == "true",
+		DNSAlreadyConfigured: r.FormValue("dns_already_configured") == "true",
 	}
 
 	installNginx := r.FormValue("install_nginx_ingress") == "true"

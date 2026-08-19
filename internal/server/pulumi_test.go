@@ -244,7 +244,7 @@ func TestGetAppBaseDir_DataDir(t *testing.T) {
 
 func TestGetAppBaseDir_RootWorkDir_Fallthrough(t *testing.T) {
 	// WORK_DIR at root level should fall through to PULUMI_HOME
-	t.Setenv("WORK_DIR", "/jobs")       // filepath.Dir("/jobs") = "/"
+	t.Setenv("WORK_DIR", "/jobs") // filepath.Dir("/jobs") = "/"
 	t.Setenv("PULUMI_HOME", "/app/.pulumi")
 	t.Setenv("GOMODCACHE", "")
 	t.Setenv("GOPATH", "")
@@ -409,8 +409,8 @@ func TestGetConfigCommands_BYOK(t *testing.T) {
 func TestGetConfigCommands_OVH(t *testing.T) {
 	pe := &PulumiExecutor{}
 	cfg := &LabConfig{
-		Provider:         "ovh",
-		StackName:        "my-stack",
+		Provider:           "ovh",
+		StackName:          "my-stack",
 		NetworkGatewayName: "gw",
 	}
 	cmds := pe.getConfigCommands(cfg)
@@ -422,11 +422,11 @@ func TestGetConfigCommands_OVH(t *testing.T) {
 func TestGetConfigCommands_Azure(t *testing.T) {
 	pe := &PulumiExecutor{}
 	cfg := &LabConfig{
-		Provider:        "azure",
-		StackName:       "my-stack",
-		AzureLocation:   "eastus",
-		K8sClusterName:  "aks",
-		NodePoolName:    "pool",
+		Provider:       "azure",
+		StackName:      "my-stack",
+		AzureLocation:  "eastus",
+		K8sClusterName: "aks",
+		NodePoolName:   "pool",
 	}
 	cmds := pe.getConfigCommands(cfg)
 	if len(cmds) == 0 {
@@ -449,6 +449,52 @@ func TestGetConfigCommands_WithDomain(t *testing.T) {
 	}
 	if !found {
 		t.Error("getConfigCommands() with domain should contain coder:domain")
+	}
+}
+
+func TestGetConfigCommands_DNSAlreadyConfigured(t *testing.T) {
+	tests := []struct {
+		name                  string
+		cfg                   *LabConfig
+		wantAlreadyConfigured bool
+	}{
+		{
+			name: "flag set with a DNS provider emits dns:alreadyConfigured",
+			cfg: &LabConfig{
+				Domain:               "coder.example.com",
+				DNSProvider:          "ovh",
+				DNSZone:              "example.com",
+				DNSAlreadyConfigured: true,
+			},
+			wantAlreadyConfigured: true,
+		},
+		{
+			name: "unset by default",
+			cfg: &LabConfig{
+				Domain:      "coder.example.com",
+				DNSProvider: "ovh",
+				DNSZone:     "example.com",
+			},
+			wantAlreadyConfigured: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			pe := &PulumiExecutor{}
+			cmds := pe.getConfigCommands(tt.cfg)
+
+			found := false
+			for _, c := range cmds {
+				if c.key == "dns:alreadyConfigured" && c.value == "true" {
+					found = true
+				}
+			}
+			if found != tt.wantAlreadyConfigured {
+				t.Errorf("dns:alreadyConfigured present = %v, want %v", found, tt.wantAlreadyConfigured)
+			}
+		})
 	}
 }
 

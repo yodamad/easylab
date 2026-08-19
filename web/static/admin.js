@@ -27,6 +27,9 @@ const wizard = {
         this.bindEvents();
         this.bindClusterModeEvents();
         this.bindIngressCertManagerEvents();
+        this.bindDomainModeEvents();
+        this.bindDNSRecordModeEvents();
+        this.bindDNSAlreadyConfiguredEvents();
         this.updateUI();
     },
 
@@ -116,6 +119,137 @@ const wizard = {
         existingBtn.classList.toggle('selected', mode === 'existing');
         fields.style.display = mode === 'existing' ? '' : 'none';
         hidden.value = mode === 'install' ? 'true' : 'false';
+        this.updateDNSAlreadyConfiguredVisibility();
+    },
+
+    bindDomainModeEvents() {
+        const quickstartBtn = document.getElementById('domain-mode-quickstart-btn');
+        const autoBtn = document.getElementById('domain-mode-auto-btn');
+        const manualBtn = document.getElementById('domain-mode-manual-btn');
+        if (!quickstartBtn || !autoBtn || !manualBtn) return;
+
+        quickstartBtn.addEventListener('click', () => this.setDomainMode('quickstart'));
+        autoBtn.addEventListener('click', () => this.setDomainMode('auto'));
+        manualBtn.addEventListener('click', () => this.setDomainMode('manual'));
+
+        // Quick start is the form's default (domain fields start empty).
+        this.setDomainMode('quickstart');
+    },
+
+    setDomainMode(mode) {
+        const quickstartBtn = document.getElementById('domain-mode-quickstart-btn');
+        const autoBtn = document.getElementById('domain-mode-auto-btn');
+        const manualBtn = document.getElementById('domain-mode-manual-btn');
+        const domainFields = document.getElementById('domain-fields-block');
+        const dnsProviderBlock = document.getElementById('dns-provider-block');
+        const manualGuidance = document.getElementById('dns-manual-warning');
+        const certManagerGroup = document.getElementById('certmanager-toggle-group');
+        if (!quickstartBtn || !autoBtn || !manualBtn) return;
+
+        quickstartBtn.classList.toggle('selected', mode === 'quickstart');
+        autoBtn.classList.toggle('selected', mode === 'auto');
+        manualBtn.classList.toggle('selected', mode === 'manual');
+
+        if (domainFields) domainFields.style.display = mode === 'quickstart' ? 'none' : '';
+        if (dnsProviderBlock) dnsProviderBlock.style.display = mode === 'auto' ? '' : 'none';
+        if (manualGuidance) manualGuidance.style.display = mode === 'manual' ? '' : 'none';
+        // cert-manager is a no-op with no domain (coder/https.go skips it entirely),
+        // so hide the toggle rather than leave a dead control on screen.
+        if (certManagerGroup) certManagerGroup.style.display = mode === 'quickstart' ? 'none' : '';
+
+        // "Quick start" and "manual DNS" both mean no DNS provider is configured;
+        // clearing it here keeps handleDNSProviderChange()'s field visibility and
+        // updateDNSManualWarning() in sync with the chosen mode.
+        const dnsProviderSelect = document.getElementById('dns_provider');
+        if (mode !== 'auto' && dnsProviderSelect && dnsProviderSelect.value !== '') {
+            dnsProviderSelect.value = '';
+            dnsProviderSelect.dispatchEvent(new Event('change'));
+        }
+
+        if (mode === 'quickstart') {
+            const domainInput = document.getElementById('domain');
+            const acmeEmailInput = document.getElementById('acme_email');
+            const wildcardInput = document.getElementById('wildcard_domain');
+            if (domainInput) domainInput.value = '';
+            if (acmeEmailInput) acmeEmailInput.value = '';
+            if (wildcardInput) wildcardInput.value = '';
+        }
+
+        if (typeof updateDNSManualWarning === 'function') updateDNSManualWarning();
+        this.updateWildcardOverrideVisibility();
+        this.updateDNSAlreadyConfiguredVisibility();
+    },
+
+    // The Wildcard Domain override only ever takes effect for "Custom domain —
+    // automatic" with the "Wildcard record" DNS strategy: coder/https.go reads
+    // coder:wildcardDomain solely inside that branch. It is a silent no-op in
+    // every other mode, so show it only where it can actually do something.
+    updateWildcardOverrideVisibility() {
+        const advanced = document.getElementById('dns-advanced-options');
+        const autoBtn = document.getElementById('domain-mode-auto-btn');
+        const externalBtn = document.getElementById('dns-record-externaldns-btn');
+        if (!advanced || !autoBtn) return;
+
+        const isAuto = autoBtn.classList.contains('selected');
+        const isExternalDNS = !!externalBtn && externalBtn.classList.contains('selected');
+        advanced.style.display = isAuto && !isExternalDNS ? '' : 'none';
+    },
+
+    // Only relevant when reusing an existing cert-manager with a DNS provider
+    // selected — a freshly-installed cert-manager can't already have a DNS-01
+    // issuer configured on it.
+    updateDNSAlreadyConfiguredVisibility() {
+        const group = document.getElementById('dns-already-configured-group');
+        const certExistingBtn = document.getElementById('certmanager-existing-btn');
+        const autoBtn = document.getElementById('domain-mode-auto-btn');
+        if (!group || !certExistingBtn || !autoBtn) return;
+
+        const certExisting = certExistingBtn.classList.contains('selected');
+        const isAuto = autoBtn.classList.contains('selected');
+        const relevant = certExisting && isAuto;
+        group.style.display = relevant ? '' : 'none';
+        if (!relevant) this.setDNSAlreadyConfigured(false);
+    },
+
+    bindDNSAlreadyConfiguredEvents() {
+        const noBtn = document.getElementById('dns-already-configured-no-btn');
+        const yesBtn = document.getElementById('dns-already-configured-yes-btn');
+        if (!noBtn || !yesBtn) return;
+
+        noBtn.addEventListener('click', () => this.setDNSAlreadyConfigured(false));
+        yesBtn.addEventListener('click', () => this.setDNSAlreadyConfigured(true));
+    },
+
+    setDNSAlreadyConfigured(isConfigured) {
+        const noBtn = document.getElementById('dns-already-configured-no-btn');
+        const yesBtn = document.getElementById('dns-already-configured-yes-btn');
+        const hidden = document.getElementById('dns_already_configured');
+        if (!noBtn || !yesBtn || !hidden) return;
+
+        noBtn.classList.toggle('selected', !isConfigured);
+        yesBtn.classList.toggle('selected', isConfigured);
+        hidden.value = isConfigured ? 'true' : 'false';
+    },
+
+    bindDNSRecordModeEvents() {
+        const wildcardBtn = document.getElementById('dns-record-wildcard-btn');
+        const externalBtn = document.getElementById('dns-record-externaldns-btn');
+        if (!wildcardBtn || !externalBtn) return;
+
+        wildcardBtn.addEventListener('click', () => this.setDNSRecordMode('wildcard'));
+        externalBtn.addEventListener('click', () => this.setDNSRecordMode('externaldns'));
+    },
+
+    setDNSRecordMode(mode) {
+        const wildcardBtn = document.getElementById('dns-record-wildcard-btn');
+        const externalBtn = document.getElementById('dns-record-externaldns-btn');
+        const hidden = document.getElementById('use_external_dns');
+        if (!wildcardBtn || !externalBtn || !hidden) return;
+
+        wildcardBtn.classList.toggle('selected', mode === 'wildcard');
+        externalBtn.classList.toggle('selected', mode === 'externaldns');
+        hidden.value = mode === 'externaldns' ? 'true' : 'false';
+        this.updateWildcardOverrideVisibility();
     },
 
     setGithubLoginEnabled(enabled) {
@@ -789,32 +923,22 @@ function handleDNSProviderChange() {
     // provider is there to create records with.
     const externalDNSGroup = document.getElementById('external_dns_group');
     if (externalDNSGroup) externalDNSGroup.style.display = provider ? '' : 'none';
-    if (!provider) {
-        const externalDNS = document.getElementById('use_external_dns');
-        if (externalDNS) externalDNS.checked = false;
+    if (!provider && typeof wizard !== 'undefined') {
+        wizard.setDNSRecordMode('wildcard');
     }
 
     updateDNSManualWarning();
 }
 
-// Warn when a lab has a domain but no DNS provider: it deploys fine, then every
-// workspace URL fails to resolve because nothing ever creates the wildcard record.
+// Keeps the manual-DNS guidance panel's example record in sync as the domain
+// input changes. Visibility of the panel itself is owned by wizard.setDomainMode().
 function updateDNSManualWarning() {
-    const warning = document.getElementById('dns-manual-warning');
-    if (!warning) return;
-
+    const record = document.getElementById('dns-warning-record');
     const domainInput = document.getElementById('domain');
-    const providerSelect = document.getElementById('dns_provider');
-    const domain = domainInput ? domainInput.value.trim() : '';
-    const provider = providerSelect ? providerSelect.value : '';
+    if (!record || !domainInput) return;
 
-    const show = domain !== '' && provider === '';
-    warning.style.display = show ? '' : 'none';
-
-    if (show) {
-        const record = document.getElementById('dns-warning-record');
-        if (record) record.textContent = '*.' + domain;
-    }
+    const domain = domainInput.value.trim();
+    record.textContent = domain !== '' ? '*.' + domain : '*.your-domain';
 }
 
 // Fetch Azure VM sizes for the selected location
