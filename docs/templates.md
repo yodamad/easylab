@@ -424,6 +424,9 @@ workspace_templates:
 | `registry_auth_secret` | string | Registry credential for **everything the build pulls or pushes**: the base image, `fallback_image`, and `cache_repo`. Omit for public registries. See [Private registries and repositories](#private-registries-and-repositories). |
 | `fallback_image` | string | Used when the devcontainer names neither an image nor a Dockerfile. |
 | `insecure` | bool | Skip TLS verification when cloning and pulling. |
+| `config_repo` | string | Reads `devcontainer.json` from a **separate** repo instead of `git_repo` — see [Devcontainer config from a separate repository](#devcontainer-config-from-a-separate-repository). `dir` then resolves inside this repo. |
+| `config_branch` | string | Branch to clone from `config_repo`. Default branch when unset. Ignored when `config_repo` is unset. |
+| `config_auth_secret` | string | Git credential for a private `config_repo`. **http(s) only.** Ignored when `config_repo` is unset. |
 
 The template's own `ide` key applies here too — see the constraints below.
 
@@ -474,13 +477,50 @@ login page taking the workspace password.
     Create `gitcred` the same way as for any private repo — see
     [Private registries and repositories](#private-registries-and-repositories).
 
+### Devcontainer config from a separate repository
+
+By default `devcontainer.json` is read from `git_repo` — the same repo the
+student's workspace clones. Set `devcontainer.config_repo` to read it from a
+**different** repo instead — for a devcontainer config shared or standardized
+across several workshops, kept apart from the workshop content it builds.
+`git_repo` is still required and is still what the student's workspace clones;
+`config_repo` is only cloned to build the devcontainer, into a separate location
+in the pod. `dir` (default `.devcontainer`) then resolves inside `config_repo`
+rather than `git_repo`.
+
+```yaml
+workspace_templates:
+  - name: go-workshop
+    git_repo: https://gitlab.com/org/go-workshop-exercises.git
+    git_branch: main
+    disk_size: 20Gi
+    devcontainer:
+      enabled: true
+      config_repo: https://gitlab.com/org/devcontainer-config.git
+      config_branch: main
+      dir: .devcontainer
+      cache_repo: registry.example.com/easylab/cache
+      registry_auth_secret: regcred
+```
+
+A private `config_repo` needs its own `config_auth_secret` — it is a separate
+credential from `git_auth_secret`, because the two repos may live in different
+projects or organizations. Create it the same way as any other git credential —
+see [Private registries and repositories](#private-registries-and-repositories).
+
 ### Importing a devcontainer
 
 Rather than writing the block by hand, use **Import from devcontainer** in the
-Templates step. It reads the repo's `devcontainer.json` — by cloning the repo, or
-from a `devcontainer.json` / repository `.zip` you upload — fills the template in,
-and reports anything in the devcontainer that will not take effect. The result is
+Templates step. It reads a `devcontainer.json` — by cloning a repo, or from a
+`devcontainer.json` / repository `.zip` you upload — fills the template in, and
+reports anything in the devcontainer that will not take effect. The result is
 ordinary YAML: review and edit it before creating the lab.
+
+By default the import clones the **workshop repository** field to read the
+devcontainer. Choose **Different repository** under **Devcontainer config** to
+read it from a separate config repo instead, while the workshop repository field
+stays the content repo the generated template's `git_repo` is set to — this
+produces the `config_repo` block above without hand-editing the YAML.
 
 For a private repository, supply an **access token** in the import dialog. It
 authenticates that one clone and is then discarded — it is not saved anywhere and

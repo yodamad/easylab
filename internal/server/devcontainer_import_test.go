@@ -102,6 +102,129 @@ func TestDetectDevcontainer_RegistryAuthSecretIsBakedIn(t *testing.T) {
 	assert.Equal(t, "regcred", templates[0].Devcontainer.RegistryAuthSecret)
 }
 
+func TestDetectDevcontainer_ConfigRepoIsBakedIn(t *testing.T) {
+	t.Parallel()
+
+	got := postDevcontainerUpload(t, "devcontainer.json", []byte(`{"name":"Go","image":"golang:1.22"}`), url.Values{
+		"git_repo":                        {"https://gitlab.com/org/workshop.git"},
+		"cache_repo":                      {"registry.example.com/cache"},
+		"devcontainer_config_repo":        {"https://gitlab.com/org/devcontainer-config.git"},
+		"devcontainer_config_branch":      {"main"},
+		"devcontainer_config_auth_secret": {"configcred"},
+	})
+
+	assert.Contains(t, got.TemplatesYAML, "config_repo: https://gitlab.com/org/devcontainer-config.git")
+	assert.Contains(t, got.TemplatesYAML, "config_branch: main")
+	assert.Contains(t, got.TemplatesYAML, "config_auth_secret: configcred")
+
+	templates, err := parseWorkspaceTemplatesYAML(got.TemplatesYAML)
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	require.NotNil(t, templates[0].Devcontainer)
+	assert.Equal(t, "https://gitlab.com/org/devcontainer-config.git", templates[0].Devcontainer.ConfigRepo)
+	assert.Equal(t, "main", templates[0].Devcontainer.ConfigBranch)
+	assert.Equal(t, "configcred", templates[0].Devcontainer.ConfigAuthSecret)
+	// git_repo stays the content repo the student's workspace clones.
+	assert.Equal(t, "https://gitlab.com/org/workshop.git", templates[0].GitRepo)
+}
+
+func TestDetectDevcontainer_NoConfigRepoLeavesItUnset(t *testing.T) {
+	t.Parallel()
+
+	// The common, single-repo case: no devcontainer_config_repo posted at all, so
+	// the generated template must look exactly as it did before this field existed.
+	got := postDevcontainerUpload(t, "devcontainer.json", []byte(`{"name":"Go","image":"golang:1.22"}`), url.Values{
+		"git_repo":   {"https://gitlab.com/org/workshop.git"},
+		"cache_repo": {"registry.example.com/cache"},
+	})
+
+	assert.NotContains(t, got.TemplatesYAML, "config_repo")
+
+	templates, err := parseWorkspaceTemplatesYAML(got.TemplatesYAML)
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	require.NotNil(t, templates[0].Devcontainer)
+	assert.Empty(t, templates[0].Devcontainer.ConfigRepo)
+}
+
+// TestDevcontainerCloneSource pins the selection detectDevcontainerFromGit relies
+// on: devcontainer_config_repo, when set, is what gets cloned to read
+// devcontainer.json — not git_repo, which stays untouched by this and keeps
+// meaning "the student's content repo".
+func TestDevcontainerCloneSource(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		form         url.Values
+		wantURL      string
+		wantBranch   string
+		wantUsername string
+		wantErr      string
+	}{
+		{
+			name:    "git_repo is required",
+			form:    url.Values{},
+			wantErr: "git_repo is required",
+		},
+		{
+			name:    "invalid git_repo",
+			form:    url.Values{"git_repo": {"not-a-url"}},
+			wantErr: "git_repo is not a valid URL",
+		},
+		{
+			name: "no config repo clones git_repo",
+			form: url.Values{
+				"git_repo":     {"https://gitlab.com/org/workshop.git"},
+				"git_branch":   {"main"},
+				"git_username": {"alice"},
+			},
+			wantURL:      "https://gitlab.com/org/workshop.git",
+			wantBranch:   "main",
+			wantUsername: "alice",
+		},
+		{
+			name: "config repo wins over git_repo",
+			form: url.Values{
+				"git_repo":                     {"https://gitlab.com/org/workshop.git"},
+				"git_branch":                   {"main"},
+				"devcontainer_config_repo":     {"https://gitlab.com/org/devcontainer-config.git"},
+				"devcontainer_config_branch":   {"config-branch"},
+				"devcontainer_config_username": {"bob"},
+			},
+			wantURL:      "https://gitlab.com/org/devcontainer-config.git",
+			wantBranch:   "config-branch",
+			wantUsername: "bob",
+		},
+		{
+			name: "invalid config repo",
+			form: url.Values{
+				"git_repo":                 {"https://gitlab.com/org/workshop.git"},
+				"devcontainer_config_repo": {"not-a-url"},
+			},
+			wantErr: "devcontainer_config_repo is not a valid URL",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			req := postForm(t, "/api/templates/detect-devcontainer", tt.form)
+
+			gotURL, branch, username, _, err := devcontainerCloneSource(req)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantURL, gotURL)
+			assert.Equal(t, tt.wantBranch, branch)
+			assert.Equal(t, tt.wantUsername, username)
+		})
+	}
+}
+
 func TestDetectDevcontainer_FromUploadedZip(t *testing.T) {
 	t.Parallel()
 
@@ -544,6 +667,40 @@ func TestDetectDevcontainer_IDEIsCarriedIntoTheTemplate(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, templates, 1)
 	assert.Equal(t, "code-server", templates[0].IDE)
+}
+
+func TestDetectDevcontainer_DescriptionIsCarriedIntoTheTemplate(t *testing.T) {
+	t.Parallel()
+
+	got := postDevcontainerUpload(t, "devcontainer.json", []byte(`{"name":"Rust","image":"rust:1"}`), url.Values{
+		"git_repo":             {"https://gitlab.com/org/workshop.git"},
+		"cache_repo":           {"registry.example.com/cache"},
+		"template_description": {"Rust workshop, June 2025 cohort"},
+	})
+
+	// devcontainer.json has no description-like field, so this only ever comes from
+	// the admin — and the student template picker falls back to showing IDE/resources/
+	// repo chips when it is missing, so it has to reach the generated template.
+	assert.Contains(t, got.TemplatesYAML, "description: Rust workshop, June 2025 cohort")
+
+	templates, err := parseWorkspaceTemplatesYAML(got.TemplatesYAML)
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	assert.Equal(t, "Rust workshop, June 2025 cohort", templates[0].Description)
+}
+
+func TestDetectDevcontainer_NoDescriptionLeavesItUnset(t *testing.T) {
+	t.Parallel()
+
+	got := postDevcontainerUpload(t, "devcontainer.json", []byte(`{"name":"Rust","image":"rust:1"}`), url.Values{
+		"git_repo":   {"https://gitlab.com/org/workshop.git"},
+		"cache_repo": {"registry.example.com/cache"},
+	})
+
+	templates, err := parseWorkspaceTemplatesYAML(got.TemplatesYAML)
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	assert.Empty(t, templates[0].Description)
 }
 
 func TestDetectDevcontainer_TemplateNameIsChosenByTheAdmin(t *testing.T) {

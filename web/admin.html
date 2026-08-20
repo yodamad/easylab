@@ -677,6 +677,12 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label for="devcontainer_template_description">Description (Optional)</label>
+                                    <input type="text" id="devcontainer_template_description" placeholder="What this template provides">
+                                    <small>Shown to students when picking a template. Left blank, the picker falls back to showing the IDE, resources and repo instead.</small>
+                                </div>
+
+                                <div class="form-group">
                                     <label>Read the devcontainer from</label>
                                     <div class="button-group">
                                         <button type="button" class="source-button selected" data-devcontainer-source="git" id="devcontainer-source-git">
@@ -713,10 +719,51 @@
                                     <small>The repository field above is still used for the generated template's <code>git_repo</code>, since that is what students clone.</small>
                                 </div>
 
+                                <div id="devcontainer-config-source-row" class="form-group">
+                                    <label>Devcontainer config</label>
+                                    <div class="button-group">
+                                        <button type="button" class="source-button selected" data-devcontainer-config-source="same" id="devcontainer-config-source-same">
+                                            <span class="source-icon">&#128193;</span>
+                                            <div class="source-content">
+                                                <span class="source-title">Same repository</span>
+                                                <span class="source-description">devcontainer.json is in the workshop repository above</span>
+                                            </div>
+                                        </button>
+                                        <button type="button" class="source-button" data-devcontainer-config-source="separate" id="devcontainer-config-source-separate">
+                                            <span class="source-icon">&#128194;</span>
+                                            <div class="source-content">
+                                                <span class="source-title">Different repository</span>
+                                                <span class="source-description">devcontainer.json is in a separate, shared config repo</span>
+                                            </div>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div id="devcontainer-config-repo-row" style="display: none;">
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label for="devcontainer_config_repo">Devcontainer config repository</label>
+                                            <input type="text" id="devcontainer_config_repo" placeholder="https://gitlab.com/org/devcontainer-config.git">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="devcontainer_config_branch">Branch</label>
+                                            <input type="text" id="devcontainer_config_branch" placeholder="default branch">
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="devcontainer_config_auth_secret">Config repository credential (Optional)</label>
+                                        <select id="devcontainer_config_auth_secret" class="template-git-cred-select">
+                                            <option value="">None</option>
+                                        </select>
+                                        <small>If the config repository is <strong>private</strong>, the git credential (from the <strong>Credentials</strong> section above) used to read the devcontainer during import and, baked into the generated template, to clone the config repo in each student's workspace.</small>
+                                    </div>
+                                </div>
+
                                 <div class="form-row">
                                     <div class="form-group">
                                         <label for="devcontainer_dir">Devcontainer folder</label>
                                         <input type="text" id="devcontainer_dir" placeholder=".devcontainer">
+                                        <small>Relative to the workshop repository, or to the config repository above when set.</small>
                                     </div>
                                     <div class="form-group">
                                         <label for="devcontainer_cache_repo">Cache registry</label>
@@ -730,7 +777,7 @@
                                 </div>
 
                                 <div class="form-group">
-                                    <label for="devcontainer_git_auth_secret">Git credential (Optional)</label>
+                                    <label for="devcontainer_git_auth_secret">Workshop repository credential (Optional)</label>
                                     <select id="devcontainer_git_auth_secret" class="template-git-cred-select">
                                         <option value="">None</option>
                                     </select>

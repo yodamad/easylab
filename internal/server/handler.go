@@ -457,6 +457,9 @@ func toWorkspaceDevcontainer(in *DevcontainerConfig) *workspace.DevcontainerSpec
 		RegistryAuthSecret: in.RegistryAuthSecret,
 		FallbackImage:      in.FallbackImage,
 		Insecure:           in.Insecure,
+		ConfigRepo:         in.ConfigRepo,
+		ConfigBranch:       in.ConfigBranch,
+		ConfigAuthSecret:   in.ConfigAuthSecret,
 	}
 }
 

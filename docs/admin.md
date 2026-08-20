@@ -210,24 +210,27 @@ Choose **From a devcontainer** at the top of the **Templates** step:
    so `Day Two` becomes `day-two`. The devcontainer's own `name` is only a display
    string and is often identical across repositories, so importing two of them
    without naming them yourself would collide.
-2. Choose **Git repository** (EasyLab clones the repo and finds the
+2. Optionally add a **Description** — shown to students when they pick a template.
+   Left blank, the student picker falls back to showing the IDE, resources and repo
+   instead, which is a poor substitute for explaining what the template is for.
+3. Choose **Git repository** (EasyLab clones the repo and finds the
    `devcontainer.json`) or **Upload** (a `devcontainer.json`, or a repository
    `.zip`).
-3. Fill in the **Cache registry**. If the devcontainer builds from a **private
+4. Fill in the **Cache registry**. If the devcontainer builds from a **private
    base image** or pushes to a **private cache**, add a registry credential in the
    **Credentials** section and choose it under **Registry credential for students**
    — with a single registry credential it is applied automatically. envbuilder
    pulls the base image (and pushes the cache) inside each student's pod with it;
    without it the pull falls back to anonymous and the build fails.
-4. If the workshop repository is **private**, add a git token in the **Credentials**
+5. If the workshop repository is **private**, add a git token in the **Credentials**
    section and choose it under **Git credential** — with a single git credential it is
    applied automatically. The same credential reads the devcontainer during import and,
    baked into the template, clones the repo in each student's workspace.
-5. Click **Import** — this step is required. EasyLab turns the devcontainer into a
+6. Click **Import** — this step is required. EasyLab turns the devcontainer into a
    workspace template and lists anything in it that will not take effect. The wizard
    will not advance to the next step until the import has run, since the import is
    what generates the workspace the lab is created from.
-6. Click **Review generated YAML** to open the result in the editor, adjust it if
+7. Click **Review generated YAML** to open the result in the editor, adjust it if
    needed, then finish the wizard.
 
 The import is a starting point, not a black box — what it produces is ordinary

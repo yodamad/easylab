@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -84,6 +85,17 @@ const (
 
 	// workspaceVolumeName is the PVC holding the student's files.
 	workspaceVolumeName = "workspace"
+
+	// devcontainerConfigMountPath is where a separately-cloned devcontainer config
+	// repo (Devcontainer.ConfigRepo) lands, outside the content repo's clone —
+	// envbuilder is pointed at it with an absolute ENVBUILDER_DEVCONTAINER_DIR.
+	devcontainerConfigMountPath  = "/devcontainer-config"
+	devcontainerConfigVolumeName = "devcontainer-config"
+
+	// defaultDevcontainerDirName is where the Dev Container spec puts
+	// devcontainer.json, applied when Devcontainer.Dir is empty and ConfigRepo is
+	// set — otherwise envbuilder's own default (the same value) applies instead.
+	defaultDevcontainerDirName = ".devcontainer"
 )
 
 var dns1123Invalid = regexp.MustCompile(`[^a-z0-9-]`)
@@ -414,6 +426,16 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 			Name:         ideVolumeName,
 			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 		})
+		// A separately-cloned devcontainer config repo lands on its own volume,
+		// outside the content repo's clone — envbuilder is pointed at it with an
+		// absolute ENVBUILDER_DEVCONTAINER_DIR (see devcontainerEnv).
+		if repo := strings.TrimSpace(spec.Devcontainer.ConfigRepo); repo != "" {
+			initContainers = append(initContainers, devcontainerConfigCloneInit(repo, spec.Devcontainer.ConfigBranch, spec.Devcontainer.ConfigAuthSecret))
+			volumes = append(volumes, corev1.Volume{
+				Name:         devcontainerConfigVolumeName,
+				VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+			})
+		}
 	} else if command, args, wrapped := buildBootstrap(spec, p); wrapped {
 		// Setup (startup script / dotfiles / extensions) wraps the IDE start command;
 		// otherwise the plain per-IDE args run under the image entrypoint.
@@ -601,6 +623,11 @@ func applyDevcontainer(c *corev1.Container, spec workspace.Spec, p ideProfile, d
 	// before running the init script, so the IDE itself does not stay root.
 	c.SecurityContext = &corev1.SecurityContext{RunAsUser: int64Ptr(0)}
 	c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: ideVolumeName, MountPath: ideMountPath})
+	if spec.Devcontainer != nil && strings.TrimSpace(spec.Devcontainer.ConfigRepo) != "" {
+		// envbuilder reads devcontainer.json from here at build time — see
+		// devcontainerEnv's ENVBUILDER_DEVCONTAINER_DIR.
+		c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: devcontainerConfigVolumeName, MountPath: devcontainerConfigMountPath})
+	}
 	// envbuilder is driven entirely by env; its own entrypoint must run.
 	c.Command = nil
 	c.Args = nil
@@ -611,20 +638,38 @@ func applyDevcontainer(c *corev1.Container, spec workspace.Spec, p ideProfile, d
 func devcontainerEnv(spec workspace.Spec, p ideProfile, dockerConfig string) []corev1.EnvVar {
 	dc := spec.Devcontainer
 
+	// What the build must not wipe: the injected IDE, and the student's files —
+	// plus a separately-cloned devcontainer config repo, if any.
+	ignorePaths := []string{ideMountPath, p.workspaceDir}
+	configRepo := strings.TrimSpace(dc.ConfigRepo)
+	if configRepo != "" {
+		ignorePaths = append(ignorePaths, devcontainerConfigMountPath)
+	}
+
 	env := []corev1.EnvVar{
 		{Name: "ENVBUILDER_GIT_URL", Value: gitURLWithRef(spec.GitRepo, spec.GitBranch)},
 		// Clone where a plain workspace clones, so git_folder and the IDE's open
 		// folder mean the same thing in both modes.
 		{Name: "ENVBUILDER_WORKSPACE_FOLDER", Value: p.workspaceDir},
 		{Name: "ENVBUILDER_INIT_SCRIPT", Value: devcontainerInitScript(spec, p)},
-		// What the build must not wipe: the injected IDE, and the student's files.
-		{Name: "ENVBUILDER_IGNORE_PATHS", Value: strings.Join([]string{ideMountPath, p.workspaceDir}, ",")},
+		{Name: "ENVBUILDER_IGNORE_PATHS", Value: strings.Join(ignorePaths, ",")},
 		// A failed build must fail the pod. Continuing would present a workspace
 		// that looks fine but is missing everything the devcontainer installs.
 		{Name: "ENVBUILDER_EXIT_ON_BUILD_FAILURE", Value: "true"},
 	}
 
-	if v := strings.TrimSpace(dc.Dir); v != "" {
+	if configRepo != "" {
+		// devcontainer.json lives in the separately-cloned config repo rather than
+		// the content repo — point envbuilder at its absolute path on the config
+		// volume instead of a path relative to the content clone. Defaulted here
+		// (rather than left to envbuilder) because an absolute
+		// ENVBUILDER_DEVCONTAINER_DIR is always set in this branch.
+		dir := strings.TrimSpace(dc.Dir)
+		if dir == "" {
+			dir = defaultDevcontainerDirName
+		}
+		env = append(env, corev1.EnvVar{Name: "ENVBUILDER_DEVCONTAINER_DIR", Value: path.Join(devcontainerConfigMountPath, dir)})
+	} else if v := strings.TrimSpace(dc.Dir); v != "" {
 		env = append(env, corev1.EnvVar{Name: "ENVBUILDER_DEVCONTAINER_DIR", Value: v})
 	}
 	if v := strings.TrimSpace(dc.CacheRepo); v != "" {
@@ -876,6 +921,36 @@ func gitCloneInit(repo, branch, dir, authSecret string) corev1.Container {
 		Command:      []string{"sh", "-c", script},
 		Env:          env,
 		VolumeMounts: []corev1.VolumeMount{{Name: workspaceVolumeName, MountPath: dir}},
+	}
+}
+
+// devcontainerConfigCloneInit returns an init container that clones a
+// devcontainer config repo (Devcontainer.ConfigRepo) into its own volume,
+// separate from the content repo — same clone-script pattern as gitCloneInit,
+// mounted at devcontainerConfigMountPath instead of the workspace PVC. envbuilder
+// runs the build as root (see applyDevcontainer), so this does not need the
+// chown to uid/gid 1000 that gitCloneInit applies for the IDE's benefit.
+func devcontainerConfigCloneInit(repo, branch, authSecret string) corev1.Container {
+	branchFlag := ""
+	if b := strings.TrimSpace(branch); b != "" {
+		branchFlag = fmt.Sprintf("--branch %s --single-branch ", shellQuote(b))
+	}
+
+	gitCmd := "git"
+	var env []corev1.EnvVar
+	if s := strings.TrimSpace(authSecret); s != "" {
+		gitCmd = "git " + strings.Join(gitCredentialArgs, " ")
+		env = basicAuthEnv(s, "GIT_USERNAME", "GIT_PASSWORD")
+	}
+
+	script := fmt.Sprintf(`if [ -z "$(ls -A %s 2>/dev/null)" ]; then %s clone %s%s %s; fi`,
+		devcontainerConfigMountPath, gitCmd, branchFlag, shellQuote(repo), devcontainerConfigMountPath)
+	return corev1.Container{
+		Name:         "devcontainer-config-clone",
+		Image:        "alpine/git:latest",
+		Command:      []string{"sh", "-c", script},
+		Env:          env,
+		VolumeMounts: []corev1.VolumeMount{{Name: devcontainerConfigVolumeName, MountPath: devcontainerConfigMountPath}},
 	}
 }
 

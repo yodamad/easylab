@@ -176,7 +176,8 @@ func devcontainerTemplate(res devcontainer.Result, r *http.Request) WorkspaceTem
 	}
 
 	return WorkspaceTemplate{
-		Name: name,
+		Name:        name,
+		Description: strings.TrimSpace(getFormValue(r, "template_description")),
 		// The IDE is injected onto a volume the build leaves alone, so it is the
 		// admin's choice rather than anything the devcontainer.json dictates.
 		IDE:        strings.TrimSpace(getFormValue(r, "ide")),
@@ -197,6 +198,11 @@ func devcontainerTemplate(res devcontainer.Result, r *http.Request) WorkspaceTem
 			Dir:                dir,
 			CacheRepo:          strings.TrimSpace(getFormValue(r, "cache_repo")),
 			RegistryAuthSecret: strings.TrimSpace(getFormValue(r, "registry_auth_secret")),
+			// Set only when the admin pointed the import at a separate config repo —
+			// otherwise devcontainer.json keeps coming from git_repo, as today.
+			ConfigRepo:       strings.TrimSpace(getFormValue(r, "devcontainer_config_repo")),
+			ConfigBranch:     strings.TrimSpace(getFormValue(r, "devcontainer_config_branch")),
+			ConfigAuthSecret: strings.TrimSpace(getFormValue(r, "devcontainer_config_auth_secret")),
 		},
 	}
 }
@@ -262,17 +268,42 @@ func (h *Handler) detectDevcontainerFromUpload(r *http.Request) (*devcontainer.C
 	return nil, "", clientErrorf("unsupported file type: upload a devcontainer.json or a repository .zip")
 }
 
-// detectDevcontainerFromGit shallow-clones the workshop repo and reads its
-// devcontainer.json.
-func (h *Handler) detectDevcontainerFromGit(r *http.Request) (*devcontainer.Config, string, error) {
-	repoURL := strings.TrimSpace(getFormValue(r, "git_repo"))
-	branch := strings.TrimSpace(getFormValue(r, "git_branch"))
-
-	if repoURL == "" {
-		return nil, "", clientErrorf("git_repo is required")
+// devcontainerCloneSource resolves what detectDevcontainerFromGit actually
+// clones to read devcontainer.json: normally git_repo, or
+// devcontainer_config_repo when set (see detectDevcontainerFromGit's doc
+// comment). Pulled out as a pure function so the selection is testable without
+// a real clone.
+func devcontainerCloneSource(r *http.Request) (repoURL, branch, username, token string, err error) {
+	gitRepo := strings.TrimSpace(getFormValue(r, "git_repo"))
+	if gitRepo == "" {
+		return "", "", "", "", clientErrorf("git_repo is required")
 	}
-	if !validateURL(repoURL) {
-		return nil, "", clientErrorf("git_repo is not a valid URL")
+	if !validateURL(gitRepo) {
+		return "", "", "", "", clientErrorf("git_repo is not a valid URL")
+	}
+
+	if configRepo := strings.TrimSpace(getFormValue(r, "devcontainer_config_repo")); configRepo != "" {
+		if !validateURL(configRepo) {
+			return "", "", "", "", clientErrorf("devcontainer_config_repo is not a valid URL")
+		}
+		return configRepo, strings.TrimSpace(getFormValue(r, "devcontainer_config_branch")),
+			getFormValue(r, "devcontainer_config_username"), getFormValue(r, "devcontainer_config_token"), nil
+	}
+
+	return gitRepo, strings.TrimSpace(getFormValue(r, "git_branch")),
+		getFormValue(r, "git_username"), getFormValue(r, "git_token"), nil
+}
+
+// detectDevcontainerFromGit shallow-clones a repo and reads its
+// devcontainer.json. Normally that is the workshop repo (git_repo); when
+// devcontainer_config_repo is set, the devcontainer instead lives in that
+// separate repo, cloned in its place — git_repo is still required and still
+// becomes the generated template's content repo (see devcontainerTemplate), it
+// is just not what gets read here.
+func (h *Handler) detectDevcontainerFromGit(r *http.Request) (*devcontainer.Config, string, error) {
+	cloneURL, cloneBranch, cloneUsername, cloneToken, err := devcontainerCloneSource(r)
+	if err != nil {
+		return nil, "", err
 	}
 
 	tmpDir, err := os.MkdirTemp("", "detect-devcontainer-git-*")
@@ -283,20 +314,20 @@ func (h *Handler) detectDevcontainerFromGit(r *http.Request) (*devcontainer.Conf
 	defer os.RemoveAll(tmpDir)
 
 	opts := &git.CloneOptions{
-		URL:          repoURL,
+		URL:          cloneURL,
 		SingleBranch: true,
 		Depth:        1,
 		// nil means anonymous, so a public repo needs no special case here.
-		Auth: gitCloneAuth(getFormValue(r, "git_username"), getFormValue(r, "git_token")),
+		Auth: gitCloneAuth(cloneUsername, cloneToken),
 	}
 	// An empty branch means "whatever the remote's HEAD is". Defaulting to a name
 	// here would break every repo that does not use it.
-	if branch != "" {
-		opts.ReferenceName = plumbing.NewBranchReferenceName(branch)
+	if cloneBranch != "" {
+		opts.ReferenceName = plumbing.NewBranchReferenceName(cloneBranch)
 	}
 
 	if _, err := git.PlainClone(tmpDir, false, opts); err != nil {
-		log.Printf("Failed to clone %s for devcontainer detection: %v", redactURL(repoURL), err)
+		log.Printf("Failed to clone %s for devcontainer detection: %v", redactURL(cloneURL), err)
 		return nil, "", errDevcontainerClone
 	}
 

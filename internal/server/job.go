@@ -122,19 +122,25 @@ type WorkspaceTemplate struct {
 	Devcontainer *DevcontainerConfig `json:"devcontainer,omitempty"`
 }
 
-// DevcontainerConfig builds a workspace from the repo's devcontainer.json
-// (image or Dockerfile, plus features) rather than a fixed image. The build runs
-// inside the student's pod on first start, so the layer cache is what keeps that
-// start bearable — hence CacheRepo being required rather than optional.
+// DevcontainerConfig builds a workspace from a devcontainer.json (image or
+// Dockerfile, plus features) rather than a fixed image. The build runs inside
+// the student's pod on first start, so the layer cache is what keeps that start
+// bearable — hence CacheRepo being required rather than optional.
 //
 // Note the division of labour: envbuilder reads image/build/features/containerEnv
 // and the lifecycle commands straight from the repo, so none of those appear
 // here. The surrounding WorkspaceTemplate covers what envbuilder ignores
 // (Extensions, CPU/Memory/DiskSize, GitFolder).
+//
+// By default devcontainer.json is read from the workshop repo
+// (WorkspaceTemplate.GitRepo). ConfigRepo, when set, moves that read to a
+// second, separately-cloned repo — for a devcontainer config shared or
+// standardized across workshops, kept apart from the workshop content it builds.
 type DevcontainerConfig struct {
 	Enabled bool `json:"enabled,omitempty"`
-	// Dir is the folder containing devcontainer.json, relative to the repo root
-	// (default ".devcontainer").
+	// Dir is the folder containing devcontainer.json: relative to the workshop
+	// repo root when ConfigRepo is empty (default ".devcontainer"), or relative
+	// to ConfigRepo's root when it is set.
 	Dir string `json:"dir,omitempty"`
 	// CacheRepo is the container registry image layers are cached in. Required:
 	// without it every student's pod rebuilds the devcontainer from scratch.
@@ -157,6 +163,17 @@ type DevcontainerConfig struct {
 	FallbackImage string `json:"fallback_image,omitempty"`
 	// Insecure bypasses TLS verification when cloning and pulling from registries.
 	Insecure bool `json:"insecure,omitempty"`
+	// ConfigRepo, when set, names a git repo cloned separately from GitRepo and is
+	// where devcontainer.json (and any Dockerfile/build context it references) is
+	// read from instead of GitRepo.
+	ConfigRepo string `json:"config_repo,omitempty"`
+	// ConfigBranch is the branch to clone from ConfigRepo (default branch when
+	// empty). Ignored when ConfigRepo is empty.
+	ConfigBranch string `json:"config_branch,omitempty"`
+	// ConfigAuthSecret names an existing kubernetes.io/basic-auth Secret in the
+	// workspace namespace, used to clone a private ConfigRepo over HTTPS — like
+	// GitAuthSecret, but for ConfigRepo. Ignored when ConfigRepo is empty.
+	ConfigAuthSecret string `json:"config_auth_secret,omitempty"`
 }
 
 // WorkspaceSidecar is an additional container co-located in the workspace pod.

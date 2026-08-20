@@ -161,6 +161,75 @@ func TestEnsureWorkspace_DevcontainerSkipsGitClone(t *testing.T) {
 	assert.False(t, ok, "envbuilder clones the repo itself")
 }
 
+// TestEnsureWorkspace_DevcontainerConfigRepoClonesSeparately covers a
+// devcontainer.json read from a repo separate from the content repo: a second
+// init container must clone it onto its own volume, alongside (not instead of)
+// envbuilder's own content-repo clone.
+func TestEnsureWorkspace_DevcontainerConfigRepoClonesSeparately(t *testing.T) {
+	b, cs := newTestBackend()
+
+	spec := devcontainerSpec()
+	spec.Devcontainer.ConfigRepo = "https://gitlab.com/org/devcontainer-config.git"
+	spec.Devcontainer.ConfigBranch = "main"
+
+	ws, err := b.EnsureWorkspace(context.Background(), spec)
+	require.NoError(t, err)
+
+	c, ok := initContainerNamed(t, cs, ws.ID, "devcontainer-config-clone")
+	require.True(t, ok, "a separate config repo must get its own clone init container")
+	assert.Contains(t, c.Command[len(c.Command)-1], "https://gitlab.com/org/devcontainer-config.git")
+	assert.Contains(t, c.Command[len(c.Command)-1], "--branch 'main'")
+	require.Len(t, c.VolumeMounts, 1)
+	assert.Equal(t, devcontainerConfigVolumeName, c.VolumeMounts[0].Name)
+	assert.Equal(t, devcontainerConfigMountPath, c.VolumeMounts[0].MountPath)
+
+	// envbuilder still owns the content-repo clone.
+	_, ok = initContainerNamed(t, cs, ws.ID, "git-clone")
+	assert.False(t, ok, "envbuilder clones the content repo itself, config_repo does not change that")
+
+	ideC := ideContainer(t, cs, ws.ID)
+	var mounted bool
+	for _, m := range ideC.VolumeMounts {
+		if m.Name == devcontainerConfigVolumeName && m.MountPath == devcontainerConfigMountPath {
+			mounted = true
+		}
+	}
+	assert.True(t, mounted, "envbuilder must be able to read the cloned config at build time")
+}
+
+// TestEnsureWorkspace_DevcontainerConfigRepoEnv covers what points envbuilder at
+// the separately-cloned config instead of a path inside the content clone.
+func TestEnsureWorkspace_DevcontainerConfigRepoEnv(t *testing.T) {
+	tests := []struct {
+		name    string
+		dir     string
+		wantDir string
+	}{
+		{name: "explicit dir", dir: "custom/.devcontainer", wantDir: devcontainerConfigMountPath + "/custom/.devcontainer"},
+		{name: "empty dir defaults to .devcontainer", dir: "", wantDir: devcontainerConfigMountPath + "/.devcontainer"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, cs := newTestBackend()
+
+			spec := devcontainerSpec()
+			spec.Devcontainer.Dir = tt.dir
+			spec.Devcontainer.ConfigRepo = "https://gitlab.com/org/devcontainer-config.git"
+
+			ws, err := b.EnsureWorkspace(context.Background(), spec)
+			require.NoError(t, err)
+			env := envOf(ideContainer(t, cs, ws.ID))
+
+			assert.Equal(t, tt.wantDir, env["ENVBUILDER_DEVCONTAINER_DIR"])
+			// The content repo is still what envbuilder clones — config_repo only
+			// changes where devcontainer.json comes from.
+			assert.Equal(t, "https://gitlab.com/org/workshop.git#refs/heads/main", env["ENVBUILDER_GIT_URL"])
+			assert.Contains(t, env["ENVBUILDER_IGNORE_PATHS"], devcontainerConfigMountPath, "the build must not wipe the config clone")
+		})
+	}
+}
+
 // TestEnsureWorkspace_PlainModeStillClones is the counterpart: the devcontainer
 // branch must not have changed the ordinary path.
 func TestEnsureWorkspace_PlainModeStillClones(t *testing.T) {

@@ -200,6 +200,74 @@ func TestGitCloneInit_ScriptIsValidSh(t *testing.T) {
 	}
 }
 
+func TestDevcontainerConfigCloneInit_WithoutAuth(t *testing.T) {
+	t.Parallel()
+
+	c := devcontainerConfigCloneInit("https://gitlab.com/org/config.git", "main", "")
+
+	assert.Empty(t, c.Env, "an anonymous clone needs no credentials in its environment")
+	require.Len(t, c.Command, 3)
+	assert.NotContains(t, c.Command[2], "credential.helper")
+	assert.Contains(t, c.Command[2], "git clone")
+	require.Len(t, c.VolumeMounts, 1)
+	assert.Equal(t, devcontainerConfigVolumeName, c.VolumeMounts[0].Name)
+	assert.Equal(t, devcontainerConfigMountPath, c.VolumeMounts[0].MountPath)
+}
+
+func TestDevcontainerConfigCloneInit_WithAuth(t *testing.T) {
+	t.Parallel()
+
+	c := devcontainerConfigCloneInit("https://gitlab.com/org/config.git", "main", "configcred")
+
+	refs := envRefOf(c)
+	require.Contains(t, refs, "GIT_USERNAME")
+	require.Contains(t, refs, "GIT_PASSWORD")
+	assert.Equal(t, "configcred", refs["GIT_USERNAME"].Name)
+	assert.Equal(t, corev1.BasicAuthUsernameKey, refs["GIT_USERNAME"].Key)
+	assert.Equal(t, "configcred", refs["GIT_PASSWORD"].Name)
+	assert.Equal(t, corev1.BasicAuthPasswordKey, refs["GIT_PASSWORD"].Key)
+
+	require.Len(t, c.Command, 3)
+	script := c.Command[2]
+	assert.Contains(t, script, "-c credential.helper= -c credential.helper=")
+	assert.Contains(t, script, "${GIT_USERNAME}")
+	assert.Contains(t, script, "${GIT_PASSWORD}")
+}
+
+// Mirrors TestGitCloneInit_ScriptIsValidSh: the script is assembled by string
+// formatting, so its syntax is otherwise only verified by eye.
+func TestDevcontainerConfigCloneInit_ScriptIsValidSh(t *testing.T) {
+	t.Parallel()
+
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("sh not available")
+	}
+
+	tests := []struct {
+		name                     string
+		repo, branch, authSecret string
+	}{
+		{name: "anonymous", repo: "https://gitlab.com/org/config.git", branch: "main"},
+		{name: "authenticated", repo: "https://gitlab.com/org/config.git", branch: "main", authSecret: "configcred"},
+		{name: "no branch", repo: "https://gitlab.com/org/config.git", authSecret: "configcred"},
+		{name: "quote in branch", repo: "https://gitlab.com/org/config.git", branch: `it's; rm -rf /`, authSecret: "configcred"},
+		{name: "quote in repo", repo: `https://gitlab.com/org/config.git'; touch /pwned; '`, branch: "main"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := devcontainerConfigCloneInit(tt.repo, tt.branch, tt.authSecret)
+			require.Len(t, c.Command, 3)
+
+			cmd := exec.Command(sh, "-n", "-c", c.Command[2])
+			out, err := cmd.CombinedOutput()
+			assert.NoError(t, err, "generated script is not valid sh: %s\nscript: %s", out, c.Command[2])
+		})
+	}
+}
+
 func TestEnsureWorkspace_GitAuthSecretWiredIntoCloneInit(t *testing.T) {
 	b, cs := newTestBackend()
 	gitAuthSecret(t, cs, "gitcred", "oauth2", "glpat-example")

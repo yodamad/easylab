@@ -2076,11 +2076,39 @@ const devcontainerSourceGitBtn = document.getElementById('devcontainer-source-gi
 const devcontainerSourceUploadBtn = document.getElementById('devcontainer-source-upload');
 let devcontainerSource = 'git';
 
+// Whether the devcontainer is read from the workshop repo (git_repo) or a
+// separate, shared config repo — orthogonal to devcontainerSource (git/upload),
+// and only meaningful for the "git" source: an upload already supplies the
+// devcontainer.json directly, so there is nothing else to clone.
+const devcontainerConfigSourceRow = document.getElementById('devcontainer-config-source-row');
+const devcontainerConfigRepoRow = document.getElementById('devcontainer-config-repo-row');
+const devcontainerConfigSourceSameBtn = document.getElementById('devcontainer-config-source-same');
+const devcontainerConfigSourceSeparateBtn = document.getElementById('devcontainer-config-source-separate');
+let devcontainerConfigSource = 'same';
+
+function setDevcontainerConfigSource(source) {
+    devcontainerConfigSource = source === 'separate' ? 'separate' : 'same';
+    if (devcontainerConfigSourceSameBtn) devcontainerConfigSourceSameBtn.classList.toggle('selected', devcontainerConfigSource === 'same');
+    if (devcontainerConfigSourceSeparateBtn) devcontainerConfigSourceSeparateBtn.classList.toggle('selected', devcontainerConfigSource === 'separate');
+    if (devcontainerConfigRepoRow) devcontainerConfigRepoRow.style.display = devcontainerConfigSource === 'separate' ? '' : 'none';
+}
+
+if (devcontainerConfigSourceSameBtn) {
+    devcontainerConfigSourceSameBtn.addEventListener('click', () => setDevcontainerConfigSource('same'));
+}
+if (devcontainerConfigSourceSeparateBtn) {
+    devcontainerConfigSourceSeparateBtn.addEventListener('click', () => setDevcontainerConfigSource('separate'));
+}
+
 function setDevcontainerSource(source) {
     devcontainerSource = source === 'upload' ? 'upload' : 'git';
     if (devcontainerSourceGitBtn) devcontainerSourceGitBtn.classList.toggle('selected', devcontainerSource === 'git');
     if (devcontainerSourceUploadBtn) devcontainerSourceUploadBtn.classList.toggle('selected', devcontainerSource === 'upload');
     if (devcontainerUploadRow) devcontainerUploadRow.style.display = devcontainerSource === 'upload' ? '' : 'none';
+    // The config-repo choice only applies when reading from git; an upload is
+    // already the devcontainer.json, so reset back to "same" underneath it.
+    if (devcontainerConfigSourceRow) devcontainerConfigSourceRow.style.display = devcontainerSource === 'upload' ? 'none' : '';
+    if (devcontainerSource === 'upload') setDevcontainerConfigSource('same');
 }
 
 if (devcontainerSourceGitBtn) {
@@ -2158,6 +2186,7 @@ if (btnRunDevcontainerImport) {
         }
         const body = new FormData();
         body.append('template_name', templateName);
+        body.append('template_description', (document.getElementById('devcontainer_template_description') || {}).value || '');
         body.append('source', devcontainerSource);
         body.append('git_repo', (document.getElementById('devcontainer_git_repo') || {}).value || '');
         body.append('git_branch', (document.getElementById('devcontainer_git_branch') || {}).value || '');
@@ -2189,6 +2218,24 @@ if (btnRunDevcontainerImport) {
         const gitAuth = gitCredentialAuthByName(gitAuthSecret);
         body.append('git_username', gitAuth.username);
         body.append('git_token', gitAuth.token);
+
+        // When the devcontainer lives in a separate repo, the import reads from
+        // that repo instead of git_repo — git_repo above stays the generated
+        // template's content repo either way. Left empty in "same repo" mode, so
+        // the server falls back to reading git_repo as it always has.
+        if (devcontainerSource === 'git' && devcontainerConfigSource === 'separate') {
+            body.append('devcontainer_config_repo', (document.getElementById('devcontainer_config_repo') || {}).value || '');
+            body.append('devcontainer_config_branch', (document.getElementById('devcontainer_config_branch') || {}).value || '');
+            let configAuthSecret = (document.getElementById('devcontainer_config_auth_secret') || {}).value || '';
+            if (!configAuthSecret) {
+                const names = gitCredentialNames();
+                if (names.length === 1) configAuthSecret = names[0];
+            }
+            body.append('devcontainer_config_auth_secret', configAuthSecret);
+            const configAuth = gitCredentialAuthByName(configAuthSecret);
+            body.append('devcontainer_config_username', configAuth.username);
+            body.append('devcontainer_config_token', configAuth.token);
+        }
 
         if (devcontainerSource === 'upload') {
             const file = fileInput && fileInput.files[0];

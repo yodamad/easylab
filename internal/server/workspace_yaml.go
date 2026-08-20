@@ -53,13 +53,17 @@ workspace_templates:
     #   - type: configmap                        # configmap | secret
     #     name: my-config
     #     path: /etc/config
-    # devcontainer:                              # build the image from the repo's devcontainer.json
+    # devcontainer:                              # build the image from a devcontainer.json
     #   enabled: true                            # requires git_repo; conflicts with image
     #   dir: .devcontainer                       # folder holding devcontainer.json
     #   cache_repo: registry.example.com/cache   # REQUIRED — without it every student rebuilds
     #   registry_auth_secret: regcred            # existing dockerconfigjson Secret in the namespace
     #   fallback_image: codercom/code-server:latest
     #   insecure: false                          # bypass registry/git TLS verification
+    #   config_repo: https://gitlab.com/org/devcontainer-config.git # devcontainer.json lives here
+    #                                             # instead of git_repo; dir is then relative to it
+    #   config_branch: main
+    #   config_auth_secret: gitcred              # basic-auth Secret for a private config_repo
 `
 
 // workspaceTemplatesDoc is the YAML document admins edit. It carries no yaml
@@ -315,22 +319,41 @@ func gitCredentialWarnings(templates []WorkspaceTemplate) []devcontainer.Warning
 			where = "template"
 		}
 
-		for key, raw := range map[string]string{"git_repo": t.GitRepo, "dotfiles_repo": t.DotfilesRepo} {
+		configRepo := ""
+		if t.Devcontainer != nil {
+			configRepo = t.Devcontainer.ConfigRepo
+		}
+		urls := map[string]string{"git_repo": t.GitRepo, "dotfiles_repo": t.DotfilesRepo, "devcontainer.config_repo": configRepo}
+		for key, raw := range urls {
 			if !urlEmbedsCredential(raw) {
 				continue
 			}
+			authField := "git_auth_secret"
+			if key == "devcontainer.config_repo" {
+				authField = "devcontainer.config_auth_secret"
+			}
 			out = append(out, devcontainer.Warning{
 				Key: key,
-				Message: fmt.Sprintf("%s: %s embeds a credential in the URL. It is stored in the lab's job file, returned by the jobs API and included in the templates export. Use git_auth_secret instead.",
-					where, key),
+				Message: fmt.Sprintf("%s: %s embeds a credential in the URL. It is stored in the lab's job file, returned by the jobs API and included in the templates export. Use %s instead.",
+					where, key, authField),
 			})
 			// A token in the URL is what git uses, so the secret is dead config the
 			// admin will otherwise believe is in force.
-			if key == "git_repo" && strings.TrimSpace(t.GitAuthSecret) != "" {
-				out = append(out, devcontainer.Warning{
-					Key:     "git_auth_secret",
-					Message: fmt.Sprintf("%s: git_auth_secret is ignored — the git_repo URL carries its own credential, which git uses in preference.", where),
-				})
+			switch key {
+			case "git_repo":
+				if strings.TrimSpace(t.GitAuthSecret) != "" {
+					out = append(out, devcontainer.Warning{
+						Key:     "git_auth_secret",
+						Message: fmt.Sprintf("%s: git_auth_secret is ignored — the git_repo URL carries its own credential, which git uses in preference.", where),
+					})
+				}
+			case "devcontainer.config_repo":
+				if t.Devcontainer != nil && strings.TrimSpace(t.Devcontainer.ConfigAuthSecret) != "" {
+					out = append(out, devcontainer.Warning{
+						Key:     "devcontainer.config_auth_secret",
+						Message: fmt.Sprintf("%s: devcontainer.config_auth_secret is ignored — the config_repo URL carries its own credential, which git uses in preference.", where),
+					})
+				}
 			}
 		}
 	}
@@ -359,13 +382,28 @@ func validateDevcontainer(where string, t WorkspaceTemplate) error {
 		return nil
 	}
 	if strings.TrimSpace(t.GitRepo) == "" {
-		return fmt.Errorf("%s: devcontainer.enabled requires git_repo — the devcontainer.json is read from the workshop repository", where)
+		return fmt.Errorf("%s: devcontainer.enabled requires git_repo — it is always cloned into the workspace, and is where devcontainer.json is read from unless devcontainer.config_repo is set", where)
 	}
 	if strings.TrimSpace(t.Image) != "" {
-		return fmt.Errorf("%s: devcontainer.enabled conflicts with image — the workspace image is built from the repository's devcontainer.json, so image would be ignored", where)
+		return fmt.Errorf("%s: devcontainer.enabled conflicts with image — the workspace image is built from devcontainer.json, so image would be ignored", where)
 	}
 	if strings.TrimSpace(dc.CacheRepo) == "" {
 		return fmt.Errorf("%s: devcontainer.cache_repo is required — without a layer cache registry every student rebuilds the devcontainer from scratch on first start", where)
+	}
+
+	configRepo := strings.TrimSpace(dc.ConfigRepo)
+	if configRepo != "" && !validateURL(configRepo) {
+		return fmt.Errorf("%s: devcontainer.config_repo %q is not a valid URL", where, configRepo)
+	}
+	if configAuth := strings.TrimSpace(dc.ConfigAuthSecret); configAuth != "" {
+		if configRepo == "" {
+			return fmt.Errorf("%s: devcontainer.config_auth_secret requires devcontainer.config_repo — there is nothing to authenticate to without a repository", where)
+		}
+		// Same reasoning as git_auth_secret: the credentials are basic auth, which
+		// only an HTTP(S) remote sends.
+		if u, err := url.Parse(configRepo); err == nil && u.Scheme != "http" && u.Scheme != "https" {
+			return fmt.Errorf("%s: devcontainer.config_auth_secret needs an http(s) devcontainer.config_repo — %q uses %q, which does not authenticate with a username and password", where, configRepo, u.Scheme)
+		}
 	}
 	return nil
 }

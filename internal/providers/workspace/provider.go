@@ -81,16 +81,21 @@ type Mount struct {
 	Path string
 }
 
-// DevcontainerSpec builds the workspace image from the repo's devcontainer.json
-// rather than running Spec.Image directly. The build happens inside the
-// student's own pod on first start, which is what lets a workshop's Dockerfile
-// and features work without EasyLab having to understand them.
+// DevcontainerSpec builds the workspace image from a devcontainer.json rather
+// than running Spec.Image directly. The build happens inside the student's own
+// pod on first start, which is what lets a workshop's Dockerfile and features
+// work without EasyLab having to understand them.
 //
-// The repo to build comes from Spec.GitRepo/GitBranch — a devcontainer workspace
-// is always repo-backed.
+// The content repo to build comes from Spec.GitRepo/GitBranch — a devcontainer
+// workspace is always repo-backed. When ConfigRepo is empty, devcontainer.json
+// is also read from that same clone (at Dir). When ConfigRepo is set, it names a
+// second repo cloned separately, and Dir is resolved inside that clone instead —
+// this is what lets a shared/standardized devcontainer config live apart from
+// the workshop content it builds.
 type DevcontainerSpec struct {
-	// Dir is the folder containing devcontainer.json, relative to the repo root
-	// (empty means the builder's own default).
+	// Dir is the folder containing devcontainer.json: relative to the content
+	// repo root when ConfigRepo is empty, or relative to ConfigRepo's root when
+	// it is set (empty means the builder's own default).
 	Dir string
 	// CacheRepo is the registry image layers are cached in. Without it every
 	// workspace rebuilds the devcontainer from scratch, so callers are expected to
@@ -104,6 +109,17 @@ type DevcontainerSpec struct {
 	FallbackImage string
 	// Insecure bypasses TLS verification when cloning and pulling from registries.
 	Insecure bool
+	// ConfigRepo, when set, names a git repo cloned separately from the content
+	// repo and is where devcontainer.json (and any Dockerfile/build context it
+	// references) is read from instead of the content repo.
+	ConfigRepo string
+	// ConfigBranch is the branch to clone from ConfigRepo (default branch when
+	// empty). Ignored when ConfigRepo is empty.
+	ConfigBranch string
+	// ConfigAuthSecret names a kubernetes.io/basic-auth Secret in the workspace
+	// namespace used to clone a private ConfigRepo. Injected by reference into
+	// the clone step only, like GitAuthSecret. Ignored when ConfigRepo is empty.
+	ConfigAuthSecret string
 }
 
 // Spec describes the workspace to create for a student.

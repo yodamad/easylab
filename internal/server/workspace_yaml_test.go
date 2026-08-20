@@ -325,6 +325,40 @@ func TestParseWorkspaceTemplatesYAML_Errors(t *testing.T) {
       enabled: true`,
 			wantInErr: "cache_repo is required",
 		},
+		{
+			name: "devcontainer config_repo is not a valid URL",
+			input: `workspace_templates:
+  - name: default
+    git_repo: https://gitlab.com/org/workshop.git
+    devcontainer:
+      enabled: true
+      cache_repo: registry.example.com/cache
+      config_repo: "not a url"`,
+			wantInErr: "config_repo",
+		},
+		{
+			name: "devcontainer config_auth_secret without config_repo has nothing to authenticate to",
+			input: `workspace_templates:
+  - name: default
+    git_repo: https://gitlab.com/org/workshop.git
+    devcontainer:
+      enabled: true
+      cache_repo: registry.example.com/cache
+      config_auth_secret: configcred`,
+			wantInErr: "config_auth_secret requires devcontainer.config_repo",
+		},
+		{
+			name: "devcontainer config_auth_secret needs an http(s) config_repo",
+			input: `workspace_templates:
+  - name: default
+    git_repo: https://gitlab.com/org/workshop.git
+    devcontainer:
+      enabled: true
+      cache_repo: registry.example.com/cache
+      config_repo: ssh://git@gitlab.com/org/config.git
+      config_auth_secret: configcred`,
+			wantInErr: "needs an http(s) devcontainer.config_repo",
+		},
 	}
 
 	for _, tt := range tests {
@@ -410,6 +444,9 @@ func TestMarshalWorkspaceTemplatesYAML_RoundTripDevcontainer(t *testing.T) {
 			RegistryAuthSecret: "regcred",
 			FallbackImage:      "codercom/code-server:latest",
 			Insecure:           true,
+			ConfigRepo:         "https://gitlab.com/org/devcontainer-config.git",
+			ConfigBranch:       "main",
+			ConfigAuthSecret:   "configcred",
 		},
 	}}
 
@@ -927,6 +964,22 @@ func TestGitCredentialWarnings(t *testing.T) {
 				Name: "a", GitRepo: "https://oauth2:glpat-x@gitlab.com/o/r.git", GitAuthSecret: "gitcred",
 			},
 			wantKeys: []string{"git_repo", "git_auth_secret"},
+		},
+		{
+			name: "token in the devcontainer config_repo url",
+			template: WorkspaceTemplate{
+				Name: "a", GitRepo: "https://gitlab.com/o/r.git",
+				Devcontainer: &DevcontainerConfig{Enabled: true, ConfigRepo: "https://oauth2:glpat-x@gitlab.com/o/config.git"},
+			},
+			wantKeys: []string{"devcontainer.config_repo"},
+		},
+		{
+			name: "token in the config_repo url alongside a config_auth_secret",
+			template: WorkspaceTemplate{
+				Name: "a", GitRepo: "https://gitlab.com/o/r.git",
+				Devcontainer: &DevcontainerConfig{Enabled: true, ConfigRepo: "https://oauth2:glpat-x@gitlab.com/o/config.git", ConfigAuthSecret: "configcred"},
+			},
+			wantKeys: []string{"devcontainer.config_repo", "devcontainer.config_auth_secret"},
 		},
 	}
 
