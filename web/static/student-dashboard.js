@@ -4,7 +4,6 @@
 // (cookies, crypto, copy, escaping) live in student-common.js, loaded first.
 
 document.addEventListener('DOMContentLoaded', function() {
-    loadLabs();
     setupLabTemplateHandlers();
 
     document.addEventListener('htmx:afterRequest', function(evt) {
@@ -54,44 +53,42 @@ async function encryptAndSaveWorkspaceInfo(button) {
 }
 
 function setupLabTemplateHandlers() {
-    const labSelect = document.getElementById('lab_id');
-    const tilesContainer = document.getElementById('template-tiles');
+    const labTilesContainer = document.getElementById('lab-tiles');
+    const labCountEl = document.getElementById('lab-picker-count');
+    const templateTilesContainer = document.getElementById('template-tiles');
     const templateGroup = document.getElementById('template-select-group');
-    const countEl = document.getElementById('template-picker-count');
+    const templateCountEl = document.getElementById('template-picker-count');
     const submitBtn = document.getElementById('submit-btn');
 
-    if (!labSelect || !tilesContainer || !templateGroup) return;
+    if (!labTilesContainer || !templateTilesContainer || !templateGroup) return;
 
     function setSubmitEnabled(enabled) {
         if (submitBtn) submitBtn.disabled = !enabled;
     }
 
-    function showStatus(message, isError) {
-        tilesContainer.innerHTML = '';
+    function showTilesStatus(container, countEl, message, isError) {
+        container.innerHTML = '';
         const p = document.createElement('p');
         p.className = 'template-tiles-status' + (isError ? ' template-tiles-status--error' : '');
         p.textContent = message;
-        tilesContainer.appendChild(p);
+        container.appendChild(p);
         if (countEl) countEl.textContent = '';
     }
 
-    // Nothing can be requested until a template is chosen — the picker starts hidden.
+    // Nothing can be requested until a lab and a template are chosen.
     setSubmitEnabled(false);
 
-    labSelect.addEventListener('change', function() {
-        const labId = this.value;
-
-        if (!labId) {
-            templateGroup.classList.add('template-group-hidden');
-            tilesContainer.innerHTML = '';
-            if (countEl) countEl.textContent = '';
-            setSubmitEnabled(false);
-            return;
-        }
-
+    function loadTemplatesForLab(labId) {
         templateGroup.classList.remove('template-group-hidden');
-        showStatus('Loading templates…', false);
+        showTilesStatus(templateTilesContainer, templateCountEl, 'Loading templates…', false);
         setSubmitEnabled(false);
+
+        // Picking a different lab before this request resolves must not let its
+        // response render over the newer selection's tiles.
+        const isStale = () => {
+            const checked = labTilesContainer.querySelector('input[name="lab_id"]:checked');
+            return !checked || checked.value !== labId;
+        };
 
         fetch('/api/student/labs/templates?lab_id=' + encodeURIComponent(labId))
             .then(response => {
@@ -101,35 +98,37 @@ function setupLabTemplateHandlers() {
                 return response.json();
             })
             .then(templates => {
+                if (isStale()) return;
                 renderTemplates(templates);
             })
             .catch(error => {
+                if (isStale()) return;
                 console.error('Error loading templates:', error);
-                showStatus("Couldn't load templates. Choose the lab again to retry.", true);
+                showTilesStatus(templateTilesContainer, templateCountEl, "Couldn't load templates. Choose the lab again to retry.", true);
                 setSubmitEnabled(false);
             });
-    });
+    }
 
     function renderTemplates(templates) {
         if (!Array.isArray(templates) || templates.length === 0) {
-            showStatus('No templates available for this lab.', false);
+            showTilesStatus(templateTilesContainer, templateCountEl, 'No templates available for this lab.', false);
             setSubmitEnabled(false);
             return;
         }
 
         const single = templates.length === 1;
-        tilesContainer.innerHTML = '';
-        templates.forEach((t, i) => tilesContainer.appendChild(renderTile(t, single && i === 0)));
-        if (countEl) countEl.textContent = single ? '1 available' : templates.length + ' available';
+        templateTilesContainer.innerHTML = '';
+        templates.forEach((t, i) => templateTilesContainer.appendChild(renderTemplateTile(t, single && i === 0)));
+        if (templateCountEl) templateCountEl.textContent = single ? '1 available' : templates.length + ' available';
 
         // A lone template is pre-selected, so the request is ready right away;
         // otherwise the student must pick one first.
         setSubmitEnabled(single);
-        tilesContainer.querySelectorAll('input[name="template_id"]').forEach(radio => {
+        templateTilesContainer.querySelectorAll('input[name="template_id"]').forEach(radio => {
             radio.addEventListener('change', function() {
                 // Mirror the checked state as a class so the selected styling holds up
                 // even where :has() isn't supported.
-                tilesContainer.querySelectorAll('.template-tile').forEach(tile => tile.classList.remove('is-selected'));
+                templateTilesContainer.querySelectorAll('.template-tile').forEach(tile => tile.classList.remove('is-selected'));
                 this.closest('.template-tile').classList.add('is-selected');
                 setSubmitEnabled(true);
             });
@@ -137,19 +136,58 @@ function setupLabTemplateHandlers() {
 
         advanceStep(2);
     }
+
+    function wireLabTiles() {
+        labTilesContainer.querySelectorAll('input[name="lab_id"]').forEach(radio => {
+            radio.addEventListener('change', function() {
+                labTilesContainer.querySelectorAll('.template-tile').forEach(tile => tile.classList.remove('is-selected'));
+                this.closest('.template-tile').classList.add('is-selected');
+                loadTemplatesForLab(this.value);
+            });
+        });
+    }
+
+    function loadLabs() {
+        showTilesStatus(labTilesContainer, labCountEl, 'Loading environments…', false);
+
+        fetch('/api/student/labs')
+            .then(response => response.json())
+            .then(labs => {
+                if (!Array.isArray(labs) || labs.length === 0) {
+                    showTilesStatus(labTilesContainer, labCountEl, 'No labs available.', false);
+                    return;
+                }
+
+                const single = labs.length === 1;
+                labTilesContainer.innerHTML = '';
+                labs.forEach((lab, i) => labTilesContainer.appendChild(renderLabTile(lab, single && i === 0)));
+                if (labCountEl) labCountEl.textContent = single ? '1 available' : labs.length + ' available';
+                wireLabTiles();
+
+                // A lone lab is pre-selected, so template loading starts right away.
+                if (single) loadTemplatesForLab(labs[0].id);
+            })
+            .catch(error => {
+                console.error('Error loading labs:', error);
+                showTilesStatus(labTilesContainer, labCountEl, "Couldn't load environments. Reload the page to retry.", true);
+            });
+    }
+
+    loadLabs();
 }
 
-// renderTile builds one selectable template card from a template option returned by
-// /api/student/labs/templates. Built with DOM APIs (not innerHTML) so admin-authored
-// names and descriptions can never break out into markup.
-function renderTile(t, checked) {
+// renderPickerTile builds one selectable card for a radio group from
+// {id, name, description, chips} — shared by the lab and template pickers on this
+// page. Built with DOM APIs (not innerHTML) so admin-authored names and
+// descriptions can never break out into markup.
+function renderPickerTile(item, checked, groupName) {
     const label = document.createElement('label');
     label.className = 'template-tile';
 
     const input = document.createElement('input');
     input.type = 'radio';
-    input.name = 'template_id';
-    input.value = t.id;
+    input.name = groupName;
+    input.value = item.id;
     if (checked) {
         input.checked = true;
         label.classList.add('is-selected');
@@ -164,24 +202,20 @@ function renderTile(t, checked) {
 
     const name = document.createElement('span');
     name.className = 'template-tile-name';
-    name.textContent = t.name;
+    name.textContent = item.name;
     label.appendChild(name);
 
-    if (t.description) {
+    if (item.description) {
         const desc = document.createElement('span');
         desc.className = 'template-tile-desc';
-        desc.textContent = t.description;
+        desc.textContent = item.description;
         label.appendChild(desc);
     }
 
-    const chips = [];
-    if (t.ide) chips.push(['', t.ide]);
-    if (t.resources) chips.push(['cpu', t.resources]);
-    if (t.repo) chips.push(['repo', t.repo]);
-    if (chips.length) {
+    if (item.chips && item.chips.length) {
         const meta = document.createElement('span');
         meta.className = 'template-tile-meta';
-        chips.forEach(pair => {
+        item.chips.forEach(pair => {
             const chip = document.createElement('span');
             chip.className = 'template-tile-chip';
             if (pair[0]) {
@@ -201,34 +235,26 @@ function renderTile(t, checked) {
     return label;
 }
 
-function loadLabs() {
-    fetch('/api/student/labs')
-        .then(response => response.json())
-        .then(data => {
-            const select = document.getElementById('lab_id');
-            select.classList.remove('loading');
+// renderTemplateTile builds one selectable template card from a template option
+// returned by /api/student/labs/templates.
+function renderTemplateTile(t, checked) {
+    const chips = [];
+    if (t.ide) chips.push(['', t.ide]);
+    if (t.resources) chips.push(['cpu', t.resources]);
+    if (t.repo) chips.push(['repo', t.repo]);
+    return renderPickerTile({ id: t.id, name: t.name, description: t.description, chips: chips }, checked, 'template_id');
+}
 
-            if (data.length === 0) {
-                select.innerHTML = '<option value="">No labs available</option>';
-                return;
-            }
-
-            select.innerHTML = '<option value="">Select a lab...</option>';
-            data.forEach(lab => {
-                const option = document.createElement('option');
-                option.value = lab.id;
-                option.textContent = `${lab.config.stack_name || lab.id}`;
-                select.appendChild(option);
-            });
-        })
-        .catch(error => {
-            console.error('Error loading labs:', error);
-            const select = document.getElementById('lab_id');
-            if (select) {
-                select.classList.remove('loading');
-                select.innerHTML = '<option value="">Error loading labs</option>';
-            }
-        });
+// renderLabTile builds one selectable lab card from a job returned by
+// /api/student/labs.
+function renderLabTile(lab, checked) {
+    const config = lab.config || {};
+    return renderPickerTile({
+        id: lab.id,
+        name: config.stack_name || lab.id,
+        description: config.description,
+        chips: []
+    }, checked, 'lab_id');
 }
 
 let _workspacePollTimer = null;

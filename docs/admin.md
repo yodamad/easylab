@@ -31,7 +31,7 @@ As an admin (trainer, speaker, ...), you have access to the admin space to manag
 Start by naming the lab:
 
 * **Lab Name** (required) — a unique name used as the prefix for all cloud resources (letters, numbers, hyphens and underscores only).
-* **Description** (optional) — a free-text summary of what the lab is for (e.g. *Kubernetes 101 workshop, June 2025 cohort*). It is shown in the [labs list](#manage-your-labs) to help you tell labs apart.
+* **Description** (optional) — a free-text summary of what the lab is for (e.g. *Kubernetes 101 workshop, June 2025 cohort*). It is shown in the [labs list](#manage-your-labs) to help you tell labs apart, and to students on the environment picker when they request a workspace.
 
 First you need to choose how to provide the Kubernetes cluster:
 

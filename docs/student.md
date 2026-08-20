@@ -33,7 +33,7 @@ The **Request a workspace** page is where you land after login. It allows you to
 
 You need to provide:
 
-* [x] the lab (environment) you want to use
+* [x] the **lab (environment)** you want to use — available labs appear as selectable cards, each showing the lab name and, when the organiser set one, a short description of what it's for. When only one lab is available it is selected for you.
 * [x] the **template** — once you pick a lab, its templates appear as selectable cards. Each card shows the template name, a short description of what it provides, and its IDE, resources, and source repository, so you can tell them apart before choosing. When a lab has a single template it is selected for you.
 
 Your email address is automatically filled in from your login session and is not editable on this form.

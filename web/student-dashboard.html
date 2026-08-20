@@ -78,10 +78,11 @@
 
                     <div id="workspace-form-fields">
                         <div class="student-form-group">
-                            <label for="lab_id">Select Environment *</label>
-                            <select id="lab_id" name="lab_id" required class="loading">
-                                <option value="">Loading environments...</option>
-                            </select>
+                            <div class="template-picker-head">
+                                <label id="lab-picker-label">Select Environment *</label>
+                                <span class="template-picker-count" id="lab-picker-count"></span>
+                            </div>
+                            <div class="template-tiles" id="lab-tiles" role="radiogroup" aria-labelledby="lab-picker-label"></div>
                             <small>Choose the lab environment for your workspace</small>
                         </div>
 
