@@ -239,9 +239,7 @@ function renderPickerTile(item, checked, groupName) {
 // returned by /api/student/labs/templates.
 function renderTemplateTile(t, checked) {
     const chips = [];
-    if (t.ide) chips.push(['', t.ide]);
     if (t.resources) chips.push(['cpu', t.resources]);
-    if (t.repo) chips.push(['repo', t.repo]);
     return renderPickerTile({ id: t.id, name: t.name, description: t.description, chips: chips }, checked, 'template_id');
 }
 
