@@ -40,7 +40,7 @@ First you need to choose how to provide the Kubernetes cluster:
 * [x] [Create New Infrastructure](#on-ovhcloud) — Provision a new cluster on a cloud provider (OVHcloud)
 * [x] [Use Existing Cluster](#use-existing-cluster) — Provide a kubeconfig for an existing Kubernetes cluster
 
-![Infrastructure selection](screens/infra-choice.png){width=350}
+![Infrastructure selection](screens/infra-choice.png)
 
 ### Use Existing Cluster
 
@@ -442,7 +442,7 @@ Each workspace template can define environment variables passed to the workspace
 
 ![Environment variables](screens/variables.png)
 
-### Cleaning Configuration (Step 8)
+### Cleaning Configuration (Step 7)
 
 The last step of the wizard lets you configure automatic cleanup policies for both workspaces and the entire lab.
 
