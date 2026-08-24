@@ -1633,6 +1633,19 @@ body.home-page {
     color: #3d6070;
 }
 
+.home-credit-pill a {
+    color: #7ba8bd;
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.home-credit-pill a:hover,
+.home-credit-pill a:focus-visible {
+    color: #00dcc8;
+    border-bottom-color: currentColor;
+}
+
 .home-credit-sep {
     color: #1e3040;
 }
