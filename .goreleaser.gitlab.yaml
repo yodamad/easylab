@@ -21,6 +21,8 @@ builds:
       - GOFLAGS=-buildvcs=false
     flags:
       - -trimpath
+    ldflags:
+      - -X easylab/internal/server.Version={{ .Version }}
 
 release:
   gitlab:

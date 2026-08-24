@@ -2003,6 +2003,15 @@ body.student-dashboard-page {
     padding: 0;
 }
 
+.student-footer {
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    text-align: center;
+    font-size: 0.8125rem;
+    color: var(--text-light);
+}
+
 .student-dashboard-header {
     background: var(--background);
     border-radius: var(--radius);
@@ -5856,6 +5865,13 @@ body.admin-page {
     flex-shrink: 0;
 }
 
+.admin-sidebar-copyright {
+    padding: 0.25rem 1rem 0.5rem;
+    font-size: 0.6875rem;
+    color: #475569;
+    white-space: nowrap;
+}
+
 .admin-sidebar-footer .admin-nav-item:hover {
     color: #fca5a5;
     background: rgba(239, 68, 68, 0.08);
@@ -5951,7 +5967,8 @@ body.admin-page .wizard-footer {
     }
 
     .admin-sidebar-name,
-    .admin-nav-label {
+    .admin-nav-label,
+    .admin-sidebar-copyright {
         display: none;
     }
 

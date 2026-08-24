@@ -54,6 +54,7 @@
         </a>
     </nav>
     <div class="admin-sidebar-footer">
+        <div class="admin-sidebar-copyright">{{template "copyright-notice"}}</div>
         <a href="/logout" class="admin-nav-item">
             <span class="admin-nav-icon">🚪</span>
             <span class="admin-nav-label">Logout</span>
@@ -79,4 +80,10 @@
     });
 })();
 </script>
+{{end}}
+
+{{define "copyright-notice"}}&copy; yodamad 2026 &middot; EasyLab v{{appVersion}}{{end}}
+
+{{define "student-footer"}}
+<footer class="student-footer">{{template "copyright-notice"}}</footer>
 {{end}}

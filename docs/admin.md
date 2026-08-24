@@ -24,6 +24,8 @@ As an admin (trainer, speaker, ...), you have access to the admin space to manag
 * [x] View deployment statistics (KPIs, monthly chart, per-project breakdown)
 * [x] Configure automatic workspace and lab deletion (cleaning policies)
 
+Every admin page shows the EasyLab copyright and version in the sidebar footer. The version reflects the latest Git tag the binary was built from (`dev` for local/untagged builds).
+
 ## Create a new lab
 
 ![Steps](screens/steps.png)

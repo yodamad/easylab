@@ -10,6 +10,10 @@ BINARY_NAME=easylab
 BINARY_UNIX=$(BINARY_NAME)_unix
 SERVER_BINARY=easylab-server
 
+# Version shown in the admin/student footer: latest git tag, or "dev" outside a tagged/git checkout
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo dev)
+LDFLAGS := -X easylab/internal/server.Version=$(VERSION)
+
 # NPM parameters
 NPMCMD=npm
 NPMTEST=$(NPMCMD) test
@@ -43,7 +47,7 @@ build:
 
 # Build the web server
 server:
-	$(GOBUILD) -o $(BUILD_DIR)/$(SERVER_BINARY) -v $(SERVER_CMD)
+	$(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(SERVER_BINARY) -v $(SERVER_CMD)
 
 # Run the server
 run-server: server

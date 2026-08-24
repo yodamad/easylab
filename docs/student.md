@@ -8,6 +8,8 @@ As a student, you have access to the student space to request new development en
 
 You can request **one workspace per template per lab**. If a lab has multiple templates (e.g. Docker, Go), you can request one workspace for each — so multiple workspaces in the same lab. Across different labs you can have even more workspaces running simultaneously.
 
+Every student page shows the EasyLab copyright and version in a footer at the bottom of the page. The version reflects the latest Git tag the binary was built from (`dev` for local/untagged builds).
+
 ## Login
 
 To access the student portal, you must log in with:

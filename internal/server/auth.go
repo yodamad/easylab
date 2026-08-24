@@ -329,7 +329,7 @@ func (ah *AuthHandler) getTemplate(filename string) (*template.Template, error) 
 
 	var err error
 	// Parse base template and page template together
-	tmpl, err = template.ParseFiles("web/base.html", tmplPath)
+	tmpl, err = template.New("base.html").Funcs(templateFuncMap).ParseFiles("web/base.html", tmplPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load template %s: %w", tmplPath, err)
 	}

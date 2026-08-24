@@ -1,9 +1,13 @@
 # Set to "true" in CI to skip the in-image Go build and use docker-prebuild/linux_${TARGETARCH}/main (GoReleaser).
 ARG SKIP_BUILD=false
+# Version shown in the admin/student footer (git tag without the "v" prefix). The build
+# context excludes .git, so this must be passed in via --build-arg; defaults to "dev".
+ARG VERSION=dev
 
 # Build stage (skipped in CI when SKIP_BUILD=true)
 FROM pulumi/pulumi-go:latest AS builder
 ARG SKIP_BUILD
+ARG VERSION
 # Align Go binary with image platform (BuildKit sets TARGETARCH for e.g. --platform linux/amd64).
 # Without this, docker build on arm64 hosts produces an arm64 binary that fails on amd64 clusters.
 ARG TARGETARCH
@@ -24,7 +28,7 @@ RUN if [ "$SKIP_BUILD" = "true" ]; then \
       cp "docker-prebuild/linux_${TARGETARCH}/main" /app/main && chmod +x /app/main; \
     else \
       ARCH="${TARGETARCH:-$(go env GOARCH)}"; \
-      CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" go build -a -installsuffix cgo -o main ./cmd/server; \
+      CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" go build -a -installsuffix cgo -ldflags "-X easylab/internal/server.Version=${VERSION}" -o main ./cmd/server; \
     fi
 
 # Runtime stage
