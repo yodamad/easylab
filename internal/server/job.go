@@ -46,6 +46,25 @@ type WorkspaceSnapshot struct {
 	Count int       `json:"count"`
 }
 
+// Workspace event actions recorded on a job's WorkspaceEvents history.
+const (
+	WorkspaceEventCreated = "created"
+	WorkspaceEventDeleted = "deleted"
+)
+
+// WorkspaceEvent records a workspace being created or deleted, so the admin UI
+// can show who owned a workspace and when — even after it disappears from the
+// live cluster list. Workspaces are not soft-deleted: once removed from
+// Kubernetes there is nothing left for ListWorkspaces to report.
+type WorkspaceEvent struct {
+	At            time.Time `json:"at"`
+	Action        string    `json:"action"` // WorkspaceEventCreated | WorkspaceEventDeleted
+	WorkspaceID   string    `json:"workspace_id"`
+	WorkspaceName string    `json:"workspace_name"`
+	Owner         string    `json:"owner"`
+	Template      string    `json:"template,omitempty"`
+}
+
 // Job represents a Pulumi execution job
 type Job struct {
 	ID         string     `json:"id"`
@@ -56,11 +75,12 @@ type Job struct {
 	Error      string     `json:"error,omitempty"`
 	Config     *LabConfig `json:"config,omitempty"`
 	Kubeconfig string     `json:"kubeconfig,omitempty"`
-	// CleanupEvents/WorkspaceSnapshots/DeletionRetries feed the stats dashboard
-	// and the background workspace cleanup loop.
+	// CleanupEvents/WorkspaceSnapshots/DeletionRetries/WorkspaceEvents feed the
+	// stats dashboard and the background workspace cleanup loop.
 	CleanupEvents      []CleanupEvent                     `json:"cleanup_events,omitempty"`
 	WorkspaceSnapshots []WorkspaceSnapshot                `json:"workspace_snapshots,omitempty"`
 	DeletionRetries    map[string]*WorkspaceDeletionRetry `json:"deletion_retries,omitempty"`
+	WorkspaceEvents    []WorkspaceEvent                   `json:"workspace_events,omitempty"`
 	mu                 sync.RWMutex                       `json:"-"`
 }
 
@@ -475,6 +495,30 @@ func (jm *JobManager) RecordWorkspaceSnapshot(id string, count int) error {
 	return nil
 }
 
+// RecordWorkspaceEvent appends a workspace creation/deletion event to a job's
+// history, so the admin UI can show who owned a workspace after it disappears
+// from the live cluster list.
+func (jm *JobManager) RecordWorkspaceEvent(id, action, workspaceID, workspaceName, owner, template string) error {
+	jm.mu.RLock()
+	job, exists := jm.jobs[id]
+	jm.mu.RUnlock()
+	if !exists {
+		return fmt.Errorf("job %s not found", id)
+	}
+	job.mu.Lock()
+	job.WorkspaceEvents = append(job.WorkspaceEvents, WorkspaceEvent{
+		At:            time.Now(),
+		Action:        action,
+		WorkspaceID:   workspaceID,
+		WorkspaceName: workspaceName,
+		Owner:         owner,
+		Template:      template,
+	})
+	job.UpdatedAt = time.Now()
+	job.mu.Unlock()
+	return nil
+}
+
 // ResetJobForRetry resets a failed job to pending status for retry
 func (jm *JobManager) ResetJobForRetry(id string) error {
 	jm.mu.RLock()
@@ -526,6 +570,7 @@ func (j *Job) sanitizedCopy(encryptSecrets bool) (*Job, error) {
 		CleanupEvents:      j.CleanupEvents,
 		WorkspaceSnapshots: j.WorkspaceSnapshots,
 		DeletionRetries:    j.DeletionRetries,
+		WorkspaceEvents:    j.WorkspaceEvents,
 	}
 
 	// atRest encrypts when persisting and blanks when exposing via the API.

@@ -277,7 +277,9 @@ func (b *Backend) EnsureWorkspace(ctx context.Context, spec workspace.Spec) (wor
 	if err != nil {
 		return workspace.Workspace{}, fmt.Errorf("failed to read created workspace %s: %w", name, err)
 	}
-	return b.toWorkspace(dep, spec.Domain, spec.Token), nil
+	ws := b.toWorkspace(dep, spec.Domain, spec.Token)
+	ws.Created = true
+	return ws, nil
 }
 
 // GetWorkspace returns the workspace with the given resource name.

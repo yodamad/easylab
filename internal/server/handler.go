@@ -1792,6 +1792,14 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if ws.Created {
+		if rerr := h.jobManager.RecordWorkspaceEvent(labID, WorkspaceEventCreated, ws.ID, ws.Name, ws.Owner, selected.Name); rerr != nil {
+			log.Printf("Failed to record workspace creation event for %s: %v", ws.Name, rerr)
+		} else if serr := h.jobManager.SaveJob(labID); serr != nil {
+			log.Printf("Failed to persist workspace creation event for %s: %v", ws.Name, serr)
+		}
+	}
+
 	workspaceURL := ws.URL
 	workspaceName := ws.Name
 
@@ -3036,6 +3044,7 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 		stackName = job.Config.StackName
 		templates = job.Config.GetWorkspaceTemplates()
 	}
+	events := append([]WorkspaceEvent(nil), job.WorkspaceEvents...)
 	job.mu.RUnlock()
 
 	if status != JobStatusCompleted {
@@ -3094,6 +3103,28 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 	templateStatuses, unattributed := buildTemplateStatus(templates, workspaces)
 
+	// Prepare workspace history for template — newest first, independent of
+	// whether the workspace it names is still running.
+	type WorkspaceHistoryDisplay struct {
+		Action   string
+		Name     string
+		Owner    string
+		Template string
+		At       string
+	}
+
+	history := make([]WorkspaceHistoryDisplay, 0, len(events))
+	for i := len(events) - 1; i >= 0; i-- {
+		e := events[i]
+		history = append(history, WorkspaceHistoryDisplay{
+			Action:   e.Action,
+			Name:     e.WorkspaceName,
+			Owner:    e.Owner,
+			Template: e.Template,
+			At:       e.At.Format("2006-01-02 15:04:05"),
+		})
+	}
+
 	data := map[string]interface{}{
 		"LabID":        labID,
 		"StackName":    stackName,
@@ -3101,6 +3132,7 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 		"Count":        len(workspacesDisplay),
 		"Templates":    templateStatuses,
 		"Unattributed": unattributed,
+		"History":      history,
 	}
 
 	h.serveTemplate(w, "lab-workspaces.html", data)
@@ -3219,9 +3251,24 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 
 		var delErrors []string
 		for _, wsID := range workspaceIDs {
+			// Best-effort: captured before deletion so the history can still show
+			// who owned the workspace once it is gone. A lookup failure leaves the
+			// owner/template blank rather than blocking the delete.
+			wsInfo, _ := backend.GetWorkspace(r.Context(), wsID)
 			if err := backend.DeleteWorkspace(r.Context(), labID, wsID); err != nil {
 				delErrors = append(delErrors, fmt.Sprintf("Failed to delete workspace %s: %v", wsID, err))
+				continue
 			}
+			wsName := wsInfo.Name
+			if wsName == "" {
+				wsName = wsID
+			}
+			if rerr := h.jobManager.RecordWorkspaceEvent(labID, WorkspaceEventDeleted, wsID, wsName, wsInfo.Owner, wsInfo.Template); rerr != nil {
+				log.Printf("Failed to record workspace deletion event for %s: %v", wsID, rerr)
+			}
+		}
+		if serr := h.jobManager.SaveJob(labID); serr != nil {
+			log.Printf("Failed to persist workspace deletion events for lab %s: %v", labID, serr)
 		}
 
 		if len(delErrors) > 0 {
@@ -3286,10 +3333,24 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Best-effort: captured before deletion so the history can still show who
+	// owned the workspace once it is gone.
+	wsInfo, _ := backend.GetWorkspace(r.Context(), workspaceIDStr)
+
 	if err := backend.DeleteWorkspace(r.Context(), labID, workspaceIDStr); err != nil {
 		log.Printf("Failed to delete workspace: %v", err)
 		writeJSONError(w, http.StatusInternalServerError, "Failed to delete workspace")
 		return
+	}
+
+	wsName := wsInfo.Name
+	if wsName == "" {
+		wsName = workspaceIDStr
+	}
+	if rerr := h.jobManager.RecordWorkspaceEvent(labID, WorkspaceEventDeleted, workspaceIDStr, wsName, wsInfo.Owner, wsInfo.Template); rerr != nil {
+		log.Printf("Failed to record workspace deletion event for %s: %v", workspaceIDStr, rerr)
+	} else if serr := h.jobManager.SaveJob(labID); serr != nil {
+		log.Printf("Failed to persist workspace deletion event for %s: %v", workspaceIDStr, serr)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

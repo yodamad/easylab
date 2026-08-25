@@ -97,7 +97,7 @@ func TestCleanupExpiredWorkspaces_DeletesExpiredWorkspace(t *testing.T) {
 	fb := &fakeBackend{
 		reachable: true,
 		workspaces: []workspace.Workspace{
-			{ID: "ws-alice", Name: "ws-alice", CreatedAt: time.Now().Add(-2 * time.Hour)},
+			{ID: "ws-alice", Name: "ws-alice", Owner: "alice", Template: "default", CreatedAt: time.Now().Add(-2 * time.Hour)},
 		},
 	}
 	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
@@ -108,8 +108,13 @@ func TestCleanupExpiredWorkspaces_DeletesExpiredWorkspace(t *testing.T) {
 	job, _ := jm.GetJob(id)
 	job.mu.RLock()
 	events := job.CleanupEvents
+	wsEvents := job.WorkspaceEvents
 	job.mu.RUnlock()
 	assert.Len(t, events, 1, "should have 1 cleanup event for the deleted workspace")
+	require.Len(t, wsEvents, 1, "should have 1 workspace history event for the deleted workspace")
+	assert.Equal(t, WorkspaceEventDeleted, wsEvents[0].Action)
+	assert.Equal(t, "alice", wsEvents[0].Owner)
+	assert.Equal(t, "default", wsEvents[0].Template)
 }
 
 func TestCleanupExpiredWorkspaces_KeepsYoungWorkspace(t *testing.T) {

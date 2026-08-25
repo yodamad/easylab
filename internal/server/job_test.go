@@ -775,6 +775,70 @@ func TestJobManager_RecordWorkspaceSnapshot_NotFound(t *testing.T) {
 	}
 }
 
+// --- RecordWorkspaceEvent tests ---
+
+func TestJobManager_RecordWorkspaceEvent_Success(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test"})
+
+	err := jm.RecordWorkspaceEvent(id, WorkspaceEventCreated, "ws-alice", "ws-alice", "alice", "default")
+	if err != nil {
+		t.Fatalf("RecordWorkspaceEvent() error = %v", err)
+	}
+
+	job, _ := jm.GetJob(id)
+	job.mu.RLock()
+	events := job.WorkspaceEvents
+	job.mu.RUnlock()
+
+	if len(events) != 1 {
+		t.Fatalf("WorkspaceEvents len = %d, want 1", len(events))
+	}
+	got := events[0]
+	if got.Action != WorkspaceEventCreated || got.WorkspaceID != "ws-alice" ||
+		got.WorkspaceName != "ws-alice" || got.Owner != "alice" || got.Template != "default" {
+		t.Errorf("WorkspaceEvents[0] = %+v, unexpected fields", got)
+	}
+	if got.At.IsZero() {
+		t.Error("WorkspaceEvents[0].At should be set")
+	}
+}
+
+func TestJobManager_RecordWorkspaceEvent_AppendsInOrder(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test"})
+
+	if err := jm.RecordWorkspaceEvent(id, WorkspaceEventCreated, "ws-bob", "ws-bob", "bob", "default"); err != nil {
+		t.Fatalf("RecordWorkspaceEvent() error = %v", err)
+	}
+	if err := jm.RecordWorkspaceEvent(id, WorkspaceEventDeleted, "ws-bob", "ws-bob", "bob", "default"); err != nil {
+		t.Fatalf("RecordWorkspaceEvent() error = %v", err)
+	}
+
+	job, _ := jm.GetJob(id)
+	job.mu.RLock()
+	events := job.WorkspaceEvents
+	job.mu.RUnlock()
+
+	if len(events) != 2 {
+		t.Fatalf("WorkspaceEvents len = %d, want 2", len(events))
+	}
+	if events[0].Action != WorkspaceEventCreated {
+		t.Errorf("WorkspaceEvents[0].Action = %q, want %q", events[0].Action, WorkspaceEventCreated)
+	}
+	if events[1].Action != WorkspaceEventDeleted {
+		t.Errorf("WorkspaceEvents[1].Action = %q, want %q", events[1].Action, WorkspaceEventDeleted)
+	}
+}
+
+func TestJobManager_RecordWorkspaceEvent_NotFound(t *testing.T) {
+	jm := NewJobManager("")
+	err := jm.RecordWorkspaceEvent("nonexistent", WorkspaceEventCreated, "ws-1", "ws-1", "alice", "default")
+	if err == nil {
+		t.Error("RecordWorkspaceEvent() should error for nonexistent job")
+	}
+}
+
 // --- ResetJobForRetry tests ---
 
 func TestJobManager_ResetJobForRetry_Success(t *testing.T) {

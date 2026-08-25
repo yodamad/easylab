@@ -136,6 +136,9 @@ func (h *Handler) cleanupExpiredWorkspaces() {
 				if cerr := h.jobManager.ClearDeletionRetry(job.ID, wsID); cerr != nil {
 					log.Printf("[cleanup] failed to clear deletion retry for workspace %s: %v", wsID, cerr)
 				}
+				if rerr := h.jobManager.RecordWorkspaceEvent(job.ID, WorkspaceEventDeleted, wsID, ws.Name, ws.Owner, ws.Template); rerr != nil {
+					log.Printf("[cleanup] failed to record deletion event for workspace %s: %v", wsID, rerr)
+				}
 			}
 		}
 		if deleted > 0 {

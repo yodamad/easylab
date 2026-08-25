@@ -52,6 +52,12 @@ type Workspace struct {
 	Ready bool `json:"ready"`
 	// Phase is one of the Phase* constants above.
 	Phase string `json:"phase"`
+	// Created reports whether this call to EnsureWorkspace actually created the
+	// workspace, as opposed to returning an already-existing one. Only
+	// meaningful on EnsureWorkspace's return value — GetWorkspace and
+	// ListWorkspaces always leave it false. Excluded from JSON since it has no
+	// meaning outside that one call.
+	Created bool `json:"-"`
 }
 
 // IDE base identifiers.

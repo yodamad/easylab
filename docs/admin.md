@@ -19,6 +19,7 @@ As an admin (trainer, speaker, ...), you have access to the admin space to manag
     * [x] Recreate a destroyed lab with the same configuration
     * [x] List workspaces
     * [x] Delete workspaces (one by one or in bulk)
+    * [x] See a workspace creation/deletion history per lab, with owner and template
     * [x] Retry a failing lab installation
 * [x] View student feedback per lab (rating, difficulty, comments)
 * [x] View deployment statistics (KPIs, monthly chart, per-project breakdown)
@@ -531,6 +532,26 @@ workspaces.
 > reported as a small "not attributed to a template" note; it is attributed once
 > the workspace is recreated. Because workspaces are cleaned up on their lifetime,
 > this resolves on its own.
+
+### Workspace history
+
+Below the workspace list, a **Workspace History** panel records every workspace
+**created** and **deleted** for the lab, newest first — who owned it, which
+template it came from, and when. Unlike the workspace list above it, this history
+is not a live view of the cluster: a workspace still shows up here after it has
+been deleted (by a student, by you, or by automatic lifetime cleanup), which is
+what lets you see who held a workspace once it is gone.
+
+Each entry shows:
+
+* A green **+** badge for a creation, or a red **−** badge for a deletion
+* The workspace name and owner
+* The template it was created from (blank for workspaces created before template
+  attribution was added)
+* The date and time of the event
+
+The history is stored with the lab and survives a server restart; it is cleared
+when the lab itself is deleted.
 
 ### Add a template to an existing lab
 

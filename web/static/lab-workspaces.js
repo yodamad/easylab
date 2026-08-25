@@ -44,8 +44,8 @@ function deleteSelected() {
 
     const workspaceIds = Array.from(checkboxes).map(cb => cb.value);
     const workspaceNames = Array.from(checkboxes).map(cb => {
-        const card = cb.closest('.workspace-card');
-        return card ? card.querySelector('.workspace-name').textContent : '';
+        const row = cb.closest('.workspace-row');
+        return row ? row.querySelector('.workspace-name').textContent : '';
     }).filter(name => name);
 
     if (!confirm(`Are you sure you want to delete ${workspaceIds.length} workspace(s)?\n\n${workspaceNames.join('\n')}\n\nThis action cannot be undone.`)) {
@@ -156,6 +156,22 @@ function updateDeleteButton() {
 // Refresh workspaces list
 function refreshWorkspaces() {
     window.location.reload();
+}
+
+// Switch between the Active Workspaces and History tabs. Both panels are
+// already rendered server-side, so this only toggles visibility — no data to fetch.
+function switchWorkspacesTab(name) {
+    ['active', 'history'].forEach(key => {
+        const tab = document.getElementById(`tab-${key}`);
+        const panel = document.getElementById(`panel-${key}`);
+        if (!tab || !panel) {
+            return;
+        }
+        const isSelected = key === name;
+        tab.classList.toggle('is-active', isSelected);
+        tab.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+        panel.classList.toggle('is-hidden', !isSelected);
+    });
 }
 
 // Show message to user
