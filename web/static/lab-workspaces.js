@@ -174,6 +174,52 @@ function switchWorkspacesTab(name) {
     });
 }
 
+// Quote a CSV field only when it needs it (contains a comma, quote, or newline),
+// doubling any embedded quotes per RFC 4180.
+function csvField(value) {
+    const str = String(value == null ? '' : value);
+    if (/[",\n]/.test(str)) {
+        return '"' + str.replace(/"/g, '""') + '"';
+    }
+    return str;
+}
+
+// Export the History tab's rows as a CSV file. The data is already rendered
+// server-side (via data-* attributes on each row), so this reads the DOM rather
+// than making another request.
+function exportWorkspaceHistoryCSV() {
+    const rows = document.querySelectorAll('#panel-history .workspace-history-row');
+    if (rows.length === 0) {
+        return;
+    }
+
+    const lines = [['Action', 'Name', 'Owner', 'Template', 'Time'].map(csvField).join(',')];
+    rows.forEach(row => {
+        lines.push([
+            row.dataset.action,
+            row.dataset.name,
+            row.dataset.owner,
+            row.dataset.template,
+            row.dataset.at,
+        ].map(csvField).join(','));
+    });
+
+    // A leading BOM makes Excel detect UTF-8 instead of guessing a local codepage.
+    const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+
+    const slug = (typeof LAB_STACK_NAME !== 'undefined' && LAB_STACK_NAME ? LAB_STACK_NAME : LAB_ID)
+        .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'lab';
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `workspace-history-${slug}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+}
+
 // Show message to user
 function showMessage(type, message) {
     const container = document.getElementById('message-container');

@@ -178,9 +178,17 @@
 
             <div id="panel-history" role="tabpanel" aria-labelledby="tab-history" class="is-hidden">
                 {{if .History}}
+                <div class="workspace-history-toolbar">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="exportWorkspaceHistoryCSV()">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+                        </svg>
+                        Export CSV
+                    </button>
+                </div>
                 <div class="workspace-history-list">
                     {{range .History}}
-                    <div class="workspace-history-row">
+                    <div class="workspace-history-row" data-action="{{if eq .Action "created"}}Created{{else}}Deleted{{end}}" data-name="{{.Name}}" data-owner="{{.Owner}}" data-template="{{.Template}}" data-at="{{.At}}">
                         <span class="workspace-history-badge is-{{.Action}}" aria-hidden="true">{{if eq .Action "created"}}+{{else}}−{{end}}</span>
                         <div class="workspace-history-main">
                             <span class="workspace-history-name">{{.Name}}</span>
@@ -211,5 +219,6 @@
     <script>
         // Set lab ID for JavaScript
         const LAB_ID = '{{.LabID}}';
+        const LAB_STACK_NAME = '{{.StackName}}';
     </script>
 {{end}}

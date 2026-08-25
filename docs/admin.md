@@ -20,6 +20,7 @@ As an admin (trainer, speaker, ...), you have access to the admin space to manag
     * [x] List workspaces
     * [x] Delete workspaces (one by one or in bulk)
     * [x] See a workspace creation/deletion history per lab, with owner and template
+    * [x] Export a lab's workspace history to CSV
     * [x] Retry a failing lab installation
 * [x] View student feedback per lab (rating, difficulty, comments)
 * [x] View deployment statistics (KPIs, monthly chart, per-project breakdown)
@@ -535,12 +536,17 @@ workspaces.
 
 ### Workspace history
 
-Below the workspace list, a **Workspace History** panel records every workspace
-**created** and **deleted** for the lab, newest first — who owned it, which
-template it came from, and when. Unlike the workspace list above it, this history
-is not a live view of the cluster: a workspace still shows up here after it has
-been deleted (by a student, by you, or by automatic lifetime cleanup), which is
-what lets you see who held a workspace once it is gone.
+The workspace list sits behind an **Active Workspaces** / **History** pair of tabs
+(each labelled with a live count) — separating the current cluster state from the
+lab's full activity log keeps either one from crowding out the other. The
+**Refresh** button applies to whichever tab you're on and sits with the tabs
+rather than inside either one.
+
+**History** records every workspace **created** and **deleted** for the lab,
+newest first — who owned it, which template it came from, and when. Unlike
+**Active Workspaces**, this is not a live view of the cluster: a workspace still
+shows up here after it has been deleted (by a student, by you, or by automatic
+lifetime cleanup), which is what lets you see who held a workspace once it is gone.
 
 Each entry shows:
 
@@ -552,6 +558,10 @@ Each entry shows:
 
 The history is stored with the lab and survives a server restart; it is cleared
 when the lab itself is deleted.
+
+Use **Export CSV**, above the history list, to download the full history as a
+`workspace-history-<lab>.csv` file — handy for record-keeping or sharing usage
+with someone who doesn't have admin access.
 
 ### Add a template to an existing lab
 

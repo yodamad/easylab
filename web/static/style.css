@@ -6624,6 +6624,18 @@ body.admin-page .wizard-footer {
     color: var(--text-light);
 }
 
+.workspace-history-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0.75rem;
+}
+
+.workspace-history-toolbar .icon {
+    width: 1rem;
+    height: 1rem;
+    stroke-width: 2;
+}
+
 .workspace-history-list {
     display: flex;
     flex-direction: column;
