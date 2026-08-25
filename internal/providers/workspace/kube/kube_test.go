@@ -334,6 +334,62 @@ func TestEnsureWorkspace_AttributesTemplate(t *testing.T) {
 	}
 }
 
+// TestEnsureWorkspace_AttributesOwnerEmail pins that the student's email survives
+// the round-trip via an annotation: it is returned by EnsureWorkspace and read
+// back out of the cluster by ListWorkspaces, so the admin UI can show a real
+// identity instead of the sanitized Owner username.
+func TestEnsureWorkspace_AttributesOwnerEmail(t *testing.T) {
+	b, _ := newTestBackend()
+	ctx := context.Background()
+
+	created, err := b.EnsureWorkspace(ctx, workspace.Spec{
+		LabID:      "job-1",
+		Owner:      "alice",
+		OwnerEmail: "alice@example.com",
+		Domain:     "lab.example.com",
+		Token:      "t",
+	})
+	if err != nil {
+		t.Fatalf("EnsureWorkspace error: %v", err)
+	}
+	if created.OwnerEmail != "alice@example.com" {
+		t.Errorf("EnsureWorkspace OwnerEmail = %q, want %q", created.OwnerEmail, "alice@example.com")
+	}
+	// The DNS-safe Owner label is unaffected by OwnerEmail.
+	if created.Owner != "alice" {
+		t.Errorf("EnsureWorkspace Owner = %q, want %q", created.Owner, "alice")
+	}
+
+	list, err := b.ListWorkspaces(ctx, "job-1")
+	if err != nil {
+		t.Fatalf("ListWorkspaces error: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("ListWorkspaces returned %d workspaces, want 1", len(list))
+	}
+	if list[0].OwnerEmail != "alice@example.com" {
+		t.Errorf("ListWorkspaces OwnerEmail = %q, want %q", list[0].OwnerEmail, "alice@example.com")
+	}
+}
+
+// TestEnsureWorkspace_OwnerEmailEmptyForLegacyWorkspaces pins the fallback case:
+// a workspace created without OwnerEmail (e.g. before this was tracked) reports
+// an empty OwnerEmail rather than fabricating one.
+func TestEnsureWorkspace_OwnerEmailEmptyForLegacyWorkspaces(t *testing.T) {
+	b, _ := newTestBackend()
+	ctx := context.Background()
+
+	created, err := b.EnsureWorkspace(ctx, workspace.Spec{
+		LabID: "job-1", Owner: "bob", Domain: "d", Token: "t",
+	})
+	if err != nil {
+		t.Fatalf("EnsureWorkspace error: %v", err)
+	}
+	if created.OwnerEmail != "" {
+		t.Errorf("EnsureWorkspace OwnerEmail = %q, want empty", created.OwnerEmail)
+	}
+}
+
 func TestEnsureWorkspace_Idempotent(t *testing.T) {
 	b, cs := newTestBackend()
 	ctx := context.Background()

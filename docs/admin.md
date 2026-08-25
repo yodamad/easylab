@@ -551,10 +551,14 @@ lifetime cleanup), which is what lets you see who held a workspace once it is go
 Each entry shows:
 
 * A green **+** badge for a creation, or a red **−** badge for a deletion
-* The workspace name and owner
+* The workspace name and owner's **email** (falls back to the sanitized workspace
+  username for workspaces created before email tracking was added)
 * The template it was created from (blank for workspaces created before template
   attribution was added)
 * The date and time of the event
+
+The **Active Workspaces** tab's Owner column follows the same rule: email when
+known, the sanitized username otherwise.
 
 The history is stored with the lab and survives a server restart; it is cleared
 when the lab itself is deleted.

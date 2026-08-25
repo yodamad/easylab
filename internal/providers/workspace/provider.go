@@ -29,8 +29,16 @@ type Workspace struct {
 	ID string `json:"id"`
 	// Name is the human-facing workspace name (currently equal to ID).
 	Name string `json:"name"`
-	// Owner is the sanitized student username the workspace belongs to.
+	// Owner is the sanitized student username the workspace belongs to. It is
+	// what authorization checks compare against — never overwrite it with the
+	// student's email, which is not DNS/label-safe and isn't guaranteed unique
+	// after sanitization.
 	Owner string `json:"owner"`
+	// OwnerEmail is the student's login email, recorded as an annotation at
+	// creation time so the admin UI can show a real identity instead of the
+	// sanitized username. Empty for workspaces created before this was tracked,
+	// or if the backend does not support it.
+	OwnerEmail string `json:"owner_email,omitempty"`
 	// URL is the base workspace URL (shown to the student; no auth token).
 	URL string `json:"url"`
 	// OpenURL is the redirect target that lands the student in the IDE. It is the
@@ -130,9 +138,10 @@ type DevcontainerSpec struct {
 
 // Spec describes the workspace to create for a student.
 type Spec struct {
-	LabID    string // owning lab/job ID, stored as a label for selection
-	Owner    string // sanitized student username
-	Template string // template name — part of the workspace identity (one workspace per template)
+	LabID      string // owning lab/job ID, stored as a label for selection
+	Owner      string // sanitized student username
+	OwnerEmail string // student's login email, stored as an annotation for display only
+	Template   string // template name — part of the workspace identity (one workspace per template)
 
 	IDE       string            // IDE base; only "code-server" is supported (empty = default)
 	Image     string            // container image override (empty = IDE default)

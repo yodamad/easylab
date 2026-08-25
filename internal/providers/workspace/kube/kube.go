@@ -46,15 +46,16 @@ const (
 	// may not reuse it).
 	workspaceContainerName = "workspace"
 
-	labelManagedBy     = "app.kubernetes.io/managed-by"
-	labelLabID         = "easylab.io/lab-id"
-	labelOwner         = "easylab.io/owner"
-	labelName          = "app.kubernetes.io/name"
-	annotationIDE      = "easylab.io/ide"
-	annotationToken    = "easylab.io/token"
-	annotationDomain   = "easylab.io/domain"
-	annotationScheme   = "easylab.io/scheme"
-	annotationTemplate = "easylab.io/template"
+	labelManagedBy       = "app.kubernetes.io/managed-by"
+	labelLabID           = "easylab.io/lab-id"
+	labelOwner           = "easylab.io/owner"
+	labelName            = "app.kubernetes.io/name"
+	annotationIDE        = "easylab.io/ide"
+	annotationToken      = "easylab.io/token"
+	annotationDomain     = "easylab.io/domain"
+	annotationScheme     = "easylab.io/scheme"
+	annotationTemplate   = "easylab.io/template"
+	annotationOwnerEmail = "easylab.io/owner-email"
 
 	managedByValue = "easylab"
 
@@ -487,11 +488,12 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 			Namespace: b.namespace,
 			Labels:    labels,
 			Annotations: map[string]string{
-				annotationDomain:   spec.Domain,
-				annotationScheme:   scheme,
-				annotationIDE:      p.kind,
-				annotationToken:    spec.Token,
-				annotationTemplate: spec.Template,
+				annotationDomain:     spec.Domain,
+				annotationScheme:     scheme,
+				annotationIDE:        p.kind,
+				annotationToken:      spec.Token,
+				annotationTemplate:   spec.Template,
+				annotationOwnerEmail: spec.OwnerEmail,
 			},
 		},
 		Spec: appsv1.DeploymentSpec{
@@ -1045,18 +1047,19 @@ func (b *Backend) toWorkspace(dep *appsv1.Deployment, domain, token string) work
 		openURL = url
 	}
 	return workspace.Workspace{
-		ID:        dep.Name,
-		Name:      dep.Name,
-		Owner:     dep.Labels[labelOwner],
-		URL:       url,
-		OpenURL:   openURL,
-		Token:     token,
-		IDE:       ide,
-		Template:  dep.Annotations[annotationTemplate],
-		CreatedAt: dep.CreationTimestamp.Time,
-		UpdatedAt: deploymentUpdatedAt(dep),
-		Ready:     ready,
-		Phase:     phase,
+		ID:         dep.Name,
+		Name:       dep.Name,
+		Owner:      dep.Labels[labelOwner],
+		OwnerEmail: dep.Annotations[annotationOwnerEmail],
+		URL:        url,
+		OpenURL:    openURL,
+		Token:      token,
+		IDE:        ide,
+		Template:   dep.Annotations[annotationTemplate],
+		CreatedAt:  dep.CreationTimestamp.Time,
+		UpdatedAt:  deploymentUpdatedAt(dep),
+		Ready:      ready,
+		Phase:      phase,
 	}
 }
 

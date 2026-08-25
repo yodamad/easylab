@@ -35,7 +35,7 @@ func (f *fakeBackend) EnsureWorkspace(_ context.Context, spec workspace.Spec) (w
 	if f.getWS != nil {
 		return *f.getWS, nil
 	}
-	return workspace.Workspace{ID: "ws-" + spec.Owner, Name: "ws-" + spec.Owner, Owner: spec.Owner, Token: spec.Token, Created: true}, nil
+	return workspace.Workspace{ID: "ws-" + spec.Owner, Name: "ws-" + spec.Owner, Owner: spec.Owner, OwnerEmail: spec.OwnerEmail, Token: spec.Token, Created: true}, nil
 }
 
 func (f *fakeBackend) GetWorkspace(_ context.Context, _ string) (workspace.Workspace, error) {

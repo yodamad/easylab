@@ -1747,6 +1747,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	spec := workspace.Spec{
 		LabID:            labID,
 		Owner:            username,
+		OwnerEmail:       email,
 		Template:         selected.Name,
 		IDE:              selected.IDE,
 		Image:            selected.Image,
@@ -1793,7 +1794,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if ws.Created {
-		if rerr := h.jobManager.RecordWorkspaceEvent(labID, WorkspaceEventCreated, ws.ID, ws.Name, ws.Owner, selected.Name); rerr != nil {
+		if rerr := h.jobManager.RecordWorkspaceEvent(labID, WorkspaceEventCreated, ws.ID, ws.Name, ownerDisplayName(ws), selected.Name); rerr != nil {
 			log.Printf("Failed to record workspace creation event for %s: %v", ws.Name, rerr)
 		} else if serr := h.jobManager.SaveJob(labID); serr != nil {
 			log.Printf("Failed to persist workspace creation event for %s: %v", ws.Name, serr)
@@ -2026,6 +2027,18 @@ func usernameFromEmail(email string) string {
 	}
 	local := strings.ToLower(strings.Split(email, "@")[0])
 	return strings.Trim(usernameInvalidChars.ReplaceAllString(local, "-"), "-")
+}
+
+// ownerDisplayName returns the identity to show an admin for a workspace:
+// the student's email when known, falling back to the sanitized Owner username
+// for workspaces created before email tracking (or by a backend that doesn't
+// support it). Never use this for authorization — that must compare
+// Workspace.Owner directly.
+func ownerDisplayName(ws workspace.Workspace) string {
+	if ws.OwnerEmail != "" {
+		return ws.OwnerEmail
+	}
+	return ws.Owner
 }
 
 // autoLoginPage is a self-submitting form that logs a student into their
@@ -3094,7 +3107,7 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 		workspacesDisplay = append(workspacesDisplay, WorkspaceDisplay{
 			ID:        ws.ID,
 			Name:      ws.Name,
-			Owner:     ws.Owner,
+			Owner:     ownerDisplayName(ws),
 			Status:    ws.Phase,
 			CreatedAt: createdAt,
 			UpdatedAt: updatedAt,
@@ -3263,7 +3276,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			if wsName == "" {
 				wsName = wsID
 			}
-			if rerr := h.jobManager.RecordWorkspaceEvent(labID, WorkspaceEventDeleted, wsID, wsName, wsInfo.Owner, wsInfo.Template); rerr != nil {
+			if rerr := h.jobManager.RecordWorkspaceEvent(labID, WorkspaceEventDeleted, wsID, wsName, ownerDisplayName(wsInfo), wsInfo.Template); rerr != nil {
 				log.Printf("Failed to record workspace deletion event for %s: %v", wsID, rerr)
 			}
 		}
@@ -3347,7 +3360,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	if wsName == "" {
 		wsName = workspaceIDStr
 	}
-	if rerr := h.jobManager.RecordWorkspaceEvent(labID, WorkspaceEventDeleted, workspaceIDStr, wsName, wsInfo.Owner, wsInfo.Template); rerr != nil {
+	if rerr := h.jobManager.RecordWorkspaceEvent(labID, WorkspaceEventDeleted, workspaceIDStr, wsName, ownerDisplayName(wsInfo), wsInfo.Template); rerr != nil {
 		log.Printf("Failed to record workspace deletion event for %s: %v", workspaceIDStr, rerr)
 	} else if serr := h.jobManager.SaveJob(labID); serr != nil {
 		log.Printf("Failed to persist workspace deletion event for %s: %v", workspaceIDStr, serr)
