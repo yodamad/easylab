@@ -281,10 +281,15 @@ func TestEnsureWorkspace_DevcontainerDefaultsResourcesWhenUnset(t *testing.T) {
 
 	c := ideContainer(t, cs, ws.ID)
 	require.NotEmpty(t, c.Resources.Requests, "devcontainer workspace must not be BestEffort")
-	assert.Equal(t, resource.MustParse(defaultDevcontainerCPU), c.Resources.Requests[corev1.ResourceCPU])
+	// CPU request and limit deliberately differ (burst headroom without
+	// inflating the scheduler/autoscaler's aggregate demand); memory and
+	// ephemeral-storage keep request == limit.
+	assert.Equal(t, resource.MustParse(defaultDevcontainerCPURequest), c.Resources.Requests[corev1.ResourceCPU])
+	assert.Equal(t, resource.MustParse(defaultDevcontainerCPULimit), c.Resources.Limits[corev1.ResourceCPU])
 	assert.Equal(t, resource.MustParse(defaultDevcontainerMemory), c.Resources.Requests[corev1.ResourceMemory])
+	assert.Equal(t, resource.MustParse(defaultDevcontainerMemory), c.Resources.Limits[corev1.ResourceMemory])
 	assert.Equal(t, resource.MustParse(defaultDevcontainerEphemeralStorage), c.Resources.Requests[corev1.ResourceEphemeralStorage])
-	assert.Equal(t, c.Resources.Requests, c.Resources.Limits)
+	assert.Equal(t, resource.MustParse(defaultDevcontainerEphemeralStorage), c.Resources.Limits[corev1.ResourceEphemeralStorage])
 }
 
 // TestEnsureWorkspace_DevcontainerExplicitResourcesOverrideDefault is the

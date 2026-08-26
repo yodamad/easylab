@@ -107,12 +107,25 @@ const (
 	// capacity a workspace can expect.
 	defaultEphemeralWorkspaceSize = "5Gi"
 
-	// defaultDevcontainerCPU/Memory/EphemeralStorage are applied (see
-	// buildResources) when a devcontainer-enabled template leaves CPU/Memory
-	// blank, so its workspace pods aren't BestEffort during envbuilder's
-	// CPU/disk-heavy layer-extraction step. An explicit template CPU/Memory
-	// always overrides these.
-	defaultDevcontainerCPU              = "1"
+	// defaultDevcontainerCPURequest/Limit, Memory, and EphemeralStorage are
+	// applied (see buildResources) when a devcontainer-enabled template leaves
+	// CPU/Memory blank, so its workspace pods aren't BestEffort during
+	// envbuilder's CPU/disk-heavy layer-extraction step. An explicit template
+	// CPU/Memory always overrides these.
+	//
+	// CPU request and limit are deliberately different: the request is what the
+	// scheduler/cluster-autoscaler size nodes against (a burst of many pods each
+	// requesting a full core inflates node count for demand that mostly never
+	// materializes), while the limit only bounds worst-case use and is enforced
+	// by CFS throttling, which slows a pod rather than crashing it — so a higher
+	// limit than request lets extraction burst into a node's actual spare
+	// capacity instead of being capped at exactly what was requested. Memory and
+	// ephemeral-storage keep request == limit: memory isn't compressible like
+	// CPU (a spike can pressure the whole node, not just the offending pod), and
+	// ephemeral-storage headroom protects against one runaway build exhausting a
+	// node's disk and evicting unrelated pods.
+	defaultDevcontainerCPURequest       = "500m"
+	defaultDevcontainerCPULimit         = "2"
 	defaultDevcontainerMemory           = "2Gi"
 	defaultDevcontainerEphemeralStorage = "5Gi"
 
@@ -1157,11 +1170,21 @@ func workspaceHost(name, domain string) string {
 func buildResources(cpu, mem string, isDevcontainer bool) corev1.ResourceRequirements {
 	cpu = strings.TrimSpace(cpu)
 	mem = strings.TrimSpace(mem)
-	ephemeral := ""
+
 	if isDevcontainer && cpu == "" && mem == "" {
-		cpu = defaultDevcontainerCPU
-		mem = defaultDevcontainerMemory
-		ephemeral = defaultDevcontainerEphemeralStorage
+		// Request and limit deliberately differ for CPU — see the constants'
+		// doc comment for why — but not for memory/ephemeral-storage.
+		reqs := corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse(defaultDevcontainerCPURequest),
+			corev1.ResourceMemory:           resource.MustParse(defaultDevcontainerMemory),
+			corev1.ResourceEphemeralStorage: resource.MustParse(defaultDevcontainerEphemeralStorage),
+		}
+		limits := corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse(defaultDevcontainerCPULimit),
+			corev1.ResourceMemory:           resource.MustParse(defaultDevcontainerMemory),
+			corev1.ResourceEphemeralStorage: resource.MustParse(defaultDevcontainerEphemeralStorage),
+		}
+		return corev1.ResourceRequirements{Requests: reqs, Limits: limits}
 	}
 
 	reqs := corev1.ResourceList{}
@@ -1170,9 +1193,6 @@ func buildResources(cpu, mem string, isDevcontainer bool) corev1.ResourceRequire
 	}
 	if q, err := resource.ParseQuantity(mem); err == nil && mem != "" {
 		reqs[corev1.ResourceMemory] = q
-	}
-	if q, err := resource.ParseQuantity(ephemeral); err == nil && ephemeral != "" {
-		reqs[corev1.ResourceEphemeralStorage] = q
 	}
 	if len(reqs) == 0 {
 		return corev1.ResourceRequirements{}
