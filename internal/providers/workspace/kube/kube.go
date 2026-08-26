@@ -107,6 +107,15 @@ const (
 	// capacity a workspace can expect.
 	defaultEphemeralWorkspaceSize = "5Gi"
 
+	// defaultDevcontainerCPU/Memory/EphemeralStorage are applied (see
+	// buildResources) when a devcontainer-enabled template leaves CPU/Memory
+	// blank, so its workspace pods aren't BestEffort during envbuilder's
+	// CPU/disk-heavy layer-extraction step. An explicit template CPU/Memory
+	// always overrides these.
+	defaultDevcontainerCPU              = "1"
+	defaultDevcontainerMemory           = "2Gi"
+	defaultDevcontainerEphemeralStorage = "5Gi"
+
 	// devcontainerConfigMountPath is where a separately-cloned devcontainer config
 	// repo (Devcontainer.ConfigRepo) lands, outside the content repo's clone —
 	// envbuilder is pointed at it with an absolute ENVBUILDER_DEVCONTAINER_DIR.
@@ -433,7 +442,7 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Ports:           []corev1.ContainerPort{{ContainerPort: p.port, Name: "http"}},
 		Env:             env,
-		Resources:       buildResources(spec.CPU, spec.Memory),
+		Resources:       buildResources(spec.CPU, spec.Memory, spec.Devcontainer != nil),
 		// Only mark the pod Ready once the IDE is actually listening — a wrapped
 		// startup script runs before the server exec, so the port opens late.
 		ReadinessProbe: &corev1.Probe{
@@ -1138,13 +1147,32 @@ func workspaceHost(name, domain string) string {
 	return name + "." + domain
 }
 
-func buildResources(cpu, mem string) corev1.ResourceRequirements {
+// buildResources computes the workspace container's resource requests/limits.
+// isDevcontainer workspaces that leave both cpu and mem blank get a non-BestEffort
+// default instead of no reservation at all: envbuilder's layer-extraction step
+// (materializing the built image onto the pod's own root filesystem) is CPU- and
+// disk-I/O-heavy and runs on every single pod regardless of build-cache state, so
+// a burst of BestEffort devcontainer pods has no fair-share basis to divide a
+// node's CPU/disk between them. A template's explicit cpu/mem still wins outright.
+func buildResources(cpu, mem string, isDevcontainer bool) corev1.ResourceRequirements {
+	cpu = strings.TrimSpace(cpu)
+	mem = strings.TrimSpace(mem)
+	ephemeral := ""
+	if isDevcontainer && cpu == "" && mem == "" {
+		cpu = defaultDevcontainerCPU
+		mem = defaultDevcontainerMemory
+		ephemeral = defaultDevcontainerEphemeralStorage
+	}
+
 	reqs := corev1.ResourceList{}
-	if q, err := resource.ParseQuantity(strings.TrimSpace(cpu)); err == nil && cpu != "" {
+	if q, err := resource.ParseQuantity(cpu); err == nil && cpu != "" {
 		reqs[corev1.ResourceCPU] = q
 	}
-	if q, err := resource.ParseQuantity(strings.TrimSpace(mem)); err == nil && mem != "" {
+	if q, err := resource.ParseQuantity(mem); err == nil && mem != "" {
 		reqs[corev1.ResourceMemory] = q
+	}
+	if q, err := resource.ParseQuantity(ephemeral); err == nil && ephemeral != "" {
+		reqs[corev1.ResourceEphemeralStorage] = q
 	}
 	if len(reqs) == 0 {
 		return corev1.ResourceRequirements{}

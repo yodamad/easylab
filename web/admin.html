@@ -886,6 +886,9 @@
                                                     </div>
                                                 </div>
                                                 <div class="form-group">
+                                                    <small>For a devcontainer-enabled template, layer extraction is CPU/disk-heavy under concurrent load: EasyLab defaults to 1 CPU / 2Gi memory / 5Gi ephemeral storage here when left blank, but set these explicitly to size for your base image and expected class size.</small>
+                                                </div>
+                                                <div class="form-group">
                                                     <label>Startup Script (Optional)</label>
                                                     <textarea name="template_0_startup_script" data-field="startup_script" rows="4" class="monospace" placeholder="# runs before the IDE starts"></textarea>
                                                     <small>Runs (best-effort) on start. code-server has passwordless sudo, so the script can install system packages with apt.</small>
@@ -1000,6 +1003,9 @@
                                                     <label>Disk Size (Optional)</label>
                                                     <input type="text" name="template_0_disk_size" data-field="disk_size" placeholder="5Gi">
                                                 </div>
+                                            </div>
+                                            <div class="form-group">
+                                                <small>For a devcontainer-enabled template, layer extraction is CPU/disk-heavy under concurrent load: EasyLab defaults to 1 CPU / 2Gi memory / 5Gi ephemeral storage here when left blank, but set these explicitly to size for your base image and expected class size.</small>
                                             </div>
                                             <div class="form-group">
                                                 <label>Startup Script (Optional)</label>

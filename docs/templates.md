@@ -571,6 +571,17 @@ keys the build ignores; and some keys are honoured by neither.
     the node's disk rather than the workspace volume, so a large image across
     many students is worth sizing the node pool for.
 
+!!! tip "A warm cache skips the build, not the extraction — size CPU/memory for concurrent starts"
+    A cache hit only skips re-running the devcontainer's build steps; every
+    workspace still has to extract the resulting image's layers onto its own pod
+    from scratch (`Extracting layer N/M...` in the pod's logs) — that part happens
+    every time, cache hit or not, and it is CPU- and disk-I/O-heavy. Leave `cpu`
+    and `memory` unset and EasyLab now applies a default (1 CPU / 2Gi memory / 5Gi
+    ephemeral storage) instead of leaving the pod with no reservation at all, but
+    a workshop with many concurrent students on a large base image should still
+    size these explicitly for the image and class size — the default is a floor,
+    not a recommendation for every workload.
+
 ## Reusing a lab's templates
 
 Use **Export Templates YAML** on the [labs list](admin.md#manage-your-labs) to
@@ -604,4 +615,4 @@ workshop edition to the next.
 | Devcontainer build fails with `devcontainer.json: no such file or directory` on a private repo | The clone ran with no credentials (`Using no authentication!` in the pod logs), so nothing was fetched. Add `git_auth_secret` — see [Devcontainer workshops](#devcontainer-workshops). Recreate the workspace so the clone runs again on a clean volume. |
 | Students can read the repo but cannot `git push` | Expected. The token authenticates the clone only and is never given to the IDE. |
 | A devcontainer import fails on `dockerComposeFile` | Compose-based devcontainers are not supported — use `sidecars` instead. |
-| Every student's workspace takes minutes to start | The cache registry is unreachable or unwritable, so each build starts cold. Check `registry_auth_secret`. |
+| Every student's workspace takes minutes to start | The cache registry is unreachable or unwritable, so each build starts cold. Check `registry_auth_secret`. If the cache *is* warm and it's still slow at scale, it's likely layer extraction contending for CPU/disk across many concurrent pods — see [A warm cache skips the build, not the extraction](#devcontainer-workshops) and size `cpu`/`memory` explicitly. |

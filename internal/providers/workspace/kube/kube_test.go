@@ -13,6 +13,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -262,6 +263,60 @@ func TestEnsureWorkspace_ImagePullPolicyIsIfNotPresent(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, corev1.PullIfNotPresent, configClone.ImagePullPolicy, "devcontainer-config-clone init container")
 	})
+}
+
+// TestEnsureWorkspace_DevcontainerDefaultsResourcesWhenUnset guards the fix for
+// the layer-extraction contention found under load: a devcontainer workspace
+// with no explicit CPU/Memory must not be BestEffort — envbuilder's extraction
+// step is CPU/disk heavy and needs a real scheduling fair-share claim, not zero
+// reservation, once many workspaces build concurrently.
+func TestEnsureWorkspace_DevcontainerDefaultsResourcesWhenUnset(t *testing.T) {
+	b, cs := newTestBackend()
+	spec := devcontainerSpec()
+	spec.CPU = ""
+	spec.Memory = ""
+
+	ws, err := b.EnsureWorkspace(context.Background(), spec)
+	require.NoError(t, err)
+
+	c := ideContainer(t, cs, ws.ID)
+	require.NotEmpty(t, c.Resources.Requests, "devcontainer workspace must not be BestEffort")
+	assert.Equal(t, resource.MustParse(defaultDevcontainerCPU), c.Resources.Requests[corev1.ResourceCPU])
+	assert.Equal(t, resource.MustParse(defaultDevcontainerMemory), c.Resources.Requests[corev1.ResourceMemory])
+	assert.Equal(t, resource.MustParse(defaultDevcontainerEphemeralStorage), c.Resources.Requests[corev1.ResourceEphemeralStorage])
+	assert.Equal(t, c.Resources.Requests, c.Resources.Limits)
+}
+
+// TestEnsureWorkspace_DevcontainerExplicitResourcesOverrideDefault is the
+// regression guard on the opt-out path: a template author who sizes CPU/Memory
+// explicitly gets exactly that, not the default layered on top.
+func TestEnsureWorkspace_DevcontainerExplicitResourcesOverrideDefault(t *testing.T) {
+	b, cs := newTestBackend()
+	spec := devcontainerSpec()
+	spec.CPU = "4"
+	spec.Memory = "8Gi"
+
+	ws, err := b.EnsureWorkspace(context.Background(), spec)
+	require.NoError(t, err)
+
+	c := ideContainer(t, cs, ws.ID)
+	assert.Equal(t, resource.MustParse("4"), c.Resources.Requests[corev1.ResourceCPU])
+	assert.Equal(t, resource.MustParse("8Gi"), c.Resources.Requests[corev1.ResourceMemory])
+	_, hasEphemeral := c.Resources.Requests[corev1.ResourceEphemeralStorage]
+	assert.False(t, hasEphemeral, "explicit sizing must not also get the ephemeral-storage default")
+}
+
+// TestEnsureWorkspace_PlainModeStaysBestEffortWhenUnset pins the unchanged case:
+// this default is devcontainer-specific, not a blanket change to every workspace.
+func TestEnsureWorkspace_PlainModeStaysBestEffortWhenUnset(t *testing.T) {
+	b, cs := newTestBackend()
+	ws, err := b.EnsureWorkspace(context.Background(), workspace.Spec{
+		LabID: "job-1", Owner: "alice", Domain: "d", Token: "t",
+	})
+	require.NoError(t, err)
+
+	c := ideContainer(t, cs, ws.ID)
+	assert.Empty(t, c.Resources.Requests, "a non-devcontainer workspace with no CPU/Memory must remain BestEffort, unchanged from before this fix")
 }
 
 func TestEnsureWorkspace_PrivilegedSidecar(t *testing.T) {
