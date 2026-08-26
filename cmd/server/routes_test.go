@@ -83,6 +83,18 @@ func TestResolveLabRoute(t *testing.T) {
 			want:   routeCoderCredentials,
 		},
 		{name: "kubeconfig", path: "/api/labs/job-1/kubeconfig", method: http.MethodGet, want: routeKubeconfig},
+		{
+			name:   "update lifecycle",
+			path:   "/api/labs/job-1/lifecycle",
+			method: http.MethodPost,
+			want:   routeUpdateLabLifecycle,
+		},
+		{
+			name:   "GET on lifecycle falls through to status",
+			path:   "/api/labs/job-1/lifecycle",
+			method: http.MethodGet,
+			want:   routeJobStatus,
+		},
 
 		// Fallback.
 		{name: "job status", path: "/api/labs/job-1", method: http.MethodGet, want: routeJobStatus},

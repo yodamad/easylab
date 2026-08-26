@@ -122,6 +122,83 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
+// showEditLifecycleModal opens the "Edit Lifecycle" modal pre-filled with the
+// lab's current workspace lifetime (always stored/edited in hours) and its
+// scheduled deletion date/time, if any.
+function showEditLifecycleModal(labId, labName, currentHours, currentDate, currentTime) {
+    const form = document.getElementById('edit-lifecycle-form');
+    if (form) form.reset();
+    clearEditLifecycleError();
+
+    document.getElementById('edit-lifecycle-job-id').value = labId;
+    document.getElementById('edit-lifecycle-hours').value = currentHours > 0 ? currentHours : '';
+    document.getElementById('edit-lifecycle-unit').value = 'hours';
+    document.getElementById('edit-lifecycle-date').value = currentDate || '';
+    document.getElementById('edit-lifecycle-time').value = currentTime || '';
+
+    openEditLifecycleModal();
+}
+
+function openEditLifecycleModal() {
+    const overlay = document.getElementById('edit-lifecycle-overlay');
+    if (overlay) {
+        overlay.classList.add('visible');
+        overlay.setAttribute('aria-hidden', 'false');
+    }
+}
+
+function closeEditLifecycleModal() {
+    const overlay = document.getElementById('edit-lifecycle-overlay');
+    if (overlay) {
+        overlay.classList.remove('visible');
+        overlay.setAttribute('aria-hidden', 'true');
+    }
+}
+
+function showEditLifecycleError(message) {
+    const box = document.getElementById('edit-lifecycle-error');
+    if (!box) return;
+    box.textContent = message;
+    box.className = 'error-message';
+    box.style.display = 'block';
+}
+
+function clearEditLifecycleError() {
+    const box = document.getElementById('edit-lifecycle-error');
+    if (!box) return;
+    box.textContent = '';
+    box.style.display = 'none';
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('edit-lifecycle-form');
+    if (form) {
+        form.addEventListener('submit', function(event) {
+            event.preventDefault();
+            clearEditLifecycleError();
+            const labId = document.getElementById('edit-lifecycle-job-id').value;
+            fetch('/api/labs/' + encodeURIComponent(labId) + '/lifecycle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams(new FormData(form)).toString()
+            })
+            .then(response => response.json().then(data => ({ ok: response.ok, data: data })))
+            .then(result => {
+                if (result.ok) {
+                    closeEditLifecycleModal();
+                    window.location.reload();
+                } else {
+                    showEditLifecycleError(result.data.message || 'Could not update the lab.');
+                }
+            })
+            .catch(error => {
+                console.error('Edit lifecycle error:', error);
+                showEditLifecycleError('Could not update the lab. Please try again.');
+            });
+        });
+    }
+});
+
 function removeLab(labId) {
     if (!confirm('Remove this lab from the list? This action cannot be undone.')) return;
     fetch('/api/labs/' + encodeURIComponent(labId) + '/delete', {

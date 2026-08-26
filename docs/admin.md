@@ -593,6 +593,23 @@ confirms the addition and the list refreshes.
 > created (see below). A template added here can only reference a credential that
 > already exists on the lab.
 
+### Edit a lab's lifecycle
+
+Completed labs also have an **Edit Lifecycle** action that opens a modal for changing
+the **Workspace Lifetime** and **Lab Deletion** date/time set during creation (see
+[Cleaning Configuration](#cleaning-configuration-step-7) above) without recreating the
+lab:
+
+![Edit Lifecycle](screens/edit-lifecycle.png){width=450}
+
+* Change the workspace lifetime value/unit, or clear it (`0` or empty) to disable
+  automatic workspace cleanup.
+* Set, change, or clear the lab's scheduled deletion date and time. A cleared date
+  disables scheduled lab deletion; a date must be in the future.
+
+On save, the modal closes and the labs list refreshes to show the new values. The new
+policy takes effect on the cleanup service's next check.
+
 ## Lab credentials (private registries and repositories)
 
 A lab whose workspaces use a private image or clone a private repository needs

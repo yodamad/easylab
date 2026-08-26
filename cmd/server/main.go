@@ -531,6 +531,7 @@ const (
 	routeCoderCredentials
 	routeKubeconfig
 	routeRecreateCredentials
+	routeUpdateLabLifecycle
 )
 
 // resolveLabRoute picks the endpoint for a request. The case order is the
@@ -566,6 +567,8 @@ func resolveLabRoute(path, method, format string) labRoute {
 		return routeCoderCredentials
 	case strings.HasSuffix(path, "/kubeconfig"):
 		return routeKubeconfig
+	case strings.HasSuffix(path, "/lifecycle") && method == http.MethodPost:
+		return routeUpdateLabLifecycle
 	case format == "json":
 		return routeJobStatusJSON
 	default:
@@ -602,6 +605,8 @@ func labRequestRouter(h *server.Handler) http.HandlerFunc {
 			h.DownloadKubeconfig(w, r)
 		case routeJobStatusJSON:
 			h.GetJobStatusJSON(w, r)
+		case routeUpdateLabLifecycle:
+			h.UpdateLabLifecycle(w, r)
 		default:
 			h.GetJobStatus(w, r)
 		}

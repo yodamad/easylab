@@ -118,6 +118,12 @@
                                         </svg>
                                         <span class="tooltip">Add Template</span>
                                     </button>
+                                    <button type="button" class="btn btn-secondary btn-icon-only tooltip-trigger" title="Edit workspace lifetime and lab deletion date" onclick="showEditLifecycleModal('{{.ID}}', '{{.StackName}}', {{.WorkspaceLifetimeHours}}, '{{.LabDeletionDateValue}}', '{{.LabDeletionTimeValue}}')">
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
+                                        <span class="tooltip">Edit Lifecycle</span>
+                                    </button>
                                     {{end}}
                                     {{if eq .Status "failed"}}
                                     <button type="button" class="btn btn-primary btn-icon-only tooltip-trigger" title="Retry this failed lab deployment" onclick="retryLab('{{.ID}}')">
@@ -500,6 +506,53 @@
                             </div>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="edit-lifecycle-overlay" class="credentials-modal-overlay" onclick="closeEditLifecycleModal()" aria-hidden="true">
+            <div class="credentials-modal" onclick="event.stopPropagation()">
+                <div class="credentials-modal-header">
+                    <h3>Edit Lifecycle</h3>
+                    <button type="button" class="credentials-modal-close" onclick="closeEditLifecycleModal()" title="Close" aria-label="Close">&times;</button>
+                </div>
+                <div class="credentials-modal-body">
+                    <form id="edit-lifecycle-form">
+                        <input type="hidden" name="job_id" id="edit-lifecycle-job-id">
+                        <div id="edit-lifecycle-error" style="display: none;"></div>
+
+                        <div class="form-group">
+                            <label for="edit-lifecycle-hours">Workspace Lifetime (Optional)</label>
+                            <div class="lifetime-input">
+                                <input type="number" id="edit-lifecycle-hours" name="workspace_lifetime_hours" min="0" placeholder="0">
+                                <select id="edit-lifecycle-unit" name="workspace_lifetime_unit">
+                                    <option value="hours">Hours</option>
+                                    <option value="days">Days</option>
+                                </select>
+                            </div>
+                            <small>Auto-delete workspaces after this duration. Leave 0 to disable.</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Lab Deletion (Optional)</label>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="edit-lifecycle-date">Date</label>
+                                    <input type="date" id="edit-lifecycle-date" name="lab_deletion_date">
+                                </div>
+                                <div class="form-group">
+                                    <label for="edit-lifecycle-time">Time</label>
+                                    <input type="time" id="edit-lifecycle-time" name="lab_deletion_time" placeholder="23:59">
+                                </div>
+                            </div>
+                            <small>Automatically destroy the entire lab at the specified date and time. Time defaults to end of day (23:59) if not set. Leave date empty to disable.</small>
+                        </div>
+
+                        <div class="credentials-modal-actions">
+                            <button type="submit" class="btn btn-success btn-sm">Save</button>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="closeEditLifecycleModal()">Cancel</button>
+                        </div>
+                    </form>
                 </div>
             </div>
         </div>

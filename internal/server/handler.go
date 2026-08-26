@@ -2988,6 +2988,8 @@ func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
 		IsDestroyed               bool
 		WorkspaceLifetimeHours    int
 		LabDeletionDate           string
+		LabDeletionDateValue      string
+		LabDeletionTimeValue      string
 		HasDeletionDate           bool
 		WorkspaceTemplateNamesCSV string
 	}
@@ -3014,9 +3016,13 @@ func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
 			workspaceLifetimeHours = job.Config.WorkspaceLifetimeHours
 		}
 		labDeletionDate := ""
+		labDeletionDateValue := ""
+		labDeletionTimeValue := ""
 		hasLabDeletionDate := false
 		if job.Config != nil && job.Config.LabDeletionDate != nil {
 			labDeletionDate = job.Config.LabDeletionDate.Format("Jan 02, 2006 at 15:04")
+			labDeletionDateValue = job.Config.LabDeletionDate.Format("2006-01-02")
+			labDeletionTimeValue = job.Config.LabDeletionDate.Format("15:04")
 			hasLabDeletionDate = true
 		}
 		var templateNames []string
@@ -3042,6 +3048,8 @@ func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
 			IsDestroyed:               isDestroyed,
 			WorkspaceLifetimeHours:    workspaceLifetimeHours,
 			LabDeletionDate:           labDeletionDate,
+			LabDeletionDateValue:      labDeletionDateValue,
+			LabDeletionTimeValue:      labDeletionTimeValue,
 			HasDeletionDate:           hasLabDeletionDate,
 			WorkspaceTemplateNamesCSV: strings.Join(templateNames, ", "),
 		})
@@ -3539,6 +3547,78 @@ func (h *Handler) DestroyStack(w http.ResponseWriter, r *http.Request) {
 
 	// Redirect to admin page to view destroy progress (like CreateLab)
 	http.Redirect(w, r, fmt.Sprintf("/admin?job=%s", jobID), http.StatusSeeOther)
+}
+
+// UpdateLabLifecycle handles editing a completed lab's workspace lifetime and
+// scheduled lab deletion date from the labs-list "Edit Lifecycle" modal. Field
+// names mirror the creation wizard's Lifecycle step (workspace_lifetime_hours /
+// workspace_lifetime_unit / lab_deletion_date / lab_deletion_time) so the same
+// deletion-date parsing/validation as the recreate prompt applies here too.
+func (h *Handler) UpdateLabLifecycle(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	// Expect: api/labs/{id}/lifecycle or api/jobs/{id}/lifecycle
+	if len(pathParts) < 4 || (pathParts[1] != "labs" && pathParts[1] != "jobs") {
+		writeJSONError(w, http.StatusBadRequest, "Invalid path")
+		return
+	}
+	jobID := pathParts[2]
+
+	job, exists := h.jobManager.GetJob(jobID)
+	if !exists {
+		writeJSONError(w, http.StatusNotFound, "Lab not found")
+		return
+	}
+
+	job.mu.RLock()
+	status := job.Status
+	job.mu.RUnlock()
+
+	if status != JobStatusCompleted {
+		writeJSONError(w, http.StatusBadRequest, "Lab is not ready yet")
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		log.Printf("Failed to parse form for lab %s: %v", jobID, err)
+		writeJSONError(w, http.StatusBadRequest, "Failed to parse form data")
+		return
+	}
+
+	lifetimeStr := strings.TrimSpace(r.FormValue("workspace_lifetime_hours"))
+	lifetime := 0
+	if lifetimeStr != "" {
+		var err error
+		lifetime, err = strconv.Atoi(lifetimeStr)
+		if err != nil || lifetime < 0 {
+			writeJSONError(w, http.StatusBadRequest, "Workspace lifetime must be a non-negative number")
+			return
+		}
+	}
+	if r.FormValue("workspace_lifetime_unit") == "days" {
+		lifetime *= 24
+	}
+
+	deletionDate, err := parseRecreateDeletionDate(r)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	h.updateJobConfig(jobID, func(config *LabConfig) {
+		config.WorkspaceLifetimeHours = lifetime
+		config.LabDeletionDate = deletionDate
+	})
+	if err := h.jobManager.SaveJob(jobID); err != nil {
+		log.Printf("Failed to persist lifecycle update for lab %s: %v", jobID, err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }
 
 // parseRecreateDeletionDate reads the deletion schedule the admin entered in the
