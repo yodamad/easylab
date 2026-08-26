@@ -1805,11 +1805,12 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A git-backed workspace needs a persistent volume to clone into; default one.
+	// A git-backed workspace still needs somewhere to clone into even without a
+	// PVC: kube.go mounts an EmptyDir at the workspace directory whenever
+	// GitRepo is set and DiskSize is empty, so no fallback size is forced here.
+	// A persistent (Azure-Disk-backed) volume is opt-in — set DiskSize on the
+	// template to request one.
 	diskSize := selected.DiskSize
-	if diskSize == "" && selected.GitRepo != "" {
-		diskSize = "5Gi"
-	}
 
 	spec := workspace.Spec{
 		LabID:            labID,

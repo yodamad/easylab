@@ -96,8 +96,16 @@ const (
 	ideMountPath  = "/ide"
 	ideVolumeName = "ide"
 
-	// workspaceVolumeName is the PVC holding the student's files.
+	// workspaceVolumeName holds the student's files: a PVC when the template sets
+	// an explicit DiskSize, otherwise an EmptyDir sized to
+	// defaultEphemeralWorkspaceSize (see createDeployment).
 	workspaceVolumeName = "workspace"
+	// defaultEphemeralWorkspaceSize bounds the EmptyDir used in place of a PVC
+	// for a git-backed workspace with no explicit DiskSize, so a runaway
+	// clone/build can't consume unbounded node ephemeral storage. Matches the
+	// old forced-PVC default size — this only changes the volume type, not the
+	// capacity a workspace can expect.
+	defaultEphemeralWorkspaceSize = "5Gi"
 
 	// devcontainerConfigMountPath is where a separately-cloned devcontainer config
 	// repo (Devcontainer.ConfigRepo) lands, outside the content repo's clone —
@@ -415,11 +423,17 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 	env = append(env, corev1.EnvVar{Name: "PASSWORD", Value: spec.Token})
 
 	container := corev1.Container{
-		Name:      workspaceContainerName,
-		Image:     image,
-		Ports:     []corev1.ContainerPort{{ContainerPort: p.port, Name: "http"}},
-		Env:       env,
-		Resources: buildResources(spec.CPU, spec.Memory),
+		Name:  workspaceContainerName,
+		Image: image,
+		// Every workspace pod on a lab shares the same handful of images; once one
+		// pod has pulled it onto a node, the rest should reuse that cache instead
+		// of re-hitting the registry (Always, the default for a :latest tag, does
+		// not — see the same field on the init containers below for why that
+		// matters at burst scale).
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Ports:           []corev1.ContainerPort{{ContainerPort: p.port, Name: "http"}},
+		Env:             env,
+		Resources:       buildResources(spec.CPU, spec.Memory),
 		// Only mark the pod Ready once the IDE is actually listening — a wrapped
 		// startup script runs before the server exec, so the port opens late.
 		ReadinessProbe: &corev1.Probe{
@@ -462,14 +476,26 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 		container.Args = args
 	}
 
-	if hasPVC {
+	// A workspace directory is needed whenever there's a git repo to clone into
+	// (a plain clone below, or envbuilder's own clone in devcontainer mode) —
+	// not only when the template asked for a persistent disk. Without an
+	// explicit DiskSize this is an EmptyDir instead of a PVC: ephemeral, but it
+	// avoids forcing an Azure-Disk-backed PVC — and its per-node attach limits —
+	// on every git-backed workspace by default.
+	if hasPVC || strings.TrimSpace(spec.GitRepo) != "" {
 		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{Name: workspaceVolumeName, MountPath: p.workspaceDir})
-		volumes = append(volumes, corev1.Volume{
-			Name: workspaceVolumeName,
-			VolumeSource: corev1.VolumeSource{
+		vol := corev1.Volume{Name: workspaceVolumeName}
+		if hasPVC {
+			vol.VolumeSource = corev1.VolumeSource{
 				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: name},
-			},
-		})
+			}
+		} else {
+			sizeLimit := resource.MustParse(defaultEphemeralWorkspaceSize)
+			vol.VolumeSource = corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: &sizeLimit},
+			}
+		}
+		volumes = append(volumes, vol)
 		// In devcontainer mode envbuilder does its own clone, so a git-clone init
 		// container would only race it for the same directory.
 		if strings.TrimSpace(spec.GitRepo) != "" && spec.Devcontainer == nil {
@@ -755,8 +781,12 @@ func ideInjectInit(p ideProfile) corev1.Container {
 	script := fmt.Sprintf(`cp -dR "%s/." %s/ && chmod -R a+rX %s`,
 		p.bundleRoot, ideMountPath, ideMountPath)
 	return corev1.Container{
-		Name:            "ide-inject",
-		Image:           p.defaultImage,
+		Name:  "ide-inject",
+		Image: p.defaultImage,
+		// See the workspace container's ImagePullPolicy comment: this image is the
+		// same one on every workspace pod, so once a node has it, later pods on
+		// that node should reuse it rather than re-hitting the registry.
+		ImagePullPolicy: corev1.PullIfNotPresent,
 		Command:         []string{"sh", "-c", script},
 		SecurityContext: &corev1.SecurityContext{RunAsUser: int64Ptr(0)},
 		VolumeMounts:    []corev1.VolumeMount{{Name: ideVolumeName, MountPath: ideMountPath}},
@@ -833,7 +863,10 @@ func buildSidecar(sc workspace.Sidecar) (corev1.Container, bool) {
 	if scName == "" || scName == workspaceContainerName || strings.TrimSpace(sc.Image) == "" {
 		return corev1.Container{}, false
 	}
-	c := corev1.Container{Name: scName, Image: sc.Image}
+	// See the workspace container's ImagePullPolicy comment: every student on a
+	// lab using this template shares the same sidecar image, so later pods on a
+	// node that already has it should reuse the cache instead of re-pulling.
+	c := corev1.Container{Name: scName, Image: sc.Image, ImagePullPolicy: corev1.PullIfNotPresent}
 	for _, port := range sc.Ports {
 		c.Ports = append(c.Ports, corev1.ContainerPort{ContainerPort: int32(port)})
 	}
@@ -934,11 +967,14 @@ func gitCloneInit(repo, branch, dir, authSecret string) corev1.Container {
 	script := fmt.Sprintf(`if [ -z "$(ls -A %s 2>/dev/null)" ]; then %s clone %s%s %s && chown -R 1000:1000 %s; fi`,
 		dir, gitCmd, branchFlag, shellQuote(repo), dir, dir)
 	return corev1.Container{
-		Name:         "git-clone",
-		Image:        "alpine/git:latest",
-		Command:      []string{"sh", "-c", script},
-		Env:          env,
-		VolumeMounts: []corev1.VolumeMount{{Name: workspaceVolumeName, MountPath: dir}},
+		Name:  "git-clone",
+		Image: "alpine/git:latest",
+		// See the workspace container's ImagePullPolicy comment: this image is
+		// shared by every workspace pod, so reuse the node's cache once present.
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Command:         []string{"sh", "-c", script},
+		Env:             env,
+		VolumeMounts:    []corev1.VolumeMount{{Name: workspaceVolumeName, MountPath: dir}},
 	}
 }
 
@@ -964,11 +1000,14 @@ func devcontainerConfigCloneInit(repo, branch, authSecret string) corev1.Contain
 	script := fmt.Sprintf(`if [ -z "$(ls -A %s 2>/dev/null)" ]; then %s clone %s%s %s; fi`,
 		devcontainerConfigMountPath, gitCmd, branchFlag, shellQuote(repo), devcontainerConfigMountPath)
 	return corev1.Container{
-		Name:         "devcontainer-config-clone",
-		Image:        "alpine/git:latest",
-		Command:      []string{"sh", "-c", script},
-		Env:          env,
-		VolumeMounts: []corev1.VolumeMount{{Name: devcontainerConfigVolumeName, MountPath: devcontainerConfigMountPath}},
+		Name:  "devcontainer-config-clone",
+		Image: "alpine/git:latest",
+		// See the workspace container's ImagePullPolicy comment: this image is
+		// shared by every workspace pod, so reuse the node's cache once present.
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Command:         []string{"sh", "-c", script},
+		Env:             env,
+		VolumeMounts:    []corev1.VolumeMount{{Name: devcontainerConfigVolumeName, MountPath: devcontainerConfigMountPath}},
 	}
 }
 

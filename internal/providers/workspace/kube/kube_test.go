@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -206,6 +207,63 @@ func TestEnsureWorkspace_SidecarAndMount(t *testing.T) {
 	}
 }
 
+// TestEnsureWorkspace_ImagePullPolicyIsIfNotPresent guards the fix for the
+// image-pull QPS storm incident: every image these containers use is shared
+// across every student on a lab (the main IDE image, the git-clone/devcontainer
+// helper images, and a template's sidecar image), so once one pod has pulled it
+// onto a node, later pods there must reuse the cache instead of re-hitting the
+// registry. Several of these images are hardcoded to :latest, whose Kubernetes
+// default is Always — that default is what caused the incident.
+func TestEnsureWorkspace_ImagePullPolicyIsIfNotPresent(t *testing.T) {
+	t.Run("plain mode: main container, git-clone init, sidecar", func(t *testing.T) {
+		b, cs := newTestBackend()
+		ws, err := b.EnsureWorkspace(context.Background(), workspace.Spec{
+			LabID: "job-1", Owner: "alice", Domain: "d", Token: "t",
+			GitRepo: "https://gitlab.com/org/workshop.git", DiskSize: "5Gi",
+			Sidecars: []workspace.Sidecar{{Name: "db", Image: "postgres:16"}},
+		})
+		require.NoError(t, err)
+
+		c := ideContainer(t, cs, ws.ID)
+		assert.Equal(t, corev1.PullIfNotPresent, c.ImagePullPolicy, "main container")
+
+		gc, ok := initContainerNamed(t, cs, ws.ID, "git-clone")
+		require.True(t, ok)
+		assert.Equal(t, corev1.PullIfNotPresent, gc.ImagePullPolicy, "git-clone init container")
+
+		dep, err := cs.AppsV1().Deployments("workshops").Get(context.Background(), ws.ID, metav1.GetOptions{})
+		require.NoError(t, err)
+		var sidecar *corev1.Container
+		for i := range dep.Spec.Template.Spec.Containers {
+			if dep.Spec.Template.Spec.Containers[i].Name == "db" {
+				sidecar = &dep.Spec.Template.Spec.Containers[i]
+			}
+		}
+		require.NotNil(t, sidecar, "sidecar container 'db' not found")
+		assert.Equal(t, corev1.PullIfNotPresent, sidecar.ImagePullPolicy, "sidecar container")
+	})
+
+	t.Run("devcontainer mode: envbuilder main container, ide-inject, config-clone init", func(t *testing.T) {
+		b, cs := newTestBackend()
+		spec := devcontainerSpec()
+		spec.Devcontainer.ConfigRepo = "https://gitlab.com/org/devcontainer-config.git"
+
+		ws, err := b.EnsureWorkspace(context.Background(), spec)
+		require.NoError(t, err)
+
+		c := ideContainer(t, cs, ws.ID)
+		assert.Equal(t, corev1.PullIfNotPresent, c.ImagePullPolicy, "envbuilder main container")
+
+		ideInject, ok := initContainerNamed(t, cs, ws.ID, "ide-inject")
+		require.True(t, ok)
+		assert.Equal(t, corev1.PullIfNotPresent, ideInject.ImagePullPolicy, "ide-inject init container")
+
+		configClone, ok := initContainerNamed(t, cs, ws.ID, "devcontainer-config-clone")
+		require.True(t, ok)
+		assert.Equal(t, corev1.PullIfNotPresent, configClone.ImagePullPolicy, "devcontainer-config-clone init container")
+	})
+}
+
 func TestEnsureWorkspace_PrivilegedSidecar(t *testing.T) {
 	b, cs := newTestBackend()
 	ws, err := b.EnsureWorkspace(context.Background(), workspace.Spec{
@@ -298,6 +356,116 @@ func TestEnsureWorkspace_CreatesResources(t *testing.T) {
 	if _, err := cs.NetworkingV1().Ingresses("workshops").Get(ctx, name, metav1.GetOptions{}); err != nil {
 		t.Errorf("ingress not created: %v", err)
 	}
+}
+
+// workspaceVolume returns the pod's "workspace" volume, so tests can assert on
+// its VolumeSource (PVC vs EmptyDir) without duplicating the deployment lookup.
+func workspaceVolume(t *testing.T, cs *fake.Clientset, name string) (corev1.Volume, bool) {
+	t.Helper()
+	dep, err := cs.AppsV1().Deployments("workshops").Get(context.Background(), name, metav1.GetOptions{})
+	require.NoError(t, err)
+	for _, v := range dep.Spec.Template.Spec.Volumes {
+		if v.Name == workspaceVolumeName {
+			return v, true
+		}
+	}
+	return corev1.Volume{}, false
+}
+
+// TestEnsureWorkspace_GitBackedWithoutDiskSizeUsesEmptyDir guards the fix for the
+// Azure Disk attach-storm incident: a git-backed workspace with no explicit
+// DiskSize must not get a PVC (every one of 200 concurrent creates hammering a
+// cluster's disk-attach limits at once caused 82/200 pods to get stuck). It
+// still needs somewhere to clone into, so that becomes a size-bounded EmptyDir.
+func TestEnsureWorkspace_GitBackedWithoutDiskSizeUsesEmptyDir(t *testing.T) {
+	b, cs := newTestBackend()
+	ctx := context.Background()
+
+	ws, err := b.EnsureWorkspace(ctx, workspace.Spec{
+		LabID:   "job-1",
+		Owner:   "alice",
+		GitRepo: "https://gitlab.com/org/workshop.git",
+		Domain:  "lab.example.com",
+		Token:   "secret-token",
+	})
+	require.NoError(t, err)
+
+	_, err = cs.CoreV1().PersistentVolumeClaims("workshops").Get(ctx, ws.ID, metav1.GetOptions{})
+	assert.True(t, apierrors.IsNotFound(err), "no DiskSize must mean no PVC is created, got err=%v", err)
+
+	vol, ok := workspaceVolume(t, cs, ws.ID)
+	require.True(t, ok, "a workspace volume must still exist as the clone target")
+	require.NotNil(t, vol.EmptyDir, "expected an EmptyDir volume, got %+v", vol.VolumeSource)
+	require.NotNil(t, vol.EmptyDir.SizeLimit, "the EmptyDir must be size-bounded")
+	assert.Nil(t, vol.PersistentVolumeClaim)
+
+	_, ok = initContainerNamed(t, cs, ws.ID, "git-clone")
+	assert.True(t, ok, "cloning must still happen even without a PVC")
+}
+
+// TestEnsureWorkspace_DevcontainerWithoutDiskSizeUsesEmptyDir is the exact
+// scenario from the incident: a devcontainer template (which always implies a
+// GitRepo) with no explicit DiskSize.
+func TestEnsureWorkspace_DevcontainerWithoutDiskSizeUsesEmptyDir(t *testing.T) {
+	b, cs := newTestBackend()
+	ctx := context.Background()
+
+	spec := devcontainerSpec()
+	spec.DiskSize = ""
+
+	ws, err := b.EnsureWorkspace(ctx, spec)
+	require.NoError(t, err)
+
+	_, err = cs.CoreV1().PersistentVolumeClaims("workshops").Get(ctx, ws.ID, metav1.GetOptions{})
+	assert.True(t, apierrors.IsNotFound(err), "no DiskSize must mean no PVC is created, got err=%v", err)
+
+	vol, ok := workspaceVolume(t, cs, ws.ID)
+	require.True(t, ok)
+	assert.NotNil(t, vol.EmptyDir)
+	assert.Nil(t, vol.PersistentVolumeClaim)
+}
+
+// TestEnsureWorkspace_GitBackedWithDiskSizeStillUsesPVC is the regression guard
+// on the opt-in path: a template author who explicitly sets DiskSize must still
+// get a real, durable PVC — unchanged from before the fix.
+func TestEnsureWorkspace_GitBackedWithDiskSizeStillUsesPVC(t *testing.T) {
+	b, cs := newTestBackend()
+	ctx := context.Background()
+
+	ws, err := b.EnsureWorkspace(ctx, workspace.Spec{
+		LabID:    "job-1",
+		Owner:    "alice",
+		GitRepo:  "https://gitlab.com/org/workshop.git",
+		DiskSize: "10Gi",
+		Domain:   "lab.example.com",
+		Token:    "secret-token",
+	})
+	require.NoError(t, err)
+
+	_, err = cs.CoreV1().PersistentVolumeClaims("workshops").Get(ctx, ws.ID, metav1.GetOptions{})
+	require.NoError(t, err, "an explicit DiskSize must still create a PVC")
+
+	vol, ok := workspaceVolume(t, cs, ws.ID)
+	require.True(t, ok)
+	require.NotNil(t, vol.PersistentVolumeClaim)
+	assert.Equal(t, ws.ID, vol.PersistentVolumeClaim.ClaimName)
+	assert.Nil(t, vol.EmptyDir)
+}
+
+// TestEnsureWorkspace_ImageOnlyHasNoWorkspaceVolume pins the unchanged case: a
+// plain image template with no git repo and no DiskSize needs nowhere to clone
+// into, so it gets neither a PVC nor an EmptyDir workspace volume.
+func TestEnsureWorkspace_ImageOnlyHasNoWorkspaceVolume(t *testing.T) {
+	b, cs := newTestBackend()
+	ctx := context.Background()
+
+	ws, err := b.EnsureWorkspace(ctx, workspace.Spec{
+		LabID: "job-1", Owner: "alice", Domain: "lab.example.com", Token: "secret-token",
+	})
+	require.NoError(t, err)
+
+	_, ok := workspaceVolume(t, cs, ws.ID)
+	assert.False(t, ok, "an image-only workspace with nothing to clone must not get a workspace volume")
 }
 
 // TestEnsureWorkspace_AttributesTemplate pins that the template a workspace was
