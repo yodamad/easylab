@@ -61,6 +61,54 @@ func TestDetectDevcontainer_FromUploadedJSON(t *testing.T) {
 	assert.True(t, templates[0].Devcontainer.Enabled)
 }
 
+// TestDetectDevcontainer_ExplicitCPUMemoryOverrideHostRequirements covers the
+// admin-typed override path: an explicit cpu/memory in the import form wins
+// over whatever the devcontainer.json's hostRequirements would have set,
+// mirroring how template_name already overrides the devcontainer's own name.
+func TestDetectDevcontainer_ExplicitCPUMemoryOverrideHostRequirements(t *testing.T) {
+	t.Parallel()
+
+	body := `{"name": "Go Workshop", "image": "golang:1.22", "hostRequirements": {"cpus": 2, "memory": "4gb"}}`
+
+	got := postDevcontainerUpload(t, "devcontainer.json", []byte(body), url.Values{
+		"git_repo":   {"https://gitlab.com/org/workshop.git"},
+		"cache_repo": {"registry.example.com/easylab/cache"},
+		"cpu":        {"4"},
+		"memory":     {"8Gi"},
+	})
+
+	assert.Contains(t, got.TemplatesYAML, `cpu: "4"`)
+	assert.Contains(t, got.TemplatesYAML, "memory: 8Gi")
+	assert.NotContains(t, got.TemplatesYAML, `cpu: "2"`)
+	assert.NotContains(t, got.TemplatesYAML, "memory: 4Gi")
+}
+
+// TestDetectDevcontainer_CPULimitMemoryLimitAreBakedIn covers cpu_limit and
+// memory_limit: unlike cpu/memory, these have no devcontainer.json-derived
+// source at all — hostRequirements carries no request/limit distinction — so
+// they must come through purely from the admin-typed form fields.
+func TestDetectDevcontainer_CPULimitMemoryLimitAreBakedIn(t *testing.T) {
+	t.Parallel()
+
+	body := `{"name": "Go Workshop", "image": "golang:1.22"}`
+
+	got := postDevcontainerUpload(t, "devcontainer.json", []byte(body), url.Values{
+		"git_repo":     {"https://gitlab.com/org/workshop.git"},
+		"cache_repo":   {"registry.example.com/easylab/cache"},
+		"cpu_limit":    {"2"},
+		"memory_limit": {"2Gi"},
+	})
+
+	assert.Contains(t, got.TemplatesYAML, `cpu_limit: "2"`)
+	assert.Contains(t, got.TemplatesYAML, "memory_limit: 2Gi")
+
+	templates, err := parseWorkspaceTemplatesYAML(got.TemplatesYAML)
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	assert.Equal(t, "2", templates[0].CPULimit)
+	assert.Equal(t, "2Gi", templates[0].MemoryLimit)
+}
+
 func TestDetectDevcontainer_GitAuthSecretIsBakedIn(t *testing.T) {
 	t.Parallel()
 

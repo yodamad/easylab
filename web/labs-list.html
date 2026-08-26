@@ -275,13 +275,24 @@
                                                 <input type="text" name="template_0_cpu" data-field="cpu" placeholder="500m">
                                             </div>
                                             <div class="form-group">
+                                                <label>CPU Limit (Optional)</label>
+                                                <input type="text" name="template_0_cpu_limit" data-field="cpu_limit" placeholder="defaults to CPU">
+                                            </div>
+                                            <div class="form-group">
                                                 <label>Memory (Optional)</label>
                                                 <input type="text" name="template_0_memory" data-field="memory" placeholder="1Gi">
+                                            </div>
+                                            <div class="form-group">
+                                                <label>Memory Limit (Optional)</label>
+                                                <input type="text" name="template_0_memory_limit" data-field="memory_limit" placeholder="defaults to Memory">
                                             </div>
                                             <div class="form-group">
                                                 <label>Disk Size (Optional)</label>
                                                 <input type="text" name="template_0_disk_size" data-field="disk_size" placeholder="5Gi">
                                             </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <small>CPU/Memory are the request; CPU Limit/Memory Limit override the limit independently — left blank, the limit matches the request. For a devcontainer-enabled template, layer extraction is CPU/disk-heavy under concurrent load: when all four are left blank, EasyLab defaults to 500m CPU (limit 2) / 2Gi memory / 5Gi ephemeral storage, but set them explicitly to size for your base image and expected class size.</small>
                                         </div>
                                         <div class="form-group">
                                             <label>Startup Script (Optional)</label>

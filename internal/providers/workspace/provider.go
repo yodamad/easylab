@@ -143,15 +143,17 @@ type Spec struct {
 	OwnerEmail string // student's login email, stored as an annotation for display only
 	Template   string // template name — part of the workspace identity (one workspace per template)
 
-	IDE       string            // IDE base; only "code-server" is supported (empty = default)
-	Image     string            // container image override (empty = IDE default)
-	GitRepo   string            // optional git repo cloned into the workspace on first start
-	GitBranch string            // optional branch to clone (default branch when empty)
-	GitFolder string            // optional subfolder the IDE opens (repo root when empty)
-	CPU       string            // optional CPU request/limit (e.g. "500m")
-	Memory    string            // optional memory request/limit (e.g. "1Gi")
-	DiskSize  string            // PVC size (e.g. "5Gi"); empty means no persistent volume
-	Env       map[string]string // extra environment variables for the IDE container
+	IDE         string            // IDE base; only "code-server" is supported (empty = default)
+	Image       string            // container image override (empty = IDE default)
+	GitRepo     string            // optional git repo cloned into the workspace on first start
+	GitBranch   string            // optional branch to clone (default branch when empty)
+	GitFolder   string            // optional subfolder the IDE opens (repo root when empty)
+	CPU         string            // optional CPU request (e.g. "500m"); also the limit when CPULimit is empty
+	Memory      string            // optional memory request (e.g. "1Gi"); also the limit when MemoryLimit is empty
+	CPULimit    string            // optional CPU limit override; empty means limit == CPU
+	MemoryLimit string            // optional memory limit override; empty means limit == Memory
+	DiskSize    string            // PVC size (e.g. "5Gi"); empty means no persistent volume
+	Env         map[string]string // extra environment variables for the IDE container
 
 	StartupScript string   // best-effort setup run before the IDE starts
 	DotfilesRepo  string   // dotfiles repo cloned + install script run

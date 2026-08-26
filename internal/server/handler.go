@@ -342,8 +342,9 @@ func (h *Handler) rehydrateProviderCredentials(config *LabConfig) error {
 
 // parseWorkspaceTemplatesFromForm extracts workspace template entries from the form.
 // Expects template_N_name, template_N_image, template_N_git_repo, template_N_cpu,
-// template_N_memory, template_N_disk_size, and repeated template_N_env_name /
-// template_N_env_value pairs.
+// template_N_memory, template_N_cpu_limit, template_N_memory_limit,
+// template_N_disk_size, and repeated template_N_env_name / template_N_env_value
+// pairs.
 func parseWorkspaceTemplatesFromForm(r *http.Request) []WorkspaceTemplate {
 	var templates []WorkspaceTemplate
 	for i := 0; ; i++ {
@@ -361,6 +362,8 @@ func parseWorkspaceTemplatesFromForm(r *http.Request) []WorkspaceTemplate {
 			GitFolder:     getFormValue(r, fmt.Sprintf("template_%d_git_folder", i)),
 			CPU:           getFormValue(r, fmt.Sprintf("template_%d_cpu", i)),
 			Memory:        getFormValue(r, fmt.Sprintf("template_%d_memory", i)),
+			CPULimit:      getFormValue(r, fmt.Sprintf("template_%d_cpu_limit", i)),
+			MemoryLimit:   getFormValue(r, fmt.Sprintf("template_%d_memory_limit", i)),
 			DiskSize:      getFormValue(r, fmt.Sprintf("template_%d_disk_size", i)),
 			StartupScript: getFormValue(r, fmt.Sprintf("template_%d_startup_script", i)),
 			DotfilesRepo:  getFormValue(r, fmt.Sprintf("template_%d_dotfiles_repo", i)),
@@ -1643,6 +1646,8 @@ func templatesFromUploadRequest(r *http.Request) ([]WorkspaceTemplate, error) {
 		GitFolder:     strings.TrimSpace(r.FormValue("template_git_folder")),
 		CPU:           strings.TrimSpace(r.FormValue("template_cpu")),
 		Memory:        strings.TrimSpace(r.FormValue("template_memory")),
+		CPULimit:      strings.TrimSpace(r.FormValue("template_cpu_limit")),
+		MemoryLimit:   strings.TrimSpace(r.FormValue("template_memory_limit")),
 		DiskSize:      strings.TrimSpace(r.FormValue("template_disk_size")),
 		StartupScript: r.FormValue("template_startup_script"),
 		DotfilesRepo:  strings.TrimSpace(r.FormValue("template_dotfiles_repo")),
@@ -1824,6 +1829,8 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		GitFolder:        selected.GitFolder,
 		CPU:              selected.CPU,
 		Memory:           selected.Memory,
+		CPULimit:         selected.CPULimit,
+		MemoryLimit:      selected.MemoryLimit,
 		DiskSize:         diskSize,
 		Env:              selected.Env,
 		StartupScript:    selected.StartupScript,

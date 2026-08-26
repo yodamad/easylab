@@ -275,6 +275,8 @@ func TestEnsureWorkspace_DevcontainerDefaultsResourcesWhenUnset(t *testing.T) {
 	spec := devcontainerSpec()
 	spec.CPU = ""
 	spec.Memory = ""
+	spec.CPULimit = ""
+	spec.MemoryLimit = ""
 
 	ws, err := b.EnsureWorkspace(context.Background(), spec)
 	require.NoError(t, err)
@@ -292,9 +294,33 @@ func TestEnsureWorkspace_DevcontainerDefaultsResourcesWhenUnset(t *testing.T) {
 	assert.Equal(t, resource.MustParse(defaultDevcontainerEphemeralStorage), c.Resources.Limits[corev1.ResourceEphemeralStorage])
 }
 
+// TestEnsureWorkspace_DevcontainerDefaultNotAppliedWhenAnyFieldSet proves the
+// auto-default only fires when CPU, Memory, CPULimit and MemoryLimit are ALL
+// blank — setting just one of the new limit fields opts out of the whole
+// default block (including the ephemeral-storage default), same as setting
+// CPU/Memory already does.
+func TestEnsureWorkspace_DevcontainerDefaultNotAppliedWhenAnyFieldSet(t *testing.T) {
+	b, cs := newTestBackend()
+	spec := devcontainerSpec()
+	spec.CPU = ""
+	spec.Memory = ""
+	spec.CPULimit = "3"
+
+	ws, err := b.EnsureWorkspace(context.Background(), spec)
+	require.NoError(t, err)
+
+	c := ideContainer(t, cs, ws.ID)
+	_, hasCPURequest := c.Resources.Requests[corev1.ResourceCPU]
+	assert.False(t, hasCPURequest, "no CPU request was set, only a limit")
+	assert.Equal(t, resource.MustParse("3"), c.Resources.Limits[corev1.ResourceCPU])
+	_, hasEphemeral := c.Resources.Requests[corev1.ResourceEphemeralStorage]
+	assert.False(t, hasEphemeral, "the ephemeral-storage default belongs to the auto-default block and must not leak in once that block is opted out of")
+}
+
 // TestEnsureWorkspace_DevcontainerExplicitResourcesOverrideDefault is the
 // regression guard on the opt-out path: a template author who sizes CPU/Memory
-// explicitly gets exactly that, not the default layered on top.
+// explicitly gets exactly that, not the default layered on top, and a blank
+// limit still defaults to the request — unchanged from before limits existed.
 func TestEnsureWorkspace_DevcontainerExplicitResourcesOverrideDefault(t *testing.T) {
 	b, cs := newTestBackend()
 	spec := devcontainerSpec()
@@ -307,8 +333,31 @@ func TestEnsureWorkspace_DevcontainerExplicitResourcesOverrideDefault(t *testing
 	c := ideContainer(t, cs, ws.ID)
 	assert.Equal(t, resource.MustParse("4"), c.Resources.Requests[corev1.ResourceCPU])
 	assert.Equal(t, resource.MustParse("8Gi"), c.Resources.Requests[corev1.ResourceMemory])
+	assert.Equal(t, resource.MustParse("4"), c.Resources.Limits[corev1.ResourceCPU], "blank CPULimit must default to the CPU request")
+	assert.Equal(t, resource.MustParse("8Gi"), c.Resources.Limits[corev1.ResourceMemory], "blank MemoryLimit must default to the Memory request")
 	_, hasEphemeral := c.Resources.Requests[corev1.ResourceEphemeralStorage]
 	assert.False(t, hasEphemeral, "explicit sizing must not also get the ephemeral-storage default")
+}
+
+// TestEnsureWorkspace_DevcontainerExplicitLimitsOverrideRequest proves an
+// admin-set CPULimit/MemoryLimit is honored verbatim and independently of
+// CPU/Memory, rather than always tracking the request.
+func TestEnsureWorkspace_DevcontainerExplicitLimitsOverrideRequest(t *testing.T) {
+	b, cs := newTestBackend()
+	spec := devcontainerSpec()
+	spec.CPU = "1"
+	spec.Memory = "2Gi"
+	spec.CPULimit = "4"
+	spec.MemoryLimit = "6Gi"
+
+	ws, err := b.EnsureWorkspace(context.Background(), spec)
+	require.NoError(t, err)
+
+	c := ideContainer(t, cs, ws.ID)
+	assert.Equal(t, resource.MustParse("1"), c.Resources.Requests[corev1.ResourceCPU])
+	assert.Equal(t, resource.MustParse("4"), c.Resources.Limits[corev1.ResourceCPU])
+	assert.Equal(t, resource.MustParse("2Gi"), c.Resources.Requests[corev1.ResourceMemory])
+	assert.Equal(t, resource.MustParse("6Gi"), c.Resources.Limits[corev1.ResourceMemory])
 }
 
 // TestEnsureWorkspace_PlainModeStaysBestEffortWhenUnset pins the unchanged case:
@@ -322,6 +371,24 @@ func TestEnsureWorkspace_PlainModeStaysBestEffortWhenUnset(t *testing.T) {
 
 	c := ideContainer(t, cs, ws.ID)
 	assert.Empty(t, c.Resources.Requests, "a non-devcontainer workspace with no CPU/Memory must remain BestEffort, unchanged from before this fix")
+}
+
+// TestEnsureWorkspace_PlainModeLimitOnlyStillGetsLimit pins the request-less-
+// but-limited edge case: a plain (non-devcontainer) workspace with only a
+// CPULimit set (no CPU request) must not be silently dropped into the fully
+// empty/BestEffort return.
+func TestEnsureWorkspace_PlainModeLimitOnlyStillGetsLimit(t *testing.T) {
+	b, cs := newTestBackend()
+	ws, err := b.EnsureWorkspace(context.Background(), workspace.Spec{
+		LabID: "job-1", Owner: "grace", Domain: "d", Token: "t",
+		CPULimit: "2",
+	})
+	require.NoError(t, err)
+
+	c := ideContainer(t, cs, ws.ID)
+	_, hasCPURequest := c.Resources.Requests[corev1.ResourceCPU]
+	assert.False(t, hasCPURequest, "no CPU request was set")
+	assert.Equal(t, resource.MustParse("2"), c.Resources.Limits[corev1.ResourceCPU])
 }
 
 func TestEnsureWorkspace_PrivilegedSidecar(t *testing.T) {

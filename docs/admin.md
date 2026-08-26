@@ -121,6 +121,7 @@ Under **Advanced options** (all optional):
 * **Git credential** — the credential (from the **Credentials** section at the top of the step) that unlocks a **private** Git Repository. Define a single git credential and it is wired into every template with a private repo automatically; add more than one and pick the right one per template here.
 * **Image** — a container image override. Defaults to `codercom/code-server:latest`.
 * **CPU / Memory / Disk Size** — resource requests for the workspace pod (e.g. `500m`, `1Gi`, `5Gi`).
+* **CPU Limit / Memory Limit** (optional) — override the pod's resource limit independently of the request above. Left blank, the limit matches the request, as it always has. See [Workshops with a devcontainer](#workshops-with-a-devcontainer) for why a devcontainer template in particular benefits from setting these explicitly.
 * **Startup Script** — shell commands run (best-effort) on start, *before* the IDE opens: install tools, configure the shell, run a bootstrap. Failures are shown in `kubectl logs` but never block the workspace from opening.
 * **Dotfiles Repository** — cloned to `~/.dotfiles`; its `install.sh` / `setup.sh` / `bootstrap.sh` is run if present.
 * **Extensions** — comma-separated VS Code extension IDs installed on start.

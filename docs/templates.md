@@ -40,6 +40,8 @@ validation instead of silently shipping a lab without its image.
 | `git_folder` | string | Subfolder of the repo the IDE opens. Repo root when unset. |
 | `cpu` | string | Resource request, e.g. `500m`. **Quote plain numbers**: `"2"`. |
 | `memory` | string | Resource request, e.g. `4Gi`. |
+| `cpu_limit` | string | Resource limit override. **Empty means it matches `cpu`** (the request). |
+| `memory_limit` | string | Resource limit override. **Empty means it matches `memory`** (the request). |
 | `disk_size` | string | Volume size, e.g. `10Gi`. **Empty means no volume** — the workspace is ephemeral. |
 | `startup_script` | string | Shell commands run before the IDE starts. Best-effort. |
 | `dotfiles_repo` | string | Cloned to `~/.dotfiles`; its `install.sh` / `setup.sh` / `bootstrap.sh` runs if present. |
@@ -575,12 +577,16 @@ keys the build ignores; and some keys are honoured by neither.
     A cache hit only skips re-running the devcontainer's build steps; every
     workspace still has to extract the resulting image's layers onto its own pod
     from scratch (`Extracting layer N/M...` in the pod's logs) — that part happens
-    every time, cache hit or not, and it is CPU- and disk-I/O-heavy. Leave `cpu`
-    and `memory` unset and EasyLab now applies a default (1 CPU / 2Gi memory / 5Gi
-    ephemeral storage) instead of leaving the pod with no reservation at all, but
-    a workshop with many concurrent students on a large base image should still
-    size these explicitly for the image and class size — the default is a floor,
-    not a recommendation for every workload.
+    every time, cache hit or not, and it is CPU- and disk-I/O-heavy. Leave `cpu`,
+    `memory`, `cpu_limit` and `memory_limit` all unset and EasyLab now applies a
+    default (500m CPU request / 2 CPU limit, 2Gi memory, 5Gi ephemeral storage)
+    instead of leaving the pod with no reservation at all — the low CPU request
+    keeps the scheduler/cluster-autoscaler from over-provisioning nodes for a
+    burst of many workspaces, while the higher limit still lets extraction burst
+    into whatever a node actually has spare. A workshop with many concurrent
+    students on a large base image should still size `cpu`/`memory` (the request)
+    and `cpu_limit`/`memory_limit` (the limit) explicitly for the image and class
+    size — the default is a floor, not a recommendation for every workload.
 
 ## Reusing a lab's templates
 

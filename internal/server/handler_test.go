@@ -1360,12 +1360,14 @@ func TestParseWorkspaceTemplatesFromForm_NoTemplates(t *testing.T) {
 func TestParseWorkspaceTemplatesFromForm_OneTemplate(t *testing.T) {
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Form = map[string][]string{
-		"template_0_name":      {"my-template"},
-		"template_0_image":     {"codercom/code-server:latest"},
-		"template_0_git_repo":  {"https://github.com/example/repo"},
-		"template_0_cpu":       {"500m"},
-		"template_0_memory":    {"1Gi"},
-		"template_0_disk_size": {"5Gi"},
+		"template_0_name":         {"my-template"},
+		"template_0_image":        {"codercom/code-server:latest"},
+		"template_0_git_repo":     {"https://github.com/example/repo"},
+		"template_0_cpu":          {"500m"},
+		"template_0_memory":       {"1Gi"},
+		"template_0_cpu_limit":    {"2"},
+		"template_0_memory_limit": {"2Gi"},
+		"template_0_disk_size":    {"5Gi"},
 	}
 	templates := parseWorkspaceTemplatesFromForm(req)
 	assert.Len(t, templates, 1)
@@ -1374,6 +1376,32 @@ func TestParseWorkspaceTemplatesFromForm_OneTemplate(t *testing.T) {
 	assert.Equal(t, "https://github.com/example/repo", templates[0].GitRepo)
 	assert.Equal(t, "500m", templates[0].CPU)
 	assert.Equal(t, "1Gi", templates[0].Memory)
+	assert.Equal(t, "2", templates[0].CPULimit)
+	assert.Equal(t, "2Gi", templates[0].MemoryLimit)
+	assert.Equal(t, "5Gi", templates[0].DiskSize)
+}
+
+// TestTemplatesFromUploadRequest_LegacyFlatFields covers the legacy
+// single-template fallback path (templatesFromUploadRequest), which had no
+// test coverage at all before the CPU/memory limit fields were added.
+func TestTemplatesFromUploadRequest_LegacyFlatFields(t *testing.T) {
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"template_name":         {"legacy-template"},
+		"template_cpu":          {"500m"},
+		"template_memory":       {"1Gi"},
+		"template_cpu_limit":    {"2"},
+		"template_memory_limit": {"2Gi"},
+		"template_disk_size":    {"5Gi"},
+	}
+	templates, err := templatesFromUploadRequest(req)
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	assert.Equal(t, "legacy-template", templates[0].Name)
+	assert.Equal(t, "500m", templates[0].CPU)
+	assert.Equal(t, "1Gi", templates[0].Memory)
+	assert.Equal(t, "2", templates[0].CPULimit)
+	assert.Equal(t, "2Gi", templates[0].MemoryLimit)
 	assert.Equal(t, "5Gi", templates[0].DiskSize)
 }
 

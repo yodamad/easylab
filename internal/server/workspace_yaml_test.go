@@ -52,6 +52,8 @@ func TestParseWorkspaceTemplatesYAML(t *testing.T) {
     git_folder: exercises
     cpu: "2"
     memory: 4Gi
+    cpu_limit: "4"
+    memory_limit: 8Gi
     disk_size: 10Gi
     startup_script: |
       apt-get update
@@ -69,6 +71,8 @@ func TestParseWorkspaceTemplatesYAML(t *testing.T) {
 				GitFolder:     "exercises",
 				CPU:           "2",
 				Memory:        "4Gi",
+				CPULimit:      "4",
+				MemoryLimit:   "8Gi",
 				DiskSize:      "10Gi",
 				StartupScript: "apt-get update\n",
 				DotfilesRepo:  "https://github.com/you/dotfiles",
@@ -401,6 +405,8 @@ func TestMarshalWorkspaceTemplatesYAML_RoundTrip(t *testing.T) {
 			GitBranch:     "main",
 			CPU:           "2",
 			Memory:        "4Gi",
+			CPULimit:      "4",
+			MemoryLimit:   "8Gi",
 			StartupScript: "apt-get update\n",
 			Extensions:    []string{"golang.go", "ms-python.python"},
 			Env:           map[string]string{"FOO": "bar"},
@@ -429,14 +435,16 @@ func TestMarshalWorkspaceTemplatesYAML_RoundTripDevcontainer(t *testing.T) {
 	// Devcontainer templates get their own round trip: they cannot carry an image,
 	// so they cannot ride along in the general round-trip fixture.
 	original := []WorkspaceTemplate{{
-		Name:       "go-workshop",
-		GitRepo:    "https://gitlab.com/org/workshop.git",
-		GitBranch:  "main",
-		GitFolder:  "exercises",
-		CPU:        "2",
-		Memory:     "4Gi",
-		DiskSize:   "20Gi",
-		Extensions: []string{"golang.go"},
+		Name:        "go-workshop",
+		GitRepo:     "https://gitlab.com/org/workshop.git",
+		GitBranch:   "main",
+		GitFolder:   "exercises",
+		CPU:         "2",
+		Memory:      "4Gi",
+		CPULimit:    "4",
+		MemoryLimit: "8Gi",
+		DiskSize:    "20Gi",
+		Extensions:  []string{"golang.go"},
 		Devcontainer: &DevcontainerConfig{
 			Enabled:            true,
 			Dir:                ".devcontainer",
@@ -506,12 +514,14 @@ func TestMarshalWorkspaceTemplatesYAML_ScalarRendering(t *testing.T) {
 	rendered, err := marshalWorkspaceTemplatesYAML([]WorkspaceTemplate{{
 		Name:          "t",
 		CPU:           "2",
+		CPULimit:      "4",
 		StartupScript: "apt-get update\napt-get install -y jq\n",
 		Sidecars:      []WorkspaceSidecar{{Name: "db", Image: "postgres:16", Ports: []int{5432}, Privileged: true}},
 	}})
 	require.NoError(t, err)
 
 	assert.Contains(t, rendered, `cpu: "2"`, "strings that look like numbers must stay quoted")
+	assert.Contains(t, rendered, `cpu_limit: "4"`, "cpu_limit is equally numeric-looking and must stay quoted too")
 	assert.Contains(t, rendered, "startup_script: |", "multi-line scripts should be literal blocks")
 	assert.Contains(t, rendered, "- 5432", "ports must stay unquoted ints")
 	assert.Contains(t, rendered, "privileged: true", "booleans must stay unquoted")
@@ -588,7 +598,8 @@ func TestWorkspaceTemplatesYAMLSkeleton_DocumentsEverySupportedKey(t *testing.T)
 	// loading, and advertising it would invite admins to set a retired value.
 	keys := []string{
 		"name", "image", "git_repo", "git_branch", "git_folder", "cpu",
-		"memory", "disk_size", "startup_script", "dotfiles_repo", "extensions",
+		"memory", "cpu_limit", "memory_limit", "disk_size", "startup_script",
+		"dotfiles_repo", "extensions",
 		"env", "sidecars", "mounts", "devcontainer",
 		"git_auth_secret", "image_pull_secrets",
 	}

@@ -96,13 +96,18 @@ type Job struct {
 type WorkspaceTemplate struct {
 	Name string `json:"name"`
 	// Description is a free-text, human-readable summary of what the template provides.
-	Description string            `json:"description,omitempty"`
-	Image       string            `json:"image,omitempty"`
-	GitRepo     string            `json:"git_repo,omitempty"`
-	GitBranch   string            `json:"git_branch,omitempty"`
-	GitFolder   string            `json:"git_folder,omitempty"`
-	CPU         string            `json:"cpu,omitempty"`
-	Memory      string            `json:"memory,omitempty"`
+	Description string `json:"description,omitempty"`
+	Image       string `json:"image,omitempty"`
+	GitRepo     string `json:"git_repo,omitempty"`
+	GitBranch   string `json:"git_branch,omitempty"`
+	GitFolder   string `json:"git_folder,omitempty"`
+	CPU         string `json:"cpu,omitempty"`
+	Memory      string `json:"memory,omitempty"`
+	// CPULimit/MemoryLimit override the pod's resource limit independently of
+	// CPU/Memory (the request); left blank, the limit equals the request, same
+	// as before these fields existed.
+	CPULimit    string            `json:"cpu_limit,omitempty"`
+	MemoryLimit string            `json:"memory_limit,omitempty"`
 	DiskSize    string            `json:"disk_size,omitempty"`
 	Env         map[string]string `json:"env,omitempty"`
 

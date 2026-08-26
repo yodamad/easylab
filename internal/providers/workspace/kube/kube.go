@@ -455,7 +455,7 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Ports:           []corev1.ContainerPort{{ContainerPort: p.port, Name: "http"}},
 		Env:             env,
-		Resources:       buildResources(spec.CPU, spec.Memory, spec.Devcontainer != nil),
+		Resources:       buildResources(spec.CPU, spec.Memory, spec.CPULimit, spec.MemoryLimit, spec.Devcontainer != nil),
 		// Only mark the pod Ready once the IDE is actually listening — a wrapped
 		// startup script runs before the server exec, so the port opens late.
 		ReadinessProbe: &corev1.Probe{
@@ -1161,17 +1161,24 @@ func workspaceHost(name, domain string) string {
 }
 
 // buildResources computes the workspace container's resource requests/limits.
-// isDevcontainer workspaces that leave both cpu and mem blank get a non-BestEffort
-// default instead of no reservation at all: envbuilder's layer-extraction step
-// (materializing the built image onto the pod's own root filesystem) is CPU- and
-// disk-I/O-heavy and runs on every single pod regardless of build-cache state, so
-// a burst of BestEffort devcontainer pods has no fair-share basis to divide a
-// node's CPU/disk between them. A template's explicit cpu/mem still wins outright.
-func buildResources(cpu, mem string, isDevcontainer bool) corev1.ResourceRequirements {
+// isDevcontainer workspaces that leave cpu, mem, cpuLimit and memLimit all blank
+// get a non-BestEffort default instead of no reservation at all: envbuilder's
+// layer-extraction step (materializing the built image onto the pod's own root
+// filesystem) is CPU- and disk-I/O-heavy and runs on every single pod regardless
+// of build-cache state, so a burst of BestEffort devcontainer pods has no
+// fair-share basis to divide a node's CPU/disk between them. A template setting
+// any of the four explicitly always wins outright over the default.
+//
+// cpuLimit/memLimit are optional overrides for the limit side only: left blank,
+// the limit equals the request (cpu/mem), matching this function's behavior
+// before these two parameters existed.
+func buildResources(cpu, mem, cpuLimit, memLimit string, isDevcontainer bool) corev1.ResourceRequirements {
 	cpu = strings.TrimSpace(cpu)
 	mem = strings.TrimSpace(mem)
+	cpuLimit = strings.TrimSpace(cpuLimit)
+	memLimit = strings.TrimSpace(memLimit)
 
-	if isDevcontainer && cpu == "" && mem == "" {
+	if isDevcontainer && cpu == "" && mem == "" && cpuLimit == "" && memLimit == "" {
 		// Request and limit deliberately differ for CPU — see the constants'
 		// doc comment for why — but not for memory/ephemeral-storage.
 		reqs := corev1.ResourceList{
@@ -1194,10 +1201,24 @@ func buildResources(cpu, mem string, isDevcontainer bool) corev1.ResourceRequire
 	if q, err := resource.ParseQuantity(mem); err == nil && mem != "" {
 		reqs[corev1.ResourceMemory] = q
 	}
-	if len(reqs) == 0 {
+	if len(reqs) == 0 && cpuLimit == "" && memLimit == "" {
 		return corev1.ResourceRequirements{}
 	}
-	return corev1.ResourceRequirements{Requests: reqs, Limits: reqs}
+
+	// Limits start as a copy of Requests (blank limit == request, unchanged
+	// behavior), then an explicit cpuLimit/memLimit overrides its entry. A
+	// fresh map, not an alias of reqs: the two can now diverge.
+	limits := corev1.ResourceList{}
+	for k, v := range reqs {
+		limits[k] = v
+	}
+	if q, err := resource.ParseQuantity(cpuLimit); err == nil && cpuLimit != "" {
+		limits[corev1.ResourceCPU] = q
+	}
+	if q, err := resource.ParseQuantity(memLimit); err == nil && memLimit != "" {
+		limits[corev1.ResourceMemory] = q
+	}
+	return corev1.ResourceRequirements{Requests: reqs, Limits: limits}
 }
 
 // shellQuote single-quotes a value for safe embedding in a sh -c script.

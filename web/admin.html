@@ -772,6 +772,27 @@
                                     </div>
                                 </div>
 
+                                <div class="template-resources">
+                                    <div class="form-group">
+                                        <label for="devcontainer_cpu">CPU (Optional)</label>
+                                        <input type="text" id="devcontainer_cpu" placeholder="500m">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="devcontainer_cpu_limit">CPU Limit (Optional)</label>
+                                        <input type="text" id="devcontainer_cpu_limit" placeholder="defaults to CPU">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="devcontainer_memory">Memory (Optional)</label>
+                                        <input type="text" id="devcontainer_memory" placeholder="1Gi">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="devcontainer_memory_limit">Memory Limit (Optional)</label>
+                                        <input type="text" id="devcontainer_memory_limit" placeholder="defaults to Memory">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <small>Overrides whatever the devcontainer.json's <code>hostRequirements</code> would otherwise set. Left entirely blank, EasyLab defaults to 500m CPU (limit 2) / 2Gi memory / 5Gi ephemeral storage — layer extraction is CPU/disk-heavy under concurrent load, so a workshop with many concurrent students should size these explicitly.</small>
+                                </div>
                                 <div class="form-group">
                                     <small>code-server is injected into the image the devcontainer builds, so it is independent of the devcontainer's own base image. The devcontainer must be built on a glibc base — the injected IDE cannot run on Alpine/musl.</small>
                                 </div>
@@ -877,8 +898,16 @@
                                                         <input type="text" name="template_0_cpu" data-field="cpu" placeholder="500m">
                                                     </div>
                                                     <div class="form-group">
+                                                        <label>CPU Limit (Optional)</label>
+                                                        <input type="text" name="template_0_cpu_limit" data-field="cpu_limit" placeholder="defaults to CPU">
+                                                    </div>
+                                                    <div class="form-group">
                                                         <label>Memory (Optional)</label>
                                                         <input type="text" name="template_0_memory" data-field="memory" placeholder="1Gi">
+                                                    </div>
+                                                    <div class="form-group">
+                                                        <label>Memory Limit (Optional)</label>
+                                                        <input type="text" name="template_0_memory_limit" data-field="memory_limit" placeholder="defaults to Memory">
                                                     </div>
                                                     <div class="form-group">
                                                         <label>Disk Size (Optional)</label>
@@ -886,7 +915,7 @@
                                                     </div>
                                                 </div>
                                                 <div class="form-group">
-                                                    <small>For a devcontainer-enabled template, layer extraction is CPU/disk-heavy under concurrent load: EasyLab defaults to 1 CPU / 2Gi memory / 5Gi ephemeral storage here when left blank, but set these explicitly to size for your base image and expected class size.</small>
+                                                    <small>CPU/Memory are the request; CPU Limit/Memory Limit override the limit independently — left blank, the limit matches the request. For a devcontainer-enabled template, layer extraction is CPU/disk-heavy under concurrent load: when all four are left blank, EasyLab defaults to 500m CPU (limit 2) / 2Gi memory / 5Gi ephemeral storage, but set them explicitly to size for your base image and expected class size.</small>
                                                 </div>
                                                 <div class="form-group">
                                                     <label>Startup Script (Optional)</label>
@@ -996,8 +1025,16 @@
                                                     <input type="text" name="template_0_cpu" data-field="cpu" placeholder="500m">
                                                 </div>
                                                 <div class="form-group">
+                                                    <label>CPU Limit (Optional)</label>
+                                                    <input type="text" name="template_0_cpu_limit" data-field="cpu_limit" placeholder="defaults to CPU">
+                                                </div>
+                                                <div class="form-group">
                                                     <label>Memory (Optional)</label>
                                                     <input type="text" name="template_0_memory" data-field="memory" placeholder="1Gi">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Memory Limit (Optional)</label>
+                                                    <input type="text" name="template_0_memory_limit" data-field="memory_limit" placeholder="defaults to Memory">
                                                 </div>
                                                 <div class="form-group">
                                                     <label>Disk Size (Optional)</label>
@@ -1005,7 +1042,7 @@
                                                 </div>
                                             </div>
                                             <div class="form-group">
-                                                <small>For a devcontainer-enabled template, layer extraction is CPU/disk-heavy under concurrent load: EasyLab defaults to 1 CPU / 2Gi memory / 5Gi ephemeral storage here when left blank, but set these explicitly to size for your base image and expected class size.</small>
+                                                <small>CPU/Memory are the request; CPU Limit/Memory Limit override the limit independently — left blank, the limit matches the request. For a devcontainer-enabled template, layer extraction is CPU/disk-heavy under concurrent load: when all four are left blank, EasyLab defaults to 500m CPU (limit 2) / 2Gi memory / 5Gi ephemeral storage, but set them explicitly to size for your base image and expected class size.</small>
                                             </div>
                                             <div class="form-group">
                                                 <label>Startup Script (Optional)</label>

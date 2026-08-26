@@ -175,19 +175,33 @@ func devcontainerTemplate(res devcontainer.Result, r *http.Request) WorkspaceTem
 		dir = defaultDevcontainerDir
 	}
 
+	// The admin's own sizing wins over the devcontainer.json's hostRequirements,
+	// same fallback shape as name above — hostRequirements has no request/limit
+	// distinction at all, so CPULimit/MemoryLimit can only ever be admin-supplied.
+	cpu := strings.TrimSpace(getFormValue(r, "cpu"))
+	if cpu == "" {
+		cpu = res.CPU
+	}
+	memory := strings.TrimSpace(getFormValue(r, "memory"))
+	if memory == "" {
+		memory = res.Memory
+	}
+
 	return WorkspaceTemplate{
 		Name:        name,
 		Description: strings.TrimSpace(getFormValue(r, "template_description")),
 		// The IDE is injected onto a volume the build leaves alone, so it is the
 		// admin's choice rather than anything the devcontainer.json dictates.
-		IDE:        strings.TrimSpace(getFormValue(r, "ide")),
-		GitRepo:    strings.TrimSpace(getFormValue(r, "git_repo")),
-		GitBranch:  strings.TrimSpace(getFormValue(r, "git_branch")),
-		GitFolder:  res.GitFolder,
-		CPU:        res.CPU,
-		Memory:     res.Memory,
-		DiskSize:   res.DiskSize,
-		Extensions: res.Extensions,
+		IDE:         strings.TrimSpace(getFormValue(r, "ide")),
+		GitRepo:     strings.TrimSpace(getFormValue(r, "git_repo")),
+		GitBranch:   strings.TrimSpace(getFormValue(r, "git_branch")),
+		GitFolder:   res.GitFolder,
+		CPU:         cpu,
+		Memory:      memory,
+		CPULimit:    strings.TrimSpace(getFormValue(r, "cpu_limit")),
+		MemoryLimit: strings.TrimSpace(getFormValue(r, "memory_limit")),
+		DiskSize:    res.DiskSize,
+		Extensions:  res.Extensions,
 		// The credential the students' workspaces clone a private repo with —
 		// distinct from the request-scoped token that read the devcontainer here (see
 		// gitCloneAuth). Baked into the generated template so a private-repo workshop

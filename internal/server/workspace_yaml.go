@@ -30,8 +30,10 @@ workspace_templates:
     # git_auth_secret: gitcred                   # basic-auth Secret for a private git_repo (http(s) only)
     # image_pull_secrets:                        # dockerconfigjson Secrets the kubelet pulls images with
     #   - regcred
-    # cpu: 500m
-    # memory: 1Gi
+    # cpu: 500m                                  # request; also the limit when cpu_limit is unset
+    # memory: 1Gi                                # request; also the limit when memory_limit is unset
+    # cpu_limit: "1"                             # optional — overrides the limit independently of cpu
+    # memory_limit: 2Gi                          # optional — overrides the limit independently of memory
     # disk_size: 5Gi
     # startup_script: |                          # runs (best-effort) before the IDE starts
     #   apt-get update && apt-get install -y jq
