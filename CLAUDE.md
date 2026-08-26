@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-EasyLab is a Go web application that provisions cloud-based lab environments using Pulumi IaC on OVHcloud. It deploys Kubernetes clusters with Coder workspaces for workshop participants.
+EasyLab is a Go web application that provisions cloud-based lab environments using Pulumi IaC on OVHcloud. It deploys Kubernetes clusters with self-managed code-server workspaces for workshop participants.
 
 Two main entry points:
 1. A Pulumi program (`main.go`) for infrastructure provisioning
@@ -14,7 +14,7 @@ Two main entry points:
 - HTMX for dynamic UI interactions (no frontend framework)
 - Pulumi SDK v3 for infrastructure as code (Go-based programs)
 - OVHcloud provider for cloud resources (network, k8s, node pools)
-- Coder SDK for workspace and template management
+- client-go (Kubernetes API) for self-managed student IDE workspaces (`internal/providers/workspace`)
 - `net/http` with `http.ServeMux` for routing (no external router)
 - Playwright for E2E frontend testing
 - Makefile for build, test, and CI tasks
@@ -25,7 +25,7 @@ Two main entry points:
 ### Folder Structure
 
 ```
-main.go                  # Pulumi IaC entry point (OVH infra + k8s + Coder setup)
+main.go                  # Pulumi IaC entry point (OVH infra + k8s setup)
 cmd/
   server/
     main.go              # Web server entry point (HTTP server with graceful shutdown)
@@ -38,7 +38,6 @@ internal/
     pulumi.go            # Pulumi executor (preview, execute, destroy, retry)
     cleanup.go           # Background workspace cleanup goroutine (every 5 min)
     feedback.go          # Student feedback form + FeedbackStore (JSON persistence)
-    github.go            # GitHub API — fetch latest stable Coder releases
     azure_api.go         # Azure-specific admin API handlers
     azure_options.go     # Azure AD runtime config + AzureADConfig struct
     ovh_api.go           # OVH-specific admin API handlers
@@ -53,13 +52,17 @@ internal/
       registry.go        # DNS provider registry
       ovh/               # OVH DNS implementation
       azure/             # Azure DNS implementation
+    workspace/
+      provider.go        # Workspace backend interface (Workspace, Backend)
+      registry.go        # Workspace backend registry
+      kube/             # Self-managed Kubernetes backend (Deployment + Service + Ingress + PVC per student, code-server)
   tfparse/
     variables.go         # Terraform .tf file parser — extracts variable definitions from ZIP uploads
   pulumi/
     program.go           # Pulumi program builder
 coder/
-  coder.go               # Coder API client (users, workspaces, templates)
   https.go               # HTTPS/TLS setup: ingress-nginx, cert-manager, DNS-01/HTTP-01 ACME
+  externaldns.go         # external-dns setup
 k8s/
   k8s.go                 # Kubernetes provider, namespace, external IP
   helm.go                # Helm release management
@@ -119,8 +122,9 @@ CRITICAL: Do NOT modify, refactor, rename, or restructure existing files unless 
 - HTMX drives all dynamic UI — prefer `hx-get`, `hx-post`, `hx-target`, `hx-swap` over writing custom JavaScript. JS files in `web/static/` are only for page-specific logic that HTMX cannot handle (e.g. encryption, cookie management).
 - Pulumi programs are pure Go — infrastructure changes go in `ovh/`, `k8s/`, or `coder/`. The `templates/` directory is a self-contained Pulumi project copied into job workspaces.
 - **Provider registry**: Cloud providers (`internal/providers/`) implement a `Provider` interface registered via `registry.go`. DNS providers (`internal/providers/dns/`) implement a separate `dns.Provider` interface for cert-manager DNS-01 challenges and A-record creation. Add new providers to the registry — never hardcode provider selection in handlers.
+- **Workspace backend registry**: `internal/providers/workspace/` defines the `Backend` interface for provisioning student IDE workspaces on a Kubernetes cluster, registered via `registry.go`. The `kube` backend (`internal/providers/workspace/kube/`) is the default and only backend today — it provisions one code-server workspace per student directly via client-go (Deployment + Service + Ingress + optional PVC), replacing the former Coder-based workspace layer.
 - **Feedback system**: `internal/server/feedback.go` manages student ratings/comments (1–5 rating, difficulty, recommendation, free text) via `FeedbackStore` persisted to JSON. Admin view at `/admin/feedback?lab_id=`.
-- **Workspace cleanup**: `internal/server/cleanup.go` runs a background goroutine every 5 minutes that probes Coder reachability, enforces `WorkspaceLifetimeHours` per job, and records cleanup events for the stats dashboard.
+- **Workspace cleanup**: `internal/server/cleanup.go` runs a background goroutine every 5 minutes that probes the lab's cluster API reachability, enforces `WorkspaceLifetimeHours` per job, and records cleanup events for the stats dashboard.
 - **Stats dashboard**: `ServeAdminStats` / `GetProjectStats` in `handler.go` aggregate deployment KPIs and monthly time-series data from job history (workspace snapshots + cleanup events).
 - **BYO Kubernetes**: `LabConfig.UseExistingCluster` + `ExternalKubeconfig` fields allow skipping OVH provisioning when a cluster already exists.
 - **HTTPS/TLS**: `coder/https.go` handles ingress-nginx and cert-manager installation, DNS-01/HTTP-01 ACME challenge setup, wildcard domains, and LoadBalancer IP resolution for OVHcloud.
@@ -229,24 +233,32 @@ When new visual styles are needed:
 
 ## Documentation
 
-When creating or modifying a user-facing or operator-facing feature, update the relevant docs in `docs/`:
+Documentation is part of the deliverable, not a follow-up task. Any change to a user-facing or operator-facing feature is incomplete until the matching doc (and any screenshot it shows) reflects the new behavior — do this in the same response/commit as the code change, not as a separate pass.
 
 | Area | Doc file |
 |------|----------|
 | Admin UI, lab creation, credentials, lab/workspace management | `docs/admin.md` |
-| Student feedback collection and admin feedback view | `docs/admin.md` |
-| Azure AD authentication setup and admin group configuration | `docs/admin.md` |
+| Student feedback collection and admin feedback view | `docs/feedbacks.md` |
+| Stats / KPI dashboard | `docs/stats.md` |
+| Azure AD authentication setup and admin group configuration | `docs/azure-ad.md` |
+| Azure cloud provider setup | `docs/azure.md` |
 | Student portal, login, workspace access | `docs/student.md` |
 | OVHcloud setup, regions, flavors, infra | `docs/ovhcloud.md` |
 | DNS provider configuration and TLS/HTTPS setup | `docs/ovhcloud.md` |
+| Workspace templates | `docs/templates.md` |
 | Docker / docker-compose usage | `docs/docker.md` |
 | Helm / Kubernetes deployment | `docs/helm.md` |
 | Product overview, getting started | `docs/index.md` |
 
+This table lists current mappings but is not exhaustive — if a doc file exists in `docs/` for the area you're touching and isn't listed, update it too rather than skipping documentation because the table doesn't name it.
+
 - **New feature**: Add a short section or bullet describing the feature and how to use it.
-- **Changed behavior**: Update existing text, steps, or checklists to match current behavior.
-- **UI changes**: Update described steps and consider adding/replacing screenshots in `docs/screens/`.
-- Docs use MkDocs (Markdown). Reference screenshots as `![Alt](screens/filename.png)`.
+- **Changed behavior**: Update existing text, steps, or checklists to match current behavior — stale steps (e.g. a form field that no longer exists, a renamed button) are a doc bug, not a minor detail.
+- **UI changes**: Required, not optional — if a change alters what a documented screen looks like (new/removed/renamed fields, buttons, copy, layout), replace the screenshot in `docs/screens/` so it matches. Do not leave a doc showing a stale UI.
+  - Reuse the existing filename when updating a screenshot for a screen that's already documented — this keeps the markdown reference unchanged.
+  - For a brand-new screen or flow, add a new, descriptively-named file to `docs/screens/` and reference it.
+  - If you can run the app (`make dev`) and drive it with browser automation, capture the actual updated screen rather than leaving the old image in place or skipping the update.
+- Docs use MkDocs (Markdown). Reference screenshots as `![Alt](screens/filename.png)`, optionally with an attr_list size hint matching the surrounding doc's convention, e.g. `![Alt](screens/filename.png){width=700}`.
 
 When adding a new cloud provider or DNS provider, document its required credential fields and any setup steps in the relevant provider doc.
 
