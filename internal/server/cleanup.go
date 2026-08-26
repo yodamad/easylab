@@ -75,7 +75,7 @@ func (h *Handler) cleanupExpiredWorkspaces() {
 			continue
 		}
 
-		backend, err := h.newWorkspaceBackend(extractStringFromConfigValue(job.Kubeconfig), job.workspaceNamespace())
+		backend, err := h.workspaceBackendFor(job.ID, extractStringFromConfigValue(job.Kubeconfig), job.workspaceNamespace())
 		if err != nil {
 			log.Printf("[cleanup] skipping job %s: failed to build backend: %v", job.ID, err)
 			continue

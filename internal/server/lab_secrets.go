@@ -57,7 +57,7 @@ func (h *Handler) labSecretManager(w http.ResponseWriter, r *http.Request) (sm w
 		return nil, "", false
 	}
 
-	backend, err := h.newWorkspaceBackend(kubeconfig, namespace)
+	backend, err := h.workspaceBackendFor(labID, kubeconfig, namespace)
 	if err != nil {
 		log.Printf("Lab secrets: failed to build backend for lab %s: %v", labID, err)
 		http.Error(w, "Failed to reach lab cluster", http.StatusInternalServerError)

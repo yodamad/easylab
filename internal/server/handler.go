@@ -40,6 +40,17 @@ type Handler struct {
 	// newWorkspaceBackend builds the workspace backend for a lab from its kubeconfig
 	// and namespace. Overridable in tests to inject a fake backend.
 	newWorkspaceBackend func(kubeconfig, namespace string) (workspace.Backend, error)
+	// workspaceBackends caches one built backend per lab (keyed by lab ID) so
+	// concurrent requests against the same lab reuse a single Kubernetes client
+	// instead of each building its own from scratch. A kubeconfig or namespace
+	// change (lab recreation) is detected as a cache miss and rebuilds it.
+	workspaceBackends   map[string]*cachedWorkspaceBackend
+	workspaceBackendsMu sync.RWMutex
+	// workspaceCreateSem bounds how many workspace-creation requests (see
+	// RequestWorkspace) run at once, so a burst of students starting workspaces
+	// together is smoothed into a steady rate instead of hitting the cluster's
+	// API server all at once. Sized by workspaceCreateConcurrency.
+	workspaceCreateSem  chan struct{}
 	templates           map[string]*template.Template
 	templatesMu         sync.RWMutex
 	credentialsManager  *CredentialsManager
@@ -110,12 +121,35 @@ func atoiForm(s string) int {
 	return n
 }
 
+// cachedWorkspaceBackend pairs a built workspace.Backend with the kubeconfig and
+// namespace it was built from, so a change (lab recreation) is detected as a
+// cache miss instead of silently reusing a stale client.
+type cachedWorkspaceBackend struct {
+	kubeconfig string
+	namespace  string
+	backend    workspace.Backend
+}
+
+// workspaceCreateConcurrency returns the maximum number of workspace-creation
+// requests allowed to run at once, configurable via WORKSPACE_CREATE_CONCURRENCY
+// env var. Defaults to 20.
+func workspaceCreateConcurrency() int {
+	if v := os.Getenv("WORKSPACE_CREATE_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 20
+}
+
 // NewHandler creates a new HTTP handler
 func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsManager *CredentialsManager, ovhOptionsManager *OVHOptionsManager, azureOptionsManager *AzureOptionsManager, feedbackStore *FeedbackStore) *Handler {
 	h := &Handler{
 		jobManager:          jobManager,
 		pulumiExec:          pulumiExec,
 		newWorkspaceBackend: workspace.Default,
+		workspaceBackends:   make(map[string]*cachedWorkspaceBackend),
+		workspaceCreateSem:  make(chan struct{}, workspaceCreateConcurrency()),
 		templates:           make(map[string]*template.Template),
 		credentialsManager:  credentialsManager,
 		ovhOptionsManager:   ovhOptionsManager,
@@ -130,6 +164,39 @@ func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsM
 		pulumiExec.afterProvision = h.applyPendingSecrets
 	}
 	return h
+}
+
+// workspaceBackendFor returns a cached workspace.Backend for labID, building and
+// caching one via newWorkspaceBackend on a cache miss (including a kubeconfig or
+// namespace change). Reusing the backend avoids rebuilding a Kubernetes client —
+// and its TLS handshake — on every request that touches a lab's workspaces.
+func (h *Handler) workspaceBackendFor(labID, kubeconfig, namespace string) (workspace.Backend, error) {
+	h.workspaceBackendsMu.RLock()
+	cached, ok := h.workspaceBackends[labID]
+	h.workspaceBackendsMu.RUnlock()
+	if ok && cached.kubeconfig == kubeconfig && cached.namespace == namespace {
+		return cached.backend, nil
+	}
+
+	backend, err := h.newWorkspaceBackend(kubeconfig, namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	h.workspaceBackendsMu.Lock()
+	h.workspaceBackends[labID] = &cachedWorkspaceBackend{kubeconfig: kubeconfig, namespace: namespace, backend: backend}
+	h.workspaceBackendsMu.Unlock()
+
+	return backend, nil
+}
+
+// evictWorkspaceBackend drops any cached backend for labID. Called when a lab is
+// permanently removed (DeleteLab) so the cache does not grow unbounded over the
+// server's lifetime.
+func (h *Handler) evictWorkspaceBackend(labID string) {
+	h.workspaceBackendsMu.Lock()
+	delete(h.workspaceBackends, labID)
+	h.workspaceBackendsMu.Unlock()
 }
 
 // deriveEncryptionKey derives a 32-byte AES-256 key from email and student password
@@ -1321,7 +1388,7 @@ func (h *Handler) GetCoderCredentials(w http.ResponseWriter, r *http.Request) {
 	// runtime. An empty base URL means workspaces are in-cluster only.
 	baseURL := ""
 	if kubeconfig != "" {
-		backend, err := h.newWorkspaceBackend(kubeconfig, namespace)
+		backend, err := h.workspaceBackendFor(jobID, kubeconfig, namespace)
 		if err != nil {
 			log.Printf("Failed to build workspace backend for lab %s: %v", jobID, err)
 		} else if d, scheme := backend.Routing(r.Context(), domain); d != "" {
@@ -1730,7 +1797,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	backend, err := h.newWorkspaceBackend(kubeconfig, namespace)
+	backend, err := h.workspaceBackendFor(labID, kubeconfig, namespace)
 	if err != nil {
 		log.Printf("Failed to build workspace backend for lab %s: %v", labID, err)
 		w.Header().Set("Content-Type", "text/html")
@@ -1781,7 +1848,13 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		spec.WildcardTLSSecret = coder.WildcardTLSSecretName
 	}
 
+	// Bound concurrent workspace-creation calls: EnsureWorkspace makes several
+	// sequential Kubernetes API calls, so an unbounded burst of students starting
+	// workspaces at once could otherwise hit the cluster's API server all
+	// simultaneously. This smooths it into a steady rate instead.
+	h.workspaceCreateSem <- struct{}{}
 	ws, err := backend.EnsureWorkspace(r.Context(), spec)
+	<-h.workspaceCreateSem
 	if err != nil {
 		// The cause is for the admin, not the student: it can name the lab's
 		// credential Secrets, its namespace and its cluster, and there is nothing in
@@ -1925,7 +1998,7 @@ func (h *Handler) WorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	backend, err := h.newWorkspaceBackend(kubeconfig, namespace)
+	backend, err := h.workspaceBackendFor(labID, kubeconfig, namespace)
 	if err != nil {
 		log.Printf("WorkspaceStatus: failed to build backend for lab %s: %v", labID, err)
 		w.Header().Set("Content-Type", "text/html")
@@ -2097,7 +2170,7 @@ func (h *Handler) OpenWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	backend, err := h.newWorkspaceBackend(kubeconfig, namespace)
+	backend, err := h.workspaceBackendFor(labID, kubeconfig, namespace)
 	if err != nil {
 		log.Printf("OpenWorkspace: failed to build backend for lab %s: %v", labID, err)
 		http.Error(w, "lab is not ready", http.StatusServiceUnavailable)
@@ -3070,7 +3143,7 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	backend, err := h.newWorkspaceBackend(kubeconfig, namespace)
+	backend, err := h.workspaceBackendFor(labID, kubeconfig, namespace)
 	if err != nil {
 		log.Printf("ServeLabWorkspaces: failed to build backend for lab %s: %v", labID, err)
 		http.Error(w, "Failed to reach lab cluster", http.StatusInternalServerError)
@@ -3185,7 +3258,7 @@ func (h *Handler) ListLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	backend, err := h.newWorkspaceBackend(kubeconfig, namespace)
+	backend, err := h.workspaceBackendFor(labID, kubeconfig, namespace)
 	if err != nil {
 		log.Printf("ListLabWorkspaces: failed to build backend for lab %s: %v", labID, err)
 		http.Error(w, "Failed to reach lab cluster", http.StatusInternalServerError)
@@ -3255,7 +3328,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		namespace := job.workspaceNamespace()
 		job.mu.RUnlock()
 
-		backend, err := h.newWorkspaceBackend(kubeconfig, namespace)
+		backend, err := h.workspaceBackendFor(labID, kubeconfig, namespace)
 		if err != nil {
 			log.Printf("DeleteWorkspace: failed to build backend for lab %s: %v", labID, err)
 			writeJSONError(w, http.StatusInternalServerError, "Failed to reach lab cluster")
@@ -3339,7 +3412,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	namespace := job.workspaceNamespace()
 	job.mu.RUnlock()
 
-	backend, err := h.newWorkspaceBackend(kubeconfig, namespace)
+	backend, err := h.workspaceBackendFor(labID, kubeconfig, namespace)
 	if err != nil {
 		log.Printf("DeleteWorkspace: failed to build backend for lab %s: %v", labID, err)
 		writeJSONError(w, http.StatusInternalServerError, "Failed to reach lab cluster")
@@ -3822,6 +3895,7 @@ func (h *Handler) DeleteLab(w http.ResponseWriter, r *http.Request) {
 	}
 	// Drop any credentials still waiting for a cluster that will now never exist.
 	h.pendingSecrets.Discard(labID)
+	h.evictWorkspaceBackend(labID)
 
 	http.Redirect(w, r, "/labs", http.StatusSeeOther)
 }

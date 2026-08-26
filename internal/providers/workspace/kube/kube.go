@@ -36,6 +36,18 @@ func init() {
 }
 
 const (
+	// clientQPS/clientBurst bound how fast this Backend's Kubernetes client sends
+	// requests to the cluster's API server. client-go's own default (QPS 5, burst
+	// 10) is sized for a short-lived, single-purpose client; the server now builds
+	// and caches one Backend per lab (see Handler.workspaceBackendFor) and reuses
+	// it for every student's requests, so it needs enough headroom to serve a
+	// whole workshop's traffic without self-throttling into failures during a
+	// burst of near-simultaneous workspace requests.
+	clientQPS   = 50
+	clientBurst = 100
+)
+
+const (
 	// DefaultNamespace is where student workspaces are created when the lab does
 	// not specify one.
 	DefaultNamespace = "workshops"
@@ -156,6 +168,8 @@ func New(kubeconfig, namespace string) (workspace.Backend, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse kubeconfig: %w", err)
 	}
+	cfg.QPS = clientQPS
+	cfg.Burst = clientBurst
 	cs, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build kubernetes client: %w", err)

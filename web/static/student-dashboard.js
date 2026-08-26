@@ -257,30 +257,55 @@ function renderLabTile(lab, checked) {
 
 let _workspacePollTimer = null;
 
+// Polling backs off from 2s up to 10s the longer a workspace takes to come up,
+// instead of a fixed 2s interval forever. A fixed interval means every student in
+// a workshop polls in lockstep for as long as their workspace takes to start,
+// which adds up fast during a burst of many students provisioning at once.
+const WORKSPACE_POLL_MIN_DELAY_MS = 2000;
+const WORKSPACE_POLL_MAX_DELAY_MS = 10000;
+const WORKSPACE_POLL_BACKOFF_STEP_MS = 1000;
+
 function startWorkspaceStatusPolling() {
-    if (_workspacePollTimer) clearInterval(_workspacePollTimer);
-    _workspacePollTimer = setInterval(function() {
+    if (_workspacePollTimer) clearTimeout(_workspacePollTimer);
+    let delay = WORKSPACE_POLL_MIN_DELAY_MS;
+
+    function scheduleNext() {
+        delay = Math.min(delay + WORKSPACE_POLL_BACKOFF_STEP_MS, WORKSPACE_POLL_MAX_DELAY_MS);
+        _workspacePollTimer = setTimeout(poll, delay);
+    }
+
+    function poll() {
         const pollEl = document.querySelector('[data-poll-url]');
         if (!pollEl) {
-            clearInterval(_workspacePollTimer);
+            _workspacePollTimer = null;
             return;
         }
         const pollUrl = pollEl.getAttribute('data-poll-url');
         fetch(pollUrl, { credentials: 'same-origin' })
             .then(function(r) { if (r.ok) return r.text(); })
             .then(function(html) {
-                if (!html) return;
+                if (!html) {
+                    scheduleNext();
+                    return;
+                }
                 const tmp = document.createElement('div');
                 tmp.innerHTML = html;
                 const newEl = tmp.firstElementChild;
-                if (!newEl || !newEl.classList.contains('workspace-ready-status')) return;
+                if (!newEl || !newEl.classList.contains('workspace-ready-status')) {
+                    scheduleNext();
+                    return;
+                }
                 pollEl.replaceWith(newEl);
                 if (newEl.classList.contains('workspace-ready-status--ready')) {
-                    clearInterval(_workspacePollTimer);
+                    _workspacePollTimer = null;
+                    return;
                 }
+                scheduleNext();
             })
-            .catch(function() {});
-    }, 2000);
+            .catch(function() { scheduleNext(); });
+    }
+
+    _workspacePollTimer = setTimeout(poll, delay);
 }
 
 const workspaceForm = document.getElementById('workspace-request-form');

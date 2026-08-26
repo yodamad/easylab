@@ -82,6 +82,11 @@ type Job struct {
 	DeletionRetries    map[string]*WorkspaceDeletionRetry `json:"deletion_retries,omitempty"`
 	WorkspaceEvents    []WorkspaceEvent                   `json:"workspace_events,omitempty"`
 	mu                 sync.RWMutex                       `json:"-"`
+	// saveMu serializes SaveJob's disk writes for this job. Without it, many
+	// students creating workspaces in the same lab at once can call SaveJob
+	// concurrently, all racing on the same tmp/final file path — whichever write
+	// lands last silently discards the others' persisted WorkspaceEvents.
+	saveMu sync.Mutex `json:"-"`
 }
 
 // WorkspaceTemplate defines a selectable workspace flavor for a lab: the IDE
@@ -640,6 +645,12 @@ func (jm *JobManager) SaveJob(id string) error {
 	if !exists {
 		return fmt.Errorf("job %s not found", id)
 	}
+
+	// Serialize the whole read-marshal-write-rename sequence below per job: it is
+	// called synchronously on every workspace creation, so concurrent callers for
+	// the same job must not race on the same tmp/final file path.
+	job.saveMu.Lock()
+	defer job.saveMu.Unlock()
 
 	job.mu.RLock()
 	status := job.Status

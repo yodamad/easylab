@@ -3,10 +3,12 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -369,6 +371,66 @@ func TestJobManager_SaveJob_NotFound(t *testing.T) {
 	err := jm.SaveJob("nonexistent")
 	if err == nil {
 		t.Error("SaveJob() expected error for nonexistent job")
+	}
+}
+
+// TestJobManager_SaveJob_ConcurrentWritesPreserveAllEvents guards against a
+// regression of the SaveJob lost-update race: many students creating
+// workspaces in the same lab at once each call RecordWorkspaceEvent then
+// SaveJob concurrently, and every one of those events must survive on disk —
+// not just in memory — even though they all write the same job file.
+func TestJobManager_SaveJob_ConcurrentWritesPreserveAllEvents(t *testing.T) {
+	tempDir := t.TempDir()
+	jm := NewJobManager(tempDir)
+
+	config := &LabConfig{StackName: "test"}
+	jobID := jm.CreateJob(config)
+	jm.UpdateJobStatus(jobID, JobStatusCompleted)
+
+	const concurrency = 50
+	var wg sync.WaitGroup
+	wg.Add(concurrency)
+	for i := 0; i < concurrency; i++ {
+		go func(n int) {
+			defer wg.Done()
+			wsID := fmt.Sprintf("ws-%d", n)
+			if err := jm.RecordWorkspaceEvent(jobID, WorkspaceEventCreated, wsID, wsID, "student", "default"); err != nil {
+				t.Errorf("RecordWorkspaceEvent() error = %v", err)
+				return
+			}
+			if err := jm.SaveJob(jobID); err != nil {
+				t.Errorf("SaveJob() error = %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	job, exists := jm.GetJob(jobID)
+	if !exists {
+		t.Fatalf("job %s not found after concurrent writes", jobID)
+	}
+	job.mu.RLock()
+	inMemory := len(job.WorkspaceEvents)
+	job.mu.RUnlock()
+	if inMemory != concurrency {
+		t.Fatalf("in-memory WorkspaceEvents = %d, want %d", inMemory, concurrency)
+	}
+
+	// The persisted file must match: this is what a lost-update race corrupts —
+	// in-memory state stays correct while the file silently falls behind.
+	jobFile := filepath.Join(tempDir, "jobs", jobID+".json")
+	data, err := os.ReadFile(jobFile)
+	if err != nil {
+		t.Fatalf("failed to read persisted job file: %v", err)
+	}
+	var persisted struct {
+		WorkspaceEvents []WorkspaceEvent `json:"workspace_events"`
+	}
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatalf("failed to unmarshal persisted job file: %v", err)
+	}
+	if len(persisted.WorkspaceEvents) != concurrency {
+		t.Errorf("persisted WorkspaceEvents = %d, want %d (lost update under concurrent SaveJob)", len(persisted.WorkspaceEvents), concurrency)
 	}
 }
 

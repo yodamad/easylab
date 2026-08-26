@@ -112,7 +112,7 @@ func (h *Handler) applyPendingSecrets(jobID string) {
 		return
 	}
 
-	backend, err := h.newWorkspaceBackend(kubeconfig, namespace)
+	backend, err := h.workspaceBackendFor(jobID, kubeconfig, namespace)
 	if err != nil {
 		log.Printf("Cannot apply credentials for lab %s: %v", jobID, err)
 		return
