@@ -40,6 +40,7 @@ func (p *AzureDNSProvider) SetupCertManagerDNS01(
 	_ *k8s.Provider,
 	zone string,
 	credSecretName string,
+	_ string,
 	_ []pulumi.Resource,
 ) (dns.SolverSpec, *helmv3.Release, error) {
 	clientID := utils.DNSConfigOptional(ctx, utils.DNSAzureClientId)

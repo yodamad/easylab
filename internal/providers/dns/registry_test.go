@@ -16,9 +16,9 @@ type mockDNSProvider struct {
 	name string
 }
 
-func (m *mockDNSProvider) Name() string                   { return m.name }
+func (m *mockDNSProvider) Name() string                               { return m.name }
 func (m *mockDNSProvider) GetCredentialFields() []dns.CredentialField { return nil }
-func (m *mockDNSProvider) SetupCertManagerDNS01(_ *pulumi.Context, _ *k8s.Provider, _, _ string, _ []pulumi.Resource) (dns.SolverSpec, *helmv3.Release, error) {
+func (m *mockDNSProvider) SetupCertManagerDNS01(_ *pulumi.Context, _ *k8s.Provider, _, _, _ string, _ []pulumi.Resource) (dns.SolverSpec, *helmv3.Release, error) {
 	return nil, nil, nil
 }
 func (m *mockDNSProvider) CreateARecord(_ *pulumi.Context, _, _ string, _ pulumi.StringOutput, _ []pulumi.Resource) error {

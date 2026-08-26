@@ -28,11 +28,15 @@ type Provider interface {
 	// SetupCertManagerDNS01 installs any required cert-manager webhook Helm chart
 	// and returns the solver spec to embed in the ClusterIssuer dns01 block.
 	// credSecretName is the Kubernetes secret that holds this provider's API credentials.
+	// certManagerNamespace is the namespace cert-manager's own controller runs in
+	// (defaults to "cert-manager" when empty) — a webhook chart's RBAC must grant
+	// that exact ServiceAccount access, or DNS-01 challenges never resolve.
 	SetupCertManagerDNS01(
 		ctx *pulumi.Context,
 		k8sProvider *k8s.Provider,
 		zone string,
 		credSecretName string,
+		certManagerNamespace string,
 		deps []pulumi.Resource,
 	) (SolverSpec, *helmv3.Release, error)
 

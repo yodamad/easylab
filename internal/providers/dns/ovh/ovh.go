@@ -37,13 +37,20 @@ func (p *OVHDNSProvider) GetCredentialFields() []dns.CredentialField {
 
 // SetupCertManagerDNS01 installs cert-manager-webhook-ovh and returns the DNS-01 solver spec.
 // credSecretName is the Kubernetes secret that holds the OVH API credentials.
+// certManagerNamespace is the namespace cert-manager's own controller runs in — the
+// chart's domain-solver ClusterRoleBinding grants that exact ServiceAccount access,
+// so an empty/wrong value here means DNS-01 challenges never resolve.
 func (p *OVHDNSProvider) SetupCertManagerDNS01(
 	ctx *pulumi.Context,
 	k8sProvider *k8s.Provider,
 	zone string,
 	credSecretName string,
+	certManagerNamespace string,
 	deps []pulumi.Resource,
 ) (dns.SolverSpec, *helmv3.Release, error) {
+	if strings.TrimSpace(certManagerNamespace) == "" {
+		certManagerNamespace = "cert-manager"
+	}
 
 	webhookNs, err := k8score.NewNamespace(ctx, "cert-manager-webhook-ovh-ns", &k8score.NamespaceArgs{
 		Metadata: &k8smeta.ObjectMetaArgs{
@@ -67,6 +74,13 @@ func (p *OVHDNSProvider) SetupCertManagerDNS01(
 		Version: pulumi.String("0.9.10"),
 		Values: pulumi.Map{
 			"groupName": pulumi.String("acme.baarde.ch"),
+			// The chart's domain-solver ClusterRoleBinding subject is built from
+			// this: without it, it silently falls back to its own default
+			// ("cert-manager"), which is wrong whenever cert-manager runs
+			// elsewhere and leaves DNS-01 challenges stuck forever.
+			"certManager": pulumi.Map{
+				"namespace": pulumi.String(certManagerNamespace),
+			},
 		},
 		Timeout: pulumi.Int(600),
 	}, pulumi.Provider(k8sProvider), pulumi.DependsOn(webhookDeps))

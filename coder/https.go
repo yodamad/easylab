@@ -172,7 +172,7 @@ func SetupHTTPS(
 			}
 
 			webhookSolver, webhookRelease, setupErr := dnsProvider.SetupCertManagerDNS01(
-				ctx, k8sProvider, zone, credSecret, certDeps,
+				ctx, k8sProvider, zone, credSecret, certManagerNsName, certDeps,
 			)
 			if setupErr != nil {
 				return nil, pulumi.StringOutput{}, fmt.Errorf("failed to setup DNS-01 solver: %w", setupErr)
