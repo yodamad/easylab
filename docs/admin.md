@@ -363,6 +363,15 @@ can find them even if you're just skimming: **Ingress Controller** (always shown
 Quick start mode). Both default to "install a new one"; switch to "use existing" if
 your cluster already has one, and a namespace/service-name override appears.
 
+When installing (not reusing) either component, a **Node Selector** field appears
+underneath it — **Traefik Node Selector** and **cert-manager Node Selector**. Add
+key/value label pairs to pin that component's pod to nodes carrying those labels,
+the same mechanism used for [workspace template node
+selectors](#splitting-easylab-and-workspaces-across-node-pools), applied here to the
+ingress controller and cert-manager themselves rather than to student workspaces.
+Useful for keeping shared infrastructure pods off a tainted or GPU-flavored node
+pool, or for co-locating them with a specific pool for cost or locality reasons.
+
 !!! note "Reusing cert-manager across labs on the same cluster"
     Picking **Use existing cert-manager** together with **Custom domain — automatic**
     reveals **Is DNS-01 already set up on this cert-manager?**. Choose **Already

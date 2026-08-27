@@ -1431,6 +1431,60 @@ func TestParseWorkspaceTemplatesFromForm_WithNodeSelector(t *testing.T) {
 	assert.Equal(t, "eu-west", templates[0].NodeSelector["zone"])
 }
 
+func TestParseNodeSelectorFromForm(t *testing.T) {
+	tests := []struct {
+		name     string
+		form     map[string][]string
+		expected map[string]string
+	}{
+		{
+			name: "multiple pairs",
+			form: map[string][]string{
+				"traefik_nodeselector_key":   {"pool", "zone"},
+				"traefik_nodeselector_value": {"infra", "eu-west"},
+			},
+			expected: map[string]string{"pool": "infra", "zone": "eu-west"},
+		},
+		{
+			name: "blank key skipped",
+			form: map[string][]string{
+				"traefik_nodeselector_key":   {"", "pool"},
+				"traefik_nodeselector_value": {"ignored", "infra"},
+			},
+			expected: map[string]string{"pool": "infra"},
+		},
+		{
+			name: "missing value defaults to empty string",
+			form: map[string][]string{
+				"traefik_nodeselector_key": {"pool"},
+			},
+			expected: map[string]string{"pool": ""},
+		},
+		{
+			name:     "no keys returns nil",
+			form:     map[string][]string{},
+			expected: nil,
+		},
+		{
+			name: "all keys blank returns nil",
+			form: map[string][]string{
+				"traefik_nodeselector_key": {"", "  "},
+			},
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequest("POST", "/", nil)
+			req.Form = tt.form
+			got := parseNodeSelectorFromForm(req, "traefik_nodeselector_key", "traefik_nodeselector_value")
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
 func TestParseWorkspaceTemplatesFromForm_GitAuthSecret(t *testing.T) {
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Form = map[string][]string{

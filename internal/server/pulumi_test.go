@@ -498,6 +498,89 @@ func TestGetConfigCommands_DNSAlreadyConfigured(t *testing.T) {
 	}
 }
 
+func TestGetConfigCommands_NodeSelectors(t *testing.T) {
+	installTrue := true
+	installFalse := false
+
+	tests := []struct {
+		name               string
+		cfg                *LabConfig
+		wantTraefikKey     string
+		wantCertManagerKey string
+	}{
+		{
+			name: "installing traefik and cert-manager emits node selectors",
+			cfg: &LabConfig{
+				Domain:                  "coder.example.com",
+				AcmeEmail:               "acme@example.com",
+				InstallNginxIngress:     &installTrue,
+				InstallCertManager:      &installTrue,
+				TraefikNodeSelector:     map[string]string{"pool": "infra"},
+				CertManagerNodeSelector: map[string]string{"pool": "infra"},
+			},
+			wantTraefikKey:     `{"pool":"infra"}`,
+			wantCertManagerKey: `{"pool":"infra"}`,
+		},
+		{
+			name: "nil install pointer (backward-compat default) still emits node selectors",
+			cfg: &LabConfig{
+				Domain:                  "coder.example.com",
+				AcmeEmail:               "acme@example.com",
+				TraefikNodeSelector:     map[string]string{"pool": "infra"},
+				CertManagerNodeSelector: map[string]string{"pool": "infra"},
+			},
+			wantTraefikKey:     `{"pool":"infra"}`,
+			wantCertManagerKey: `{"pool":"infra"}`,
+		},
+		{
+			name: "reusing existing controllers suppresses node selectors",
+			cfg: &LabConfig{
+				Domain:                  "coder.example.com",
+				AcmeEmail:               "acme@example.com",
+				InstallNginxIngress:     &installFalse,
+				InstallCertManager:      &installFalse,
+				TraefikNodeSelector:     map[string]string{"pool": "infra"},
+				CertManagerNodeSelector: map[string]string{"pool": "infra"},
+			},
+			wantTraefikKey:     "",
+			wantCertManagerKey: "",
+		},
+		{
+			name: "no node selectors configured emits nothing",
+			cfg: &LabConfig{
+				Domain:    "coder.example.com",
+				AcmeEmail: "acme@example.com",
+			},
+			wantTraefikKey:     "",
+			wantCertManagerKey: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			pe := &PulumiExecutor{}
+			cmds := pe.getConfigCommands(tt.cfg)
+
+			var gotTraefik, gotCertManager string
+			for _, c := range cmds {
+				if c.key == "coder:traefikNodeSelector" {
+					gotTraefik = c.value
+				}
+				if c.key == "coder:certManagerNodeSelector" {
+					gotCertManager = c.value
+				}
+			}
+			if gotTraefik != tt.wantTraefikKey {
+				t.Errorf("coder:traefikNodeSelector = %q, want %q", gotTraefik, tt.wantTraefikKey)
+			}
+			if gotCertManager != tt.wantCertManagerKey {
+				t.Errorf("coder:certManagerNodeSelector = %q, want %q", gotCertManager, tt.wantCertManagerKey)
+			}
+		})
+	}
+}
+
 func TestIsJobDirectoryReady_AllFiles(t *testing.T) {
 	dir := t.TempDir()
 	pe := &PulumiExecutor{workDir: dir}

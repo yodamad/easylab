@@ -311,6 +311,13 @@ type LabConfig struct {
 	InstallCertManager      *bool  `json:"install_cert_manager,omitempty"`
 	CertManagerNamespace    string `json:"cert_manager_namespace,omitempty"`
 
+	// TraefikNodeSelector/CertManagerNodeSelector pin the Traefik and
+	// cert-manager controller pods to nodes carrying these labels. Only
+	// meaningful when the respective component is installed (not reused from
+	// an existing cluster install).
+	TraefikNodeSelector     map[string]string `json:"traefik_node_selector,omitempty"`
+	CertManagerNodeSelector map[string]string `json:"cert_manager_node_selector,omitempty"`
+
 	// DNS provider for automated A-record creation and DNS-01 cert issuance
 	DNSProvider    string            `json:"dns_provider,omitempty"`
 	DNSZone        string            `json:"dns_zone,omitempty"`

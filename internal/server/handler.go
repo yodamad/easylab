@@ -340,6 +340,33 @@ func (h *Handler) rehydrateProviderCredentials(config *LabConfig) error {
 	return nil
 }
 
+// parseNodeSelectorFromForm reads repeated key/value form fields (e.g. from
+// keyField="traefik_nodeselector_key") into a node selector map, skipping
+// blank keys. Returns nil if no keys were submitted.
+func parseNodeSelectorFromForm(r *http.Request, keyField, valueField string) map[string]string {
+	keys := r.Form[keyField]
+	if len(keys) == 0 {
+		return nil
+	}
+	values := r.Form[valueField]
+	selector := make(map[string]string)
+	for i, k := range keys {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		v := ""
+		if i < len(values) {
+			v = values[i]
+		}
+		selector[k] = v
+	}
+	if len(selector) == 0 {
+		return nil
+	}
+	return selector
+}
+
 // parseWorkspaceTemplatesFromForm extracts workspace template entries from the form.
 // Expects template_N_name, template_N_image, template_N_git_repo, template_N_cpu,
 // template_N_memory, template_N_cpu_limit, template_N_memory_limit,
@@ -585,11 +612,15 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 	if !installNginx {
 		config.NginxIngressNamespace = r.FormValue("nginx_ingress_namespace")
 		config.NginxIngressServiceName = r.FormValue("nginx_ingress_service_name")
+	} else {
+		config.TraefikNodeSelector = parseNodeSelectorFromForm(r, "traefik_nodeselector_key", "traefik_nodeselector_value")
 	}
 	installCertM := r.FormValue("install_cert_manager") == "true"
 	config.InstallCertManager = &installCertM
 	if !installCertM {
 		config.CertManagerNamespace = r.FormValue("cert_manager_namespace")
+	} else {
+		config.CertManagerNodeSelector = parseNodeSelectorFromForm(r, "certmanager_nodeselector_key", "certmanager_nodeselector_value")
 	}
 
 	if config.DNSProvider != "" {

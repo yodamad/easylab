@@ -79,12 +79,17 @@ func SetupHTTPS(
 			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to create cert-manager namespace: %w", err)
 		}
 
+		certManagerValues := pulumi.Map{"installCRDs": pulumi.Bool(true)}
+		if ns := utils.CoderNodeSelectorFromConfig(ctx, utils.CoderCertManagerNodeSelector); len(ns) > 0 {
+			certManagerValues["nodeSelector"] = nodeSelectorMap(ns)
+		}
+
 		certManagerRelease, err = internalK8s.InitHelm(ctx, k8sProvider, internalK8s.HelmChartInfo{
 			Name:        "cert-manager",
 			ChartName:   "cert-manager",
 			Url:         "https://charts.jetstack.io",
 			ReleaseName: "cert-manager",
-			Values:      pulumi.Map{"installCRDs": pulumi.Bool(true)},
+			Values:      certManagerValues,
 		}, certManagerNs)
 		if err != nil {
 			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to install cert-manager: %w", err)
@@ -101,37 +106,42 @@ func SetupHTTPS(
 			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to create traefik namespace: %w", err)
 		}
 
+		traefikValues := pulumi.Map{
+			// OVHcloud sets ipMode:VIP on LoadBalancer services, which causes the Pulumi
+			// Kubernetes provider's GetService await to block indefinitely. Adding the
+			// skipAwait annotation to the controller service tells the provider to skip
+			// the readiness check when reading it.
+			"service": pulumi.Map{
+				"annotations": pulumi.StringMap{
+					"pulumi.kubernetes.io/skipAwait": pulumi.String("true"),
+				},
+			},
+			// Chart-wide idle timeout for long-lived connections (the student IDE's
+			// websocket): there is no per-Ingress annotation equivalent to nginx's old
+			// proxy-read-timeout/proxy-send-timeout under Traefik, this is entrypoint-scoped.
+			"ports": pulumi.Map{
+				"web": pulumi.Map{
+					"transport": pulumi.Map{
+						"respondingTimeouts": pulumi.Map{"idleTimeout": pulumi.String("3600s")},
+					},
+				},
+				"websecure": pulumi.Map{
+					"transport": pulumi.Map{
+						"respondingTimeouts": pulumi.Map{"idleTimeout": pulumi.String("3600s")},
+					},
+				},
+			},
+		}
+		if ns := utils.CoderNodeSelectorFromConfig(ctx, utils.CoderTraefikNodeSelector); len(ns) > 0 {
+			traefikValues["nodeSelector"] = nodeSelectorMap(ns)
+		}
+
 		ingressRelease, err = internalK8s.InitHelm(ctx, k8sProvider, internalK8s.HelmChartInfo{
 			Name:        "traefik",
 			ChartName:   "traefik",
 			Url:         "https://traefik.github.io/charts",
 			ReleaseName: "traefik",
-			Values: pulumi.Map{
-				// OVHcloud sets ipMode:VIP on LoadBalancer services, which causes the Pulumi
-				// Kubernetes provider's GetService await to block indefinitely. Adding the
-				// skipAwait annotation to the controller service tells the provider to skip
-				// the readiness check when reading it.
-				"service": pulumi.Map{
-					"annotations": pulumi.StringMap{
-						"pulumi.kubernetes.io/skipAwait": pulumi.String("true"),
-					},
-				},
-				// Chart-wide idle timeout for long-lived connections (the student IDE's
-				// websocket): there is no per-Ingress annotation equivalent to nginx's old
-				// proxy-read-timeout/proxy-send-timeout under Traefik, this is entrypoint-scoped.
-				"ports": pulumi.Map{
-					"web": pulumi.Map{
-						"transport": pulumi.Map{
-							"respondingTimeouts": pulumi.Map{"idleTimeout": pulumi.String("3600s")},
-						},
-					},
-					"websecure": pulumi.Map{
-						"transport": pulumi.Map{
-							"respondingTimeouts": pulumi.Map{"idleTimeout": pulumi.String("3600s")},
-						},
-					},
-				},
-			},
+			Values:      traefikValues,
 		}, ingressNs)
 		if err != nil {
 			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to install traefik: %w", err)
@@ -365,6 +375,16 @@ func SetupHTTPS(
 	}
 
 	return ingressRelease, ingressIP, nil
+}
+
+// nodeSelectorMap converts a plain node selector map into the pulumi.StringMap
+// form expected by a Helm chart's "nodeSelector" value.
+func nodeSelectorMap(selector map[string]string) pulumi.StringMap {
+	m := pulumi.StringMap{}
+	for k, v := range selector {
+		m[k] = pulumi.String(v)
+	}
+	return m
 }
 
 // WildcardTLSSecretName is the secret the wildcard certificate is written to, in

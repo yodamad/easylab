@@ -393,6 +393,18 @@
                                 </div>
                             </div>
                         </div>
+                        <div id="traefik-nodeselector-fields">
+                            <div class="template-variables-section">
+                                <div class="template-variables-header">
+                                    <label>Traefik Node Selector</label>
+                                    <div class="template-variables-actions">
+                                        <button type="button" class="btn btn-secondary" id="btn-add-traefik-nodeselector">+ Add Node Selector</button>
+                                    </div>
+                                </div>
+                                <small>Pin the Traefik ingress controller pod to nodes carrying these labels.</small>
+                                <div class="template-nodeselector-container" id="traefik-nodeselector-container"></div>
+                            </div>
+                        </div>
 
                         <div id="domain-fields-block" style="display: none;">
                             <div class="form-row">
@@ -435,6 +447,18 @@
                                     <label for="cert_manager_namespace">cert-manager Namespace</label>
                                     <input type="text" id="cert_manager_namespace" name="cert_manager_namespace" placeholder="cert-manager">
                                     <small>Namespace where cert-manager is installed. Defaults to <code>cert-manager</code>.</small>
+                                </div>
+                            </div>
+                            <div id="certmanager-nodeselector-fields">
+                                <div class="template-variables-section">
+                                    <div class="template-variables-header">
+                                        <label>cert-manager Node Selector</label>
+                                        <div class="template-variables-actions">
+                                            <button type="button" class="btn btn-secondary" id="btn-add-certmanager-nodeselector">+ Add Node Selector</button>
+                                        </div>
+                                    </div>
+                                    <small>Pin the cert-manager controller pod to nodes carrying these labels.</small>
+                                    <div class="template-nodeselector-container" id="certmanager-nodeselector-container"></div>
                                 </div>
                             </div>
                         </div>

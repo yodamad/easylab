@@ -1339,6 +1339,10 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 		if config.NginxIngressServiceName != "" {
 			commands = append(commands, configCommand{"coder:nginxIngressServiceName", config.NginxIngressServiceName, false})
 		}
+	} else if len(config.TraefikNodeSelector) > 0 {
+		if b, err := json.Marshal(config.TraefikNodeSelector); err == nil {
+			commands = append(commands, configCommand{"coder:traefikNodeSelector", string(b), false})
+		}
 	}
 
 	// HTTPS / TLS configuration — only meaningful when a domain is set.
@@ -1354,6 +1358,10 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 			commands = append(commands, configCommand{"coder:installCertManager", "false", false})
 			if config.CertManagerNamespace != "" {
 				commands = append(commands, configCommand{"coder:certManagerNamespace", config.CertManagerNamespace, false})
+			}
+		} else if len(config.CertManagerNodeSelector) > 0 {
+			if b, err := json.Marshal(config.CertManagerNodeSelector); err == nil {
+				commands = append(commands, configCommand{"coder:certManagerNodeSelector", string(b), false})
 			}
 		}
 	}

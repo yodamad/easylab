@@ -95,17 +95,39 @@ const wizard = {
             githubEnable.addEventListener('click', () => this.setGithubLoginEnabled(true));
             githubDisable.addEventListener('click', () => this.setGithubLoginEnabled(false));
         }
+
+        const addTraefikNodeSelector = document.getElementById('btn-add-traefik-nodeselector');
+        if (addTraefikNodeSelector) {
+            addTraefikNodeSelector.addEventListener('click', () => {
+                const container = document.getElementById('traefik-nodeselector-container');
+                if (container) {
+                    container.appendChild(createStaticNodeSelectorRow('traefik_nodeselector_key', 'traefik_nodeselector_value', '', ''));
+                }
+            });
+        }
+
+        const addCertManagerNodeSelector = document.getElementById('btn-add-certmanager-nodeselector');
+        if (addCertManagerNodeSelector) {
+            addCertManagerNodeSelector.addEventListener('click', () => {
+                const container = document.getElementById('certmanager-nodeselector-container');
+                if (container) {
+                    container.appendChild(createStaticNodeSelectorRow('certmanager_nodeselector_key', 'certmanager_nodeselector_value', '', ''));
+                }
+            });
+        }
     },
 
     setIngressMode(mode) {
         const installBtn = document.getElementById('ingress-install-btn');
         const existingBtn = document.getElementById('ingress-existing-btn');
         const fields = document.getElementById('ingress-existing-fields');
+        const nodeSelectorFields = document.getElementById('traefik-nodeselector-fields');
         const hidden = document.getElementById('install_nginx_ingress');
 
         installBtn.classList.toggle('selected', mode === 'install');
         existingBtn.classList.toggle('selected', mode === 'existing');
         fields.style.display = mode === 'existing' ? '' : 'none';
+        if (nodeSelectorFields) nodeSelectorFields.style.display = mode === 'install' ? '' : 'none';
         hidden.value = mode === 'install' ? 'true' : 'false';
     },
 
@@ -113,11 +135,13 @@ const wizard = {
         const installBtn = document.getElementById('certmanager-install-btn');
         const existingBtn = document.getElementById('certmanager-existing-btn');
         const fields = document.getElementById('certmanager-existing-fields');
+        const nodeSelectorFields = document.getElementById('certmanager-nodeselector-fields');
         const hidden = document.getElementById('install_cert_manager');
 
         installBtn.classList.toggle('selected', mode === 'install');
         existingBtn.classList.toggle('selected', mode === 'existing');
         fields.style.display = mode === 'existing' ? '' : 'none';
+        if (nodeSelectorFields) nodeSelectorFields.style.display = mode === 'install' ? '' : 'none';
         hidden.value = mode === 'install' ? 'true' : 'false';
         this.updateDNSAlreadyConfiguredVisibility();
     },
@@ -1709,6 +1733,39 @@ function addNodeSelectorRow(row) {
     if (container) {
         container.appendChild(createNodeSelectorRow(idx, '', ''));
     }
+}
+
+// createStaticNodeSelectorRow builds a node selector key/value row for a
+// singleton target (Traefik, cert-manager) rather than an indexed workspace
+// template, so the field names are fixed instead of index-prefixed.
+function createStaticNodeSelectorRow(keyName, valueName, key, value) {
+    const div = document.createElement('div');
+    div.className = 'template-variable-row';
+    const keyInput = document.createElement('input');
+    keyInput.type = 'text';
+    keyInput.name = keyName;
+    keyInput.placeholder = 'Label key (e.g. pool)';
+    keyInput.value = key || '';
+
+    const valueInput = document.createElement('input');
+    valueInput.type = 'text';
+    valueInput.name = valueName;
+    valueInput.placeholder = 'Label value (e.g. infra)';
+    valueInput.value = value || '';
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn btn-secondary btn-remove-variable';
+    removeBtn.textContent = 'x';
+    removeBtn.title = 'Remove node selector';
+    removeBtn.addEventListener('click', function() {
+        div.remove();
+    });
+
+    div.appendChild(keyInput);
+    div.appendChild(valueInput);
+    div.appendChild(removeBtn);
+    return div;
 }
 
 function makeTextInput(name, placeholder) {

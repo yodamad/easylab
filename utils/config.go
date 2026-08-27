@@ -128,6 +128,8 @@ const CoderInstallCertManager = "installCertManager"
 const CoderNginxIngressNamespace = "nginxIngressNamespace"
 const CoderNginxIngressServiceName = "nginxIngressServiceName"
 const CoderCertManagerNamespace = "certManagerNamespace"
+const CoderTraefikNodeSelector = "traefikNodeSelector"
+const CoderCertManagerNodeSelector = "certManagerNodeSelector"
 const CoderGithubLoginEnabled = "githubLoginEnabled"
 const CoderSessionDuration = "sessionDuration"             // maps to CODER_SESSION_DURATION (e.g. "24h")
 const CoderDormancyThreshold = "dormancyThreshold"         // maps to CODER_DORMANCY_THRESHOLD (e.g. "168h")
@@ -188,6 +190,21 @@ func CoderConfigOptional(ctx *pulumi.Context, key string) string {
 // DNSConfigOptional returns an optional dns: config value (empty string if not set)
 func DNSConfigOptional(ctx *pulumi.Context, key string) string {
 	return config.New(ctx, DNSGroup).Get(key)
+}
+
+// CoderNodeSelectorFromConfig reads a JSON-encoded map[string]string node
+// selector from the given coder: config key (e.g. CoderTraefikNodeSelector or
+// CoderCertManagerNodeSelector). Returns nil if not set or invalid.
+func CoderNodeSelectorFromConfig(ctx *pulumi.Context, key string) map[string]string {
+	val := CoderConfigOptional(ctx, key)
+	if val == "" {
+		return nil
+	}
+	var selector map[string]string
+	if err := json.Unmarshal([]byte(val), &selector); err != nil {
+		return nil
+	}
+	return selector
 }
 
 const CoderTemplatesKey = "templates"
