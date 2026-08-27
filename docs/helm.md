@@ -11,6 +11,8 @@ EasyLab is available as a Helm chart published on Docker Hub as an OCI artifact.
 
 - Kubernetes cluster (v1.24+)
 - Helm 3.8+ (OCI support required)
+- To reach the EasyLab UI, an **Ingress controller** matching `ingress.className` must already be running in the cluster if you set `ingress.enabled=true` (the recommended way to expose it). The chart defaults `ingress.className` to `traefik`, which is only preinstalled on some distributions (for example k3s) — most managed Kubernetes offerings, including OVHcloud Managed Kubernetes, ship with **no** ingress controller out of the box. Either install one yourself (Traefik, NGINX, etc.) beforehand, or set `ingress-nginx.enabled=true` to have this chart install NGINX for you — see [Optional infrastructure components](#optional-infrastructure-components).
+- If you terminate TLS with cert-manager annotations (rather than a pre-existing secret), **cert-manager** and a configured `ClusterIssuer` must already be installed, or set `cert-manager.enabled=true` to have the chart install cert-manager for you.
 
 ## App image platforms (multi-arch)
 
@@ -112,7 +114,7 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 
 ### Optional infrastructure components
 
-By default, the chart assumes nginx-ingress and cert-manager are **already installed** in your cluster. If they are not, you can let the chart install them:
+By default (`ingress-nginx.enabled=false`, `cert-manager.enabled=false`), this chart does not install an ingress controller or cert-manager for you — it assumes a controller matching `ingress.className` (default `traefik`) and, if you rely on cert-manager annotations for TLS, cert-manager is **already installed** in your cluster. If they are not, you can let the chart install ingress-nginx and cert-manager instead:
 
 ```yaml
 # Install nginx-ingress controller alongside EasyLab
