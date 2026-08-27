@@ -73,10 +73,15 @@ securityContext:
   runAsGroup: 1000
   fsGroup: 1000
 
-# Set enabled: true to install ingress-nginx as part of this chart.
-# Leave false (default) if your cluster already has an ingress controller.
-ingress-nginx:
+# Set enabled: true to install Traefik as part of this chart. The IngressClass
+# name is pinned to "traefik" to match ingress.className's default, so it works
+# out of the box — no extra values needed.
+# Leave false (default) if your cluster already has an ingress controller
+# (e.g. k3s ships Traefik out of the box).
+traefik:
   enabled: false
+  ingressClass:
+    name: traefik
 
 # Set enabled: true to install cert-manager as part of this chart.
 # Leave false (default) if your cluster already has cert-manager.

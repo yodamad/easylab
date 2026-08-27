@@ -11,7 +11,7 @@ EasyLab is available as a Helm chart published on Docker Hub as an OCI artifact.
 
 - Kubernetes cluster (v1.24+)
 - Helm 3.8+ (OCI support required)
-- To reach the EasyLab UI, an **Ingress controller** matching `ingress.className` must already be running in the cluster if you set `ingress.enabled=true` (the recommended way to expose it). The chart defaults `ingress.className` to `traefik`, which is only preinstalled on some distributions (for example k3s) — most managed Kubernetes offerings, including OVHcloud Managed Kubernetes, ship with **no** ingress controller out of the box. Either install one yourself (Traefik, NGINX, etc.) beforehand, or set `ingress-nginx.enabled=true` to have this chart install NGINX for you — see [Optional infrastructure components](#optional-infrastructure-components).
+- To reach the EasyLab UI, an **Ingress controller** matching `ingress.className` must already be running in the cluster if you set `ingress.enabled=true` (the recommended way to expose it). The chart defaults `ingress.className` to `traefik`, which is only preinstalled on some distributions (for example k3s) — most managed Kubernetes offerings, including OVHcloud Managed Kubernetes, ship with **no** ingress controller out of the box. Either install Traefik yourself beforehand, or set `traefik.enabled=true` to have this chart install it for you — see [Optional infrastructure components](#optional-infrastructure-components). If you use a different ingress controller (for example NGINX), install it separately and set `ingress.className` to match.
 - If you terminate TLS with cert-manager annotations (rather than a pre-existing secret), **cert-manager** and a configured `ClusterIssuer` must already be installed, or set `cert-manager.enabled=true` to have the chart install cert-manager for you.
 
 ## App image platforms (multi-arch)
@@ -99,7 +99,7 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 | `ingress.host` | Ingress hostname | `easylab.example.com` |
 | `ingress.tls.enabled` | Enable TLS | `false` |
 | `ingress.tls.secretName` | TLS secret name | `easylab-tls` |
-| `ingress-nginx.enabled` | Install ingress-nginx controller as part of this chart | `false` |
+| `traefik.enabled` | Install Traefik as part of this chart (IngressClass name pinned to `traefik`, matching `ingress.className`'s default) | `false` |
 | `cert-manager.enabled` | Install cert-manager as part of this chart | `false` |
 | `cert-manager.crds.enabled` | Install cert-manager CRDs (required on first install) | `true` |
 | `resources.requests.memory` | Memory request | `1024Mi` |
@@ -114,11 +114,11 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 
 ### Optional infrastructure components
 
-By default (`ingress-nginx.enabled=false`, `cert-manager.enabled=false`), this chart does not install an ingress controller or cert-manager for you — it assumes a controller matching `ingress.className` (default `traefik`) and, if you rely on cert-manager annotations for TLS, cert-manager is **already installed** in your cluster. If they are not, you can let the chart install ingress-nginx and cert-manager instead:
+By default (`traefik.enabled=false`, `cert-manager.enabled=false`), this chart does not install an ingress controller or cert-manager for you — it assumes a controller matching `ingress.className` (default `traefik`) and, if you rely on cert-manager annotations for TLS, cert-manager is **already installed** in your cluster. If they are not, you can let the chart install Traefik (matches the default `ingress.className` out of the box) and cert-manager instead:
 
 ```yaml
-# Install nginx-ingress controller alongside EasyLab
-ingress-nginx:
+# Install Traefik alongside EasyLab (IngressClass name pinned to "traefik")
+traefik:
   enabled: true
 
 # Install cert-manager alongside EasyLab (CRDs included)
@@ -133,22 +133,22 @@ Or via `--set` flags:
 ```bash
 helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
   --version __VERSION__ \
-  --set ingress-nginx.enabled=true \
+  --set traefik.enabled=true \
   --set cert-manager.enabled=true \
   --set secrets.adminPassword="SuperAdmin"
 ```
 
-If your cluster already has these installed, leave both at `false` (default) and configure `ingress.className` to match your existing controller.
+If your cluster already has an ingress controller and/or cert-manager installed — including a different controller such as NGINX — leave the relevant flag at `false` (default) and configure `ingress.className` to match your existing controller.
 
-All ingress-nginx and cert-manager values can be passed under their respective keys — see the [ingress-nginx chart values](https://kubernetes.github.io/ingress-nginx/) and [cert-manager chart values](https://cert-manager.io/docs/installation/helm/) for the full list.
+All `traefik` and `cert-manager` values can be passed under their respective keys — see the [Traefik chart values](https://github.com/traefik/traefik-helm-chart) and [cert-manager chart values](https://cert-manager.io/docs/installation/helm/) for the full list.
 
 ### Exposing with Traefik
 
-The chart creates a standard **Kubernetes Ingress** and defaults `ingress.className` to **`traefik`**, which matches Traefik’s default IngressClass on many clusters (for example [k3s](https://docs.k3s.io/networking#traefik-ingress-controller) and typical [Traefik Helm](https://doc.traefik.io/traefik/getting-started/install-traefik/) installs).
+The chart creates a standard **Kubernetes Ingress** and defaults `ingress.className` to **`traefik`**, which matches Traefik’s default IngressClass on many clusters (for example [k3s](https://docs.k3s.io/networking#traefik-ingress-controller) and typical [Traefik Helm](https://doc.traefik.io/traefik/getting-started/install-traefik/) installs). If your cluster has no ingress controller yet, set `traefik.enabled=true` to have this chart install Traefik for you — see [Optional infrastructure components](#optional-infrastructure-components).
 
 **Prerequisites**
 
-- Traefik running with the Kubernetes Ingress provider enabled.
+- Traefik running with the Kubernetes Ingress provider enabled (either pre-existing, or installed via `traefik.enabled=true`).
 - An IngressClass whose name matches `ingress.className` (default `traefik`). Check with:
 
   ```bash
@@ -221,19 +221,18 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
   --set ingress.annotations."cert-manager\.io/cluster-issuer"=letsencrypt
 ```
 
-### Fresh cluster (with nginx-ingress and cert-manager)
+### Fresh cluster (with Traefik and cert-manager)
 
-For a cluster that does not have an ingress controller or cert-manager yet:
+For a cluster that does not have an ingress controller or cert-manager yet, `traefik.enabled=true` installs Traefik with the default `ingress.className=traefik` — no need to override it:
 
 ```bash
 helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
   --version __VERSION__ \
   --set secrets.adminPassword="SuperAdmin" \
-  --set ingress-nginx.enabled=true \
+  --set traefik.enabled=true \
   --set cert-manager.enabled=true \
   --set ingress.enabled=true \
   --set ingress.host="easylab.example.com" \
-  --set ingress.className=nginx \
   --set ingress.tls.enabled=true \
   --set ingress.annotations."cert-manager\.io/cluster-issuer"=letsencrypt
 ```

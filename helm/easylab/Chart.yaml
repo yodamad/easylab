@@ -5,12 +5,12 @@ type: application
 version: 0.0.0-dev
 appVersion: "0.0.0-dev"
 dependencies:
-  - name: ingress-nginx
-    version: "4.12.1"
-    repository: https://kubernetes.github.io/ingress-nginx
-    condition: ingress-nginx.enabled
+  - name: traefik
+    version: "41.4.0"
+    repository: https://traefik.github.io/charts
+    condition: traefik.enabled
   - name: cert-manager
-    version: "v1.17.2"
+    version: "v1.21.1"
     repository: https://charts.jetstack.io
     condition: cert-manager.enabled
 
