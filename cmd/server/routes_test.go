@@ -71,6 +71,12 @@ func TestResolveLabRoute(t *testing.T) {
 		// The rest.
 		{name: "retry", path: "/api/labs/job-1/retry", method: http.MethodPost, want: routeRetryJob},
 		{
+			name:   "retry with edited config",
+			path:   "/api/labs/job-1/retry-with-config",
+			method: http.MethodPost,
+			want:   routeRetryJobWithConfig,
+		},
+		{
 			name:   "upload a template",
 			path:   "/api/labs/job-1/templates/upload",
 			method: http.MethodPost,
@@ -159,6 +165,12 @@ func TestResolveLabRoute_MethodIsPartOfTheMatch(t *testing.T) {
 			method: http.MethodGet,
 			want:   routeJobStatus,
 		},
+		{
+			name:   "GET on retry-with-config falls through to status",
+			path:   "/api/labs/job-1/retry-with-config",
+			method: http.MethodGet,
+			want:   routeJobStatus,
+		},
 	}
 
 	for _, tt := range tests {
@@ -167,4 +179,16 @@ func TestResolveLabRoute_MethodIsPartOfTheMatch(t *testing.T) {
 			assert.Equal(t, tt.want, resolveLabRoute(tt.path, tt.method, ""))
 		})
 	}
+}
+
+// "/retry-with-config" also ends with "-config", not "/retry" — but it's worth
+// guarding explicitly, the same way the secrets/delete overlap is guarded above,
+// since both routes are matched by HasSuffix on the same base word.
+func TestResolveLabRoute_RetryWithConfigIsNotShadowedByRetry(t *testing.T) {
+	t.Parallel()
+
+	got := resolveLabRoute("/api/labs/job-1/retry-with-config", http.MethodPost, "")
+	assert.NotEqual(t, routeRetryJob, got,
+		"an edited retry must not resolve to the plain retry route")
+	assert.Equal(t, routeRetryJobWithConfig, got)
 }

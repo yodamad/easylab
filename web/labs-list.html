@@ -126,7 +126,7 @@
                                     </button>
                                     {{end}}
                                     {{if eq .Status "failed"}}
-                                    <button type="button" class="btn btn-primary btn-icon-only tooltip-trigger" title="Retry this failed lab deployment" onclick="retryLab('{{.ID}}')">
+                                    <button type="button" class="btn btn-primary btn-icon-only tooltip-trigger" title="Retry this failed lab deployment" onclick="openRetryChoiceModal('{{.ID}}')">
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                                         </svg>
@@ -142,7 +142,7 @@
                                     </button>
                                     {{end}}
                                     {{if .IsDestroyed}}
-                                    <button type="button" class="btn btn-success btn-icon-only tooltip-trigger" title="Recreate this lab with the same configuration" onclick="recreateLab('{{.ID}}')">
+                                    <button type="button" class="btn btn-success btn-icon-only tooltip-trigger" title="Recreate this lab" onclick="openRecreateChoiceModal('{{.ID}}')">
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                                         </svg>
@@ -457,6 +457,38 @@
                         </div>
 
                     </form>
+                </div>
+            </div>
+        </div>
+
+        <div id="retry-choice-overlay" class="credentials-modal-overlay" onclick="closeRetryChoiceModal()" aria-hidden="true">
+            <div class="credentials-modal" onclick="event.stopPropagation()">
+                <div class="credentials-modal-header">
+                    <h3>Retry lab</h3>
+                    <button type="button" class="credentials-modal-close" onclick="closeRetryChoiceModal()" title="Close" aria-label="Close">&times;</button>
+                </div>
+                <div class="credentials-modal-body">
+                    <p>Rerun this lab's deployment with the configuration it already has, or open it in the wizard to fix a value first.</p>
+                    <div class="credentials-modal-actions">
+                        <button type="button" class="btn btn-primary btn-sm" onclick="confirmRetryAsIs()">Rerun as-is</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="confirmRetryEdit()">Edit configuration first</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="recreate-choice-overlay" class="credentials-modal-overlay" onclick="closeRecreateChoiceModal()" aria-hidden="true">
+            <div class="credentials-modal" onclick="event.stopPropagation()">
+                <div class="credentials-modal-header">
+                    <h3>Recreate lab</h3>
+                    <button type="button" class="credentials-modal-close" onclick="closeRecreateChoiceModal()" title="Close" aria-label="Close">&times;</button>
+                </div>
+                <div class="credentials-modal-body">
+                    <p>Recreate this lab with the configuration it had, or open it in the wizard to fix a value first.</p>
+                    <div class="credentials-modal-actions">
+                        <button type="button" class="btn btn-primary btn-sm" onclick="confirmRecreateAsIs()">Rerun as-is</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="confirmRecreateEdit()">Edit configuration first</button>
+                    </div>
                 </div>
             </div>
         </div>

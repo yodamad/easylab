@@ -532,6 +532,7 @@ const (
 	routeKubeconfig
 	routeRecreateCredentials
 	routeUpdateLabLifecycle
+	routeRetryJobWithConfig
 )
 
 // resolveLabRoute picks the endpoint for a request. The case order is the
@@ -557,6 +558,8 @@ func resolveLabRoute(path, method, format string) labRoute {
 
 	case strings.HasSuffix(path, "/delete") && !strings.Contains(path, "/workspaces") && method == http.MethodPost:
 		return routeDeleteLab
+	case strings.HasSuffix(path, "/retry-with-config") && method == http.MethodPost:
+		return routeRetryJobWithConfig
 	case strings.HasSuffix(path, "/retry"):
 		return routeRetryJob
 	case strings.HasSuffix(path, "/templates/upload") && method == http.MethodPost:
@@ -595,6 +598,8 @@ func labRequestRouter(h *server.Handler) http.HandlerFunc {
 			h.DeleteLab(w, r)
 		case routeRetryJob:
 			h.RetryJob(w, r)
+		case routeRetryJobWithConfig:
+			h.RetryJobWithConfig(w, r)
 		case routeUploadTemplate:
 			h.UploadTemplateToLab(w, r)
 		case routeRecreateCredentials:

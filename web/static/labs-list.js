@@ -72,6 +72,41 @@ function submitRecreate(body) {
     });
 }
 
+let recreateChoiceLabId = null;
+
+// openRecreateChoiceModal presents the "rerun as-is or edit configuration
+// first" choice before recreating a destroyed lab.
+function openRecreateChoiceModal(labId) {
+    recreateChoiceLabId = labId;
+    const overlay = document.getElementById('recreate-choice-overlay');
+    if (overlay) {
+        overlay.classList.add('visible');
+        overlay.setAttribute('aria-hidden', 'false');
+    }
+}
+
+function closeRecreateChoiceModal() {
+    const overlay = document.getElementById('recreate-choice-overlay');
+    if (overlay) {
+        overlay.classList.remove('visible');
+        overlay.setAttribute('aria-hidden', 'true');
+    }
+}
+
+function confirmRecreateAsIs() {
+    const labId = recreateChoiceLabId;
+    closeRecreateChoiceModal();
+    if (labId) recreateLab(labId);
+}
+
+function confirmRecreateEdit() {
+    const labId = recreateChoiceLabId;
+    closeRecreateChoiceModal();
+    if (labId) {
+        window.location.href = '/admin?prefill_job=' + encodeURIComponent(labId) + '&prefill_action=recreate';
+    }
+}
+
 function recreateLab(labId) {
     // Recreation lands on a new cluster, so any credentials the lab's templates
     // reference must be supplied again, and a lab that had a scheduled deletion
@@ -218,6 +253,41 @@ function removeLab(labId) {
     .catch(error => {
         alert('Error removing lab: ' + error.message);
     });
+}
+
+let retryChoiceLabId = null;
+
+// openRetryChoiceModal presents the "rerun as-is or edit configuration first"
+// choice before retrying a failed lab.
+function openRetryChoiceModal(labId) {
+    retryChoiceLabId = labId;
+    const overlay = document.getElementById('retry-choice-overlay');
+    if (overlay) {
+        overlay.classList.add('visible');
+        overlay.setAttribute('aria-hidden', 'false');
+    }
+}
+
+function closeRetryChoiceModal() {
+    const overlay = document.getElementById('retry-choice-overlay');
+    if (overlay) {
+        overlay.classList.remove('visible');
+        overlay.setAttribute('aria-hidden', 'true');
+    }
+}
+
+function confirmRetryAsIs() {
+    const labId = retryChoiceLabId;
+    closeRetryChoiceModal();
+    if (labId) retryLab(labId);
+}
+
+function confirmRetryEdit() {
+    const labId = retryChoiceLabId;
+    closeRetryChoiceModal();
+    if (labId) {
+        window.location.href = '/admin?prefill_job=' + encodeURIComponent(labId) + '&prefill_action=retry';
+    }
 }
 
 function retryLab(labId) {

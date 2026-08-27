@@ -362,7 +362,10 @@ const wizard = {
             const kubeconfigContent = document.getElementById('kubeconfig_content');
             const hasFile = kubeconfigFile && kubeconfigFile.files && kubeconfigFile.files.length > 0;
             const hasContent = kubeconfigContent && kubeconfigContent.value.trim() !== '';
-            if (!hasFile && !hasContent) {
+            // Editing a failed lab's config before retrying it: a blank kubeconfig
+            // here means "keep the lab's existing one" (the backend falls back to
+            // it), so it is not required in that one case.
+            if (!hasFile && !hasContent && !this.retryEditKeepsKubeconfig) {
                 alert('Please provide your kubeconfig content.');
                 return false;
             }
@@ -481,7 +484,9 @@ const wizard = {
         if (this.isLastStep()) {
             nextBtn.style.display = 'none';
             submitBtn.style.display = 'inline-flex';
-            dryRunBtn.style.display = 'inline-flex';
+            // Editing a lab's config before retrying it submits straight to the
+            // retry endpoint — there is no separate "preview" concept for that.
+            dryRunBtn.style.display = this.hideDryRunButton ? 'none' : 'inline-flex';
         } else {
             nextBtn.style.display = 'inline-flex';
             submitBtn.style.display = 'none';
@@ -702,7 +707,7 @@ function loadAzureLocations() {
 
     locationSelect.innerHTML = '<option value="">Loading regions…</option>';
 
-    fetch('/api/azure/locations')
+    return fetch('/api/azure/locations')
         .then(response => {
             if (!response.ok) throw new Error('Failed to load regions');
             return response.text();
@@ -724,7 +729,7 @@ function loadOVHRegions() {
 
     regionSelect.innerHTML = '<option value="">Loading regions…</option>';
 
-    fetch('/api/ovh/regions')
+    return fetch('/api/ovh/regions')
         .then(response => {
             if (!response.ok) throw new Error('Failed to load regions');
             return response.text();
@@ -765,7 +770,7 @@ function loadOVHFlavors() {
 
     flavorSelect.innerHTML = '<option value="">Loading flavors…</option>';
 
-    fetch(url)
+    return fetch(url)
         .then(response => {
             if (!response.ok) throw new Error('Failed to load flavors');
             return response.text();
@@ -965,7 +970,7 @@ function loadAzureVMSizes() {
 
     flavorSelect.innerHTML = '<option value="">Loading VM sizes…</option>';
 
-    fetch(url)
+    return fetch(url)
         .then(response => {
             if (!response.ok) throw new Error('Failed to load VM sizes');
             return response.text();
@@ -1297,6 +1302,15 @@ document.addEventListener('DOMContentLoaded', function() {
     if (typeof htmx !== 'undefined') {
         document.body.addEventListener('htmx:configRequest', function(event) {
             if (event.detail.target === form || event.detail.elt === form) {
+                // Editing a failed lab's config before retrying it submits to a
+                // different endpoint than plain lab creation. htmx caches an
+                // already-processed element's request config, so changing the
+                // form's hx-post attribute after the fact and reprocessing does
+                // not reliably take effect — rewriting the request path here,
+                // which htmx explicitly supports, does.
+                if (window.retryWithConfigTarget) {
+                    event.detail.path = window.retryWithConfigTarget;
+                }
                 extractBaseNamesBeforeSubmit(form);
             }
         });
@@ -1310,8 +1324,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const formData = new FormData(form);
             const responseDiv = document.getElementById('form-response');
             responseDiv.innerHTML = '<p>Submitting...</p>';
-            
-            fetch('/api/labs', {
+
+            fetch(window.retryWithConfigTarget || '/api/labs', {
                 method: 'POST',
                 body: formData
             })
@@ -1383,7 +1397,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const jobId = urlParams.get('job');
     if (jobId) {
         hideWizardShowStatus();
-        
+
         const container = document.getElementById('job-status-container');
         container.innerHTML = `<div id="job-status" hx-get="/api/jobs/${jobId}/status" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>`;
         if (typeof htmx !== 'undefined') {
@@ -1391,6 +1405,23 @@ document.addEventListener('DOMContentLoaded', function() {
         } else {
             pollJobStatus(jobId, container);
         }
+    }
+
+    // Editing a failed/destroyed lab's configuration before retrying or
+    // recreating it: the wizard is pre-filled from the source lab's stored
+    // config, seeded via the retry/recreate choice modal on the Labs and Jobs
+    // History pages.
+    const prefillJobId = urlParams.get('prefill_job');
+    const prefillAction = urlParams.get('prefill_action'); // 'retry' | 'recreate'
+    if (prefillJobId && prefillAction) {
+        Promise.all([
+            // GetJobStatusJSON only recognizes the /api/jobs/ prefix, not /api/labs/.
+            fetch('/api/jobs/' + encodeURIComponent(prefillJobId) + '?format=json').then(r => r.json()),
+            fetch('/api/labs/templates/yaml?lab_id=' + encodeURIComponent(prefillJobId)).then(r => r.text())
+        ]).then(([job, templatesYaml]) => applyPrefill(job.config || {}, templatesYaml, prefillJobId, prefillAction))
+          .catch(err => {
+              console.error('Could not load lab configuration to edit:', err);
+          });
     }
 });
 
@@ -2274,3 +2305,174 @@ document.addEventListener('DOMContentLoaded', function() {
     setTemplatesMode(templatesModeInput ? templatesModeInput.value : 'form');
     setDevcontainerSource('git');
 });
+
+// setFieldValue assigns a form field's value if the element exists and the
+// value is not null/undefined, leaving the field's default otherwise.
+function setFieldValue(id, value) {
+    if (value === undefined || value === null) return;
+    const el = document.getElementById(id);
+    if (el) el.value = value;
+}
+
+// applyPrefillDeletionDate splits a stored RFC3339 deletion timestamp into the
+// wizard's separate date/time fields, unless it has already passed — a past
+// date would only schedule the (re-)created lab for deletion on the very next
+// cleanup tick.
+function applyPrefillDeletionDate(isoDate) {
+    if (!isoDate) return;
+    const d = new Date(isoDate);
+    if (isNaN(d.getTime()) || d <= new Date()) return;
+
+    const pad = n => String(n).padStart(2, '0');
+    setFieldValue('lab_deletion_date', d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()));
+    setFieldValue('lab_deletion_time', pad(d.getHours()) + ':' + pad(d.getMinutes()));
+}
+
+// showPrefillNotice reveals the "editing a copy of an existing lab" banner.
+function showPrefillNotice(jobId, action) {
+    const notice = document.getElementById('prefill-notice');
+    if (!notice) return;
+    const actionEl = document.getElementById('prefill-notice-action');
+    const actionEl2 = document.getElementById('prefill-notice-action-2');
+    const jobIdEl = document.getElementById('prefill-notice-job-id');
+    if (actionEl) actionEl.textContent = action === 'retry' ? 'retry' : 'recreate';
+    if (actionEl2) actionEl2.textContent = action === 'retry' ? 'retrying' : 'recreating';
+    if (jobIdEl) jobIdEl.textContent = jobId;
+    notice.style.display = 'block';
+}
+
+// applyPrefill seeds the lab creation wizard from an existing (failed or
+// destroyed) lab's stored configuration, so it can be edited before retrying
+// or recreating it. Secrets never round-trip here: the sanitized job JSON this
+// is seeded from always strips the BYOK kubeconfig and DNS credentials, so
+// those fields are left for the admin to fill in again (or leave blank to keep
+// what a retry already has — see the hints shown next to each).
+async function applyPrefill(config, templatesYaml, jobId, action) {
+    // Step 1: Setup
+    setFieldValue('stack_name', config.stack_name);
+    const stackNamePreview = document.getElementById('stack-name-preview');
+    if (stackNamePreview && config.stack_name) stackNamePreview.textContent = config.stack_name;
+    setFieldValue('description', config.description);
+    wizard.setClusterMode(!!config.use_existing_cluster);
+
+    if (config.use_existing_cluster) {
+        wizard.retryEditKeepsKubeconfig = action === 'retry';
+        const hint = document.getElementById('kubeconfig-prefill-hint');
+        if (hint) {
+            hint.textContent = action === 'retry'
+                ? "Leave blank to keep the lab's existing kubeconfig."
+                : 'The kubeconfig is not carried over when recreating — you must provide one to continue.';
+            hint.style.display = '';
+        }
+    } else {
+        // Steps 2 & 3: Network + Compute. Region/flavor selects are populated
+        // asynchronously, so their values can only be set once loaded.
+        const provider = config.provider || 'ovh';
+        setFieldValue('provider', provider);
+        handleProviderChange();
+
+        if (provider === 'azure') {
+            await loadAzureLocations();
+            setFieldValue('azure_location', config.azure_location);
+            await loadAzureVMSizes();
+            setFieldValue('nodepool_flavor', config.nodepool_flavor);
+        } else {
+            await loadOVHRegions();
+            setFieldValue('network_region', config.network_region);
+            await loadOVHFlavors();
+            setFieldValue('nodepool_flavor', config.nodepool_flavor);
+        }
+
+        setFieldValue('network_gateway_name', config.network_gateway_name);
+        setFieldValue('network_gateway_model', config.network_gateway_model);
+        setFieldValue('network_private_network_name', config.network_private_network_name);
+        setFieldValue('network_id', config.network_id);
+        setFieldValue('network_mask', config.network_mask);
+        setFieldValue('network_start_ip', config.network_start_ip);
+        setFieldValue('network_end_ip', config.network_end_ip);
+        setFieldValue('k8s_cluster_name', config.k8s_cluster_name);
+        setFieldValue('nodepool_name', config.nodepool_name);
+        setFieldValue('nodepool_desired_node_count', config.nodepool_desired_node_count);
+        setFieldValue('nodepool_min_node_count', config.nodepool_min_node_count);
+        setFieldValue('nodepool_max_node_count', config.nodepool_max_node_count);
+    }
+
+    // Step 4: DNS & HTTPS
+    wizard.setIngressMode(config.install_nginx_ingress === false ? 'existing' : 'install');
+    setFieldValue('nginx_ingress_namespace', config.nginx_ingress_namespace);
+    setFieldValue('nginx_ingress_service_name', config.nginx_ingress_service_name);
+
+    wizard.setCertManagerMode(config.install_cert_manager === false ? 'existing' : 'install');
+    setFieldValue('cert_manager_namespace', config.cert_manager_namespace);
+
+    const domainMode = !config.domain ? 'quickstart' : (config.dns_provider ? 'auto' : 'manual');
+    wizard.setDomainMode(domainMode); // clears domain/acme_email/wildcard_domain when quickstart
+    if (domainMode !== 'quickstart') {
+        setFieldValue('domain', config.domain);
+        setFieldValue('acme_email', config.acme_email);
+        setFieldValue('wildcard_domain', config.wildcard_domain);
+        updateDNSManualWarning();
+    }
+    if (domainMode === 'auto') {
+        setFieldValue('dns_provider', config.dns_provider);
+        handleDNSProviderChange();
+        setFieldValue('dns_zone', config.dns_zone);
+        wizard.setDNSRecordMode(config.use_external_dns ? 'externaldns' : 'wildcard');
+
+        const dnsHint = document.getElementById('dns-cred-prefill-hint');
+        if (dnsHint) {
+            dnsHint.textContent = action === 'retry'
+                ? "Leave the credential fields below blank to keep the lab's existing DNS credentials."
+                : 'DNS credentials are not carried over when recreating — leave the fields below blank for none, or fill them in again.';
+            dnsHint.style.display = '';
+        }
+    }
+    // Only meaningful when reusing an existing cert-manager with a DNS provider
+    // selected; updateDNSAlreadyConfiguredVisibility() (called from the mode
+    // setters above) already forces this false everywhere else.
+    if (config.install_cert_manager === false && domainMode === 'auto') {
+        wizard.setDNSAlreadyConfigured(!!config.dns_already_configured);
+    }
+
+    // Step 5: Workspace
+    setFieldValue('workspace_namespace', config.workspace_namespace);
+
+    // Step 6: Templates. The structured config already has everything the
+    // form-mode builder would otherwise need reconstructed field by field
+    // (including sidecars/mounts/env), so seed the YAML editor instead.
+    setFieldValue('templates_yaml', templatesYaml);
+    setTemplatesMode('yaml');
+
+    // Step 7: Lifecycle
+    setFieldValue('workspace_lifetime_hours', config.workspace_lifetime_hours);
+    setFieldValue('workspace_lifetime_unit', 'hours');
+    applyPrefillDeletionDate(config.lab_deletion_date);
+
+    // Retry reuses the same Pulumi stack, so its name cannot change here, and
+    // the wizard must submit to the edited-retry endpoint instead of plain lab
+    // creation. Recreate keeps submitting to plain lab creation (POST
+    // /api/labs), same as today's "Recreate as-is" — a new job either way.
+    if (action === 'retry') {
+        const stackNameInput = document.getElementById('stack_name');
+        if (stackNameInput) stackNameInput.readOnly = true;
+
+        const form = document.getElementById('lab-form');
+        if (form) {
+            const target = '/api/labs/' + encodeURIComponent(jobId) + '/retry-with-config';
+            form.setAttribute('action', target); // non-JS fallback only
+            window.retryWithConfigTarget = target; // what htmx:configRequest actually uses
+        }
+
+        // Dry run always creates a separate preview job through a different
+        // endpoint — not what "editing before a retry" means. Hide it (on every
+        // step, not just now — see updateUI()), and relabel the submit button
+        // for what it actually does here.
+        wizard.hideDryRunButton = true;
+        const dryRunBtn = document.getElementById('btn-dry-run');
+        if (dryRunBtn) dryRunBtn.style.display = 'none';
+        const submitBtn = document.getElementById('btn-submit');
+        if (submitBtn) submitBtn.textContent = 'Retry Lab';
+    }
+
+    showPrefillNotice(jobId, action);
+}

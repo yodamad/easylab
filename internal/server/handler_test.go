@@ -2343,3 +2343,323 @@ func TestGetJobStatusJSON_RedactsSecrets(t *testing.T) {
 		assert.NotContains(t, body, secret, "status JSON must not leak %q", secret)
 	}
 }
+
+// retryWithConfigRequest builds a POST request for RetryJobWithConfig against
+// the given job, urlencoded, with the given form fields merged over sane
+// defaults (a valid non-BYOK submission).
+func retryWithConfigRequest(jobID string, form url.Values) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, "/api/labs/"+jobID+"/retry-with-config", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return req
+}
+
+func TestHandler_RetryJobWithConfig_WrongMethod(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/labs/job-1/retry-with-config", nil)
+	w := httptest.NewRecorder()
+
+	h.RetryJobWithConfig(w, req)
+
+	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+}
+
+func TestHandler_RetryJobWithConfig_InvalidPath(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/labs/retry-with-config", nil)
+	w := httptest.NewRecorder()
+
+	h.RetryJobWithConfig(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHandler_RetryJobWithConfig_JobNotFound(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	w := httptest.NewRecorder()
+	h.RetryJobWithConfig(w, retryWithConfigRequest("nonexistent", url.Values{}))
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestHandler_RetryJobWithConfig_NotFailed(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test"})
+	// Status is pending, not failed.
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	w := httptest.NewRecorder()
+	h.RetryJobWithConfig(w, retryWithConfigRequest(id, url.Values{}))
+
+	assert.Contains(t, w.Body.String(), "Invalid Job Status")
+}
+
+func TestHandler_RetryJobWithConfig_NilConfig(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test"})
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusFailed))
+	job, _ := jm.GetJob(id)
+	job.mu.Lock()
+	job.Config = nil
+	job.mu.Unlock()
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	w := httptest.NewRecorder()
+	h.RetryJobWithConfig(w, retryWithConfigRequest(id, url.Values{}))
+
+	assert.Contains(t, w.Body.String(), "No Configuration Available")
+}
+
+// A retry must not be able to move the job onto a different Pulumi stack, even
+// if the submitted form's stack_name has been tampered with — the stack was
+// already selected (and may already hold partial state) under the original name.
+func TestHandler_RetryJobWithConfig_PinsStackName(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{
+		StackName:          "orig-stack",
+		UseExistingCluster: true,
+		ExternalKubeconfig: "orig-kubeconfig",
+	})
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusFailed))
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	form := url.Values{}
+	form.Set("stack_name", "attempted-new-stack")
+	form.Set("use_existing_cluster", "true")
+
+	w := httptest.NewRecorder()
+	h.RetryJobWithConfig(w, retryWithConfigRequest(id, form))
+
+	job, _ := jm.GetJob(id)
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	require.NotNil(t, job.Config)
+	assert.Equal(t, "orig-stack", job.Config.StackName)
+}
+
+// Leaving the kubeconfig field blank in the edit form must keep the lab's
+// existing kubeconfig, since the prefilled form can never show it (it is
+// blanked out of the sanitized job JSON the wizard is seeded from).
+func TestHandler_RetryJobWithConfig_KubeconfigFallback(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{
+		StackName:          "test",
+		UseExistingCluster: true,
+		ExternalKubeconfig: "orig-kubeconfig",
+	})
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusFailed))
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	form := url.Values{}
+	form.Set("use_existing_cluster", "true")
+
+	w := httptest.NewRecorder()
+	h.RetryJobWithConfig(w, retryWithConfigRequest(id, form))
+
+	job, _ := jm.GetJob(id)
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	require.NotNil(t, job.Config)
+	assert.Equal(t, "orig-kubeconfig", job.Config.ExternalKubeconfig)
+}
+
+// Supplying a new kubeconfig in the edit form must override the old one.
+func TestHandler_RetryJobWithConfig_KubeconfigOverride(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{
+		StackName:          "test",
+		UseExistingCluster: true,
+		ExternalKubeconfig: "orig-kubeconfig",
+	})
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusFailed))
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	form := url.Values{}
+	form.Set("use_existing_cluster", "true")
+	form.Set("kubeconfig_content", "new-kubeconfig")
+
+	w := httptest.NewRecorder()
+	h.RetryJobWithConfig(w, retryWithConfigRequest(id, form))
+
+	job, _ := jm.GetJob(id)
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	require.NotNil(t, job.Config)
+	assert.Equal(t, "new-kubeconfig", job.Config.ExternalKubeconfig)
+}
+
+// A BYOK lab that somehow has no kubeconfig at all (neither stored nor
+// resupplied) must be rejected rather than silently proceeding with none.
+func TestHandler_RetryJobWithConfig_KubeconfigRequired(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test", UseExistingCluster: true})
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusFailed))
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	form := url.Values{}
+	form.Set("use_existing_cluster", "true")
+
+	w := httptest.NewRecorder()
+	h.RetryJobWithConfig(w, retryWithConfigRequest(id, form))
+
+	assert.Contains(t, w.Body.String(), "Kubeconfig Required")
+}
+
+// Leaving the DNS credential fields blank in the edit form (they can never be
+// prefilled — sanitizedCopy strips them) must keep the lab's existing DNS
+// credentials rather than wiping them.
+func TestHandler_RetryJobWithConfig_DNSCredentialsFallback(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{
+		StackName:          "test",
+		UseExistingCluster: true,
+		ExternalKubeconfig: "kc",
+		DNSProvider:        "ovh",
+		DNSZone:            "example.com",
+		DNSCredentials: map[string]string{
+			"ovhAppKey": "orig-app-key",
+		},
+	})
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusFailed))
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	form := url.Values{}
+	form.Set("use_existing_cluster", "true")
+	form.Set("dns_provider", "ovh")
+	form.Set("dns_zone", "example.com")
+	// dns_cred_* fields deliberately left blank.
+
+	w := httptest.NewRecorder()
+	h.RetryJobWithConfig(w, retryWithConfigRequest(id, form))
+
+	job, _ := jm.GetJob(id)
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	require.NotNil(t, job.Config)
+	assert.Equal(t, "orig-app-key", job.Config.DNSCredentials["ovhAppKey"])
+}
+
+// Supplying new DNS credentials in the edit form must override the old ones.
+func TestHandler_RetryJobWithConfig_DNSCredentialsOverride(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{
+		StackName:          "test",
+		UseExistingCluster: true,
+		ExternalKubeconfig: "kc",
+		DNSProvider:        "ovh",
+		DNSZone:            "example.com",
+		DNSCredentials: map[string]string{
+			"ovhAppKey": "orig-app-key",
+		},
+	})
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusFailed))
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	form := url.Values{}
+	form.Set("use_existing_cluster", "true")
+	form.Set("dns_provider", "ovh")
+	form.Set("dns_zone", "example.com")
+	form.Set("dns_cred_ovhAppKey", "new-app-key")
+
+	w := httptest.NewRecorder()
+	h.RetryJobWithConfig(w, retryWithConfigRequest(id, form))
+
+	job, _ := jm.GetJob(id)
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	require.NotNil(t, job.Config)
+	assert.Equal(t, "new-app-key", job.Config.DNSCredentials["ovhAppKey"])
+}
+
+// A DNS provider selected with no zone must be rejected before the job is
+// mutated, the same guard CreateLab already applies.
+func TestHandler_RetryJobWithConfig_DNSValidation(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test", UseExistingCluster: true, ExternalKubeconfig: "kc"})
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusFailed))
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	form := url.Values{}
+	form.Set("use_existing_cluster", "true")
+	form.Set("dns_provider", "ovh")
+	// dns_zone deliberately omitted.
+
+	w := httptest.NewRecorder()
+	h.RetryJobWithConfig(w, retryWithConfigRequest(id, form))
+
+	assert.Contains(t, w.Body.String(), "DNS Zone is required")
+}
+
+// A managed-infrastructure lab whose provider credentials are no longer
+// configured must fail with the same "Credentials Not Configured" prompt
+// RetryJob already gives, not a Pulumi-level error.
+func TestHandler_RetryJobWithConfig_MissingProviderCredentials(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test", Provider: "ovh"})
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusFailed))
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	form := url.Values{}
+	form.Set("provider", "ovh")
+
+	w := httptest.NewRecorder()
+	h.RetryJobWithConfig(w, retryWithConfigRequest(id, form))
+
+	assert.Contains(t, w.Body.String(), "Credentials Not Configured")
+}
+
+// The success path: valid credentials and a valid edited form reset the job to
+// pending and return the same status-polling fragment RetryJob returns.
+func TestHandler_RetryJobWithConfig_Success(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "orig-stack", Provider: "ovh"})
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusFailed))
+
+	cm := NewCredentialsManager()
+	require.NoError(t, cm.SetCredentials(&OVHCredentials{
+		ApplicationKey: "ak", ApplicationSecret: "as", ConsumerKey: "ck",
+		ServiceName: "svc", Endpoint: "ovh-eu",
+	}))
+	h := NewHandler(jm, &PulumiExecutor{}, cm, nil, nil, nil)
+
+	form := url.Values{}
+	form.Set("provider", "ovh")
+	form.Set("nodepool_flavor", "b2-7")
+
+	w := httptest.NewRecorder()
+	h.RetryJobWithConfig(w, retryWithConfigRequest(id, form))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "job-status")
+
+	job, _ := jm.GetJob(id)
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	assert.Equal(t, JobStatusPending, job.Status)
+	require.NotNil(t, job.Config)
+	assert.Equal(t, "orig-stack", job.Config.StackName)
+	assert.Equal(t, "b2-7", job.Config.NodePoolFlavor)
+}
+
+// Credentials entered in the edit form for a workspace template must still be
+// captured for once the (re-)provisioned cluster is up.
+func TestHandler_RetryJobWithConfig_CapturesPendingSecrets(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test", UseExistingCluster: true, ExternalKubeconfig: "kc"})
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusFailed))
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	form := url.Values{}
+	form.Set("use_existing_cluster", "true")
+	form.Set("secret_kind", "git")
+	form.Set("secret_name", "gitcred")
+	form.Set("secret_token", "sometoken")
+
+	w := httptest.NewRecorder()
+	h.RetryJobWithConfig(w, retryWithConfigRequest(id, form))
+
+	assert.True(t, h.pendingSecrets.Has(id))
+}

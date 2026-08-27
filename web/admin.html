@@ -54,6 +54,13 @@
                 </a>
             </div>
 
+            <!-- Editing a failed/destroyed lab's configuration before retry/recreate -->
+            <div id="prefill-notice" class="info-box" style="display: none;">
+                <h3>Editing configuration for <span id="prefill-notice-action"></span></h3>
+                <p>You're editing a copy of lab <code id="prefill-notice-job-id"></code>'s configuration before <span id="prefill-notice-action-2"></span>. The original lab is unaffected until you submit.</p>
+                <p id="prefill-notice-secrets-hint" class="hint-text"></p>
+            </div>
+
             <form id="lab-form" action="/api/labs" method="POST" enctype="multipart/form-data" hx-post="/api/labs" hx-target="#form-response" hx-swap="innerHTML" hx-indicator="#loading">
                 <input type="hidden" id="dry-run-mode" name="dry_run" value="false">
                 <div id="form-response"></div>
@@ -119,6 +126,7 @@
 
                         <!-- Kubeconfig input (shown for existing cluster) -->
                         <div id="kubeconfig-section" style="display: none;">
+                            <p id="kubeconfig-prefill-hint" class="hint-text" style="display: none;"></p>
                             <div class="form-group">
                                 <label>Provide Kubeconfig *</label>
                                 <div class="button-group">
@@ -447,6 +455,8 @@
                                 <input type="text" id="dns_zone" name="dns_zone" placeholder="example.com">
                                 <small>The DNS zone that contains the domain above.</small>
                             </div>
+
+                            <p id="dns-cred-prefill-hint" class="hint-text" style="display: none;"></p>
 
                             <div class="form-group" id="dns-already-configured-group" style="display: none;">
                                 <label>Is DNS-01 already set up on this cert-manager?</label>

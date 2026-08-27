@@ -16,12 +16,12 @@ As an admin (trainer, speaker, ...), you have access to the admin space to manag
     * [x] See logs
     * [x] Retrieve endpoint info (workspace base URL, namespace) for completed labs
     * [x] Delete a lab
-    * [x] Recreate a destroyed lab with the same configuration
+    * [x] Recreate a destroyed lab, either as-is or with an edited configuration
     * [x] List workspaces
     * [x] Delete workspaces (one by one or in bulk)
     * [x] See a workspace creation/deletion history per lab, with owner and template
     * [x] Export a lab's workspace history to CSV
-    * [x] Retry a failing lab installation
+    * [x] Retry a failing lab installation, either as-is or with an edited configuration
 * [x] View student feedback per lab (rating, difficulty, comments)
 * [x] View deployment statistics (KPIs, monthly chart, per-project breakdown)
 * [x] Configure automatic workspace and lab deletion (cleaning policies)
@@ -509,11 +509,49 @@ You can see all the labs you have created with following information:
 * **Access to the creation logs**
 * **Access to the kubeconfig file** (for completed labs)
 * **Lab endpoint info** — For completed labs, a **Lab endpoint info** button opens a read-only modal with the workspace base URL and the namespace student workspaces run in. Both values are copyable. An empty base URL means workspaces are only reachable in-cluster. This is reference information only — students reach their own workspace from the student portal.
-* **Actions** — Destroy a lab; **Recreate** a destroyed lab with the same configuration (same workspace templates, options, etc.)
+* **Actions** — Destroy a lab; **Retry** a failed lab, or **Recreate** a destroyed one, either as-is with its existing configuration or after editing it (see [Retry or recreate a lab](#retry-or-recreate-a-lab) below)
 * **List of workspaces** created for this lab — delete workspaces one by one or in bulk
 * **Cleanup** - Display the cleanup policy for the lab (*i.e. after how many hours/days the workspaces will be deleted*)
 
 ![Lab Workspaces](screens/list-workspaces.png){width=350}
+
+### Retry or recreate a lab
+
+Clicking **Retry** on a failed lab, or **Recreate** on a destroyed one, first asks you to
+choose between two options:
+
+![Retry or recreate choice](screens/retry-recreate-choice.png){width=450}
+
+* **Rerun as-is** — behaves exactly as before: the lab is retried/recreated with the
+  configuration it already has, without opening the wizard. For **Recreate**, this still
+  prompts for any credentials the lab's templates reference and, if the lab's scheduled
+  [deletion date](#lab-deletion) has already passed, a new date.
+* **Edit configuration first** — opens the full lab creation wizard, pre-filled with the
+  lab's current settings (network, compute, DNS/HTTPS, workspace templates, lifecycle),
+  so you can fix a value — a wrong region, an unavailable flavor, a stale domain — before
+  resubmitting.
+
+A few things to know when editing before a retry or recreate:
+
+* **Secrets are never pre-filled.** Provider API credentials, DNS credentials, and a
+  BYO-Kubernetes kubeconfig are stripped from the lab's stored configuration before it
+  reaches the wizard, the same way they already are everywhere else EasyLab exposes a
+  lab's config. Leaving these fields blank when editing a **retry** keeps the lab's
+  existing values; leaving them blank when editing a **recreate** means none — you must
+  re-enter them there, the same as with **Rerun as-is**.
+* **The lab name (stack name) cannot be changed when editing before a retry.** A retry
+  reuses the same underlying Pulumi stack, so the field is read-only in that mode. It
+  stays editable when editing before a recreate, since recreating always provisions a new
+  stack.
+* **Editing before a retry keeps the same lab.** Submitting applies your changes to the
+  same failed lab and reruns it — it does not appear as a new entry in the labs list.
+  **Editing before a recreate**, like **Rerun as-is**, always creates a new lab entry; the
+  destroyed one stays in the list for history.
+* Avoid switching a lab between **Create New Infrastructure** and **Use Existing
+  Cluster** when editing before a **retry** of a stack that has already provisioned real
+  cloud resources — Pulumi would treat the switch as those resources no longer being
+  wanted and destroy them. This is safe to change freely when editing before a
+  **recreate**, since that always starts a fresh stack.
 
 ### Templates on a lab
 

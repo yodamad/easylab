@@ -3870,6 +3870,202 @@ func (h *Handler) RetryJob(w http.ResponseWriter, r *http.Request) {
 		</div>`, jobID, jobID)
 }
 
+// RetryJobWithConfig handles retrying a failed job with an edited configuration,
+// submitted through the lab creation wizard pre-filled from the job's current
+// config. It mirrors RetryJob plus the relevant parts of processLabRequest/
+// CreateLab rather than refactoring either, per this project's guardrails
+// against touching existing working handlers.
+func (h *Handler) RetryJobWithConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract job ID from path like /api/jobs/{id}/retry-with-config or /api/labs/{id}/retry-with-config
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 4 || pathParts[0] != "api" || (pathParts[1] != "jobs" && pathParts[1] != "labs") || pathParts[3] != "retry-with-config" {
+		log.Printf("Invalid path for job retry with config: %s", r.URL.Path)
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	jobID := pathParts[2]
+	log.Printf("RetryJobWithConfig called for job: %s", jobID)
+
+	job, exists := h.jobManager.GetJob(jobID)
+	if !exists {
+		log.Printf("Job not found: %s", jobID)
+		http.Error(w, "Job not found", http.StatusNotFound)
+		return
+	}
+
+	job.mu.RLock()
+	status := job.Status
+	originalConfig := job.Config
+	job.mu.RUnlock()
+
+	if status != JobStatusFailed {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `
+			<div class="error-message">
+				<h3>Invalid Job Status</h3>
+				<p>This job is not in failed status. Current status: %s</p>
+				<p>Only failed jobs can be retried.</p>
+			</div>`, status)
+		return
+	}
+
+	if originalConfig == nil {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `
+			<div class="error-message">
+				<h3>No Configuration Available</h3>
+				<p>This job does not have configuration data available for retry.</p>
+			</div>`)
+		return
+	}
+
+	// Parse form data - handle both multipart and urlencoded (50MB for template files)
+	if err := h.parseForm(w, r, 50<<20); err != nil {
+		log.Printf("Failed to parse form: %v", err)
+		h.renderHTMLError(w, "Form Parse Error", "Failed to parse form data, please try again.")
+		return
+	}
+
+	// Resolve the workspace templates up front: a mistake in the YAML editor must
+	// fail here, before the job is mutated.
+	templates, err := workspaceTemplatesFromRequest(r)
+	if err != nil {
+		log.Printf("Invalid workspace templates YAML: %v", err)
+		h.renderHTMLError(w, "Invalid Workspace Templates YAML", err.Error())
+		return
+	}
+
+	wizardSecrets, err := parseWizardSecrets(r)
+	if err != nil {
+		log.Printf("Invalid wizard credentials: %v", err)
+		h.renderHTMLError(w, "Invalid Credentials", err.Error())
+		return
+	}
+	if getFormValue(r, "templates_mode") != "yaml" {
+		autolinkGitCredential(templates, wizardSecrets)
+	}
+
+	// Provider credentials are never prefilled into the edit form (they're
+	// stripped from the sanitized job JSON the wizard is seeded from), so build
+	// the config with no credentials here and rehydrate them from the in-memory
+	// store below, exactly as RetryJob already does.
+	editedConfig := h.createLabConfigFromForm(r, nil)
+	editedConfig.WorkspaceTemplates = templates
+
+	// Retry must stay on the same Pulumi stack the job already (possibly
+	// partially) provisioned — getOrCreateStackInline selects the stack by this
+	// value, so it cannot be changed here regardless of what the form submitted.
+	editedConfig.StackName = originalConfig.StackName
+
+	// The sanitized config the wizard was seeded from never carries the BYOK
+	// kubeconfig or DNS credentials (they're blanked/stripped from the API
+	// response). Leaving those fields blank in the edit form must not wipe them
+	// out — fall back to the job's current values when nothing new was supplied.
+	if editedConfig.UseExistingCluster {
+		submittedKubeconfig, err := h.readKubeconfigFromForm(r)
+		if err != nil {
+			log.Printf("Failed to read kubeconfig: %v", err)
+			h.renderHTMLError(w, "Kubeconfig Error", "Failed to read kubeconfig, please check the file and try again.")
+			return
+		}
+		if submittedKubeconfig != "" {
+			editedConfig.ExternalKubeconfig = submittedKubeconfig
+		} else {
+			editedConfig.ExternalKubeconfig = originalConfig.ExternalKubeconfig
+		}
+		if editedConfig.ExternalKubeconfig == "" {
+			h.renderHTMLError(w, "Kubeconfig Required", "Please provide a kubeconfig file or paste its content")
+			return
+		}
+	}
+	if editedConfig.DNSProvider != "" && editedConfig.DNSProvider == originalConfig.DNSProvider &&
+		len(originalConfig.DNSCredentials) > 0 && allValuesEmpty(editedConfig.DNSCredentials) {
+		editedConfig.DNSCredentials = originalConfig.DNSCredentials
+	}
+
+	// A DNS-provider selection with no (or a mismatched) zone can only fail deep
+	// inside pulumi up, after minutes of provisioning. Reject it here.
+	if err := validateDNSConfig(editedConfig); err != nil {
+		log.Printf("Invalid DNS configuration: %v", err)
+		h.renderHTMLError(w, "DNS Configuration Error", err.Error())
+		return
+	}
+
+	// Provider credentials are not persisted with the job — repopulate them from
+	// the in-memory credential store before provisioning (covers OVH and Azure).
+	// A no-op for BYO-Kubernetes labs.
+	if err := h.rehydrateProviderCredentials(editedConfig); err != nil {
+		log.Printf("Failed to load provider credentials for job %s: %v", jobID, err)
+		h.renderHTMLError(w, "Credentials Not Configured", "Please configure your cloud provider credentials before continuing.", `<a href="/credentials" class="btn btn-primary">Configure Credentials</a>`)
+		return
+	}
+
+	// Reset job for retry
+	if err := h.jobManager.ResetJobForRetry(jobID); err != nil {
+		log.Printf("Failed to reset job for retry: %v", err)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `
+			<div class="error-message">
+				<h3>Failed to Reset Job</h3>
+				<p>%s</p>
+			</div>`, template.HTMLEscapeString(err.Error()))
+		return
+	}
+
+	// Store the edited config on the job
+	job.mu.Lock()
+	job.Config = editedConfig
+	job.mu.Unlock()
+
+	// A dry run provisions no cluster, so its credentials would never be
+	// applied; retry always runs a real deployment, so keep them.
+	h.pendingSecrets.Put(jobID, wizardSecrets)
+
+	// Add retry message to output
+	h.jobManager.AppendOutput(jobID, fmt.Sprintf("Retrying job with edited configuration at %s", time.Now().Format(time.RFC3339)))
+
+	// Start Pulumi execution in a goroutine using retry-optimized path. This
+	// reads job.Config fresh at call time and re-applies it via setStackConfig
+	// before stack.Up() runs, so the edited config above takes effect.
+	go func() {
+		log.Printf("Starting Pulumi execution for retried job: %s", jobID)
+		if err := h.pulumiExec.ExecuteRetry(jobID); err != nil {
+			log.Printf("Pulumi execution failed for retried job %s: %v", jobID, err)
+			return
+		}
+		log.Printf("Pulumi execution completed for retried job: %s", jobID)
+	}()
+
+	// Return job status div for HTMX to display with proper polling, preceded by
+	// any warning about a configuration that deploys but will not work.
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprint(w, renderConfigWarnings(labConfigWarnings(editedConfig)))
+	fmt.Fprintf(w, `
+		<div class="job-created">
+			<h3>Job Retried: %s</h3>
+			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load, every 10s" hx-swap="innerHTML">
+				<p>Loading status...</p>
+			</div>
+		</div>`, jobID, jobID)
+}
+
+// allValuesEmpty reports whether every value in a map of form-submitted
+// credential fields is blank, used to detect an untouched (not resupplied)
+// DNS credentials block during an edited retry.
+func allValuesEmpty(m map[string]string) bool {
+	for _, v := range m {
+		if strings.TrimSpace(v) != "" {
+			return false
+		}
+	}
+	return true
+}
+
 // buildWorkspaceName creates a valid Coder workspace name from lab name, labID,
 // and template name. Coder enforces a maximum of 32 characters and the pattern
 // ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,30}[a-zA-Z0-9])?$.
