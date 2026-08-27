@@ -1052,6 +1052,22 @@ func TestEnsureWorkspace_FSGroupAndGitBranch(t *testing.T) {
 	}
 }
 
+func TestEnsureWorkspace_NodeSelector(t *testing.T) {
+	b, cs := newTestBackend()
+	ctx := context.Background()
+	ws, err := b.EnsureWorkspace(ctx, workspace.Spec{
+		LabID: "job-1", Owner: "kim", Domain: "d", Token: "t",
+		NodeSelector: map[string]string{"pool": "workspaces"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dep, _ := cs.AppsV1().Deployments("workshops").Get(ctx, ws.ID, metav1.GetOptions{})
+	if got := dep.Spec.Template.Spec.NodeSelector; got["pool"] != "workspaces" {
+		t.Errorf("expected pod nodeSelector pool=workspaces, got %+v", got)
+	}
+}
+
 func TestEnsureWorkspace_ReadinessProbeAndProgressDeadline(t *testing.T) {
 	b, cs := newTestBackend()
 	ws, err := b.EnsureWorkspace(context.Background(), workspace.Spec{LabID: "job-1", Owner: "ivy", Domain: "d", Token: "t"})

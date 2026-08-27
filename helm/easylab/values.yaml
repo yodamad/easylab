@@ -61,6 +61,12 @@ resources:
     memory: "4096Mi"
     cpu: "3000m"
 
+# Optional: pin the EasyLab server pod to specific nodes (e.g. a "control-plane"
+# node pool), separate from where student workspaces run.
+nodeSelector: {}
+
+tolerations: []
+
 securityContext:
   runAsNonRoot: true
   runAsUser: 1000

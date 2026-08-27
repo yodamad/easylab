@@ -1673,6 +1673,44 @@ function addVariableRow(row) {
     }
 }
 
+function createNodeSelectorRow(templateIdx, key, value) {
+    const div = document.createElement('div');
+    div.className = 'template-variable-row';
+    const keyInput = document.createElement('input');
+    keyInput.type = 'text';
+    keyInput.name = 'template_' + templateIdx + '_nodeselector_key';
+    keyInput.placeholder = 'Label key (e.g. pool)';
+    keyInput.value = key || '';
+
+    const valueInput = document.createElement('input');
+    valueInput.type = 'text';
+    valueInput.name = 'template_' + templateIdx + '_nodeselector_value';
+    valueInput.placeholder = 'Label value (e.g. workspaces)';
+    valueInput.value = value || '';
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn btn-secondary btn-remove-variable';
+    removeBtn.textContent = 'x';
+    removeBtn.title = 'Remove node selector';
+    removeBtn.addEventListener('click', function() {
+        div.remove();
+    });
+
+    div.appendChild(keyInput);
+    div.appendChild(valueInput);
+    div.appendChild(removeBtn);
+    return div;
+}
+
+function addNodeSelectorRow(row) {
+    const idx = parseInt(row.getAttribute('data-template-index'), 10);
+    const container = row.querySelector('.template-nodeselector-container');
+    if (container) {
+        container.appendChild(createNodeSelectorRow(idx, '', ''));
+    }
+}
+
 function makeTextInput(name, placeholder) {
     const input = document.createElement('input');
     input.type = 'text';
@@ -1942,6 +1980,14 @@ function initTemplateRowHandlers() {
             addMountBtn.replaceWith(addMountBtn.cloneNode(true));
             row.querySelector('.btn-add-mount').addEventListener('click', function() {
                 addMountRow(row);
+            });
+        }
+
+        const addNodeSelectorBtn = row.querySelector('.btn-add-nodeselector');
+        if (addNodeSelectorBtn) {
+            addNodeSelectorBtn.replaceWith(addNodeSelectorBtn.cloneNode(true));
+            row.querySelector('.btn-add-nodeselector').addEventListener('click', function() {
+                addNodeSelectorRow(row);
             });
         }
     });

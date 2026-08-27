@@ -150,6 +150,11 @@ type WorkspaceTemplate struct {
 	// devcontainer.json instead of using Image. Requires GitRepo; conflicts with
 	// Image.
 	Devcontainer *DevcontainerConfig `json:"devcontainer,omitempty"`
+	// NodeSelector constrains this template's workspace pods to nodes matching
+	// these labels (e.g. a dedicated workspace node pool, separate from where
+	// EasyLab itself runs). Only meaningful when the target cluster's nodes carry
+	// matching labels.
+	NodeSelector map[string]string `json:"node_selector,omitempty"`
 }
 
 // DevcontainerConfig builds a workspace from a devcontainer.json (image or

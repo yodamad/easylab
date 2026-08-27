@@ -1418,6 +1418,19 @@ func TestParseWorkspaceTemplatesFromForm_WithEnv(t *testing.T) {
 	assert.Equal(t, "val2", templates[0].Env["KEY2"])
 }
 
+func TestParseWorkspaceTemplatesFromForm_WithNodeSelector(t *testing.T) {
+	req := httptest.NewRequest("POST", "/", nil)
+	req.Form = map[string][]string{
+		"template_0_name":               {"tmpl"},
+		"template_0_nodeselector_key":   {"pool", "zone"},
+		"template_0_nodeselector_value": {"workspaces", "eu-west"},
+	}
+	templates := parseWorkspaceTemplatesFromForm(req)
+	assert.Len(t, templates, 1)
+	assert.Equal(t, "workspaces", templates[0].NodeSelector["pool"])
+	assert.Equal(t, "eu-west", templates[0].NodeSelector["zone"])
+}
+
 func TestParseWorkspaceTemplatesFromForm_GitAuthSecret(t *testing.T) {
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Form = map[string][]string{

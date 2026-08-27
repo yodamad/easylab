@@ -104,6 +104,8 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 | `resources.requests.cpu` | CPU request | `500m` |
 | `resources.limits.memory` | Memory limit | `4096Mi` |
 | `resources.limits.cpu` | CPU limit | `3000m` |
+| `nodeSelector` | Pin the EasyLab server pod to nodes matching these labels (e.g. a dedicated node pool) | `{}` |
+| `tolerations` | Tolerations for the EasyLab server pod, needed if its target node pool is tainted | `[]` |
 
 !!! warning "Set an explicit data encryption key for persistent deployments"
     Because `config.dataDir` is set by default, persisted job files hold cluster kubeconfigs and DNS credentials. Provide a `LAB_DATA_ENCRYPTION_KEY` environment variable (a base64-encoded 32-byte key, e.g. from `openssl rand -base64 32`) through your secret / pod environment and keep it stable across upgrades, or previously-encrypted kubeconfigs become unreadable and the affected labs must be recreated. If `LAB_DATA_ENCRYPTION_KEY` is not set, the server auto-generates one and saves it to `<dataDir>/.encryption_key` so it still starts — but on Kubernetes this file only survives pod restarts if `dataDir` is backed by a persistent volume; without one, a new pod means a new key and unreadable existing job data. Explicitly setting the key via a Secret is strongly recommended for any real deployment. Setting a strong `PULUMI_CONFIG_PASSPHRASE` is likewise recommended (see [Docker — Environment Variables](docker.md#environment-variables) for details on both). Provider API credentials are held in memory only and are never written to lab state.
@@ -244,6 +246,28 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
   --set secrets.ovh.applicationSecret="your-secret" \
   --set secrets.ovh.consumerKey="your-consumer-key" \
   --set secrets.ovh.serviceName="your-service-name"
+```
+
+### Pinning to a dedicated node pool
+
+To keep the EasyLab server off the node pool student workspaces run on (see
+[Splitting EasyLab and workspaces across node pools](admin.md#splitting-easylab-and-workspaces-across-node-pools)),
+label a "control-plane" pool and target it:
+
+```bash
+helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
+  --version __VERSION__ \
+  --set secrets.adminPassword="SuperAdmin" \
+  --set nodeSelector.pool="control-plane"
+```
+
+If that pool is also tainted, add a matching toleration:
+
+```bash
+  --set tolerations[0].key="dedicated" \
+  --set tolerations[0].operator="Equal" \
+  --set tolerations[0].value="easylab" \
+  --set tolerations[0].effect="NoSchedule"
 ```
 
 ### Using a custom values file

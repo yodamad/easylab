@@ -57,10 +57,32 @@ When you choose **Use Existing Cluster**, EasyLab skips cloud provider provision
 **What is skipped:**
 
 * No cloud provider credentials required
-* No network, cluster, or node pool configuration
+* No cluster provisioning — EasyLab does not create or manage node pools; it only
+  schedules onto whatever nodes the cluster already has (optionally constrained per
+  template, see below)
 * The wizard goes directly to workspace and template configuration
 
 The kubeconfig must have sufficient permissions to create namespaces, Deployments, Services, Ingresses and PersistentVolumeClaims, and (when a domain is set) to install the ingress-nginx and cert-manager Helm releases.
+
+#### Splitting EasyLab and workspaces across node pools
+
+If your existing cluster has more than one node pool, you can run the EasyLab
+server on one and student workspaces on another:
+
+1. **Label each pool** so pods can target it (e.g. `pool=control-plane` and
+   `pool=workspaces`) — how you do this depends on where the cluster runs (for an
+   OVHcloud Managed Kubernetes cluster, set it on the node pool itself; for any
+   cluster you can also label nodes directly with `kubectl label nodes <node>
+   pool=workspaces`).
+2. **Pin the EasyLab server** by setting `nodeSelector` (and `tolerations`, if the
+   pool is tainted) in the Helm chart's values — see
+   [Helm Chart Deployment](helm.md#key-values).
+3. **Pin student workspaces** by setting the **Node Selector** field on each
+   workspace template (under **Advanced options**, see above) to match the
+   workspace pool's label, e.g. key `pool`, value `workspaces`.
+
+Workspace pods only support `nodeSelector` (label matching), not tolerations, so
+the workspace pool should be labeled rather than tainted.
 
 ### On OVHcloud (Create New Infrastructure)
 
@@ -128,6 +150,7 @@ Under **Advanced options** (all optional):
 * **Environment Variables** — passed to the workspace container.
 * **Sidecars** — extra containers in the workspace pod (name / image / ports / env), reachable from the IDE at `localhost:<port>` — e.g. a `postgres:16` database. Each sidecar can also be marked **privileged** and given extra **capabilities** (e.g. `SYS_ADMIN`) — needed to run **docker-in-docker** (see below).
 * **Mounts** — mount an existing **ConfigMap** or **Secret** into the workspace container. The referenced object **must already exist** in the workspace namespace, or the pod won't start.
+* **Node Selector** (optional, [Use Existing Cluster](#use-existing-cluster) only) — pin this template's workspace pods to nodes carrying specific labels, e.g. a dedicated `pool: workspaces` node pool. Useful when you want student workspaces scheduled onto different nodes than the EasyLab server itself — see [Splitting EasyLab and workspaces across node pools](#splitting-easylab-and-workspaces-across-node-pools).
 
 If no template is defined, a `default` code-server workspace is used.
 Students can request **one workspace per template** within a lab, so multiple

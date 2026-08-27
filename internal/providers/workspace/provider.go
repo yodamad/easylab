@@ -180,6 +180,10 @@ type Spec struct {
 	WildcardTLSSecret string // pre-provisioned wildcard TLS secret; when empty a per-host cert is requested
 	ClusterIssuer     string // cert-manager ClusterIssuer used for per-host certs
 	Token             string // IDE access secret (connection token / password)
+
+	// NodeSelector constrains this workspace's pod to nodes matching these labels
+	// (e.g. a dedicated workspace node pool, separate from where EasyLab itself runs).
+	NodeSelector map[string]string
 }
 
 // Backend manages the lifecycle of student workspaces on a single cluster.

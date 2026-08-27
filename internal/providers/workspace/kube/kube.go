@@ -585,6 +585,7 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 					InitContainers:   initContainers,
 					Containers:       containers,
 					Volumes:          volumes,
+					NodeSelector:     spec.NodeSelector,
 				},
 			},
 		},

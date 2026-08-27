@@ -43,6 +43,8 @@ workspace_templates:
     #   - ms-python.python
     # env:                                       # passed to the workspace container
     #   FOO: bar
+    # node_selector:                             # pins workspace pods to nodes with these labels
+    #   pool: workspaces
     # sidecars:                                  # extra containers, reachable at localhost:<port>
     #   - name: db
     #     image: postgres:16

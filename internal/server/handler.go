@@ -343,8 +343,8 @@ func (h *Handler) rehydrateProviderCredentials(config *LabConfig) error {
 // parseWorkspaceTemplatesFromForm extracts workspace template entries from the form.
 // Expects template_N_name, template_N_image, template_N_git_repo, template_N_cpu,
 // template_N_memory, template_N_cpu_limit, template_N_memory_limit,
-// template_N_disk_size, and repeated template_N_env_name / template_N_env_value
-// pairs.
+// template_N_disk_size, repeated template_N_env_name / template_N_env_value pairs,
+// and repeated template_N_nodeselector_key / template_N_nodeselector_value pairs.
 func parseWorkspaceTemplatesFromForm(r *http.Request) []WorkspaceTemplate {
 	var templates []WorkspaceTemplate
 	for i := 0; ; i++ {
@@ -385,6 +385,23 @@ func parseWorkspaceTemplatesFromForm(r *http.Request) []WorkspaceTemplate {
 					ev = envValues[j]
 				}
 				t.Env[en] = ev
+			}
+		}
+
+		nsKeys := r.Form[fmt.Sprintf("template_%d_nodeselector_key", i)]
+		nsValues := r.Form[fmt.Sprintf("template_%d_nodeselector_value", i)]
+		if len(nsKeys) > 0 {
+			t.NodeSelector = make(map[string]string)
+			for j, nk := range nsKeys {
+				nk = strings.TrimSpace(nk)
+				if nk == "" {
+					continue
+				}
+				nv := ""
+				if j < len(nsValues) {
+					nv = nsValues[j]
+				}
+				t.NodeSelector[nk] = nv
 			}
 		}
 
@@ -1833,6 +1850,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		MemoryLimit:      selected.MemoryLimit,
 		DiskSize:         diskSize,
 		Env:              selected.Env,
+		NodeSelector:     selected.NodeSelector,
 		StartupScript:    selected.StartupScript,
 		DotfilesRepo:     selected.DotfilesRepo,
 		Extensions:       selected.Extensions,
