@@ -28,6 +28,10 @@ As an admin (trainer, speaker, ...), you have access to the admin space to manag
 
 Every admin page shows the EasyLab copyright and version in the sidebar footer. The version reflects the latest Git tag the binary was built from (`dev` for local/untagged builds).
 
+## Login
+
+Admin login uses the password set via `LAB_ADMIN_PASSWORD` (or Azure AD, if configured — see [Azure AD authentication](azure-ad.md)). After 5 failed password attempts, further attempts from the same client are locked out for 15 minutes as a brute-force protection.
+
 ## Create a new lab
 
 ![Steps](screens/steps.png)

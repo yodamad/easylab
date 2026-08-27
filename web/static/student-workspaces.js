@@ -85,8 +85,13 @@ function renderWorkspaceCard(info, labId) {
     const createdAt = formatWorkspaceDate(info.created_at) || new Date(info.created_at).toLocaleString();
     const deletionAt = formatWorkspaceDate(info.deletion_at);
     const isEncrypted = info.encrypted_password && !info.password;
-    const safeLab = escapeHtml(labId);
+    // safeLab is embedded inside single-quoted onclick="fn('...')" handlers
+    // below, so it needs quote-safe escaping, not just HTML-text escaping.
+    const safeLab = escapeHtmlAttr(labId);
     const safeUrl = escapeHtml(info.workspace_url);
+    // Only render as a clickable link when the scheme is http(s) — otherwise
+    // (e.g. a javascript: URL) show it as inert text instead of a link.
+    const workspaceLinkHref = /^https?:\/\//i.test(info.workspace_url || '') ? escapeHtmlAttr(info.workspace_url) : null;
     const safeEmail = escapeHtml(info.email);
     const safeName = escapeHtml(info.workspace_name);
     const labDisplay = escapeHtml(_labNames[info.lab_id] || info.lab_name || info.lab_id || '');
@@ -117,7 +122,7 @@ function renderWorkspaceCard(info, labId) {
                     <div class="workspace-card-subtitle">${labChip}${templateChip}</div>
                 </div>
                 <div class="workspace-card-header-actions">
-                    <button onclick="event.stopPropagation(); openCodeServer('${escapeHtml(info.lab_id)}', '${escapeHtml(info.workspace_name)}', '${escapeHtml(ownerID)}')" class="student-btn student-btn-small workspace-card-open" title="Open code-server">Open Code Server</button>
+                    <button onclick="event.stopPropagation(); openCodeServer('${escapeHtmlAttr(info.lab_id)}', '${escapeHtmlAttr(info.workspace_name)}', '${escapeHtmlAttr(ownerID)}')" class="student-btn student-btn-small workspace-card-open" title="Open code-server">Open Code Server</button>
                     <button class="collapsible-toggle" type="button" aria-label="Toggle workspace details" aria-expanded="false">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="chevron-icon">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
@@ -132,7 +137,9 @@ function renderWorkspaceCard(info, labId) {
                         <div class="student-credential-item">
                             <label>Workspace URL:</label>
                             <div class="student-credential-item-value credential-with-copy">
-                                <a href="${info.workspace_url}" target="_blank">${safeUrl}</a>
+                                ${workspaceLinkHref
+                                    ? `<a href="${workspaceLinkHref}" target="_blank" rel="noopener noreferrer">${safeUrl}</a>`
+                                    : `<span>${safeUrl}</span>`}
                                 <button class="copy-btn" data-copy-text="${safeUrl}" title="Copy URL">${copyIconSvg}</button>
                             </div>
                         </div>

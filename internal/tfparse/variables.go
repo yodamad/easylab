@@ -14,6 +14,15 @@ import (
 	"github.com/zclconf/go-cty/cty"
 )
 
+const (
+	// maxTFFileSize caps how much decompressed data is read from a single .tf
+	// entry in an uploaded zip — legitimate Terraform variable files are tiny.
+	maxTFFileSize = 5 << 20 // 5MB
+	// maxTFZipTotalSize caps the sum of decompressed bytes read across all
+	// entries in one zip, to bound memory use against a zip-bomb upload.
+	maxTFZipTotalSize = 50 << 20 // 50MB
+)
+
 // TFVariable represents a Terraform variable block extracted from .tf files.
 type TFVariable struct {
 	Name        string `json:"name"`
@@ -44,6 +53,7 @@ func ParseVariablesFromZip(zipPath string) ([]TFVariable, error) {
 
 	seen := make(map[string]TFVariable)
 	var order []string
+	var totalRead int64
 
 	for _, f := range r.File {
 		if f.FileInfo().IsDir() || !strings.HasSuffix(strings.ToLower(f.Name), ".tf") {
@@ -55,10 +65,20 @@ func ParseVariablesFromZip(zipPath string) ([]TFVariable, error) {
 			return nil, fmt.Errorf("failed to open %s in zip: %w", f.Name, err)
 		}
 
-		content, err := io.ReadAll(rc)
+		// Bound decompressed size per entry, and cumulatively across the whole
+		// zip, so a crafted archive can't exhaust memory (zip bomb).
+		limited := io.LimitReader(rc, maxTFFileSize+1)
+		content, err := io.ReadAll(limited)
 		rc.Close()
 		if err != nil {
 			return nil, fmt.Errorf("failed to read %s in zip: %w", f.Name, err)
+		}
+		if int64(len(content)) > maxTFFileSize {
+			return nil, fmt.Errorf("%s exceeds the maximum allowed size of %d bytes", f.Name, maxTFFileSize)
+		}
+		totalRead += int64(len(content))
+		if totalRead > maxTFZipTotalSize {
+			return nil, fmt.Errorf("zip contents exceed the maximum allowed total size of %d bytes", maxTFZipTotalSize)
 		}
 
 		vars, err := ParseVariablesFromBytes(content, f.Name)

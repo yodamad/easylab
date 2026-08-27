@@ -51,6 +51,7 @@ The application can be configured using the following environment variables:
 
 - `LAB_ADMIN_PASSWORD`: Admin password for the web interface (default: "admin123")
 - `LAB_STUDENT_PASSWORD`: Student password for the web interface (default: "student123")
+- `TRUST_FORWARDED_PROTO`: Whether the `X-Forwarded-Proto` header from an incoming request is trusted to mark the session cookie `Secure` (default: `true`). Leave this at its default when the app sits behind a reverse proxy that sets/overwrites this header. Set to `false` if the app is ever reachable in a way where a client-supplied `X-Forwarded-Proto` header would reach the app unstripped — otherwise a client could suppress the cookie's `Secure` flag.
 - `PORT`: Port to run the application on (default: 8080)
 - `WORK_DIR`: Directory for job workspaces (default: /app/jobs)
 - `DATA_DIR`: Directory for persisting job data (default: /app/data)

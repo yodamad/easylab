@@ -214,7 +214,7 @@ func TestChaos_AuthHandler_ConcurrentSessions(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			token := ah.createSession()
+			token, _ := ah.createSession()
 			tokens.Store(token, true)
 		}()
 	}
@@ -788,7 +788,7 @@ func TestChaos_Recovery_SessionAfterExpiry(t *testing.T) {
 	}
 
 	// Create new session should work
-	newToken := ah.createSession()
+	newToken, _ := ah.createSession()
 	if !ah.validateSession(newToken) {
 		t.Error("New session not valid")
 	}

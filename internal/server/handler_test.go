@@ -465,6 +465,57 @@ func TestHandler_ListLabs(t *testing.T) {
 	}
 }
 
+// TestHandler_ListLabs_RedactsSecrets is a regression test for a bug where
+// ListLabs (served to any authenticated student) returned raw job objects
+// carrying cluster-admin kubeconfigs and cloud provider credentials. It must
+// redact the same fields GetJobStatusJSON already redacts via sanitizedCopy.
+func TestHandler_ListLabs_RedactsSecrets(t *testing.T) {
+	jm := NewJobManager("")
+
+	config := &LabConfig{
+		StackName:            "secret-test",
+		OvhApplicationKey:    "ovh-app-key-should-not-leak",
+		OvhApplicationSecret: "ovh-app-secret-should-not-leak",
+		OvhConsumerKey:       "ovh-consumer-key-should-not-leak",
+		AzureClientID:        "azure-client-id-should-not-leak",
+		AzureClientSecret:    "azure-client-secret-should-not-leak",
+		AzureTenantID:        "azure-tenant-id-should-not-leak",
+		ExternalKubeconfig:   "external-kubeconfig-should-not-leak",
+	}
+	jobID := jm.CreateJob(config)
+	if err := jm.SetKubeconfig(jobID, "cluster-admin-kubeconfig-should-not-leak"); err != nil {
+		t.Fatalf("SetKubeconfig() error = %v", err)
+	}
+	jm.UpdateJobStatus(jobID, JobStatusCompleted)
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	req := httptest.NewRequest("GET", "/api/labs", nil)
+	w := httptest.NewRecorder()
+	h.ListLabs(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListLabs() status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	body := w.Body.String()
+	secrets := []string{
+		"cluster-admin-kubeconfig-should-not-leak",
+		"ovh-app-key-should-not-leak",
+		"ovh-app-secret-should-not-leak",
+		"ovh-consumer-key-should-not-leak",
+		"azure-client-id-should-not-leak",
+		"azure-client-secret-should-not-leak",
+		"azure-tenant-id-should-not-leak",
+		"external-kubeconfig-should-not-leak",
+	}
+	for _, secret := range secrets {
+		if strings.Contains(body, secret) {
+			t.Errorf("ListLabs() response leaked secret %q: %s", secret, body)
+		}
+	}
+}
+
 func TestHandler_RequestWorkspace_WrongMethod(t *testing.T) {
 	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
 
@@ -757,6 +808,41 @@ func TestValidateURL(t *testing.T) {
 			t.Parallel()
 			if got := validateURL(tt.url); got != tt.want {
 				t.Errorf("validateURL(%q) = %v, want %v", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestValidateServerFetchURL covers the SSRF-hardened validator used only for
+// URLs the EasyLab server itself fetches (detectVariablesFromGit). Test cases
+// use literal IP addresses throughout so validation doesn't depend on real
+// DNS resolution being available in the test environment.
+func TestValidateServerFetchURL(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{"valid https public IP", "https://8.8.8.8/repo.git", true},
+		{"valid http public IP", "http://1.1.1.1/repo.git", true},
+		{"empty", "", false},
+		{"no scheme", "8.8.8.8/repo.git", false},
+		{"disallowed scheme ftp", "ftp://8.8.8.8/repo.git", false},
+		{"disallowed scheme file", "file:///etc/passwd", false},
+		{"loopback", "http://127.0.0.1/", false},
+		{"loopback localhost-style IP", "http://127.0.0.1:8080/", false},
+		{"link-local cloud metadata", "http://169.254.169.254/latest/meta-data/", false},
+		{"private 10.x", "http://10.0.0.5/", false},
+		{"private 192.168.x", "http://192.168.1.1/", false},
+		{"private 172.16.x", "http://172.16.0.1/", false},
+		{"unspecified", "http://0.0.0.0/", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := validateServerFetchURL(tt.url); got != tt.want {
+				t.Errorf("validateServerFetchURL(%q) = %v, want %v", tt.url, got, tt.want)
 			}
 		})
 	}

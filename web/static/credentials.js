@@ -1,3 +1,12 @@
+// Escapes text for safe interpolation into innerHTML (server-echoed credential
+// fields like service_name/tenant_id are attacker-controllable if an admin
+// account is compromised, so they must never reach innerHTML raw).
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
 // Provider configuration - extensible for future providers
 const providerConfig = {
     ovh: {
@@ -78,18 +87,18 @@ function checkCredentials(provider) {
                 let statusHTML = `
                     <div class="success-message">
                         <h4>✅ Credentials Configured</h4>
-                        <p>${providerConfig[provider]?.name || provider} credentials are stored in memory and ready to use.</p>
+                        <p>${escapeHtml(providerConfig[provider]?.name || provider)} credentials are stored in memory and ready to use.</p>
                         <ul>`;
-                
+
                 // Display provider-specific status fields
                 const fields = providerConfig[provider]?.statusFields || [];
                 fields.forEach(field => {
                     if (data[field]) {
                         const label = field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-                        statusHTML += `<li>${label}: <strong>${data[field]}</strong></li>`;
+                        statusHTML += `<li>${escapeHtml(label)}: <strong>${escapeHtml(data[field])}</strong></li>`;
                     }
                 });
-                
+
                 statusHTML += `
                         </ul>
                         <p><small>Note: Credentials are stored in memory only and will be cleared on application restart.</small></p>
@@ -99,7 +108,7 @@ function checkCredentials(provider) {
                 statusContent.innerHTML = `
                     <div class="error-message">
                         <h4>⚠️ No Credentials Configured</h4>
-                        <p>Please configure your ${providerConfig[provider]?.name || provider} credentials above before creating labs.</p>
+                        <p>Please configure your ${escapeHtml(providerConfig[provider]?.name || provider)} credentials above before creating labs.</p>
                     </div>
                 `;
             }
@@ -108,7 +117,7 @@ function checkCredentials(provider) {
             statusContent.innerHTML = `
                 <div class="error-message">
                     <h4>❌ Error</h4>
-                    <p>${error.message}</p>
+                    <p>${escapeHtml(error.message)}</p>
                 </div>
             `;
         });
@@ -155,11 +164,11 @@ function loadCurrentCredentials(provider) {
                         <p>Credentials are currently configured. Fill in the fields below to update them.</p>`;
 
                     if (provider === 'ovh') {
-                        infoHTML += `<p><strong>Service Name:</strong> ${data.service_name || 'N/A'}</p>
-                            <p><strong>Endpoint:</strong> ${data.endpoint || 'N/A'}</p>`;
+                        infoHTML += `<p><strong>Service Name:</strong> ${escapeHtml(data.service_name || 'N/A')}</p>
+                            <p><strong>Endpoint:</strong> ${escapeHtml(data.endpoint || 'N/A')}</p>`;
                     } else if (provider === 'azure') {
-                        infoHTML += `<p><strong>Subscription ID:</strong> ${data.subscription_id || 'N/A'}</p>
-                            <p><strong>Tenant ID:</strong> ${data.tenant_id || 'N/A'}</p>`;
+                        infoHTML += `<p><strong>Subscription ID:</strong> ${escapeHtml(data.subscription_id || 'N/A')}</p>
+                            <p><strong>Tenant ID:</strong> ${escapeHtml(data.tenant_id || 'N/A')}</p>`;
                     }
 
                     existingInfo.innerHTML = infoHTML;

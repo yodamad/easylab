@@ -19,6 +19,8 @@ To access the student portal, you must log in with:
 
 Your email is validated on submission and stored in your session. It will be pre-filled automatically on all subsequent pages so you don't need to enter it again.
 
+After 5 failed password attempts, further attempts are locked out for 15 minutes as a brute-force protection. If you're locked out, wait 15 minutes and try again, or use Azure AD login if your workshop offers it.
+
 ![Student Login](screens/student-login.png){width=45%}
 
 ### Azure AD login (optional)

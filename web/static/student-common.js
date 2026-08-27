@@ -45,6 +45,14 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// escapeHtml() doesn't escape single quotes, which is fine for element text
+// content but unsafe when the result is embedded inside a single-quoted JS
+// string literal in an inline attribute, e.g. onclick="fn('${...}')" — use
+// this instead at those specific call sites.
+function escapeHtmlAttr(text) {
+    return escapeHtml(text).replace(/'/g, '&#39;');
+}
+
 // The inline clipboard glyph shared by every copy button.
 const copyIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="copy-icon">
     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />

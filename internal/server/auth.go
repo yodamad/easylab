@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"io"
 	"log"
 	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -32,16 +34,33 @@ const (
 	EnvAzureADClientID     = "AZURE_AD_CLIENT_ID"
 	EnvAzureADClientSecret = "AZURE_AD_CLIENT_SECRET"
 	EnvAzureADTenantID     = "AZURE_AD_TENANT_ID"
+	// EnvTrustForwardedProto controls whether the X-Forwarded-Proto header from
+	// the client is trusted to mark the session cookie Secure. Defaults to true
+	// (preserving prior behavior for deployments behind a reverse proxy that
+	// sets this header). Set to "false" only when the app is exposed in a way
+	// where a client-supplied X-Forwarded-Proto header would not be stripped by
+	// a trusted proxy first — see docs/docker.md / docs/helm.md.
+	EnvTrustForwardedProto = "TRUST_FORWARDED_PROTO"
 	// EnvAzureADAdminGroupID restricts admin Azure AD login to direct members of this group.
 	EnvAzureADAdminGroupID = "AZURE_AD_ADMIN_GROUP_ID"
 	// Cookie name for session
 	SessionCookieName = "lab_session"
 	// Cookie name for student session
 	StudentSessionCookieName = "lab_student_session"
+	// Cookie names for the CSRF tokens paired with each session above. Not
+	// HttpOnly — client JS must be able to read them to attach an
+	// X-CSRF-Token header / hidden form field on state-changing requests.
+	CSRFCookieName        = "csrf_token"
+	StudentCSRFCookieName = "student_csrf_token"
 	// Session expiry duration
 	SessionExpiry = 24 * time.Hour
 	// OAuth state expiry (short-lived, only valid during the redirect round-trip)
 	azureOAuthStateExpiry = 5 * time.Minute
+	// Login lockout: after this many failed attempts from one client within the
+	// window below, further attempts are rejected until lockoutDuration passes.
+	maxLoginAttempts   = 5
+	loginAttemptWindow = 15 * time.Minute
+	lockoutDuration    = 15 * time.Minute
 )
 
 // contextKey is a type for context keys in this package
@@ -55,6 +74,19 @@ type Session struct {
 	Token     string
 	Email     string
 	ExpiresAt time.Time
+	// CSRFToken is the synchronizer token issued alongside this session (also
+	// mirrored into a non-HttpOnly cookie so client JS can read it). Requests
+	// using state-changing methods must present it back via X-CSRF-Token or a
+	// csrf_token form field, validated against this value.
+	CSRFToken string
+}
+
+// loginAttemptState tracks failed login attempts from one client (keyed by
+// remote IP) to enforce a lockout after repeated failures.
+type loginAttemptState struct {
+	count       int
+	windowStart time.Time
+	lockedUntil time.Time
 }
 
 // AuthHandler handles authentication
@@ -72,6 +104,11 @@ type AuthHandler struct {
 	templates                 map[string]*template.Template
 	templatesMu               sync.RWMutex
 	mu                        sync.RWMutex
+	// loginAttempts is intentionally guarded by its own mutex, separate from mu:
+	// it's touched on every login POST (a hot path) and shouldn't contend with
+	// session/config reads elsewhere.
+	loginAttempts   map[string]*loginAttemptState
+	loginAttemptsMu sync.Mutex
 }
 
 // hashPassword creates a bcrypt hash of the password
@@ -153,6 +190,7 @@ func NewAuthHandler() (*AuthHandler, error) {
 		azureOAuthStates:    make(map[string]time.Time),
 		adminGroupID:        adminGroupID,
 		templates:           make(map[string]*template.Template),
+		loginAttempts:       make(map[string]*loginAttemptState),
 	}
 
 	// Periodically evict expired sessions and OAuth states so the maps don't grow unboundedly.
@@ -178,10 +216,86 @@ func NewAuthHandler() (*AuthHandler, error) {
 				}
 			}
 			ah.mu.Unlock()
+
+			ah.loginAttemptsMu.Lock()
+			for key, st := range ah.loginAttempts {
+				if now.After(st.lockedUntil) && now.After(st.windowStart.Add(loginAttemptWindow)) {
+					delete(ah.loginAttempts, key)
+				}
+			}
+			ah.loginAttemptsMu.Unlock()
 		}
 	}()
 
 	return ah, nil
+}
+
+// isSecureRequest reports whether a request should be treated as HTTPS for
+// the purpose of the session cookie's Secure flag: true TLS termination at
+// this process, or (when TRUST_FORWARDED_PROTO is not explicitly set to
+// "false") an X-Forwarded-Proto: https header from a reverse proxy.
+func isSecureRequest(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if os.Getenv(EnvTrustForwardedProto) == "false" {
+		return false
+	}
+	return r.Header.Get("X-Forwarded-Proto") == "https"
+}
+
+// clientKey derives the rate-limiting key for a request: the remote IP with
+// any port stripped, so multiple connections from the same client share one
+// counter.
+func clientKey(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// checkLoginLockout reports whether the given client is currently locked out
+// from further login attempts.
+func (ah *AuthHandler) checkLoginLockout(key string) bool {
+	ah.loginAttemptsMu.Lock()
+	defer ah.loginAttemptsMu.Unlock()
+
+	st, exists := ah.loginAttempts[key]
+	if !exists {
+		return false
+	}
+	return time.Now().Before(st.lockedUntil)
+}
+
+// recordLoginFailure increments the failure counter for a client and locks it
+// out once maxLoginAttempts is reached within loginAttemptWindow.
+func (ah *AuthHandler) recordLoginFailure(key string) {
+	ah.loginAttemptsMu.Lock()
+	defer ah.loginAttemptsMu.Unlock()
+
+	if ah.loginAttempts == nil {
+		ah.loginAttempts = make(map[string]*loginAttemptState)
+	}
+
+	now := time.Now()
+	st, exists := ah.loginAttempts[key]
+	if !exists || now.After(st.windowStart.Add(loginAttemptWindow)) {
+		st = &loginAttemptState{windowStart: now}
+		ah.loginAttempts[key] = st
+	}
+	st.count++
+	if st.count >= maxLoginAttempts {
+		st.lockedUntil = now.Add(lockoutDuration)
+	}
+}
+
+// recordLoginSuccess clears any failure counter for a client after a
+// successful login.
+func (ah *AuthHandler) recordLoginSuccess(key string) {
+	ah.loginAttemptsMu.Lock()
+	defer ah.loginAttemptsMu.Unlock()
+	delete(ah.loginAttempts, key)
 }
 
 // ConfigureAzureAD updates the Azure AD OAuth config at runtime. Passing empty strings disables it.
@@ -248,6 +362,32 @@ func (ah *AuthHandler) SetClassicAdminLoginDisabled(disabled bool) {
 	ah.classicAdminLoginDisabled = disabled
 }
 
+// csrfCookie builds the (non-HttpOnly, so JS can read it) cookie carrying a
+// session's paired CSRF token, matching the Secure/SameSite flags used for
+// the session cookie it accompanies.
+func csrfCookie(name, value string, isSecure bool, sameSite http.SameSite) *http.Cookie {
+	return &http.Cookie{
+		Name:     name,
+		Value:    value,
+		Path:     "/",
+		HttpOnly: false,
+		Secure:   isSecure,
+		SameSite: sameSite,
+		MaxAge:   int(SessionExpiry.Seconds()),
+	}
+}
+
+// clearedCSRFCookie builds an expired cookie that clears a CSRF cookie on logout.
+func clearedCSRFCookie(name string) *http.Cookie {
+	return &http.Cookie{
+		Name:     name,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: false,
+		MaxAge:   -1,
+	}
+}
+
 // generateToken creates a secure random token
 func generateToken() string {
 	bytes := make([]byte, 32)
@@ -257,18 +397,31 @@ func generateToken() string {
 	return hex.EncodeToString(bytes)
 }
 
-// createSession creates a new session and returns the token
-func (ah *AuthHandler) createSession() string {
+// createSession creates a new session and returns its token and paired CSRF token
+func (ah *AuthHandler) createSession() (string, string) {
 	ah.mu.Lock()
 	defer ah.mu.Unlock()
 
 	token := generateToken()
+	csrfToken := generateToken()
 	ah.sessions[token] = &Session{
 		Token:     token,
 		ExpiresAt: time.Now().Add(SessionExpiry),
+		CSRFToken: csrfToken,
 	}
 
-	return token
+	return token, csrfToken
+}
+
+// sessionCSRFToken returns the CSRF token paired with an admin session, or ""
+// if the session doesn't exist.
+func (ah *AuthHandler) sessionCSRFToken(token string) string {
+	ah.mu.RLock()
+	defer ah.mu.RUnlock()
+	if s, ok := ah.sessions[token]; ok {
+		return s.CSRFToken
+	}
+	return ""
 }
 
 // validateSession checks if a session token is valid
@@ -396,6 +549,13 @@ func (ah *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	loginKey := clientKey(r)
+	if ah.checkLoginLockout(loginKey) {
+		log.Printf("Login attempt rejected: client locked out after repeated failures")
+		http.Redirect(w, r, "/login?error=Too+many+failed+attempts%2C+please+try+again+later", http.StatusSeeOther)
+		return
+	}
+
 	if err := r.ParseForm(); err != nil {
 		http.Redirect(w, r, "/login?error=Invalid+request", http.StatusSeeOther)
 		return
@@ -405,6 +565,7 @@ func (ah *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	passwordHash := getFormValue(r, "password_hash")
 	if passwordHash == "" {
 		log.Printf("Failed login attempt: empty password hash")
+		ah.recordLoginFailure(loginKey)
 		http.Redirect(w, r, "/login?error=Invalid+password", http.StatusSeeOther)
 		return
 	}
@@ -412,15 +573,17 @@ func (ah *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	// Compare received SHA-256 hash with stored bcrypt(SHA-256(password)) hash
 	if !comparePassword(ah.passwordHash, passwordHash) {
 		log.Printf("Failed login attempt")
+		ah.recordLoginFailure(loginKey)
 		http.Redirect(w, r, "/login?error=Invalid+password", http.StatusSeeOther)
 		return
 	}
+	ah.recordLoginSuccess(loginKey)
 
 	// Create session
-	token := ah.createSession()
+	token, csrfToken := ah.createSession()
 
 	// Determine if HTTPS is being used
-	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	isSecure := isSecureRequest(r)
 
 	// Set cookie
 	http.SetCookie(w, &http.Cookie{
@@ -432,6 +595,7 @@ func (ah *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(SessionExpiry.Seconds()),
 	})
+	http.SetCookie(w, csrfCookie(CSRFCookieName, csrfToken, isSecure, http.SameSiteStrictMode))
 
 	log.Printf("Successful login")
 	http.Redirect(w, r, "/labs", http.StatusSeeOther)
@@ -443,7 +607,7 @@ func (ah *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		ah.deleteSession(cookie.Value)
 	}
 
-	// Clear cookie
+	// Clear cookies
 	http.SetCookie(w, &http.Cookie{
 		Name:     SessionCookieName,
 		Value:    "",
@@ -451,6 +615,7 @@ func (ah *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		MaxAge:   -1,
 	})
+	http.SetCookie(w, clearedCSRFCookie(CSRFCookieName))
 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
@@ -463,23 +628,70 @@ func (ah *AuthHandler) RequireAuth(next http.HandlerFunc) http.HandlerFunc {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
+		if !csrfSafeMethod(r.Method) && !validCSRF(ah.sessionCSRFToken(cookie.Value), requestCSRFToken(r)) {
+			http.Error(w, "Invalid or missing CSRF token", http.StatusForbidden)
+			return
+		}
 		next(w, r)
 	}
 }
 
-// createStudentSession creates a new student session and returns the token
-func (ah *AuthHandler) createStudentSession(email string) string {
+// csrfSafeMethod reports whether a request method has no side effects and is
+// therefore exempt from CSRF token validation.
+func csrfSafeMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
+		return true
+	default:
+		return false
+	}
+}
+
+// requestCSRFToken extracts the CSRF token a client presented back: the
+// X-CSRF-Token header (used by the shared csrf.js for HTMX/fetch requests)
+// or, for plain form posts, the csrf_token form field.
+func requestCSRFToken(r *http.Request) string {
+	if t := r.Header.Get("X-CSRF-Token"); t != "" {
+		return t
+	}
+	return r.FormValue("csrf_token")
+}
+
+// validCSRF compares a session's stored CSRF token against what the client
+// presented, in constant time.
+func validCSRF(expected, got string) bool {
+	if expected == "" || got == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(expected), []byte(got)) == 1
+}
+
+// createStudentSession creates a new student session and returns its token and paired CSRF token
+func (ah *AuthHandler) createStudentSession(email string) (string, string) {
 	ah.mu.Lock()
 	defer ah.mu.Unlock()
 
 	token := generateToken()
+	csrfToken := generateToken()
 	ah.studentSessions[token] = &Session{
 		Token:     token,
 		Email:     email,
 		ExpiresAt: time.Now().Add(SessionExpiry),
+		CSRFToken: csrfToken,
 	}
 
-	return token
+	return token, csrfToken
+}
+
+// studentSessionCSRFToken returns the CSRF token paired with a student
+// session, or "" if the session doesn't exist.
+func (ah *AuthHandler) studentSessionCSRFToken(token string) string {
+	ah.mu.RLock()
+	defer ah.mu.RUnlock()
+	if s, ok := ah.studentSessions[token]; ok {
+		return s.CSRFToken
+	}
+	return ""
 }
 
 // getStudentSessionEmail returns the email associated with a student session token
@@ -588,6 +800,13 @@ func (ah *AuthHandler) HandleStudentLogin(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	loginKey := clientKey(r)
+	if ah.checkLoginLockout(loginKey) {
+		log.Printf("Student login attempt rejected: client locked out after repeated failures")
+		http.Redirect(w, r, "/student/login?error=Too+many+failed+attempts%2C+please+try+again+later", http.StatusSeeOther)
+		return
+	}
+
 	if err := r.ParseForm(); err != nil {
 		http.Redirect(w, r, "/student/login?error=Invalid+request", http.StatusSeeOther)
 		return
@@ -597,6 +816,7 @@ func (ah *AuthHandler) HandleStudentLogin(w http.ResponseWriter, r *http.Request
 	passwordHash := getFormValue(r, "password_hash")
 	if passwordHash == "" {
 		log.Printf("Failed student login attempt: empty password hash")
+		ah.recordLoginFailure(loginKey)
 		http.Redirect(w, r, "/student/login?error=Invalid+password", http.StatusSeeOther)
 		return
 	}
@@ -604,6 +824,7 @@ func (ah *AuthHandler) HandleStudentLogin(w http.ResponseWriter, r *http.Request
 	// Compare received SHA-256 hash with stored bcrypt(SHA-256(password)) hash
 	if !comparePassword(storedHash, passwordHash) {
 		log.Printf("Failed student login attempt")
+		ah.recordLoginFailure(loginKey)
 		http.Redirect(w, r, "/student/login?error=Invalid+password", http.StatusSeeOther)
 		return
 	}
@@ -614,12 +835,13 @@ func (ah *AuthHandler) HandleStudentLogin(w http.ResponseWriter, r *http.Request
 		http.Redirect(w, r, "/student/login?error=Invalid+email", http.StatusSeeOther)
 		return
 	}
+	ah.recordLoginSuccess(loginKey)
 
 	// Create session
-	token := ah.createStudentSession(email)
+	token, csrfToken := ah.createStudentSession(email)
 
 	// Determine if HTTPS is being used
-	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	isSecure := isSecureRequest(r)
 
 	// Set cookie
 	http.SetCookie(w, &http.Cookie{
@@ -631,6 +853,7 @@ func (ah *AuthHandler) HandleStudentLogin(w http.ResponseWriter, r *http.Request
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(SessionExpiry.Seconds()),
 	})
+	http.SetCookie(w, csrfCookie(StudentCSRFCookieName, csrfToken, isSecure, http.SameSiteStrictMode))
 
 	log.Printf("Successful student login")
 	http.Redirect(w, r, "/student/dashboard", http.StatusSeeOther)
@@ -642,7 +865,7 @@ func (ah *AuthHandler) HandleStudentLogout(w http.ResponseWriter, r *http.Reques
 		ah.deleteStudentSession(cookie.Value)
 	}
 
-	// Clear cookie
+	// Clear cookies
 	http.SetCookie(w, &http.Cookie{
 		Name:     StudentSessionCookieName,
 		Value:    "",
@@ -650,6 +873,7 @@ func (ah *AuthHandler) HandleStudentLogout(w http.ResponseWriter, r *http.Reques
 		HttpOnly: true,
 		MaxAge:   -1,
 	})
+	http.SetCookie(w, clearedCSRFCookie(StudentCSRFCookieName))
 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
@@ -664,6 +888,10 @@ func (ah *AuthHandler) RequireStudentAuth(next http.HandlerFunc) http.HandlerFun
 		cookie, err := r.Cookie(StudentSessionCookieName)
 		if err != nil || !ah.validateStudentSession(cookie.Value) {
 			http.Redirect(w, r, "/student/login", http.StatusSeeOther)
+			return
+		}
+		if !csrfSafeMethod(r.Method) && !validCSRF(ah.studentSessionCSRFToken(cookie.Value), requestCSRFToken(r)) {
+			http.Error(w, "Invalid or missing CSRF token", http.StatusForbidden)
 			return
 		}
 		email := ah.getStudentSessionEmail(cookie.Value)
@@ -684,7 +912,7 @@ func (ah *AuthHandler) HandleAzureADLogin(w http.ResponseWriter, r *http.Request
 	ah.azureOAuthStates[state] = time.Now().Add(azureOAuthStateExpiry)
 	ah.mu.Unlock()
 
-	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	isSecure := isSecureRequest(r)
 	scheme := "http"
 	if isSecure {
 		scheme = "https"
@@ -733,7 +961,7 @@ func (ah *AuthHandler) HandleAzureADCallback(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	isSecure := isSecureRequest(r)
 	scheme := "http"
 	if isSecure {
 		scheme = "https"
@@ -760,7 +988,7 @@ func (ah *AuthHandler) HandleAzureADCallback(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	sessionToken := ah.createStudentSession(email)
+	sessionToken, csrfToken := ah.createStudentSession(email)
 
 	// Use SameSite=Lax (not Strict) so the cookie is included when the browser
 	// follows the 303 redirect from our callback — the overall navigation context
@@ -775,6 +1003,7 @@ func (ah *AuthHandler) HandleAzureADCallback(w http.ResponseWriter, r *http.Requ
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(SessionExpiry.Seconds()),
 	})
+	http.SetCookie(w, csrfCookie(StudentCSRFCookieName, csrfToken, isSecure, http.SameSiteLaxMode))
 
 	log.Printf("Successful Azure AD student login")
 	http.Redirect(w, r, "/student/dashboard", http.StatusSeeOther)
@@ -793,7 +1022,7 @@ func (ah *AuthHandler) HandleAdminAzureADLogin(w http.ResponseWriter, r *http.Re
 	ah.azureOAuthStates[state] = time.Now().Add(azureOAuthStateExpiry)
 	ah.mu.Unlock()
 
-	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	isSecure := isSecureRequest(r)
 	scheme := "http"
 	if isSecure {
 		scheme = "https"
@@ -843,7 +1072,7 @@ func (ah *AuthHandler) HandleAdminAzureADCallback(w http.ResponseWriter, r *http
 		return
 	}
 
-	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	isSecure := isSecureRequest(r)
 	scheme := "http"
 	if isSecure {
 		scheme = "https"
@@ -880,7 +1109,7 @@ func (ah *AuthHandler) HandleAdminAzureADCallback(w http.ResponseWriter, r *http
 		return
 	}
 
-	sessionToken := ah.createSession()
+	sessionToken, csrfToken := ah.createSession()
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     SessionCookieName,
@@ -891,6 +1120,7 @@ func (ah *AuthHandler) HandleAdminAzureADCallback(w http.ResponseWriter, r *http
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(SessionExpiry.Seconds()),
 	})
+	http.SetCookie(w, csrfCookie(CSRFCookieName, csrfToken, isSecure, http.SameSiteLaxMode))
 
 	log.Printf("Successful Azure AD admin login: %s", email)
 	http.Redirect(w, r, "/labs", http.StatusSeeOther)

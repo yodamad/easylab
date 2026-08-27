@@ -209,11 +209,14 @@ func TestAuthHandler_CreateSession(t *testing.T) {
 		sessions: make(map[string]*Session),
 	}
 
-	token := ah.createSession()
+	token, csrfToken := ah.createSession()
 
 	// Check token is not empty
 	if token == "" {
 		t.Error("createSession() returned empty token")
+	}
+	if csrfToken == "" {
+		t.Error("createSession() returned empty CSRF token")
 	}
 
 	// Check session was created (with proper locking)
@@ -230,6 +233,12 @@ func TestAuthHandler_CreateSession(t *testing.T) {
 	if session.ExpiresAt.Before(time.Now()) {
 		t.Error("createSession() set expiry in the past")
 	}
+
+	// The returned CSRF token must match what's stored on the session, since
+	// RequireAuth validates incoming requests against the stored value.
+	if session.CSRFToken != csrfToken {
+		t.Error("createSession() CSRF token does not match session.CSRFToken")
+	}
 }
 
 func TestAuthHandler_ValidateSession(t *testing.T) {
@@ -238,7 +247,7 @@ func TestAuthHandler_ValidateSession(t *testing.T) {
 	}
 
 	// Create a valid session
-	token := ah.createSession()
+	token, _ := ah.createSession()
 
 	// Validate should return true
 	if !ah.validateSession(token) {
@@ -277,7 +286,7 @@ func TestAuthHandler_DeleteSession(t *testing.T) {
 	}
 
 	// Create a session
-	token := ah.createSession()
+	token, _ := ah.createSession()
 
 	// Delete the session
 	ah.deleteSession(token)
@@ -298,11 +307,14 @@ func TestAuthHandler_StudentSession(t *testing.T) {
 	}
 
 	// Create a student session
-	token := ah.createStudentSession("test@example.com")
+	token, csrfToken := ah.createStudentSession("test@example.com")
 
 	// Check token is not empty
 	if token == "" {
 		t.Error("createStudentSession() returned empty token")
+	}
+	if csrfToken == "" {
+		t.Error("createStudentSession() returned empty CSRF token")
 	}
 
 	// Validate should return true
@@ -391,14 +403,17 @@ func createTestAuthHandler() *AuthHandler {
 	}
 }
 
-// createAuthenticatedRequest creates an HTTP request with a valid admin session cookie
+// createAuthenticatedRequest creates an HTTP request with a valid admin
+// session cookie and a matching X-CSRF-Token header, as the shared csrf.js
+// would attach for a real browser request.
 func createAuthenticatedRequest(method, url string, authHandler *AuthHandler) *http.Request {
 	req := httptest.NewRequest(method, url, nil)
-	token := authHandler.createSession()
+	token, csrfToken := authHandler.createSession()
 	req.AddCookie(&http.Cookie{
 		Name:  SessionCookieName,
 		Value: token,
 	})
+	req.Header.Set("X-CSRF-Token", csrfToken)
 	return req
 }
 
@@ -407,14 +422,16 @@ func createUnauthenticatedRequest(method, url string) *http.Request {
 	return httptest.NewRequest(method, url, nil)
 }
 
-// createStudentAuthenticatedRequest creates an HTTP request with a valid student session cookie
+// createStudentAuthenticatedRequest creates an HTTP request with a valid
+// student session cookie and a matching X-CSRF-Token header.
 func createStudentAuthenticatedRequest(method, url string, authHandler *AuthHandler) *http.Request {
 	req := httptest.NewRequest(method, url, nil)
-	token := authHandler.createStudentSession("test@example.com")
+	token, csrfToken := authHandler.createStudentSession("test@example.com")
 	req.AddCookie(&http.Cookie{
 		Name:  StudentSessionCookieName,
 		Value: token,
 	})
+	req.Header.Set("X-CSRF-Token", csrfToken)
 	return req
 }
 
@@ -553,6 +570,124 @@ func TestRequireAuth_ExpiredSession(t *testing.T) {
 	location := w.Header().Get("Location")
 	if location != "/login" {
 		t.Errorf("RequireAuth() expired session Location = %s, want /login", location)
+	}
+}
+
+// ---- CSRF protection tests ----
+
+func TestRequireAuth_CSRF_SafeMethodExempt(t *testing.T) {
+	ah := createTestAuthHandler()
+	protectedHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}
+	wrappedHandler := ah.RequireAuth(protectedHandler)
+
+	// GET requires no CSRF token even though the helper always attaches one.
+	req := createAuthenticatedRequest("GET", "/protected", ah)
+	req.Header.Del("X-CSRF-Token")
+	w := httptest.NewRecorder()
+	wrappedHandler(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("RequireAuth() GET without CSRF token status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestRequireAuth_CSRF_MissingTokenRejected(t *testing.T) {
+	ah := createTestAuthHandler()
+	protectedHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}
+	wrappedHandler := ah.RequireAuth(protectedHandler)
+
+	req := createAuthenticatedRequest("POST", "/protected", ah)
+	req.Header.Del("X-CSRF-Token")
+	w := httptest.NewRecorder()
+	wrappedHandler(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("RequireAuth() POST without CSRF token status = %d, want %d", w.Code, http.StatusForbidden)
+	}
+}
+
+func TestRequireAuth_CSRF_WrongTokenRejected(t *testing.T) {
+	ah := createTestAuthHandler()
+	protectedHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}
+	wrappedHandler := ah.RequireAuth(protectedHandler)
+
+	req := createAuthenticatedRequest("POST", "/protected", ah)
+	req.Header.Set("X-CSRF-Token", "not-the-right-token")
+	w := httptest.NewRecorder()
+	wrappedHandler(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("RequireAuth() POST with wrong CSRF token status = %d, want %d", w.Code, http.StatusForbidden)
+	}
+}
+
+func TestRequireAuth_CSRF_ValidTokenAccepted(t *testing.T) {
+	ah := createTestAuthHandler()
+	protectedHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}
+	wrappedHandler := ah.RequireAuth(protectedHandler)
+
+	// createAuthenticatedRequest already attaches the matching X-CSRF-Token.
+	req := createAuthenticatedRequest("POST", "/protected", ah)
+	w := httptest.NewRecorder()
+	wrappedHandler(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("RequireAuth() POST with valid CSRF token status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestRequireAuth_CSRF_FormFieldAccepted(t *testing.T) {
+	ah := createTestAuthHandler()
+	protectedHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}
+	wrappedHandler := ah.RequireAuth(protectedHandler)
+
+	token, csrfToken := ah.createSession()
+	form := url.Values{}
+	form.Set("csrf_token", csrfToken)
+	req := httptest.NewRequest("POST", "/protected", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: token})
+	w := httptest.NewRecorder()
+	wrappedHandler(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("RequireAuth() POST with csrf_token form field status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestRequireStudentAuth_CSRF_MissingTokenRejected(t *testing.T) {
+	ah := createTestAuthHandler()
+	protectedHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}
+	wrappedHandler := ah.RequireStudentAuth(protectedHandler)
+
+	req := createStudentAuthenticatedRequest("POST", "/protected", ah)
+	req.Header.Del("X-CSRF-Token")
+	w := httptest.NewRecorder()
+	wrappedHandler(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("RequireStudentAuth() POST without CSRF token status = %d, want %d", w.Code, http.StatusForbidden)
+	}
+}
+
+func TestRequireStudentAuth_CSRF_ValidTokenAccepted(t *testing.T) {
+	ah := createTestAuthHandler()
+	protectedHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}
+	wrappedHandler := ah.RequireStudentAuth(protectedHandler)
+
+	req := createStudentAuthenticatedRequest("POST", "/protected", ah)
+	w := httptest.NewRecorder()
+	wrappedHandler(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("RequireStudentAuth() POST with valid CSRF token status = %d, want %d", w.Code, http.StatusOK)
 	}
 }
 
@@ -1473,6 +1608,89 @@ func TestHandleLogin_ClassicLoginDisabled(t *testing.T) {
 	}
 	if !strings.Contains(w.Header().Get("Location"), "disabled") {
 		t.Error("HandleLogin disabled should redirect with 'disabled' message")
+	}
+}
+
+// ---- Login lockout tests ----
+
+func TestHandleLogin_LockoutAfterRepeatedFailures(t *testing.T) {
+	ah := createTestAuthHandler()
+
+	wrongForm := func() *http.Request {
+		form := url.Values{}
+		form.Set("password_hash", "wronghash")
+		req := httptest.NewRequest("POST", "/login", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		return req
+	}
+
+	// httptest.NewRequest defaults RemoteAddr to the same value on every call,
+	// so these all count as attempts from one client.
+	for i := 0; i < maxLoginAttempts-1; i++ {
+		w := httptest.NewRecorder()
+		ah.HandleLogin(w, wrongForm())
+		if !strings.Contains(w.Header().Get("Location"), "Invalid+password") {
+			t.Fatalf("attempt %d: expected invalid-password redirect, got %s", i+1, w.Header().Get("Location"))
+		}
+	}
+
+	// This attempt reaches maxLoginAttempts and should lock the client out.
+	w := httptest.NewRecorder()
+	ah.HandleLogin(w, wrongForm())
+	if !strings.Contains(w.Header().Get("Location"), "Invalid+password") {
+		t.Fatalf("final failing attempt: expected invalid-password redirect, got %s", w.Header().Get("Location"))
+	}
+
+	// Even a correct password should now be rejected until the lockout expires.
+	sha := sha256.Sum256([]byte("test-admin"))
+	passwordHash := hex.EncodeToString(sha[:])
+	form := url.Values{}
+	form.Set("password_hash", passwordHash)
+	req := httptest.NewRequest("POST", "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	ah.HandleLogin(w, req)
+	if !strings.Contains(w.Header().Get("Location"), "Too+many+failed+attempts") {
+		t.Errorf("locked-out login with correct password: Location = %q, want lockout message", w.Header().Get("Location"))
+	}
+}
+
+func TestLoginLockout_ExpiresAndSuccessResets(t *testing.T) {
+	ah := createTestAuthHandler()
+	const key = "203.0.113.1"
+
+	for i := 0; i < maxLoginAttempts; i++ {
+		ah.recordLoginFailure(key)
+	}
+	if !ah.checkLoginLockout(key) {
+		t.Fatal("expected client to be locked out after maxLoginAttempts failures")
+	}
+
+	// Simulate the lockout window having already passed.
+	ah.loginAttemptsMu.Lock()
+	ah.loginAttempts[key].lockedUntil = time.Now().Add(-time.Second)
+	ah.loginAttemptsMu.Unlock()
+
+	if ah.checkLoginLockout(key) {
+		t.Error("expected lockout to have expired")
+	}
+
+	ah.recordLoginFailure(key)
+	ah.recordLoginSuccess(key)
+	if ah.checkLoginLockout(key) {
+		t.Error("expected recordLoginSuccess to clear the failure counter")
+	}
+}
+
+func TestLoginLockout_UnderThresholdStillAllowed(t *testing.T) {
+	ah := createTestAuthHandler()
+	const key = "203.0.113.2"
+
+	for i := 0; i < maxLoginAttempts-1; i++ {
+		ah.recordLoginFailure(key)
+	}
+	if ah.checkLoginLockout(key) {
+		t.Error("client should not be locked out before reaching maxLoginAttempts")
 	}
 }
 

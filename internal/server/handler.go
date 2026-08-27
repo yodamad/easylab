@@ -97,13 +97,62 @@ func validateEmail(email string) bool {
 	return emailRegex.MatchString(email)
 }
 
-// validateURL validates a URL format
+// validateURL validates a URL format. This only checks shape (scheme + host
+// present) — it is used for template git_repo/dotfiles_repo/config_repo
+// fields that are cloned inside the student's own Kubernetes pod (see
+// internal/providers/workspace/kube/kube.go's gitCloneInit), not by the
+// EasyLab server itself, so ssh:// and other non-http(s) schemes are
+// legitimately allowed here. For a URL the server itself will fetch, use
+// validateServerFetchURL instead.
 func validateURL(urlStr string) bool {
 	if urlStr == "" {
 		return false
 	}
 	u, err := url.Parse(urlStr)
 	return err == nil && u.Scheme != "" && u.Host != ""
+}
+
+// validateServerFetchURL validates that a URL is safe for the EasyLab server
+// itself to fetch (e.g. detectVariablesFromGit's git clone): http/https only,
+// and not pointed at a loopback/link-local/private address (cloud metadata
+// endpoints, internal-network hosts), to prevent SSRF via an admin-supplied
+// URL. Do not use this for template git fields cloned inside a student pod —
+// use validateURL there instead, since those legitimately support ssh://.
+func validateServerFetchURL(urlStr string) bool {
+	if urlStr == "" {
+		return false
+	}
+	u, err := url.Parse(urlStr)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+
+	host := u.Hostname()
+	if host == "" {
+		return false
+	}
+	if ips, err := net.LookupIP(host); err == nil {
+		for _, ip := range ips {
+			if isDisallowedTargetIP(ip) {
+				return false
+			}
+		}
+	} else if ip := net.ParseIP(host); ip != nil && isDisallowedTargetIP(ip) {
+		// Host was a literal IP that didn't resolve via LookupIP.
+		return false
+	}
+
+	return true
+}
+
+// isDisallowedTargetIP reports whether ip is a loopback, link-local, or
+// private address that a server-side request should never be allowed to
+// reach (this blocks e.g. 169.254.169.254 cloud metadata and RFC1918 hosts).
+func isDisallowedTargetIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() || ip.IsUnspecified()
 }
 
 // getFormValue gets a form value, trying PostFormValue first, then FormValue
@@ -795,9 +844,9 @@ func (h *Handler) executeLabJobWithID(config *LabConfig, isDryRun bool, jobID st
 	}()
 
 	// Prepare response
-	title := fmt.Sprintf("Job Created: %s", jobID)
+	title := fmt.Sprintf("Job Created: %s", template.HTMLEscapeString(jobID))
 	if isDryRun {
-		title = fmt.Sprintf("Dry Run Started: %s", jobID)
+		title = fmt.Sprintf("Dry Run Started: %s", template.HTMLEscapeString(jobID))
 	}
 
 	html := fmt.Sprintf(`
@@ -806,7 +855,7 @@ func (h *Handler) executeLabJobWithID(config *LabConfig, isDryRun bool, jobID st
 			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load, every 10s" hx-swap="innerHTML">
 				<p>Loading status...</p>
 			</div>
-		</div>`, title, jobID)
+		</div>`, title, template.HTMLEscapeString(jobID))
 
 	return jobID, html
 }
@@ -1237,7 +1286,7 @@ func (h *Handler) GetJobStatus(w http.ResponseWriter, r *http.Request) {
 	// Show launch button if dry run completed successfully
 	if status == JobStatusDryRunCompleted {
 		statusHTML.WriteString(`<form hx-post="/api/labs/launch" hx-target="#job-status" hx-swap="outerHTML" style="display: inline-block; margin-left: 1rem;">`)
-		statusHTML.WriteString(fmt.Sprintf(`<input type="hidden" name="job_id" value="%s">`, jobID))
+		statusHTML.WriteString(fmt.Sprintf(`<input type="hidden" name="job_id" value="%s">`, template.HTMLEscapeString(jobID)))
 		statusHTML.WriteString(`<button type="submit" class="btn btn-success">`)
 		statusHTML.WriteString(`<span class="btn-icon">🚀</span> Launch Real Deployment`)
 		statusHTML.WriteString(`</button>`)
@@ -1247,7 +1296,7 @@ func (h *Handler) GetJobStatus(w http.ResponseWriter, r *http.Request) {
 	// Show retry button if job failed
 	if status == JobStatusFailed {
 		statusHTML.WriteString(`<form style="display: inline-block; margin-left: 1rem;">`)
-		statusHTML.WriteString(`<button type="button" class="btn btn-primary" onclick="retryJob('` + jobID + `')">`)
+		statusHTML.WriteString(`<button type="button" class="btn btn-primary" onclick="retryJob('` + template.JSEscapeString(jobID) + `')">`)
 		statusHTML.WriteString(`<span class="btn-icon">🔄</span> Retry Job`)
 		statusHTML.WriteString(`</button>`)
 		statusHTML.WriteString(`</form>`)
@@ -1255,7 +1304,8 @@ func (h *Handler) GetJobStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Show download button if kubeconfig is available (for both completed and failed jobs)
 	if kubeconfig != "" && (status == JobStatusCompleted || status == JobStatusFailed) {
-		statusHTML.WriteString(fmt.Sprintf(`<a href="/api/jobs/%s/kubeconfig" class="btn btn-download" download="kubeconfig-%s.yaml">`, jobID, jobID))
+		escapedJobID := template.HTMLEscapeString(jobID)
+		statusHTML.WriteString(fmt.Sprintf(`<a href="/api/jobs/%s/kubeconfig" class="btn btn-download" download="kubeconfig-%s.yaml">`, escapedJobID, escapedJobID))
 		statusHTML.WriteString(`<span class="btn-icon">⬇</span> Download Kubeconfig`)
 		statusHTML.WriteString(`</a>`)
 	}
@@ -1275,7 +1325,7 @@ func (h *Handler) GetJobStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Continue polling if job is still running
 	if status == JobStatusPending || status == JobStatusRunning {
-		statusHTML.WriteString(fmt.Sprintf(`<div hx-get="/api/jobs/%s/status" hx-trigger="every 10s" hx-swap="outerHTML"></div>`, jobID))
+		statusHTML.WriteString(fmt.Sprintf(`<div hx-get="/api/jobs/%s/status" hx-trigger="every 10s" hx-swap="outerHTML"></div>`, template.HTMLEscapeString(jobID)))
 	}
 
 	statusHTML.WriteString(`</div>`)
@@ -1712,14 +1762,25 @@ func (h *Handler) ListLabs(w http.ResponseWriter, r *http.Request) {
 	h.jobManager.mu.RLock()
 	defer h.jobManager.mu.RUnlock()
 
+	// Redact credentials and kubeconfigs before this leaves the server — the raw
+	// job carries provider secrets and cluster-admin kubeconfigs that must not be
+	// exposed to students. Mirrors GetJobStatusJSON's use of sanitizedCopy.
 	var completedLabs []*Job
 	for _, job := range h.jobManager.jobs {
 		job.mu.RLock()
 		status := job.Status
-		job.mu.RUnlock()
-		if status == JobStatusCompleted {
-			completedLabs = append(completedLabs, job)
+		if status != JobStatusCompleted {
+			job.mu.RUnlock()
+			continue
 		}
+		sanitized, err := job.sanitizedCopy(false)
+		job.mu.RUnlock()
+		if err != nil {
+			log.Printf("Failed to sanitize job %s for labs list response: %v", job.ID, err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		completedLabs = append(completedLabs, sanitized)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -4311,6 +4372,9 @@ func (h *Handler) detectVariablesFromGit(r *http.Request) ([]tfparse.TFVariable,
 
 	if repoURL == "" {
 		return nil, fmt.Errorf("git_repo is required")
+	}
+	if !validateServerFetchURL(repoURL) {
+		return nil, fmt.Errorf("invalid or disallowed git repository URL")
 	}
 	if branch == "" {
 		branch = "main"

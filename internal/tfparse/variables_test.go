@@ -2,8 +2,10 @@ package tfparse
 
 import (
 	"archive/zip"
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -144,6 +146,46 @@ variable "instance_type" {
 		t.Error("missing variable 'instance_type'")
 	} else if !v.Required {
 		t.Error("'instance_type' should be required (no default)")
+	}
+}
+
+// TestParseVariablesFromZip_OversizedEntryRejected is a regression test for a
+// zip-bomb DoS: a single .tf entry whose decompressed content exceeds
+// maxTFFileSize must be rejected with a bounded error instead of being read
+// into memory unbounded.
+func TestParseVariablesFromZip_OversizedEntryRejected(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "bomb.zip")
+
+	zf, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := zip.NewWriter(zf)
+
+	fw, err := w.Create("main.tf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Highly repetitive content compresses to a tiny archive but decompresses
+	// past maxTFFileSize, exercising the same shape as a real zip bomb.
+	oversized := bytes.Repeat([]byte("a"), maxTFFileSize+1)
+	if _, err := fw.Write(oversized); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := zf.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ParseVariablesFromZip(zipPath)
+	if err == nil {
+		t.Fatal("expected an error for an oversized zip entry, got nil")
+	}
+	if !strings.Contains(err.Error(), "exceeds the maximum allowed size") {
+		t.Errorf("error = %q, want it to mention the size limit", err.Error())
 	}
 }
 

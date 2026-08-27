@@ -1419,7 +1419,11 @@ document.addEventListener('DOMContentLoaded', function() {
     // Handle job status display on page load if job ID is in URL
     const urlParams = new URLSearchParams(window.location.search);
     const jobId = urlParams.get('job');
-    if (jobId) {
+    // Job IDs are always server-generated as "job-<uuid>" (see job.go). Reject
+    // anything else before it reaches innerHTML to prevent DOM-based XSS via a
+    // crafted ?job= query parameter.
+    const JOB_ID_RE = /^job-[0-9a-f-]{8,}$/i;
+    if (jobId && JOB_ID_RE.test(jobId)) {
         hideWizardShowStatus();
 
         const container = document.getElementById('job-status-container');
