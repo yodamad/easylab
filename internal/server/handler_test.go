@@ -1646,6 +1646,184 @@ func TestHandler_GetProjectStats_AllProjects(t *testing.T) {
 	}
 }
 
+// statsAPIResponse mirrors the JSON shape of GetProjectStats' response for
+// decoding in tests (the handler's own statsResponse type is unexported).
+type statsAPIResponse struct {
+	TotalWorkspaces int      `json:"total_workspaces"`
+	TotalActive     int      `json:"total_active"`
+	TotalFailed     int      `json:"total_failed"`
+	TotalCleaned    int      `json:"total_cleaned"`
+	Labels          []string `json:"labels"`
+	Succeeded       []int    `json:"succeeded"`
+	Failed          []int    `json:"failed"`
+	Destroyed       []int    `json:"destroyed"`
+	Created         []int    `json:"created"`
+	Cleaned         []int    `json:"cleaned"`
+}
+
+func getProjectStats(t *testing.T, h *Handler, project string) statsAPIResponse {
+	t.Helper()
+	req := httptest.NewRequest("GET", "/api/admin/stats?project="+project, nil)
+	w := httptest.NewRecorder()
+	h.GetProjectStats(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp statsAPIResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	return resp
+}
+
+func TestHandler_GetProjectStats_WorkspaceEventsDriveCounts(t *testing.T) {
+	jm := NewJobManager("")
+	// WorkspaceLifetimeHours left unset (0) — previously this caused
+	// WorkspaceSnapshots/CleanupEvents to never be recorded for this lab.
+	id := jm.CreateJob(&LabConfig{StackName: "proj-events"})
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusCompleted))
+	require.NoError(t, jm.RecordWorkspaceEvent(id, WorkspaceEventCreated, "ws-0", "ws-0", "student", "default"))
+	require.NoError(t, jm.RecordWorkspaceEvent(id, WorkspaceEventCreated, "ws-1", "ws-1", "student", "default"))
+	require.NoError(t, jm.RecordWorkspaceEvent(id, WorkspaceEventCreated, "ws-2", "ws-2", "student", "default"))
+	require.NoError(t, jm.RecordWorkspaceEvent(id, WorkspaceEventDeleted, "ws-0", "ws-0", "student", "default"))
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	resp := getProjectStats(t, h, "proj-events")
+
+	assert.Equal(t, 3, resp.TotalWorkspaces, "should count every created workspace regardless of WorkspaceLifetimeHours")
+	assert.Equal(t, 1, resp.TotalCleaned, "should count the deleted workspace")
+
+	require.Len(t, resp.Labels, 1, "all events happened in the same month")
+	assert.Equal(t, 3, resp.Created[0], "monthly created series should reflect all 3 creations")
+	assert.Equal(t, 1, resp.Cleaned[0], "monthly cleaned series should reflect the 1 deletion")
+}
+
+func TestHandler_GetProjectStats_NoDoubleCounting(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "proj-peak", WorkspaceLifetimeHours: 4})
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusCompleted))
+	// Simulate the old snapshot/cleanup-event history (still recorded by the
+	// cleanup loop) to prove it no longer feeds the workspace-count KPI.
+	require.NoError(t, jm.RecordWorkspaceSnapshot(id, 5))
+	require.NoError(t, jm.RecordCleanupEvent(id, 2))
+
+	for _, wsID := range []string{"ws-0", "ws-1", "ws-2", "ws-3", "ws-4"} {
+		require.NoError(t, jm.RecordWorkspaceEvent(id, WorkspaceEventCreated, wsID, wsID, "student", "default"))
+	}
+	require.NoError(t, jm.RecordWorkspaceEvent(id, WorkspaceEventDeleted, "ws-0", "ws-0", "student", "default"))
+	require.NoError(t, jm.RecordWorkspaceEvent(id, WorkspaceEventDeleted, "ws-1", "ws-1", "student", "default"))
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	resp := getProjectStats(t, h, "proj-peak")
+
+	assert.Equal(t, 5, resp.TotalWorkspaces, "peak snapshot (5) + cleaned (2) would double count to 7; want the true created count")
+	assert.Equal(t, 2, resp.TotalCleaned)
+}
+
+func TestHandler_GetProjectStats_MonthsSorted(t *testing.T) {
+	jm := NewJobManager("")
+
+	// Job A is created earlier but destroyed (bucketed by UpdatedAt) later
+	// than job B's creation month — inserting months out of order unless the
+	// response sorts them.
+	idA := jm.CreateJob(&LabConfig{StackName: "proj-sort"})
+	require.NoError(t, jm.UpdateJobStatus(idA, JobStatusDestroyed))
+	jobA, _ := jm.GetJob(idA)
+	jobA.mu.Lock()
+	jobA.CreatedAt = time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)
+	jobA.UpdatedAt = time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	jobA.mu.Unlock()
+
+	idB := jm.CreateJob(&LabConfig{StackName: "proj-sort"})
+	require.NoError(t, jm.UpdateJobStatus(idB, JobStatusCompleted))
+	jobB, _ := jm.GetJob(idB)
+	jobB.mu.Lock()
+	jobB.CreatedAt = time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	jobB.mu.Unlock()
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	resp := getProjectStats(t, h, "proj-sort")
+
+	assert.Equal(t, []string{"2026-02", "2026-03"}, resp.Labels, "chart months should be chronologically sorted")
+}
+
+func TestHandler_GetProjectStats_DestroyedBucketedByUpdatedAt(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "proj-destroy"})
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusDestroyed))
+	job, _ := jm.GetJob(id)
+	job.mu.Lock()
+	job.CreatedAt = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	job.UpdatedAt = time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	job.mu.Unlock()
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	resp := getProjectStats(t, h, "proj-destroy")
+
+	require.Len(t, resp.Labels, 1)
+	assert.Equal(t, "2026-04", resp.Labels[0], "destroyed lab should be bucketed by its destroy (UpdatedAt) month, not creation month")
+	assert.Equal(t, 1, resp.Destroyed[0])
+}
+
+func TestHandler_GetProjectStats_IncludesArchivedRemovedJobs(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "proj-archived"})
+	require.NoError(t, jm.RecordWorkspaceEvent(id, WorkspaceEventCreated, "ws-0", "ws-0", "student", "default"))
+	require.NoError(t, jm.RecordWorkspaceEvent(id, WorkspaceEventDeleted, "ws-0", "ws-0", "student", "default"))
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusDestroyed))
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	before := getProjectStats(t, h, "proj-archived")
+	require.Equal(t, 1, before.TotalWorkspaces)
+	require.Equal(t, 1, before.TotalCleaned)
+
+	require.NoError(t, jm.RemoveJob(id))
+
+	after := getProjectStats(t, h, "proj-archived")
+	assert.Equal(t, before.TotalWorkspaces, after.TotalWorkspaces, "removing the lab should not erase its workspace counts")
+	assert.Equal(t, before.TotalCleaned, after.TotalCleaned, "removing the lab should not erase its cleaned count")
+	require.NotEmpty(t, after.Labels, "destroyed month should still appear in the chart after removal")
+
+	sum := func(xs []int) int {
+		total := 0
+		for _, x := range xs {
+			total += x
+		}
+		return total
+	}
+	assert.Equal(t, 1, sum(after.Created), "monthly created series should still include the archived workspace")
+	assert.Equal(t, 1, sum(after.Cleaned), "monthly cleaned series should still include the archived workspace")
+}
+
+func TestHandler_GetProjectStats_AllProjectsIncludesArchived(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "proj-gone"})
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusFailed))
+	require.NoError(t, jm.RemoveJob(id))
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("GET", "/api/admin/stats?project=__all__", nil)
+	w := httptest.NewRecorder()
+	h.GetProjectStats(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var raw struct {
+		Projects []struct {
+			Name   string `json:"name"`
+			Total  int    `json:"total"`
+			Failed int    `json:"failed"`
+		} `json:"projects"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
+
+	found := false
+	for _, p := range raw.Projects {
+		if p.Name == "proj-gone" {
+			found = true
+			assert.Equal(t, 1, p.Total)
+			assert.Equal(t, 1, p.Failed)
+		}
+	}
+	assert.True(t, found, "removed job's project should still appear in the __all__ summary table")
+}
+
 func TestHandler_ServeAdminStats(t *testing.T) {
 	jm := NewJobManager("")
 	jm.CreateJob(&LabConfig{StackName: "my-stack"})

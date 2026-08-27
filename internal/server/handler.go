@@ -4169,6 +4169,7 @@ func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 		succeeded int
 		failed    int
 		destroyed int
+		created   int
 		cleaned   int
 	}
 
@@ -4188,6 +4189,7 @@ func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 		Succeeded       []int            `json:"succeeded"`
 		Failed          []int            `json:"failed"`
 		Destroyed       []int            `json:"destroyed"`
+		Created         []int            `json:"created"`
 		Cleaned         []int            `json:"cleaned"`
 		Projects        []projectSummary `json:"projects,omitempty"`
 	}
@@ -4249,49 +4251,87 @@ func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 			resp.TotalFailed++
 		}
 
-		month := job.CreatedAt.Format("2006-01")
-		addMonth(month)
 		switch job.Status {
 		case JobStatusCompleted:
+			month := job.CreatedAt.Format("2006-01")
+			addMonth(month)
 			buckets[month].succeeded++
 		case JobStatusFailed:
+			month := job.CreatedAt.Format("2006-01")
+			addMonth(month)
 			buckets[month].failed++
 		case JobStatusDestroyed:
+			// Bucket by UpdatedAt (refreshed on the Destroyed transition), not
+			// CreatedAt — a lab is typically destroyed long after it was created.
+			month := job.UpdatedAt.Format("2006-01")
+			addMonth(month)
 			buckets[month].destroyed++
 		}
 
-		// Cleanup events — bucketed by the event timestamp, not job creation.
-		// Also accumulate total workspaces: latest snapshot (current count) + all cleaned.
+		// Workspace creation/deletion events are recorded unconditionally for
+		// every workspace (handler.go EnsureWorkspace/DeleteWorkspace, and the
+		// automatic cleanup loop) — unlike WorkspaceSnapshots/CleanupEvents,
+		// which are only populated when WorkspaceLifetimeHours is set and miss
+		// manual deletions, so they're not used for this KPI.
 		job.mu.RLock()
-		latestSnapshot := 0
-		for _, snap := range job.WorkspaceSnapshots {
-			if snap.Count > latestSnapshot {
-				latestSnapshot = snap.Count
+		events := append([]WorkspaceEvent(nil), job.WorkspaceEvents...)
+		job.mu.RUnlock()
+		jobCreated, jobCleaned := 0, 0
+		for _, evt := range events {
+			evtMonth := evt.At.Format("2006-01")
+			switch evt.Action {
+			case WorkspaceEventCreated:
+				jobCreated++
+				addMonth(evtMonth)
+				buckets[evtMonth].created++
+			case WorkspaceEventDeleted:
+				jobCleaned++
+				addMonth(evtMonth)
+				buckets[evtMonth].cleaned++
 			}
 		}
-		jobCleaned := 0
-		for _, evt := range job.CleanupEvents {
-			jobCleaned += evt.Count
-			evtMonth := evt.At.Format("2006-01")
-			addMonth(evtMonth)
-			buckets[evtMonth].cleaned += evt.Count
-		}
-		job.mu.RUnlock()
 		resp.TotalCleaned += jobCleaned
-		// Total workspaces ever used for this job = current (latest snapshot) + already cleaned.
-		resp.TotalWorkspaces += latestSnapshot + jobCleaned
+		resp.TotalWorkspaces += jobCreated
+	}
+
+	// Merge in preserved history from jobs removed via DeleteLab, so deleting
+	// an old destroyed/failed lab doesn't erase its contribution to past months.
+	for month, archived := range h.jobManager.ArchivedMonthlyStats(project) {
+		addMonth(month)
+		buckets[month].succeeded += archived.Succeeded
+		buckets[month].failed += archived.Failed
+		buckets[month].destroyed += archived.Destroyed
+		buckets[month].created += archived.Created
+		buckets[month].cleaned += archived.Cleaned
+		resp.TotalFailed += archived.Failed
+		resp.TotalCleaned += archived.Cleaned
+		resp.TotalWorkspaces += archived.Created
+	}
+	if project == "__all__" {
+		for name, totals := range h.jobManager.ArchivedProjectTotals() {
+			ps, ok := perProject[name]
+			if !ok {
+				ps = &projectSummary{Name: name}
+				perProject[name] = ps
+			}
+			ps.Total += totals.Total
+			ps.Failed += totals.Failed
+		}
 	}
 
 	// Build time-series arrays in chronological order.
+	sort.Strings(orderedMonths)
 	resp.Labels = orderedMonths
 	resp.Succeeded = make([]int, len(orderedMonths))
 	resp.Failed = make([]int, len(orderedMonths))
 	resp.Destroyed = make([]int, len(orderedMonths))
+	resp.Created = make([]int, len(orderedMonths))
 	resp.Cleaned = make([]int, len(orderedMonths))
 	for i, m := range orderedMonths {
 		resp.Succeeded[i] = buckets[m].succeeded
 		resp.Failed[i] = buckets[m].failed
 		resp.Destroyed[i] = buckets[m].destroyed
+		resp.Created[i] = buckets[m].created
 		resp.Cleaned[i] = buckets[m].cleaned
 	}
 

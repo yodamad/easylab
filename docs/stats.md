@@ -8,7 +8,10 @@ Navigate to **Stats** (accessible from the header or `/admin/stats`) to see aggr
 
 ## Project selector
 
-Use the **Select a Project** dropdown to scope the view to a single lab stack name, or choose **All Projects** for a combined view.
+Use the **Select a Project** dropdown to scope the view to a single lab stack name, or choose **All Projects** for a combined view. The two views show different figures:
+
+- **A single project** — a lab stack has exactly one outcome (it succeeded, failed, or was destroyed), so lab-level counts aren't useful there. The page shows **workspace-only** figures for that lab instead.
+- **All Projects** — figures combine both lab-level and workspace-level counts across every tracked lab.
 
 ## KPI cards
 
@@ -16,16 +19,22 @@ Four summary cards are shown at the top of the page:
 
 ![Stats KPI cards](screens/stats-kpi.png){width=700}
 
-| Card | Description |
-|------|-------------|
-| **Workspaces Used** | Total number of workspaces ever provisioned across all tracked jobs |
-| **Currently Active** | Number of completed (live) labs at the time of the last check |
-| **Failed** | Number of labs that ended in a failed state |
-| **Workspaces Auto-cleaned** | Cumulative count of workspaces deleted by the automatic cleanup service |
+| Card | All Projects | Single project |
+|------|--------------|----------------|
+| **Workspaces Used** | Total workspaces ever created across all tracked jobs, whether or not a lab has an auto-expiry lifetime configured | Same, scoped to this lab |
+| **Currently Active** | Number of completed (live) labs at the time of the last check | Renamed **Active Workspaces**: workspaces created minus workspaces cleaned for this lab |
+| **Failed** | Number of labs that ended in a failed state | Hidden (not meaningful for a single lab) |
+| **Workspaces Cleaned** | Cumulative count of workspaces deleted, whether automatically by the cleanup service or manually by an admin/student | Same, scoped to this lab |
+
+Figures are preserved even after an old destroyed or failed lab is removed
+from the admin list — deleting a lab drops it from the labs list, but its
+historical contribution to these KPIs and to the activity chart below
+remains.
 
 ## Activity chart
 
-A stacked bar chart shows the monthly breakdown of lab deployments (Succeeded / Failed / Destroyed) on the left axis, overlaid with a line showing the number of workspaces auto-cleaned that month on the right axis.
+- **All Projects**: four lines — **Labs** (labs succeeded, failed, or destroyed that month, left axis) plus three workspace lines on the right axis: **Workspaces Total** (created that month), **Workspaces Active** (a running total: workspaces created so far minus workspaces cleaned so far, i.e. how many were alive as of that month), and **Workspaces Cleaned** (cleaned that month). A destroyed lab is counted in the month it was destroyed, not the month it was created.
+- **Single project**: two lines, both on the same axis — **Workspaces created** and **Workspaces cleaned** for that lab.
 
 ## Per-project breakdown
 

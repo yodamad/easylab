@@ -41,7 +41,7 @@
             </div>
             <div class="stats-kpi-card stats-kpi-cleaned">
                 <span class="stats-kpi-value" id="kpi-cleaned">–</span>
-                <span class="stats-kpi-label">Workspaces Auto-cleaned</span>
+                <span class="stats-kpi-label">Workspaces Cleaned</span>
             </div>
         </div>
 
@@ -127,12 +127,27 @@
     fetch('/api/admin/stats?project=' + encodeURIComponent(project))
         .then(function(r) { return r.json(); })
         .then(function(data) {
-            // Populate KPI cards.
+            // A single selected lab always has exactly one outcome (it either
+            // succeeded, failed, or was destroyed), so lab-level stats are
+            // trivial there — show workspace-only figures instead. The
+            // all-projects view keeps lab-level figures alongside workspaces.
+            var isSingleProject = project !== '__all__';
+
             document.getElementById('kpi-deployed').textContent = data.total_workspaces;
-            document.getElementById('kpi-active').textContent   = data.total_active;
-            document.getElementById('kpi-failed').textContent   = data.total_failed;
-            document.getElementById('kpi-cleaned').textContent  = data.total_cleaned;
-            document.getElementById('kpi-grid').style.display   = 'grid';
+            var activeLabelEl = document.querySelector('.stats-kpi-active .stats-kpi-label');
+            var failedCardEl = document.querySelector('.stats-kpi-failed');
+            if (isSingleProject) {
+                document.getElementById('kpi-active').textContent = Math.max(0, data.total_workspaces - data.total_cleaned);
+                if (activeLabelEl) activeLabelEl.textContent = 'Active Workspaces';
+                if (failedCardEl) failedCardEl.style.display = 'none';
+            } else {
+                document.getElementById('kpi-active').textContent = data.total_active;
+                if (activeLabelEl) activeLabelEl.textContent = 'Currently Active';
+                document.getElementById('kpi-failed').textContent = data.total_failed;
+                if (failedCardEl) failedCardEl.style.display = '';
+            }
+            document.getElementById('kpi-cleaned').textContent = data.total_cleaned;
+            document.getElementById('kpi-grid').style.display = 'grid';
 
             if (!data.labels || data.labels.length === 0) {
                 document.getElementById('chart-card').innerHTML =
@@ -144,72 +159,126 @@
                 return;
             }
 
+            var datasets;
+            var scales;
+            if (isSingleProject) {
+                datasets = [
+                    {
+                        label: 'Workspaces created',
+                        data: data.created,
+                        borderColor: 'rgba(59, 130, 246, 1)',
+                        backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                        borderWidth: 2,
+                        pointRadius: 4,
+                        fill: false,
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: 'Workspaces cleaned',
+                        data: data.cleaned,
+                        borderColor: 'rgba(249, 115, 22, 1)',
+                        backgroundColor: 'rgba(249, 115, 22, 0.15)',
+                        borderWidth: 2,
+                        pointRadius: 4,
+                        fill: false,
+                        yAxisID: 'y'
+                    }
+                ];
+                scales = {
+                    x: {},
+                    y: {
+                        beginAtZero: true,
+                        title: { display: true, text: 'Workspaces' },
+                        ticks: { callback: integerTicks }
+                    }
+                };
+            } else {
+                var labsPerMonth = data.labels.map(function(_, i) {
+                    return data.succeeded[i] + data.failed[i] + data.destroyed[i];
+                });
+                // Active workspaces aren't a per-month delta like created/cleaned —
+                // a workspace made in June and still alive in August is active in
+                // both months — so track it as a running total (created so far
+                // minus cleaned so far) instead of data.created[i]/data.cleaned[i]
+                // directly.
+                var runningCreated = 0;
+                var runningCleaned = 0;
+                var activePerMonth = data.labels.map(function(_, i) {
+                    runningCreated += data.created[i];
+                    runningCleaned += data.cleaned[i];
+                    return Math.max(0, runningCreated - runningCleaned);
+                });
+                datasets = [
+                    {
+                        label: 'Labs',
+                        data: labsPerMonth,
+                        borderColor: 'rgba(34, 197, 94, 1)',
+                        backgroundColor: 'rgba(34, 197, 94, 0.15)',
+                        borderWidth: 2,
+                        pointRadius: 4,
+                        fill: false,
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: 'Workspaces Total',
+                        data: data.created,
+                        borderColor: 'rgba(59, 130, 246, 1)',
+                        backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                        borderWidth: 2,
+                        pointRadius: 4,
+                        fill: false,
+                        yAxisID: 'y2'
+                    },
+                    {
+                        label: 'Workspaces Active',
+                        data: activePerMonth,
+                        borderColor: 'rgba(168, 85, 247, 1)',
+                        backgroundColor: 'rgba(168, 85, 247, 0.15)',
+                        borderWidth: 2,
+                        pointRadius: 4,
+                        fill: false,
+                        yAxisID: 'y2'
+                    },
+                    {
+                        label: 'Workspaces Cleaned',
+                        data: data.cleaned,
+                        borderColor: 'rgba(249, 115, 22, 1)',
+                        backgroundColor: 'rgba(249, 115, 22, 0.15)',
+                        borderWidth: 2,
+                        pointRadius: 4,
+                        fill: false,
+                        yAxisID: 'y2'
+                    }
+                ];
+                scales = {
+                    x: {},
+                    y: {
+                        beginAtZero: true,
+                        title: { display: true, text: 'Labs' },
+                        ticks: { callback: integerTicks }
+                    },
+                    y2: {
+                        beginAtZero: true,
+                        position: 'right',
+                        title: { display: true, text: 'Workspaces' },
+                        ticks: { callback: integerTicks },
+                        grid: { drawOnChartArea: false }
+                    }
+                };
+            }
+
             new Chart(canvas.getContext('2d'), {
-                type: 'bar',
+                type: 'line',
                 data: {
                     labels: data.labels,
-                    datasets: [
-                        {
-                            label: 'Succeeded',
-                            data: data.succeeded,
-                            backgroundColor: 'rgba(34, 197, 94, 0.75)',
-                            borderColor: 'rgba(34, 197, 94, 1)',
-                            borderWidth: 1,
-                            stack: 'labs',
-                            yAxisID: 'y'
-                        },
-                        {
-                            label: 'Failed',
-                            data: data.failed,
-                            backgroundColor: 'rgba(239, 68, 68, 0.7)',
-                            borderColor: 'rgba(239, 68, 68, 1)',
-                            borderWidth: 1,
-                            stack: 'labs',
-                            yAxisID: 'y'
-                        },
-                        {
-                            label: 'Destroyed',
-                            data: data.destroyed,
-                            backgroundColor: 'rgba(156, 163, 175, 0.7)',
-                            borderColor: 'rgba(156, 163, 175, 1)',
-                            borderWidth: 1,
-                            stack: 'labs',
-                            yAxisID: 'y'
-                        },
-                        {
-                            label: 'Workspaces auto-cleaned',
-                            data: data.cleaned,
-                            type: 'line',
-                            borderColor: 'rgba(249, 115, 22, 1)',
-                            backgroundColor: 'rgba(249, 115, 22, 0.15)',
-                            borderWidth: 2,
-                            pointRadius: 4,
-                            fill: false,
-                            yAxisID: 'y2'
-                        }
-                    ]
+                    datasets: datasets
                 },
                 options: {
                     responsive: true,
                     plugins: {
                         legend: { position: 'top' }
                     },
-                    scales: {
-                        x: { stacked: true },
-                        y: {
-                            stacked: true,
-                            beginAtZero: true,
-                            title: { display: true, text: 'Labs' },
-                            ticks: { callback: integerTicks, stepSize: 1 }
-                        },
-                        y2: {
-                            beginAtZero: true,
-                            position: 'right',
-                            title: { display: true, text: 'Workspaces cleaned' },
-                            ticks: { callback: integerTicks, stepSize: 1 },
-                            grid: { drawOnChartArea: false }
-                        }
-                    }
+                    scales: scales
                 }
             });
 

@@ -329,6 +329,59 @@ func TestJobManager_RemoveJob_NotFound(t *testing.T) {
 	}
 }
 
+func TestJobManager_RemoveJob_PreservesStatsArchive(t *testing.T) {
+	jm := NewJobManager("")
+
+	config := &LabConfig{StackName: "archived-project"}
+	jobID := jm.CreateJob(config)
+	if err := jm.RecordWorkspaceEvent(jobID, WorkspaceEventCreated, "ws-1", "ws-1", "alice", "default"); err != nil {
+		t.Fatalf("RecordWorkspaceEvent(created) error = %v", err)
+	}
+	if err := jm.RecordWorkspaceEvent(jobID, WorkspaceEventDeleted, "ws-1", "ws-1", "alice", "default"); err != nil {
+		t.Fatalf("RecordWorkspaceEvent(deleted) error = %v", err)
+	}
+	if err := jm.UpdateJobStatus(jobID, JobStatusDestroyed); err != nil {
+		t.Fatalf("UpdateJobStatus() error = %v", err)
+	}
+
+	if err := jm.RemoveJob(jobID); err != nil {
+		t.Fatalf("RemoveJob() error = %v", err)
+	}
+
+	if _, exists := jm.GetJob(jobID); exists {
+		t.Error("job should be gone after RemoveJob()")
+	}
+
+	monthly := jm.ArchivedMonthlyStats("archived-project")
+	var total archivedMonthBucket
+	for _, b := range monthly {
+		total.Destroyed += b.Destroyed
+		total.Created += b.Created
+		total.Cleaned += b.Cleaned
+	}
+	if total.Destroyed != 1 {
+		t.Errorf("archived Destroyed = %d, want 1", total.Destroyed)
+	}
+	if total.Created != 1 {
+		t.Errorf("archived Created = %d, want 1", total.Created)
+	}
+	if total.Cleaned != 1 {
+		t.Errorf("archived Cleaned = %d, want 1", total.Cleaned)
+	}
+
+	totals := jm.ArchivedProjectTotals()
+	pt, ok := totals["archived-project"]
+	if !ok {
+		t.Fatal("ArchivedProjectTotals() missing archived-project")
+	}
+	if pt.Total != 1 {
+		t.Errorf("archived project Total = %d, want 1", pt.Total)
+	}
+	if pt.Failed != 0 {
+		t.Errorf("archived project Failed = %d, want 0", pt.Failed)
+	}
+}
+
 func TestJobManager_SaveJob(t *testing.T) {
 	tempDir := t.TempDir()
 	jm := NewJobManager(tempDir)

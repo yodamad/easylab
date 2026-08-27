@@ -1158,6 +1158,19 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 	if destroyResult.Summary.ResourceChanges != nil {
 		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy summary: %+v", destroyResult.Summary))
 	}
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' resources destroyed successfully.", stackName))
+
+	// Mark as destroyed and persist immediately, before the best-effort stack
+	// metadata removal and directory cleanup below — those steps already
+	// tolerate failure without failing the job, so persisting the terminal
+	// state first means a crash during that cleanup can't leave this job's
+	// on-disk status stuck at Completed after resources are already gone.
+	pe.jobManager.UpdateJobStatus(jobID, JobStatusDestroyed)
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy completed at %s", time.Now().Format(time.RFC3339)))
+	pe.jobManager.AppendOutput(jobID, "✅ Stack destroyed successfully. You can recreate it using the same configuration.")
+	if err := pe.jobManager.SaveJob(jobID); err != nil {
+		log.Printf("Warning: failed to persist destroyed job %s: %v", jobID, err)
+	}
 
 	// Get environment variables including OVH credentials (scoped to job directory)
 	envVars := getPulumiEnvVars(job.Config, jobDir)
@@ -1179,18 +1192,6 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 		} else {
 			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' removed from workspace successfully", stackName))
 		}
-	}
-
-	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Stack '%s' resources destroyed successfully.", stackName))
-
-	// Success - mark as destroyed only after successful destroy
-	pe.jobManager.UpdateJobStatus(jobID, JobStatusDestroyed)
-	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Destroy completed at %s", time.Now().Format(time.RFC3339)))
-	pe.jobManager.AppendOutput(jobID, "✅ Stack destroyed successfully. You can recreate it using the same configuration.")
-
-	// Persist destroyed job to disk
-	if err := pe.jobManager.SaveJob(jobID); err != nil {
-		log.Printf("Warning: failed to persist destroyed job %s: %v", jobID, err)
 	}
 
 	// Clean up the job directory completely since all resources have been destroyed

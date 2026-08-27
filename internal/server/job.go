@@ -335,6 +335,7 @@ type JobManager struct {
 	jobs    map[string]*Job
 	dataDir string
 	mu      sync.RWMutex
+	archive *StatsArchive
 }
 
 // NewJobManager creates a new job manager with optional data directory for persistence
@@ -342,6 +343,7 @@ func NewJobManager(dataDir string) *JobManager {
 	jm := &JobManager{
 		jobs:    make(map[string]*Job),
 		dataDir: dataDir,
+		archive: NewStatsArchive(dataDir),
 	}
 
 	// Job loading is now done asynchronously after server starts
@@ -863,15 +865,21 @@ func (jm *JobManager) ClearDeletionRetry(jobID, wsID string) error {
 // RemoveJob removes a job from the manager and optionally deletes its persisted file
 func (jm *JobManager) RemoveJob(id string) error {
 	jm.mu.Lock()
-	defer jm.mu.Unlock()
-
-	_, exists := jm.jobs[id]
+	job, exists := jm.jobs[id]
 	if !exists {
+		jm.mu.Unlock()
 		return fmt.Errorf("job %s not found", id)
 	}
-
 	// Remove from memory
 	delete(jm.jobs, id)
+	jm.mu.Unlock()
+
+	// Fold this job's historical contribution into the stats archive before its
+	// record disappears, so removing an old destroyed/failed lab doesn't erase
+	// its months from the admin stats dashboard.
+	if jm.archive != nil {
+		jm.archive.recordJob(job)
+	}
 
 	// Remove persisted file if it exists
 	if jm.dataDir != "" {
@@ -884,4 +892,25 @@ func (jm *JobManager) RemoveJob(id string) error {
 	}
 
 	return nil
+}
+
+// ArchivedMonthlyStats returns preserved monthly stats contributed by jobs
+// that have since been removed via RemoveJob, scoped to project (or merged
+// across all projects for "__all__"). Used by GetProjectStats so deleting an
+// old destroyed/failed lab doesn't erase its history from the dashboard.
+func (jm *JobManager) ArchivedMonthlyStats(project string) map[string]archivedMonthBucket {
+	if jm == nil || jm.archive == nil {
+		return nil
+	}
+	return jm.archive.forProject(project)
+}
+
+// ArchivedProjectTotals returns, per project, the archived Total and Failed
+// lab counts contributed by removed jobs — used to keep the __all__
+// per-project summary table consistent after those jobs are gone.
+func (jm *JobManager) ArchivedProjectTotals() map[string]archivedProjectTotal {
+	if jm == nil || jm.archive == nil {
+		return nil
+	}
+	return jm.archive.projectTotals()
 }
