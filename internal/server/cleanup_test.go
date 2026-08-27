@@ -117,6 +117,46 @@ func TestCleanupExpiredWorkspaces_DeletesExpiredWorkspace(t *testing.T) {
 	assert.Equal(t, "default", wsEvents[0].Template)
 }
 
+// timeoutCheckingBackend wraps fakeBackend and records whether
+// ListWorkspaces/DeleteWorkspace were called with a context that carries a
+// deadline. This is a regression test for a bug where both calls used
+// context.Background() (no deadline at all), so an unresponsive cluster could
+// stall the whole cleanup tick indefinitely.
+type timeoutCheckingBackend struct {
+	*fakeBackend
+	listHadDeadline   bool
+	deleteHadDeadline bool
+}
+
+func (b *timeoutCheckingBackend) ListWorkspaces(ctx context.Context, id string) ([]workspace.Workspace, error) {
+	_, b.listHadDeadline = ctx.Deadline()
+	return b.fakeBackend.ListWorkspaces(ctx, id)
+}
+
+func (b *timeoutCheckingBackend) DeleteWorkspace(ctx context.Context, labID, wsID string) error {
+	_, b.deleteHadDeadline = ctx.Deadline()
+	return b.fakeBackend.DeleteWorkspace(ctx, labID, wsID)
+}
+
+func TestCleanupExpiredWorkspaces_UsesTimeoutContextForListAndDelete(t *testing.T) {
+	jm := NewJobManager("")
+	completedLabWithKubeconfig(jm, 1)
+
+	fb := &timeoutCheckingBackend{fakeBackend: &fakeBackend{
+		reachable: true,
+		workspaces: []workspace.Workspace{
+			{ID: "ws-old", Name: "ws-old", CreatedAt: time.Now().Add(-2 * time.Hour)},
+		},
+	}}
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	h.newWorkspaceBackend = func(_, _ string) (workspace.Backend, error) { return fb, nil }
+	h.cleanupExpiredWorkspaces()
+
+	assert.True(t, fb.listHadDeadline, "ListWorkspaces must be called with a bounded context, not context.Background()")
+	assert.True(t, fb.deleteHadDeadline, "DeleteWorkspace must be called with a bounded context, not context.Background()")
+}
+
 func TestCleanupExpiredWorkspaces_KeepsYoungWorkspace(t *testing.T) {
 	jm := NewJobManager("")
 	completedLabWithKubeconfig(jm, 5) // 5h lifetime
@@ -286,6 +326,27 @@ func TestDeletionRetryInterval_Invalid(t *testing.T) {
 func TestDeletionRetryInterval_Zero(t *testing.T) {
 	t.Setenv("CLEANUP_DELETE_RETRY_INTERVAL_HOURS", "0")
 	assert.Equal(t, 2*time.Hour, deletionRetryInterval())
+}
+
+// --- cleanupDeleteConcurrency tests ---
+
+func TestCleanupDeleteConcurrency_Default(t *testing.T) {
+	assert.Equal(t, 5, cleanupDeleteConcurrency())
+}
+
+func TestCleanupDeleteConcurrency_EnvVar(t *testing.T) {
+	t.Setenv("CLEANUP_DELETE_CONCURRENCY", "3")
+	assert.Equal(t, 3, cleanupDeleteConcurrency())
+}
+
+func TestCleanupDeleteConcurrency_Invalid(t *testing.T) {
+	t.Setenv("CLEANUP_DELETE_CONCURRENCY", "bad")
+	assert.Equal(t, 5, cleanupDeleteConcurrency())
+}
+
+func TestCleanupDeleteConcurrency_Zero(t *testing.T) {
+	t.Setenv("CLEANUP_DELETE_CONCURRENCY", "0")
+	assert.Equal(t, 5, cleanupDeleteConcurrency())
 }
 
 // --- cleanupExpiredLabs tests ---

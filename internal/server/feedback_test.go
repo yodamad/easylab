@@ -99,6 +99,40 @@ func TestFeedbackStore_AddIsolatedByLab(t *testing.T) {
 	assert.Len(t, b, 1)
 }
 
+// TestFeedbackStore_LockFor_SameLabReturnsSameLock proves lockFor's LoadOrStore
+// usage actually shares one lock per lab across calls, not a fresh one each time.
+func TestFeedbackStore_LockFor_SameLabReturnsSameLock(t *testing.T) {
+	fs, err := NewFeedbackStore(t.TempDir())
+	require.NoError(t, err)
+
+	assert.Same(t, fs.lockFor("lab-x"), fs.lockFor("lab-x"))
+}
+
+// TestFeedbackStore_PerLabLocking_UnrelatedLabsDontBlock is a regression test
+// for replacing the single store-wide mutex with a per-lab lock: an in-flight
+// operation on one lab must not block a concurrent Add for a different lab.
+func TestFeedbackStore_PerLabLocking_UnrelatedLabsDontBlock(t *testing.T) {
+	fs, err := NewFeedbackStore(t.TempDir())
+	require.NoError(t, err)
+
+	// Simulate an in-flight Add for lab-a by holding its lock directly.
+	labALock := fs.lockFor("lab-a")
+	labALock.Lock()
+	defer labALock.Unlock()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- fs.Add(Feedback{ID: "1", LabID: "lab-b", Rating: 5, Difficulty: "just-right"})
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Add for an unrelated lab blocked on lab-a's lock — per-lab locking regressed to a shared lock")
+	}
+}
+
 func TestFeedbackStore_ReadUnsafe_InvalidJSON(t *testing.T) {
 	dir := t.TempDir()
 	fs, err := NewFeedbackStore(dir)

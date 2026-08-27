@@ -1977,6 +1977,65 @@ func TestHandler_GetProjectStats_AllProjectsIncludesArchived(t *testing.T) {
 	assert.True(t, found, "removed job's project should still appear in the __all__ summary table")
 }
 
+// TestHandler_GetProjectStats_CachesWithinTTL proves GetProjectStats serves a
+// cached response for repeat calls within statsCacheTTL: a job added between
+// two calls for the same project must not appear in the second response.
+func TestHandler_GetProjectStats_CachesWithinTTL(t *testing.T) {
+	jm := NewJobManager("")
+	id1 := jm.CreateJob(&LabConfig{StackName: "cache-test"})
+	require.NoError(t, jm.UpdateJobStatus(id1, JobStatusCompleted))
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	req1 := httptest.NewRequest("GET", "/api/admin/stats?project=cache-test", nil)
+	w1 := httptest.NewRecorder()
+	h.GetProjectStats(w1, req1)
+	require.Equal(t, http.StatusOK, w1.Code)
+
+	// A second job completes after the first response was cached.
+	id2 := jm.CreateJob(&LabConfig{StackName: "cache-test"})
+	require.NoError(t, jm.UpdateJobStatus(id2, JobStatusCompleted))
+
+	req2 := httptest.NewRequest("GET", "/api/admin/stats?project=cache-test", nil)
+	w2 := httptest.NewRecorder()
+	h.GetProjectStats(w2, req2)
+	require.Equal(t, http.StatusOK, w2.Code)
+
+	assert.Equal(t, w1.Body.Bytes(), w2.Body.Bytes(), "second call within the TTL should be served from cache, unaffected by the job added in between")
+}
+
+// TestHandler_GetProjectStats_RecomputesAfterTTLExpiry proves a cache entry
+// older than statsCacheTTL is treated as stale and recomputed.
+func TestHandler_GetProjectStats_RecomputesAfterTTLExpiry(t *testing.T) {
+	jm := NewJobManager("")
+	id1 := jm.CreateJob(&LabConfig{StackName: "cache-expiry-test"})
+	require.NoError(t, jm.UpdateJobStatus(id1, JobStatusCompleted))
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	req1 := httptest.NewRequest("GET", "/api/admin/stats?project=cache-expiry-test", nil)
+	w1 := httptest.NewRecorder()
+	h.GetProjectStats(w1, req1)
+	require.Equal(t, http.StatusOK, w1.Code)
+
+	// Force the cache entry to look older than the TTL instead of sleeping.
+	h.statsCacheMu.Lock()
+	entry := h.statsCache["cache-expiry-test"]
+	entry.computedAt = time.Now().Add(-statsCacheTTL - time.Second)
+	h.statsCache["cache-expiry-test"] = entry
+	h.statsCacheMu.Unlock()
+
+	id2 := jm.CreateJob(&LabConfig{StackName: "cache-expiry-test"})
+	require.NoError(t, jm.UpdateJobStatus(id2, JobStatusCompleted))
+
+	req2 := httptest.NewRequest("GET", "/api/admin/stats?project=cache-expiry-test", nil)
+	w2 := httptest.NewRecorder()
+	h.GetProjectStats(w2, req2)
+	require.Equal(t, http.StatusOK, w2.Code)
+
+	assert.NotEqual(t, w1.Body.Bytes(), w2.Body.Bytes(), "call after TTL expiry should recompute and reflect the newly added job")
+}
+
 func TestHandler_ServeAdminStats(t *testing.T) {
 	jm := NewJobManager("")
 	jm.CreateJob(&LabConfig{StackName: "my-stack"})

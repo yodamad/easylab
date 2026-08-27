@@ -46,11 +46,24 @@ type Handler struct {
 	// change (lab recreation) is detected as a cache miss and rebuilds it.
 	workspaceBackends   map[string]*cachedWorkspaceBackend
 	workspaceBackendsMu sync.RWMutex
-	// workspaceCreateSem bounds how many workspace-creation requests (see
-	// RequestWorkspace) run at once, so a burst of students starting workspaces
-	// together is smoothed into a steady rate instead of hitting the cluster's
-	// API server all at once. Sized by workspaceCreateConcurrency.
-	workspaceCreateSem  chan struct{}
+	// workspaceCreateSem bounds how many workspace create/delete requests (see
+	// RequestWorkspace and the bulk path in DeleteWorkspace) run at once, so a
+	// burst of students/admins acting on workspaces together is smoothed into a
+	// steady rate instead of hitting the cluster's API server all at once.
+	// Sized by workspaceCreateConcurrency.
+	workspaceCreateSem chan struct{}
+	// pulumiExecSem bounds how many Pulumi executions (preview/up/destroy) run
+	// at once. Each spawns a full Pulumi engine process plus its resource
+	// provider plugins, so an unbounded burst of concurrent lab creates,
+	// destroys, retries, or recreations can exhaust host CPU/memory well before
+	// the number of labs involved gets large. Sized by pulumiExecutionConcurrency.
+	pulumiExecSem chan struct{}
+	// statsCache holds GetProjectStats results keyed by the "project" query
+	// param, since computing one walks every job's full event history — cheap
+	// enough for an on-demand admin view, wasteful to repeat within seconds of
+	// the last call (e.g. flipping the project filter back and forth).
+	statsCache          map[string]statsCacheEntry
+	statsCacheMu        sync.Mutex
 	templates           map[string]*template.Template
 	templatesMu         sync.RWMutex
 	credentialsManager  *CredentialsManager
@@ -179,7 +192,7 @@ type cachedWorkspaceBackend struct {
 	backend    workspace.Backend
 }
 
-// workspaceCreateConcurrency returns the maximum number of workspace-creation
+// workspaceCreateConcurrency returns the maximum number of workspace create/delete
 // requests allowed to run at once, configurable via WORKSPACE_CREATE_CONCURRENCY
 // env var. Defaults to 20.
 func workspaceCreateConcurrency() int {
@@ -191,6 +204,18 @@ func workspaceCreateConcurrency() int {
 	return 20
 }
 
+// pulumiExecutionConcurrency returns the maximum number of Pulumi executions
+// (preview/up/destroy) allowed to run at once, configurable via
+// PULUMI_EXECUTION_CONCURRENCY env var. Defaults to 5.
+func pulumiExecutionConcurrency() int {
+	if v := os.Getenv("PULUMI_EXECUTION_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 5
+}
+
 // NewHandler creates a new HTTP handler
 func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsManager *CredentialsManager, ovhOptionsManager *OVHOptionsManager, azureOptionsManager *AzureOptionsManager, feedbackStore *FeedbackStore) *Handler {
 	h := &Handler{
@@ -199,6 +224,8 @@ func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsM
 		newWorkspaceBackend: workspace.Default,
 		workspaceBackends:   make(map[string]*cachedWorkspaceBackend),
 		workspaceCreateSem:  make(chan struct{}, workspaceCreateConcurrency()),
+		pulumiExecSem:       make(chan struct{}, pulumiExecutionConcurrency()),
+		statsCache:          make(map[string]statsCacheEntry),
 		templates:           make(map[string]*template.Template),
 		credentialsManager:  credentialsManager,
 		ovhOptionsManager:   ovhOptionsManager,
@@ -826,6 +853,8 @@ func (h *Handler) executeLabJobWithID(config *LabConfig, isDryRun bool, jobID st
 
 	// Start execution in a goroutine
 	go func() {
+		h.pulumiExecSem <- struct{}{}
+		defer func() { <-h.pulumiExecSem }()
 		if isDryRun {
 			log.Printf("Starting Pulumi preview for job: %s", jobID)
 			if err := h.pulumiExec.Preview(jobID); err != nil {
@@ -1232,6 +1261,8 @@ func (h *Handler) LaunchLab(w http.ResponseWriter, r *http.Request) {
 
 	// Start Pulumi execution in a goroutine
 	go func() {
+		h.pulumiExecSem <- struct{}{}
+		defer func() { <-h.pulumiExecSem }()
 		log.Printf("Starting Pulumi execution for job: %s", jobID)
 		if err := h.pulumiExec.Execute(jobID); err != nil {
 			log.Printf("Pulumi execution failed for job %s: %v", jobID, err)
@@ -1383,6 +1414,12 @@ func (h *Handler) ServeStatic(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
+	info, err := file.Stat()
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	// Set content type based on file extension
 	if strings.HasSuffix(path, ".css") {
 		w.Header().Set("Content-Type", "text/css")
@@ -1392,7 +1429,9 @@ func (h *Handler) ServeStatic(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 	}
 
-	io.Copy(w, file)
+	// http.ServeContent adds conditional GET (ETag/Last-Modified) and Range
+	// support, so unchanged assets get a 304 instead of a full re-send.
+	http.ServeContent(w, r, filePath, info.ModTime(), file)
 }
 
 // DownloadKubeconfig serves the kubeconfig file for download
@@ -1706,9 +1745,15 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("A template named %q already exists", dupName), http.StatusConflict)
 		return
 	}
-	if err := h.jobManager.SaveJob(jobID); err != nil {
-		log.Printf("Failed to persist templates for lab %s: %v", jobID, err)
-	}
+	// Persisting is off the response's critical path: SaveJob re-reads the job's
+	// current state at execution time and serializes concurrent saves via
+	// job.saveMu, so firing it async is safe and avoids blocking this request on
+	// an O(job history size) disk write.
+	go func() {
+		if err := h.jobManager.SaveJob(jobID); err != nil {
+			log.Printf("Failed to persist templates for lab %s: %v", jobID, err)
+		}
+	}()
 
 	names := make([]string, len(templates))
 	for i, t := range templates {
@@ -1987,8 +2032,14 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	if ws.Created {
 		if rerr := h.jobManager.RecordWorkspaceEvent(labID, WorkspaceEventCreated, ws.ID, ws.Name, ownerDisplayName(ws), selected.Name); rerr != nil {
 			log.Printf("Failed to record workspace creation event for %s: %v", ws.Name, rerr)
-		} else if serr := h.jobManager.SaveJob(labID); serr != nil {
-			log.Printf("Failed to persist workspace creation event for %s: %v", ws.Name, serr)
+		} else {
+			// Off the response's critical path — see the comment on the SaveJob
+			// call in UploadTemplateToLab for why this is safe to run async.
+			go func() {
+				if serr := h.jobManager.SaveJob(labID); serr != nil {
+					log.Printf("Failed to persist workspace creation event for %s: %v", ws.Name, serr)
+				}
+			}()
 		}
 	}
 
@@ -3461,27 +3512,47 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Bound and parallelize the per-workspace deletes: sequential deletes made
+		// a bulk request as slow as N sequential Kubernetes API round trips.
+		// Reuses workspaceCreateSem, the same budget that already protects the
+		// cluster's API server from a burst of concurrent create requests.
 		var delErrors []string
+		var delErrorsMu sync.Mutex
+		var wg sync.WaitGroup
 		for _, wsID := range workspaceIDs {
-			// Best-effort: captured before deletion so the history can still show
-			// who owned the workspace once it is gone. A lookup failure leaves the
-			// owner/template blank rather than blocking the delete.
-			wsInfo, _ := backend.GetWorkspace(r.Context(), wsID)
-			if err := backend.DeleteWorkspace(r.Context(), labID, wsID); err != nil {
-				delErrors = append(delErrors, fmt.Sprintf("Failed to delete workspace %s: %v", wsID, err))
-				continue
-			}
-			wsName := wsInfo.Name
-			if wsName == "" {
-				wsName = wsID
-			}
-			if rerr := h.jobManager.RecordWorkspaceEvent(labID, WorkspaceEventDeleted, wsID, wsName, ownerDisplayName(wsInfo), wsInfo.Template); rerr != nil {
-				log.Printf("Failed to record workspace deletion event for %s: %v", wsID, rerr)
-			}
+			wg.Add(1)
+			h.workspaceCreateSem <- struct{}{}
+			go func(wsID string) {
+				defer wg.Done()
+				defer func() { <-h.workspaceCreateSem }()
+
+				// Best-effort: captured before deletion so the history can still show
+				// who owned the workspace once it is gone. A lookup failure leaves the
+				// owner/template blank rather than blocking the delete.
+				wsInfo, _ := backend.GetWorkspace(r.Context(), wsID)
+				if err := backend.DeleteWorkspace(r.Context(), labID, wsID); err != nil {
+					delErrorsMu.Lock()
+					delErrors = append(delErrors, fmt.Sprintf("Failed to delete workspace %s: %v", wsID, err))
+					delErrorsMu.Unlock()
+					return
+				}
+				wsName := wsInfo.Name
+				if wsName == "" {
+					wsName = wsID
+				}
+				if rerr := h.jobManager.RecordWorkspaceEvent(labID, WorkspaceEventDeleted, wsID, wsName, ownerDisplayName(wsInfo), wsInfo.Template); rerr != nil {
+					log.Printf("Failed to record workspace deletion event for %s: %v", wsID, rerr)
+				}
+			}(wsID)
 		}
-		if serr := h.jobManager.SaveJob(labID); serr != nil {
-			log.Printf("Failed to persist workspace deletion events for lab %s: %v", labID, serr)
-		}
+		wg.Wait()
+		// Off the response's critical path — see the comment on the SaveJob call
+		// in UploadTemplateToLab for why this is safe to run async.
+		go func() {
+			if serr := h.jobManager.SaveJob(labID); serr != nil {
+				log.Printf("Failed to persist workspace deletion events for lab %s: %v", labID, serr)
+			}
+		}()
 
 		if len(delErrors) > 0 {
 			w.Header().Set("Content-Type", "application/json")
@@ -3561,8 +3632,14 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	if rerr := h.jobManager.RecordWorkspaceEvent(labID, WorkspaceEventDeleted, workspaceIDStr, wsName, ownerDisplayName(wsInfo), wsInfo.Template); rerr != nil {
 		log.Printf("Failed to record workspace deletion event for %s: %v", workspaceIDStr, rerr)
-	} else if serr := h.jobManager.SaveJob(labID); serr != nil {
-		log.Printf("Failed to persist workspace deletion event for %s: %v", workspaceIDStr, serr)
+	} else {
+		// Off the response's critical path — see the comment on the SaveJob call
+		// in UploadTemplateToLab for why this is safe to run async.
+		go func() {
+			if serr := h.jobManager.SaveJob(labID); serr != nil {
+				log.Printf("Failed to persist workspace deletion event for %s: %v", workspaceIDStr, serr)
+			}
+		}()
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -3631,6 +3708,8 @@ func (h *Handler) DestroyStack(w http.ResponseWriter, r *http.Request) {
 
 	// Start destruction in a goroutine
 	go func() {
+		h.pulumiExecSem <- struct{}{}
+		defer func() { <-h.pulumiExecSem }()
 		log.Printf("Starting stack destruction for job: %s, stack: %s", jobID, stackName)
 		if err := h.pulumiExec.Destroy(jobID); err != nil {
 			log.Printf("Stack destruction failed for job %s: %v", jobID, err)
@@ -3723,9 +3802,13 @@ func (h *Handler) UpdateLabLifecycle(w http.ResponseWriter, r *http.Request) {
 		config.WorkspaceLifetimeHours = lifetime
 		config.LabDeletionDate = deletionDate
 	})
-	if err := h.jobManager.SaveJob(jobID); err != nil {
-		log.Printf("Failed to persist lifecycle update for lab %s: %v", jobID, err)
-	}
+	// Off the response's critical path — see the comment on the SaveJob call in
+	// UploadTemplateToLab for why this is safe to run async.
+	go func() {
+		if err := h.jobManager.SaveJob(jobID); err != nil {
+			log.Printf("Failed to persist lifecycle update for lab %s: %v", jobID, err)
+		}
+	}()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
@@ -3866,6 +3949,8 @@ func (h *Handler) RecreateLab(w http.ResponseWriter, r *http.Request) {
 
 	// Start Pulumi execution in a goroutine
 	go func() {
+		h.pulumiExecSem <- struct{}{}
+		defer func() { <-h.pulumiExecSem }()
 		log.Printf("Starting Pulumi execution for recreated job: %s", newJobID)
 		if err := h.pulumiExec.Execute(newJobID); err != nil {
 			log.Printf("Pulumi execution failed for recreated job %s: %v", newJobID, err)
@@ -3961,6 +4046,8 @@ func (h *Handler) RetryJob(w http.ResponseWriter, r *http.Request) {
 
 	// Start Pulumi execution in a goroutine using retry-optimized path
 	go func() {
+		h.pulumiExecSem <- struct{}{}
+		defer func() { <-h.pulumiExecSem }()
 		log.Printf("Starting Pulumi execution for retried job: %s", jobID)
 		if err := h.pulumiExec.ExecuteRetry(jobID); err != nil {
 			log.Printf("Pulumi execution failed for retried job %s: %v", jobID, err)
@@ -4143,6 +4230,8 @@ func (h *Handler) RetryJobWithConfig(w http.ResponseWriter, r *http.Request) {
 	// reads job.Config fresh at call time and re-applies it via setStackConfig
 	// before stack.Up() runs, so the edited config above takes effect.
 	go func() {
+		h.pulumiExecSem <- struct{}{}
+		defer func() { <-h.pulumiExecSem }()
 		log.Printf("Starting Pulumi execution for retried job: %s", jobID)
 		if err := h.pulumiExec.ExecuteRetry(jobID); err != nil {
 			log.Printf("Pulumi execution failed for retried job %s: %v", jobID, err)
@@ -4467,10 +4556,43 @@ func (h *Handler) ServeAdminStats(w http.ResponseWriter, r *http.Request) {
 // GetProjectStats returns KPI totals and time-series JSON for deployed labs.
 // Accepts project=<stackName> or project=__all__ for aggregated view.
 // Route: GET /api/admin/stats?project=<stackName>
+// statsCacheTTL bounds how stale the admin stats dashboard can be.
+const statsCacheTTL = 30 * time.Second
+
+// statsCacheEntry is one cached, pre-encoded GetProjectStats response.
+type statsCacheEntry struct {
+	data       []byte
+	computedAt time.Time
+}
+
+// statsCacheLookup returns a still-fresh cached response for project, if any.
+func (h *Handler) statsCacheLookup(project string) ([]byte, bool) {
+	h.statsCacheMu.Lock()
+	defer h.statsCacheMu.Unlock()
+	entry, ok := h.statsCache[project]
+	if !ok || time.Since(entry.computedAt) > statsCacheTTL {
+		return nil, false
+	}
+	return entry.data, true
+}
+
+// statsCacheStore caches a freshly computed response for project.
+func (h *Handler) statsCacheStore(project string, data []byte) {
+	h.statsCacheMu.Lock()
+	defer h.statsCacheMu.Unlock()
+	h.statsCache[project] = statsCacheEntry{data: data, computedAt: time.Now()}
+}
+
 func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	if project == "" {
 		http.Error(w, "project query param required", http.StatusBadRequest)
+		return
+	}
+
+	if cached, ok := h.statsCacheLookup(project); ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(cached)
 		return
 	}
 
@@ -4654,8 +4776,14 @@ func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
+	data, err := json.Marshal(resp)
+	if err != nil {
 		log.Printf("failed to encode stats response: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
 	}
+	h.statsCacheStore(project, data)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
 }

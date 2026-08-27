@@ -27,7 +27,10 @@ type Feedback struct {
 // FeedbackStore manages feedback persistence on disk
 type FeedbackStore struct {
 	dataDir string
-	mu      sync.RWMutex
+	// labLocks holds one *sync.RWMutex per lab ID (each lab's feedback lives in
+	// its own file), so submissions for unrelated labs don't serialize against
+	// each other the way a single store-wide lock would.
+	labLocks sync.Map
 }
 
 // NewFeedbackStore creates a new FeedbackStore that persists data in dataDir
@@ -42,10 +45,17 @@ func (fs *FeedbackStore) filePath(labID string) string {
 	return filepath.Join(fs.dataDir, labID+".json")
 }
 
+// lockFor returns the per-lab lock for labID, creating it on first use.
+func (fs *FeedbackStore) lockFor(labID string) *sync.RWMutex {
+	v, _ := fs.labLocks.LoadOrStore(labID, &sync.RWMutex{})
+	return v.(*sync.RWMutex)
+}
+
 // Add appends a feedback entry to the lab's JSON file
 func (fs *FeedbackStore) Add(f Feedback) error {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
+	lock := fs.lockFor(f.LabID)
+	lock.Lock()
+	defer lock.Unlock()
 
 	entries, err := fs.readUnsafe(f.LabID)
 	if err != nil {
@@ -57,8 +67,9 @@ func (fs *FeedbackStore) Add(f Feedback) error {
 
 // GetByLab returns all feedback entries for a given lab
 func (fs *FeedbackStore) GetByLab(labID string) ([]Feedback, error) {
-	fs.mu.RLock()
-	defer fs.mu.RUnlock()
+	lock := fs.lockFor(labID)
+	lock.RLock()
+	defer lock.RUnlock()
 	return fs.readUnsafe(labID)
 }
 

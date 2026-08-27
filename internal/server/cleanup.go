@@ -5,7 +5,11 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"time"
+
+	"easylab/internal/providers/workspace"
 )
 
 // cleanupInterval returns the workspace cleanup interval, configurable via CLEANUP_INTERVAL_MINUTES env var.
@@ -43,6 +47,28 @@ func deletionRetryInterval() time.Duration {
 
 // clusterReachabilityTimeout bounds how long we probe the cluster API before skipping cleanup for a job.
 const clusterReachabilityTimeout = 5 * time.Second
+
+// clusterOperationTimeout bounds how long a single list/delete call against a
+// lab's cluster is allowed to take during cleanup. Unlike clusterReachabilityTimeout
+// (a quick up/down probe), listing or deleting workspaces does real work, so this
+// is longer — but still bounded, so a cluster that degrades between the
+// reachability probe and this call can no longer stall the whole cleanup tick.
+const clusterOperationTimeout = 30 * time.Second
+
+// cleanupDeleteConcurrency returns the maximum number of workspace deletions
+// run at once per job during a cleanup pass, configurable via
+// CLEANUP_DELETE_CONCURRENCY env var. Defaults to 5. Deliberately a separate
+// budget from workspaceCreateSem: this runs on a background goroutine, not an
+// interactive request, so it must not make interactive workspace-request
+// latency depend on unrelated background cleanup activity.
+func cleanupDeleteConcurrency() int {
+	if v := os.Getenv("CLEANUP_DELETE_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 5
+}
 
 // StartWorkspaceCleanup starts a background goroutine that periodically deletes
 // workspaces that have exceeded their configured lifetime and destroys labs past
@@ -90,7 +116,9 @@ func (h *Handler) cleanupExpiredWorkspaces() {
 		}
 
 		lifetime := time.Duration(job.Config.WorkspaceLifetimeHours) * time.Hour
-		workspaces, err := backend.ListWorkspaces(context.Background(), job.ID)
+		listCtx, listCancel := context.WithTimeout(context.Background(), clusterOperationTimeout)
+		workspaces, err := backend.ListWorkspaces(listCtx, job.ID)
+		listCancel()
 		if err != nil {
 			log.Printf("[cleanup] failed to list workspaces for job %s: %v", job.ID, err)
 			continue
@@ -103,7 +131,12 @@ func (h *Handler) cleanupExpiredWorkspaces() {
 		maxRetries := deletionRetryMaxRetries()
 		retryInterval := deletionRetryInterval()
 
-		deleted := 0
+		// Bound and parallelize per-workspace deletes within this job: sequential
+		// deletes made a job with many simultaneously-expiring workspaces stall
+		// every other job behind it in the outer loop for the rest of this tick.
+		var deleted atomic.Int32
+		var wg sync.WaitGroup
+		deleteSem := make(chan struct{}, cleanupDeleteConcurrency())
 		for _, ws := range workspaces {
 			if time.Since(ws.CreatedAt) <= lifetime {
 				continue
@@ -124,25 +157,35 @@ func (h *Handler) cleanupExpiredWorkspaces() {
 				continue
 			}
 
-			log.Printf("[cleanup] deleting workspace %s (%s) in job %s: exceeded %dh lifetime", ws.Name, wsID, job.ID, job.Config.WorkspaceLifetimeHours)
-			delErr := backend.DeleteWorkspace(context.Background(), job.ID, wsID)
-			if delErr != nil {
-				log.Printf("[cleanup] failed to delete workspace %s: %v", wsID, delErr)
-				if ferr := h.jobManager.RecordDeletionFailure(job.ID, wsID, ws.Name, maxRetries); ferr != nil {
-					log.Printf("[cleanup] failed to record deletion failure for workspace %s: %v", wsID, ferr)
+			wg.Add(1)
+			deleteSem <- struct{}{}
+			go func(ws workspace.Workspace, wsID string) {
+				defer wg.Done()
+				defer func() { <-deleteSem }()
+
+				log.Printf("[cleanup] deleting workspace %s (%s) in job %s: exceeded %dh lifetime", ws.Name, wsID, job.ID, job.Config.WorkspaceLifetimeHours)
+				delCtx, delCancel := context.WithTimeout(context.Background(), clusterOperationTimeout)
+				delErr := backend.DeleteWorkspace(delCtx, job.ID, wsID)
+				delCancel()
+				if delErr != nil {
+					log.Printf("[cleanup] failed to delete workspace %s: %v", wsID, delErr)
+					if ferr := h.jobManager.RecordDeletionFailure(job.ID, wsID, ws.Name, maxRetries); ferr != nil {
+						log.Printf("[cleanup] failed to record deletion failure for workspace %s: %v", wsID, ferr)
+					}
+				} else {
+					deleted.Add(1)
+					if cerr := h.jobManager.ClearDeletionRetry(job.ID, wsID); cerr != nil {
+						log.Printf("[cleanup] failed to clear deletion retry for workspace %s: %v", wsID, cerr)
+					}
+					if rerr := h.jobManager.RecordWorkspaceEvent(job.ID, WorkspaceEventDeleted, wsID, ws.Name, ownerDisplayName(ws), ws.Template); rerr != nil {
+						log.Printf("[cleanup] failed to record deletion event for workspace %s: %v", wsID, rerr)
+					}
 				}
-			} else {
-				deleted++
-				if cerr := h.jobManager.ClearDeletionRetry(job.ID, wsID); cerr != nil {
-					log.Printf("[cleanup] failed to clear deletion retry for workspace %s: %v", wsID, cerr)
-				}
-				if rerr := h.jobManager.RecordWorkspaceEvent(job.ID, WorkspaceEventDeleted, wsID, ws.Name, ownerDisplayName(ws), ws.Template); rerr != nil {
-					log.Printf("[cleanup] failed to record deletion event for workspace %s: %v", wsID, rerr)
-				}
-			}
+			}(ws, wsID)
 		}
-		if deleted > 0 {
-			if err := h.jobManager.RecordCleanupEvent(job.ID, deleted); err != nil {
+		wg.Wait()
+		if deletedCount := int(deleted.Load()); deletedCount > 0 {
+			if err := h.jobManager.RecordCleanupEvent(job.ID, deletedCount); err != nil {
 				log.Printf("[cleanup] failed to record cleanup event for job %s: %v", job.ID, err)
 			} else if err := h.jobManager.SaveJob(job.ID); err != nil {
 				log.Printf("[cleanup] failed to persist cleanup event for job %s: %v", job.ID, err)
@@ -182,6 +225,8 @@ func (h *Handler) cleanupExpiredLabs() {
 			continue
 		}
 		go func(id string) {
+			h.pulumiExecSem <- struct{}{}
+			defer func() { <-h.pulumiExecSem }()
 			if err := h.pulumiExec.Destroy(id); err != nil {
 				log.Printf("[cleanup] automatic lab deletion failed for job %s: %v", id, err)
 			}

@@ -6,6 +6,8 @@ title: Stats
 
 Navigate to **Stats** (accessible from the header or `/admin/stats`) to see aggregated deployment metrics.
 
+Figures are cached for up to 30 seconds per project view, so a just-completed change (a lab finishing, a workspace being created or cleaned) may take up to 30 seconds to appear here.
+
 ## Project selector
 
 Use the **Select a Project** dropdown to scope the view to a single lab stack name, or choose **All Projects** for a combined view. The two views show different figures:

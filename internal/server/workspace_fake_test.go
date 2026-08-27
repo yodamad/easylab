@@ -3,12 +3,16 @@ package server
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"easylab/internal/providers/workspace"
 )
 
 // fakeBackend is an in-memory workspace.Backend used in tests. It records calls
 // so assertions can verify cleanup / handler behaviour without a real cluster.
+// callsMu guards DeleteCalls/Ensured since the real handler code now calls a
+// backend's Get/Delete methods from multiple goroutines concurrently (bulk
+// workspace delete).
 type fakeBackend struct {
 	reachable  bool
 	workspaces []workspace.Workspace
@@ -23,12 +27,15 @@ type fakeBackend struct {
 	routingDomain string
 	routingScheme string
 
+	callsMu     sync.Mutex
 	DeleteCalls []string
 	Ensured     []workspace.Spec
 }
 
 func (f *fakeBackend) EnsureWorkspace(_ context.Context, spec workspace.Spec) (workspace.Workspace, error) {
+	f.callsMu.Lock()
 	f.Ensured = append(f.Ensured, spec)
+	f.callsMu.Unlock()
 	if f.ensureErr != nil {
 		return workspace.Workspace{}, f.ensureErr
 	}
@@ -55,8 +62,10 @@ func (f *fakeBackend) ListWorkspaces(_ context.Context, _ string) ([]workspace.W
 	return f.workspaces, nil
 }
 
-func (f *fakeBackend) DeleteWorkspace(_ context.Context, _ , id string) error {
+func (f *fakeBackend) DeleteWorkspace(_ context.Context, _, id string) error {
+	f.callsMu.Lock()
 	f.DeleteCalls = append(f.DeleteCalls, id)
+	f.callsMu.Unlock()
 	return f.deleteErr
 }
 
