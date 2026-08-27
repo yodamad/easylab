@@ -323,4 +323,5 @@ pages:
       - site
   publish: site
   retry: 2 # In case of ulimit errors
-
+  only:
+    - tags
