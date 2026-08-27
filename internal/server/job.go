@@ -292,14 +292,17 @@ type LabConfig struct {
 	AzureLocation       string `json:"azure_location,omitempty"`
 
 	// HTTPS / ingress configuration. Domain is the lab's public domain, wired into
-	// cert-manager + ingress-nginx and used to build per-student workspace URLs
-	// ("{workspace}.{Domain}"). WildcardDomain drives the wildcard DNS A-record so
-	// per-student subdomains resolve.
+	// cert-manager + the Traefik ingress controller and used to build per-student
+	// workspace URLs ("{workspace}.{Domain}"). WildcardDomain drives the wildcard
+	// DNS A-record so per-student subdomains resolve.
 	Domain         string `json:"domain,omitempty"`
 	AcmeEmail      string `json:"acme_email,omitempty"`
 	WildcardDomain string `json:"wildcard_domain,omitempty"`
 
-	// Controls whether nginx-ingress / cert-manager are installed as part of the lab.
+	// Controls whether the ingress controller (Traefik) / cert-manager are
+	// installed as part of the lab. Field/JSON-tag names predate the switch from
+	// nginx to Traefik and are kept for backward compat with persisted jobs and
+	// Pulumi stack config — they now gate the ingress controller generically.
 	// nil means "install" (default, preserves backward compat for persisted jobs).
 	// &false means "skip" (cluster already has it installed).
 	InstallNginxIngress     *bool  `json:"install_nginx_ingress,omitempty"`

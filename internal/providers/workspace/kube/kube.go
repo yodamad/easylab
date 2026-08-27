@@ -76,11 +76,11 @@ const (
 	// reachable through the ingress controller without any DNS setup.
 	nipDomainSuffix = "nip.io"
 
-	// Well-known ingress-nginx controller location. These mirror the defaults
+	// Well-known Traefik ingress controller location. These mirror the defaults
 	// coder.SetupHTTPS installs into; a lab that pre-installs the controller
 	// elsewhere simply gets no nip.io fallback (workspace stays in-cluster).
-	ingressNginxNamespace = "ingress-nginx"
-	ingressNginxService   = "ingress-nginx-controller"
+	ingressControllerNamespace = "traefik"
+	ingressControllerService   = "traefik"
 
 	schemeHTTPS = "https"
 	schemeHTTP  = "http"
@@ -242,11 +242,11 @@ func sanitizeDNS(s string) string {
 	return s
 }
 
-// ingressIP returns the external IP assigned to the ingress-nginx controller
+// ingressIP returns the external IP assigned to the Traefik ingress controller
 // Service, or "" when the controller is absent or has no IP yet. Only an IP is
 // usable: nip.io encodes an address, so a hostname-only LoadBalancer yields "".
 func (b *Backend) ingressIP(ctx context.Context) string {
-	svc, err := b.client.CoreV1().Services(ingressNginxNamespace).Get(ctx, ingressNginxService, metav1.GetOptions{})
+	svc, err := b.client.CoreV1().Services(ingressControllerNamespace).Get(ctx, ingressControllerService, metav1.GetOptions{})
 	if err != nil {
 		return ""
 	}
@@ -1055,15 +1055,13 @@ func (b *Backend) createService(ctx context.Context, name string, labels map[str
 func (b *Backend) createIngress(ctx context.Context, name string, labels map[string]string, spec workspace.Spec) error {
 	host := workspaceHost(name, spec.Domain)
 	pathType := netv1.PathTypePrefix
-	ingressClass := "nginx"
+	ingressClass := "traefik"
 
-	annotations := map[string]string{
-		// Websocket / long-lived connections for the IDE (same tuning the old Coder ingress used).
-		"nginx.ingress.kubernetes.io/proxy-read-timeout": "3600",
-		"nginx.ingress.kubernetes.io/proxy-send-timeout": "3600",
-		"nginx.ingress.kubernetes.io/proxy-body-size":    "0",
-		"nginx.ingress.kubernetes.io/proxy-http-version": "1.1",
-	}
+	// Websocket / long-lived IDE connections and unbounded request bodies need no
+	// per-Ingress annotation under Traefik (unlike nginx): it streams bodies
+	// unbounded by default, and the client-facing idle timeout is configured
+	// chart-wide in coder.SetupHTTPS's Traefik install instead.
+	annotations := map[string]string{}
 
 	tlsSecret := spec.WildcardTLSSecret
 	if tlsSecret == "" && spec.ClusterIssuer != "" {

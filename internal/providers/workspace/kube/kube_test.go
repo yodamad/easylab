@@ -480,8 +480,11 @@ func TestEnsureWorkspace_CreatesResources(t *testing.T) {
 	if _, err := cs.CoreV1().PersistentVolumeClaims("workshops").Get(ctx, name, metav1.GetOptions{}); err != nil {
 		t.Errorf("pvc not created: %v", err)
 	}
-	if _, err := cs.NetworkingV1().Ingresses("workshops").Get(ctx, name, metav1.GetOptions{}); err != nil {
+	ing, err := cs.NetworkingV1().Ingresses("workshops").Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
 		t.Errorf("ingress not created: %v", err)
+	} else if ing.Spec.IngressClassName == nil || *ing.Spec.IngressClassName != "traefik" {
+		t.Errorf("expected ingress class %q, got %v", "traefik", ing.Spec.IngressClassName)
 	}
 }
 
@@ -702,12 +705,12 @@ func TestEnsureWorkspace_Idempotent(t *testing.T) {
 	}
 }
 
-// withIngressLB seeds a ready ingress-nginx controller Service carrying the given
+// withIngressLB seeds a ready Traefik controller Service carrying the given
 // external IP, which is what the nip.io fallback looks for.
 func withIngressLB(cs *fake.Clientset, ip, hostname string) {
 	lb := corev1.LoadBalancerIngress{IP: ip, Hostname: hostname}
-	_, _ = cs.CoreV1().Services(ingressNginxNamespace).Create(context.Background(), &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: ingressNginxService, Namespace: ingressNginxNamespace},
+	_, _ = cs.CoreV1().Services(ingressControllerNamespace).Create(context.Background(), &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: ingressControllerService, Namespace: ingressControllerNamespace},
 		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeLoadBalancer},
 		Status: corev1.ServiceStatus{
 			LoadBalancer: corev1.LoadBalancerStatus{Ingress: []corev1.LoadBalancerIngress{lb}},

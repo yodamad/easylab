@@ -62,7 +62,7 @@ When you choose **Use Existing Cluster**, EasyLab skips cloud provider provision
   template, see below)
 * The wizard goes directly to workspace and template configuration
 
-The kubeconfig must have sufficient permissions to create namespaces, Deployments, Services, Ingresses and PersistentVolumeClaims, and (when a domain is set) to install the ingress-nginx and cert-manager Helm releases.
+The kubeconfig must have sufficient permissions to create namespaces, Deployments, Services, Ingresses and PersistentVolumeClaims, and (when a domain is set) to install the Traefik ingress controller and cert-manager Helm releases.
 
 #### Splitting EasyLab and workspaces across node pools
 
@@ -381,7 +381,7 @@ other mode, so the wizard hides it rather than show a field that silently does n
 
 The following components are deployed into the cluster:
 
-* **ingress-nginx** — Kubernetes ingress controller (gets its own LoadBalancer IP, exported as `ingressIP`). Installed whether or not a domain is set, since the nip.io fallback routes through it too.
+* **Traefik** — Kubernetes ingress controller (gets its own LoadBalancer IP, exported as `ingressIP`). Installed whether or not a domain is set, since the nip.io fallback routes through it too.
 * **cert-manager** — automates TLS certificate issuance from Let's Encrypt. Installed only when a domain is set; the nip.io fallback has no certificates to issue.
 
 !!! note "The nip.io fallback needs a routable LoadBalancer IP"

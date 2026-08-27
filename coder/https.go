@@ -17,13 +17,13 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
 
-// SetupHTTPS installs ingress-nginx and cert-manager and creates a Let's Encrypt
-// ClusterIssuer, plus (when a DNS provider is configured) the DNS A-records that
-// let per-student workspace subdomains resolve and the wildcard certificate they
-// are served with. Per-student ingresses are created at runtime by the server;
-// this function only provisions the shared TLS/ingress infrastructure. Returns
-// the ingress-nginx release and the LoadBalancer IP assigned to the ingress-nginx
-// controller service.
+// SetupHTTPS installs the Traefik ingress controller and cert-manager and creates
+// a Let's Encrypt ClusterIssuer, plus (when a DNS provider is configured) the DNS
+// A-records that let per-student workspace subdomains resolve and the wildcard
+// certificate they are served with. Per-student ingresses are created at runtime
+// by the server; this function only provisions the shared TLS/ingress
+// infrastructure. Returns the Traefik release and the LoadBalancer IP assigned to
+// the Traefik controller service.
 // kubeconfigOut is the kubeconfig file content as a StringOutput, used to read
 // the LoadBalancer IP directly from the Kubernetes API (avoiding the Pulumi
 // provider's await which blocks on OVHcloud's ipMode:VIP).
@@ -31,9 +31,10 @@ import (
 // certificate must live there, because an ingress can only reference a TLS secret
 // in its own namespace. It may be nil when the namespace is not managed here.
 //
-// If coder:domain is not set, only ingress-nginx is installed: the server then
-// exposes workspaces over plain HTTP via nip.io on the returned LoadBalancer IP,
-// so the controller is still required, but there is no domain to certify.
+// If coder:domain is not set, only the ingress controller is installed: the
+// server then exposes workspaces over plain HTTP via nip.io on the returned
+// LoadBalancer IP, so the controller is still required, but there is no domain to
+// certify.
 func SetupHTTPS(
 	ctx *pulumi.Context,
 	k8sProvider *k8s.Provider,
@@ -46,20 +47,24 @@ func SetupHTTPS(
 
 	// Absent config key means "install" (default). Explicit "false" means skip (pre-installed).
 	installCertManager := utils.CoderConfigOptional(ctx, utils.CoderInstallCertManager) != "false"
-	installNginxIngress := utils.CoderConfigOptional(ctx, utils.CoderInstallNginxIngress) != "false"
+	// CoderInstallNginxIngress/CoderNginxIngressNamespace/CoderNginxIngressServiceName
+	// are historical Pulumi config key names (kept for backward compat with
+	// already-provisioned stacks) that now gate the ingress controller generically —
+	// the controller itself is Traefik, not nginx.
+	installIngressController := utils.CoderConfigOptional(ctx, utils.CoderInstallNginxIngress) != "false"
 
 	// Configurable namespace / service names (fall back to well-known defaults).
 	certManagerNsName := utils.CoderConfigOptional(ctx, utils.CoderCertManagerNamespace)
 	if certManagerNsName == "" {
 		certManagerNsName = "cert-manager"
 	}
-	nginxNsName := utils.CoderConfigOptional(ctx, utils.CoderNginxIngressNamespace)
-	if nginxNsName == "" {
-		nginxNsName = "ingress-nginx"
+	ingressNsName := utils.CoderConfigOptional(ctx, utils.CoderNginxIngressNamespace)
+	if ingressNsName == "" {
+		ingressNsName = "traefik"
 	}
-	nginxServiceName := utils.CoderConfigOptional(ctx, utils.CoderNginxIngressServiceName)
-	if nginxServiceName == "" {
-		nginxServiceName = "ingress-nginx-controller"
+	ingressServiceName := utils.CoderConfigOptional(ctx, utils.CoderNginxIngressServiceName)
+	if ingressServiceName == "" {
+		ingressServiceName = "traefik"
 	}
 
 	// ── cert-manager ────────────────────────────────────────────────────────
@@ -86,37 +91,50 @@ func SetupHTTPS(
 		}
 	}
 
-	// ── ingress-nginx ────────────────────────────────────────────────────────
+	// ── Traefik ──────────────────────────────────────────────────────────────
 	var ingressRelease *helmv3.Release
-	if installNginxIngress {
-		ingressNs, err := k8score.NewNamespace(ctx, "ingress-nginx-ns", &k8score.NamespaceArgs{
-			Metadata: &metav1.ObjectMetaArgs{Name: pulumi.String(nginxNsName)},
+	if installIngressController {
+		ingressNs, err := k8score.NewNamespace(ctx, "traefik-ns", &k8score.NamespaceArgs{
+			Metadata: &metav1.ObjectMetaArgs{Name: pulumi.String(ingressNsName)},
 		}, pulumi.Provider(k8sProvider))
 		if err != nil {
-			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to create ingress-nginx namespace: %w", err)
+			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to create traefik namespace: %w", err)
 		}
 
 		ingressRelease, err = internalK8s.InitHelm(ctx, k8sProvider, internalK8s.HelmChartInfo{
-			Name:        "ingress-nginx",
-			ChartName:   "ingress-nginx",
-			Url:         "https://kubernetes.github.io/ingress-nginx",
-			ReleaseName: "ingress-nginx",
-			// OVHcloud sets ipMode:VIP on LoadBalancer services, which causes the Pulumi
-			// Kubernetes provider's GetService await to block indefinitely. Adding the
-			// skipAwait annotation to the controller service tells the provider to skip
-			// the readiness check when reading it.
+			Name:        "traefik",
+			ChartName:   "traefik",
+			Url:         "https://traefik.github.io/charts",
+			ReleaseName: "traefik",
 			Values: pulumi.Map{
-				"controller": pulumi.Map{
-					"service": pulumi.Map{
-						"annotations": pulumi.StringMap{
-							"pulumi.kubernetes.io/skipAwait": pulumi.String("true"),
+				// OVHcloud sets ipMode:VIP on LoadBalancer services, which causes the Pulumi
+				// Kubernetes provider's GetService await to block indefinitely. Adding the
+				// skipAwait annotation to the controller service tells the provider to skip
+				// the readiness check when reading it.
+				"service": pulumi.Map{
+					"annotations": pulumi.StringMap{
+						"pulumi.kubernetes.io/skipAwait": pulumi.String("true"),
+					},
+				},
+				// Chart-wide idle timeout for long-lived connections (the student IDE's
+				// websocket): there is no per-Ingress annotation equivalent to nginx's old
+				// proxy-read-timeout/proxy-send-timeout under Traefik, this is entrypoint-scoped.
+				"ports": pulumi.Map{
+					"web": pulumi.Map{
+						"transport": pulumi.Map{
+							"respondingTimeouts": pulumi.Map{"idleTimeout": pulumi.String("3600s")},
+						},
+					},
+					"websecure": pulumi.Map{
+						"transport": pulumi.Map{
+							"respondingTimeouts": pulumi.Map{"idleTimeout": pulumi.String("3600s")},
 						},
 					},
 				},
 			},
 		}, ingressNs)
 		if err != nil {
-			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to install ingress-nginx: %w", err)
+			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to install traefik: %w", err)
 		}
 	}
 
@@ -124,9 +142,9 @@ func SetupHTTPS(
 	// LoadBalancer IP so the server can route workspaces at "{name}.{ip}.nip.io"
 	// over plain HTTP, and skip the ACME ClusterIssuer and DNS records entirely.
 	if domain == "" {
-		ingressIP, ipErr := GetIngressIP(kubeconfigOut, ingressRelease, nginxNsName, nginxServiceName)
+		ingressIP, ipErr := GetIngressIP(kubeconfigOut, ingressRelease, ingressNsName, ingressServiceName)
 		if ipErr != nil {
-			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to get ingress-nginx IP: %w", ipErr)
+			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to get traefik IP: %w", ipErr)
 		}
 		return ingressRelease, ingressIP, nil
 	}
@@ -230,7 +248,7 @@ func SetupHTTPS(
 		// Resolve the LoadBalancer IP here — after the webhook Helm install, which
 		// takes several minutes and gives the cloud provider time to assign the IP.
 		var ipErr error
-		ingressIP, ipErr = GetIngressIP(kubeconfigOut, ingressRelease, nginxNsName, nginxServiceName)
+		ingressIP, ipErr = GetIngressIP(kubeconfigOut, ingressRelease, ingressNsName, ingressServiceName)
 		if ipErr != nil {
 			return nil, pulumi.StringOutput{}, ipErr
 		}
@@ -262,10 +280,10 @@ func SetupHTTPS(
 			}
 		}
 	} else {
-		// HTTP-01 solver: cert-manager handles the challenge via ingress-nginx
+		// HTTP-01 solver: cert-manager handles the challenge via Traefik.
 		solverSpec = map[string]any{
 			"http01": map[string]any{
-				"ingress": map[string]any{"class": "nginx"},
+				"ingress": map[string]any{"ingressClassName": "traefik"},
 			},
 		}
 	}
@@ -340,9 +358,9 @@ func SetupHTTPS(
 	// time to assign the LoadBalancer IP during the cert-manager/ingress install.
 	if !ingressIPResolved {
 		var ipErr error
-		ingressIP, ipErr = GetIngressIP(kubeconfigOut, ingressRelease, nginxNsName, nginxServiceName)
+		ingressIP, ipErr = GetIngressIP(kubeconfigOut, ingressRelease, ingressNsName, ingressServiceName)
 		if ipErr != nil {
-			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to get ingress-nginx IP: %w", ipErr)
+			return nil, pulumi.StringOutput{}, fmt.Errorf("failed to get traefik IP: %w", ipErr)
 		}
 	}
 
@@ -415,11 +433,11 @@ func createWildcardCertificate(
 	return nil
 }
 
-// GetIngressIP returns the LoadBalancer IP assigned to the ingress-nginx controller service.
+// GetIngressIP returns the LoadBalancer IP assigned to the ingress controller service.
 // It uses a direct Kubernetes API call instead of GetService to avoid the Pulumi provider's
 // pending-initialisation await, which blocks indefinitely on OVHcloud clusters because
 // OVHcloud sets ipMode:VIP on LoadBalancer services (not recognised as ready by the provider).
-// ingressRelease may be nil when ingress-nginx is pre-installed on the cluster.
+// ingressRelease may be nil when the ingress controller is pre-installed on the cluster.
 func GetIngressIP(kubeconfigOut pulumi.StringOutput, ingressRelease *helmv3.Release, namespace, serviceName string) (pulumi.StringOutput, error) {
 	var trigger interface{}
 	if ingressRelease != nil {

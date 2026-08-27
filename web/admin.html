@@ -365,8 +365,8 @@
                                 <button type="button" class="source-button selected" id="ingress-install-btn" data-ingress-mode="install">
                                     <span class="source-icon">&#9729;</span>
                                     <div class="source-content">
-                                        <span class="source-title">Install ingress-nginx</span>
-                                        <span class="source-description">Deploy a new ingress-nginx controller</span>
+                                        <span class="source-title">Install Traefik ingress</span>
+                                        <span class="source-description">Deploy a new Traefik ingress controller</span>
                                     </div>
                                 </button>
                                 <button type="button" class="source-button" id="ingress-existing-btn" data-ingress-mode="existing">
@@ -383,13 +383,13 @@
                             <div class="form-row">
                                 <div class="form-group">
                                     <label for="nginx_ingress_namespace">Ingress Namespace</label>
-                                    <input type="text" id="nginx_ingress_namespace" name="nginx_ingress_namespace" placeholder="ingress-nginx">
-                                    <small>Namespace where the ingress controller is installed. Defaults to <code>ingress-nginx</code>.</small>
+                                    <input type="text" id="nginx_ingress_namespace" name="nginx_ingress_namespace" placeholder="traefik">
+                                    <small>Namespace where the ingress controller is installed. Defaults to <code>traefik</code>.</small>
                                 </div>
                                 <div class="form-group">
                                     <label for="nginx_ingress_service_name">Controller Service Name</label>
-                                    <input type="text" id="nginx_ingress_service_name" name="nginx_ingress_service_name" placeholder="ingress-nginx-controller">
-                                    <small>Service name of the ingress controller. Defaults to <code>ingress-nginx-controller</code>.</small>
+                                    <input type="text" id="nginx_ingress_service_name" name="nginx_ingress_service_name" placeholder="traefik">
+                                    <small>Service name of the ingress controller. Defaults to <code>traefik</code>.</small>
                                 </div>
                             </div>
                         </div>
