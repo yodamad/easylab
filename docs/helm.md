@@ -12,7 +12,7 @@ EasyLab is available as a Helm chart published on Docker Hub as an OCI artifact.
 - Kubernetes cluster (v1.24+)
 - Helm 3.8+ (OCI support required)
 - To reach the EasyLab UI, an **Ingress controller** matching `ingress.className` must already be running in the cluster if you set `ingress.enabled=true` (the recommended way to expose it). The chart defaults `ingress.className` to `traefik`, which is only preinstalled on some distributions (for example k3s) — most managed Kubernetes offerings, including OVHcloud Managed Kubernetes, ship with **no** ingress controller out of the box. Either install Traefik yourself beforehand, or set `traefik.enabled=true` to have this chart install it for you — see [Optional infrastructure components](#optional-infrastructure-components). If you use a different ingress controller (for example NGINX), install it separately and set `ingress.className` to match.
-- If you terminate TLS with cert-manager annotations (rather than a pre-existing secret), **cert-manager** and a configured `ClusterIssuer` must already be installed, or set `cert-manager.enabled=true` to have the chart install cert-manager for you.
+- If you terminate TLS with cert-manager annotations (rather than a pre-existing secret), **cert-manager** and a configured `ClusterIssuer` must already be installed, or set `cert-manager.enabled=true` to have the chart install cert-manager for you. This chart can also create the `ClusterIssuer` itself (HTTP-01, Azure DNS-01, or OVH DNS-01) — see [Certificates for the EasyLab ingress](#certificates-for-the-easylab-ingress).
 
 ## App image platforms (multi-arch)
 
@@ -102,6 +102,16 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 | `traefik.enabled` | Install Traefik as part of this chart (IngressClass name pinned to `traefik`, matching `ingress.className`'s default) | `false` |
 | `cert-manager.enabled` | Install cert-manager as part of this chart | `false` |
 | `cert-manager.crds.enabled` | Install cert-manager CRDs (required on first install) | `true` |
+| `certManager.namespace` | Namespace cert-manager's controller runs in — must match wherever it's actually installed | `cert-manager` |
+| `certManager.clusterIssuer.create` | Create a Let's Encrypt ClusterIssuer for the EasyLab ingress (HTTP-01, or Azure DNS-01 if `dns.azure.enabled=true`) | `false` |
+| `certManager.clusterIssuer.name` | ClusterIssuer name | `letsencrypt` |
+| `certManager.clusterIssuer.email` | ACME account email | `""` |
+| `certManager.clusterIssuer.server` | ACME server URL | `https://acme-v02.api.letsencrypt.org/directory` |
+| `dns.azure.enabled` | Use Azure DNS-01 (cert-manager's built-in `azureDNS` solver) instead of HTTP-01 | `false` |
+| `dns.azure.zone` | Azure DNS hosted zone name | `""` |
+| `dns.azure.tenantId` / `.subscriptionId` / `.resourceGroup` / `.clientId` / `.clientSecret` | Azure service principal credentials | `""` |
+| `dns.ovh.enabled` | Install `cert-manager-webhook-ovh` and let it create its own OVH DNS-01 ClusterIssuer — see [Certificates for the EasyLab ingress](#certificates-for-the-easylab-ingress) | `false` |
+| `cert-manager-webhook-ovh.*` | Raw values for the vendored OVH webhook chart (issuer name, ACME email, OVH credentials, etc.) — deeply nested, see [upstream chart values](https://github.com/aureq/cert-manager-webhook-ovh) | see `values.yaml` |
 | `resources.requests.memory` | Memory request | `1024Mi` |
 | `resources.requests.cpu` | CPU request | `500m` |
 | `resources.limits.memory` | Memory limit | `4096Mi` |
@@ -140,7 +150,133 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 
 If your cluster already has an ingress controller and/or cert-manager installed — including a different controller such as NGINX — leave the relevant flag at `false` (default) and configure `ingress.className` to match your existing controller.
 
-All `traefik` and `cert-manager` values can be passed under their respective keys — see the [Traefik chart values](https://github.com/traefik/traefik-helm-chart) and [cert-manager chart values](https://cert-manager.io/docs/installation/helm/) for the full list.
+All `traefik` and `cert-manager` values can be passed under their respective keys — see the [Traefik chart values](https://github.com/traefik/traefik-helm-chart) and [cert-manager chart values](https://cert-manager.io/docs/installation/helm/) for the full list. This also covers scheduling: `traefik.nodeSelector`/`.tolerations` and `cert-manager.nodeSelector`/`.tolerations` pin those components to specific nodes the same way `nodeSelector`/`tolerations` pin the EasyLab pod itself (see [Pinning to a dedicated node pool](#pinning-to-a-dedicated-node-pool)), for example `--set traefik.nodeSelector.pool=control-plane`.
+
+!!! warning "cert-manager CRDs are not updated by `helm upgrade`"
+    `cert-manager.crds.enabled=true` installs the cert-manager CRDs on first install, but Helm does not update CRDs on `helm upgrade` — this is a general Helm/cert-manager limitation, not specific to this chart. Bumping the vendored cert-manager version may require manually applying the new CRDs (see [cert-manager's CRD upgrade docs](https://cert-manager.io/docs/installation/upgrading/)) before `helm upgrade` picks up the new version.
+
+### Certificates for the EasyLab ingress
+
+Beyond installing cert-manager itself, this chart can also create the `ClusterIssuer` that actually requests a certificate for the EasyLab ingress — closing the gap left by `cert-manager.enabled=true` alone (that only installs cert-manager; nothing issues a certificate until an issuer exists).
+
+**Namespace alignment (read this first)**
+
+`certManager.namespace` (and, for OVH, `cert-manager-webhook-ovh.certManager.namespace`) must match the namespace cert-manager's own pods actually run in. `cert-manager.enabled=true` installs cert-manager as a normal Helm dependency of this chart, which lands in whatever `--namespace` you pass to `helm install`/`helm upgrade` — **not** this chart's own `namespace.name` (EasyLab's own resources are explicitly namespaced independently of that flag; cert-manager's are not). Always pass `--namespace cert-manager --create-namespace` explicitly when using any of the options below, and verify with:
+
+```bash
+kubectl get pods -n cert-manager
+```
+
+If cert-manager is pre-installed separately, use its actual namespace instead (commonly `cert-manager`).
+
+Enable only **one** ClusterIssuer mechanism at a time: `certManager.clusterIssuer.create` (HTTP-01 or Azure DNS-01) *or* `dns.ovh.enabled` (OVH DNS-01) — not both.
+
+**HTTP-01 (default solver, no DNS provider)**
+
+Needs no DNS credentials, but the EasyLab ingress host must be reachable on port 80 for the ACME challenge:
+
+```bash
+helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
+  --version __VERSION__ \
+  --namespace cert-manager --create-namespace \
+  --set secrets.adminPassword="SuperAdmin" \
+  --set traefik.enabled=true \
+  --set cert-manager.enabled=true \
+  --set certManager.clusterIssuer.create=true \
+  --set certManager.clusterIssuer.email="you@example.com" \
+  --set ingress.enabled=true \
+  --set ingress.host="easylab.example.com" \
+  --set ingress.tls.enabled=true \
+  --wait --timeout 5m
+```
+
+`--wait --timeout 5m` makes Helm wait for cert-manager's Deployments (webhook included) to be ready before the `post-install` hook that creates the `ClusterIssuer` fires — without it, the ClusterIssuer can fail to create on a fresh combined install because cert-manager's admission webhook isn't up yet. The `cert-manager.io/cluster-issuer` Ingress annotation is added automatically; no manual `ingress.annotations` `--set` is needed here.
+
+**Azure DNS-01**
+
+No port-80 requirement; uses cert-manager's built-in `azureDNS` solver:
+
+```bash
+helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
+  --version __VERSION__ \
+  --namespace cert-manager --create-namespace \
+  --set secrets.adminPassword="SuperAdmin" \
+  --set traefik.enabled=true \
+  --set cert-manager.enabled=true \
+  --set certManager.clusterIssuer.create=true \
+  --set certManager.clusterIssuer.email="you@example.com" \
+  --set dns.azure.enabled=true \
+  --set dns.azure.zone="example.com" \
+  --set dns.azure.tenantId="..." \
+  --set dns.azure.subscriptionId="..." \
+  --set dns.azure.resourceGroup="..." \
+  --set dns.azure.clientId="..." \
+  --set dns.azure.clientSecret="..." \
+  --set ingress.enabled=true \
+  --set ingress.host="easylab.example.com" \
+  --set ingress.tls.enabled=true \
+  --wait --timeout 5m
+```
+
+**OVH DNS-01**
+
+Vendors the [`cert-manager-webhook-ovh`](https://github.com/aureq/cert-manager-webhook-ovh) chart, which manages its own `ClusterIssuer`, credential `Secret`, and RBAC end-to-end — the same webhook EasyLab's own Pulumi-provisioned student clusters use for DNS-01. Its values are deeply nested, so a values file is easier than a long `--set` chain:
+
+```yaml
+# ovh-dns01-values.yaml
+secrets:
+  adminPassword: "SuperAdmin"
+
+traefik:
+  enabled: true
+cert-manager:
+  enabled: true
+
+dns:
+  ovh:
+    enabled: true
+
+cert-manager-webhook-ovh:
+  issuers:
+    - name: letsencrypt-ovh
+      create: true
+      kind: ClusterIssuer
+      acmeServerUrl: https://acme-v02.api.letsencrypt.org/directory
+      email: "you@example.com"
+      ovhEndpointName: ovh-eu
+      ovhAuthenticationMethod: application
+      ovhAuthentication:
+        applicationKey: "your-app-key"
+        applicationSecret: "your-app-secret"
+        applicationConsumerKey: "your-consumer-key"
+
+ingress:
+  enabled: true
+  host: easylab.example.com
+  tls:
+    enabled: true
+  # The auto-annotation only covers certManager.clusterIssuer.create (HTTP-01/
+  # Azure) above — for OVH, match this to cert-manager-webhook-ovh.issuers[0].name:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-ovh
+```
+
+```bash
+helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
+  --version __VERSION__ \
+  --namespace cert-manager --create-namespace \
+  -f ovh-dns01-values.yaml \
+  --wait --timeout 5m
+```
+
+Unlike the HTTP-01/Azure path above, the OVH issuer is created directly by the vendored webhook chart's own templates, not deferred to a post-install hook — `--wait --timeout 5m` reduces but does not fully eliminate a possible webhook-readiness race on a fresh combined install. If the first install fails on this, a `helm upgrade` retry with the same values succeeds once cert-manager is up. See the [`cert-manager-webhook-ovh` values reference](https://github.com/aureq/cert-manager-webhook-ovh/blob/main/charts/cert-manager-webhook-ovh/values.yaml) for the full set of `issuers[]` fields (OAuth2 authentication, EAB, alternate OVH endpoints, etc.).
+
+Once any of the above is applied, check certificate status with:
+
+```bash
+kubectl describe clusterissuer <issuer-name>
+kubectl describe certificate -n easylab easylab-tls
+```
 
 ### Exposing with Traefik
 
@@ -223,19 +359,24 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 
 ### Fresh cluster (with Traefik and cert-manager)
 
-For a cluster that does not have an ingress controller or cert-manager yet, `traefik.enabled=true` installs Traefik with the default `ingress.className=traefik` — no need to override it:
+For a cluster that does not have an ingress controller or cert-manager yet, `traefik.enabled=true` installs Traefik with the default `ingress.className=traefik` — no need to override it. `certManager.clusterIssuer.create=true` has this chart create the `ClusterIssuer` too (HTTP-01 here — see [Certificates for the EasyLab ingress](#certificates-for-the-easylab-ingress) for Azure/OVH DNS-01 alternatives), so the certificate actually gets issued instead of the Ingress annotation pointing at a `ClusterIssuer` that doesn't exist:
 
 ```bash
 helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
   --version __VERSION__ \
+  --namespace cert-manager --create-namespace \
   --set secrets.adminPassword="SuperAdmin" \
   --set traefik.enabled=true \
   --set cert-manager.enabled=true \
+  --set certManager.clusterIssuer.create=true \
+  --set certManager.clusterIssuer.email="you@example.com" \
   --set ingress.enabled=true \
   --set ingress.host="easylab.example.com" \
   --set ingress.tls.enabled=true \
-  --set ingress.annotations."cert-manager\.io/cluster-issuer"=letsencrypt
+  --wait --timeout 5m
 ```
+
+`--namespace cert-manager --create-namespace` makes `certManager.namespace`'s default line up with where cert-manager actually lands (see the namespace alignment note above). `--wait --timeout 5m` lets cert-manager's webhook come up before the `ClusterIssuer` is created. The `cert-manager.io/cluster-issuer` annotation is now added to the Ingress automatically — no manual `ingress.annotations` `--set` needed.
 
 ### With OVH credentials
 

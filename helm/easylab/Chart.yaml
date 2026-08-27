@@ -13,6 +13,10 @@ dependencies:
     version: "v1.21.1"
     repository: https://charts.jetstack.io
     condition: cert-manager.enabled
+  - name: cert-manager-webhook-ovh
+    version: "0.9.10"
+    repository: https://aureq.github.io/cert-manager-webhook-ovh
+    condition: dns.ovh.enabled
 
 maintainers:
   - name: yodamad

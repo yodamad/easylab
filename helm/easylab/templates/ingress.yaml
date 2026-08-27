@@ -6,9 +6,14 @@ metadata:
   namespace: {{ include "easylab.namespace" . }}
   labels:
     {{- include "easylab.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
+  {{- $auto := dict }}
+  {{- if and .Values.certManager.clusterIssuer.create .Values.ingress.tls.enabled }}
+  {{- $auto = dict "cert-manager.io/cluster-issuer" .Values.certManager.clusterIssuer.name }}
+  {{- end }}
+  {{- $annotations := merge (dict) .Values.ingress.annotations $auto }}
+  {{- if $annotations }}
   annotations:
-    {{- toYaml . | nindent 4 }}
+    {{- toYaml $annotations | nindent 4 }}
   {{- end }}
 spec:
   {{- if .Values.ingress.className }}

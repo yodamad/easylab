@@ -90,3 +90,83 @@ cert-manager:
   enabled: false
   crds:
     enabled: true
+
+# Automates a Let's Encrypt ClusterIssuer for the EasyLab ingress's own TLS
+# certificate (see ingress.tls above). Requires cert-manager to be present in
+# the cluster: either cert-manager.enabled=true above, or a pre-existing
+# install.
+#
+# IMPORTANT — namespace alignment: certManager.namespace must match wherever
+# cert-manager's own pods actually run. cert-manager.enabled=true installs it
+# as a normal Helm dependency, which lands in whatever --namespace you pass to
+# `helm install`/`helm upgrade` (NOT this chart's own namespace.name) — always
+# pass --namespace cert-manager explicitly when using this feature. If
+# cert-manager is pre-installed separately, use its actual namespace (commonly
+# "cert-manager"). Verify with: kubectl get pods -n cert-manager
+#
+# Two solver modes:
+#   - HTTP-01 (default): no DNS provider needed, but the ingress host must be
+#     reachable on port 80 for the ACME challenge.
+#   - Azure DNS-01 (set dns.azure.enabled=true below): uses cert-manager's
+#     built-in azureDNS solver, no port-80 requirement.
+# For OVH DNS-01, use dns.ovh below instead — it manages its own ClusterIssuer
+# end-to-end via the vendored cert-manager-webhook-ovh chart. Enable only one
+# mechanism at a time (certManager.clusterIssuer.create OR dns.ovh.enabled).
+certManager:
+  namespace: cert-manager
+  clusterIssuer:
+    create: false
+    name: letsencrypt
+    email: ""
+    # Let's Encrypt production. Override to
+    # https://acme-staging-v02.api.letsencrypt.org/directory while testing to
+    # avoid production rate limits.
+    server: https://acme-v02.api.letsencrypt.org/directory
+
+# DNS-01 provider settings for certManager.clusterIssuer (Azure) and for the
+# vendored OVH webhook chart below.
+dns:
+  # Azure DNS-01 credentials for certManager.clusterIssuer above (service
+  # principal / client secret auth).
+  azure:
+    enabled: false
+    zone: ""             # Azure DNS hosted zone name, e.g. "example.com"
+    tenantId: ""
+    subscriptionId: ""
+    resourceGroup: ""
+    clientId: ""
+    clientSecret: ""
+
+  # OVH DNS-01: enabled: true installs the cert-manager-webhook-ovh chart as a
+  # dependency (see Chart.yaml), which creates its own ClusterIssuer,
+  # credential Secret, and RBAC end-to-end — nothing under certManager above
+  # needs to be set for OVH beyond cert-manager being present. The nested
+  # cert-manager-webhook-ovh block below configures that subchart directly
+  # (it enforces its own values schema, so it cannot carry an "enabled" field
+  # itself — that lives here instead). Its certManager.namespace /
+  # certManager.serviceAccountName must match your actual cert-manager install
+  # (defaults assume `helm install easylab` with cert-manager.enabled=true and
+  # --namespace cert-manager — see the namespace alignment note above).
+  ovh:
+    enabled: false
+
+# Raw values for the vendored cert-manager-webhook-ovh chart (see dns.ovh
+# above). Deeply nested — see
+# https://github.com/aureq/cert-manager-webhook-ovh for the full schema.
+cert-manager-webhook-ovh:
+  groupName: acme.easylab.local
+  certManager:
+    namespace: cert-manager
+    serviceAccountName: easylab-cert-manager
+  issuers:
+    - name: letsencrypt-ovh
+      create: true
+      kind: ClusterIssuer
+      acmeServerUrl: https://acme-v02.api.letsencrypt.org/directory
+      email: ""
+      ovhEndpointName: ovh-eu
+      ovhAuthenticationMethod: application
+      ovhAuthentication:
+        applicationKey: ""
+        applicationSecret: ""
+        applicationConsumerKey: ""

@@ -1,0 +1,48 @@
+{{- if .Values.certManager.clusterIssuer.create }}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.certManager.clusterIssuer.name }}
+  labels:
+    {{- include "easylab.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  acme:
+    server: {{ .Values.certManager.clusterIssuer.server }}
+    email: {{ .Values.certManager.clusterIssuer.email | quote }}
+    privateKeySecretRef:
+      name: {{ .Values.certManager.clusterIssuer.name }}
+    solvers:
+      {{- if .Values.dns.azure.enabled }}
+      - dns01:
+          azureDNS:
+            clientID: {{ .Values.dns.azure.clientId | quote }}
+            subscriptionID: {{ .Values.dns.azure.subscriptionId | quote }}
+            tenantID: {{ .Values.dns.azure.tenantId | quote }}
+            resourceGroupName: {{ .Values.dns.azure.resourceGroup | quote }}
+            hostedZoneName: {{ .Values.dns.azure.zone | quote }}
+            environment: AzurePublicCloud
+            clientSecretSecretRef:
+              name: {{ include "easylab.fullname" . }}-azure-dns-credentials
+              key: client-secret
+      {{- else }}
+      - http01:
+          ingress:
+            ingressClassName: {{ .Values.ingress.className }}
+      {{- end }}
+{{- end }}
+---
+{{- if .Values.dns.azure.enabled }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "easylab.fullname" . }}-azure-dns-credentials
+  namespace: {{ .Values.certManager.namespace }}
+  labels:
+    {{- include "easylab.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  client-secret: {{ .Values.dns.azure.clientSecret | quote }}
+{{- end }}

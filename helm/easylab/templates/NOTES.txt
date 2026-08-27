@@ -13,3 +13,17 @@ To access EasyLab, run:
 
 Then open http://localhost:{{ .Values.service.port }} in your browser.
 {{- end }}
+
+{{- if .Values.certManager.clusterIssuer.create }}
+
+A ClusterIssuer ({{ .Values.certManager.clusterIssuer.name }}) was created.
+Certificate issuance can take a minute or two. Check status with:
+  kubectl describe clusterissuer {{ .Values.certManager.clusterIssuer.name }}
+  kubectl describe certificate -n {{ include "easylab.namespace" . }} {{ .Values.ingress.tls.secretName }}
+{{- end }}
+{{- if .Values.dns.ovh.enabled }}
+
+An OVH ClusterIssuer was created by the cert-manager-webhook-ovh subchart.
+Check status with:
+  kubectl describe clusterissuer <name from cert-manager-webhook-ovh.issuers[].name>
+{{- end }}
