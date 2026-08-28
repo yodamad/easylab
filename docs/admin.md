@@ -549,6 +549,8 @@ You can see all the labs you have created with following information:
 * **List of workspaces** created for this lab — delete workspaces one by one or in bulk
 * **Cleanup** - Display the cleanup policy for the lab (*i.e. after how many hours/days the workspaces will be deleted*)
 
+The list is paginated at 25 labs per page once you have more than that; use the **Previous**/**Next** buttons at the bottom of the table to navigate.
+
 ![Lab Workspaces](screens/list-workspaces.png){width=350}
 
 ### Retry or recreate a lab

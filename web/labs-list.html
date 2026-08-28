@@ -164,6 +164,22 @@
                     </tbody>
                 </table>
             </div>
+
+            {{if gt .TotalPages 1}}
+            <div class="pagination">
+                {{if .HasPrev}}
+                <a href="?page={{.PrevPage}}" class="btn btn-secondary btn-sm">← Previous</a>
+                {{else}}
+                <span class="btn btn-secondary btn-sm pagination-disabled">← Previous</span>
+                {{end}}
+                <span class="pagination-info">Page {{.Page}} of {{.TotalPages}}</span>
+                {{if .HasNext}}
+                <a href="?page={{.NextPage}}" class="btn btn-secondary btn-sm">Next →</a>
+                {{else}}
+                <span class="btn btn-secondary btn-sm pagination-disabled">Next →</span>
+                {{end}}
+            </div>
+            {{end}}
             {{else}}
             <div class="empty-state">
                 <div class="empty-state-icon">📋</div>

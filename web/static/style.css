@@ -3236,6 +3236,24 @@ select.loading {
     color: var(--text-light);
 }
 
+.pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem 0;
+}
+
+.pagination-info {
+    font-size: 0.875rem;
+    color: var(--text-light);
+}
+
+.pagination-disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
 .timestamp {
     font-size: 0.875rem;
     color: var(--text-light);

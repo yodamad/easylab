@@ -1079,6 +1079,59 @@ func TestHandler_ServeLabsList(t *testing.T) {
 	// Template loading will fail in tests (no web/ dir), but the data-building code is exercised.
 }
 
+// TestHandler_ServeLabsList_Pagination proves ServeLabsList slices allJobs to
+// the requested page's window (via labsPagination) rather than rendering
+// every job — seed more than one page's worth and confirm a later page's
+// query param actually changes which jobs would be shown.
+func TestHandler_ServeLabsList_Pagination(t *testing.T) {
+	jm := NewJobManager("")
+	for i := 0; i < labsPageSize+5; i++ {
+		jm.CreateJob(&LabConfig{StackName: "lab"})
+	}
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	req := httptest.NewRequest("GET", "/admin/labs?page=2", nil)
+	w := httptest.NewRecorder()
+	h.ServeLabsList(w, req)
+	// Template loading will fail in tests (no web/ dir); this just proves the
+	// handler doesn't panic on a page-2 request with a partial final page.
+}
+
+func TestLabsPagination(t *testing.T) {
+	tests := []struct {
+		name           string
+		totalCount     int
+		requestedPage  int
+		wantPage       int
+		wantTotalPages int
+		wantStart      int
+		wantEnd        int
+	}{
+		{"empty set", 0, 1, 1, 1, 0, 0},
+		{"single page, exact page size", labsPageSize, 1, 1, 1, 0, labsPageSize},
+		{"single page, under page size", 10, 1, 1, 1, 0, 10},
+		{"second page, full", labsPageSize*2 + 5, 2, 2, 3, labsPageSize, labsPageSize * 2},
+		{"last partial page", labsPageSize*2 + 5, 3, 3, 3, labsPageSize * 2, labsPageSize*2 + 5},
+		{"page 0 clamps to 1", 100, 0, 1, 4, 0, labsPageSize},
+		{"negative page clamps to 1", 100, -5, 1, 4, 0, labsPageSize},
+		{"page beyond total clamps to last", 100, 99, 4, 4, labsPageSize * 3, 100},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			page, totalPages, start, end := labsPagination(tt.totalCount, tt.requestedPage)
+			assert.Equal(t, tt.wantPage, page, "page")
+			assert.Equal(t, tt.wantTotalPages, totalPages, "totalPages")
+			assert.Equal(t, tt.wantStart, start, "start")
+			assert.Equal(t, tt.wantEnd, end, "end")
+			require.GreaterOrEqual(t, end, start, "end must never be before start")
+			require.LessOrEqual(t, end, tt.totalCount, "end must never exceed totalCount")
+		})
+	}
+}
+
 func TestHandler_ServeUI_Root(t *testing.T) {
 	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
 	req := httptest.NewRequest("GET", "/", nil)

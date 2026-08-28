@@ -3085,9 +3085,43 @@ func (h *Handler) ListProviders(w http.ResponseWriter, r *http.Request) {
 }
 
 // ServeLabsList serves the labs list page
+// labsPageSize is the fixed number of labs shown per page on the admin Labs
+// list. Not user-configurable — nothing else in the app needs a page-size
+// query param yet, so a simple constant is enough.
+const labsPageSize = 25
+
+// labsPagination computes pagination bounds for the Labs list: requestedPage
+// is clamped into [1, totalPages], and start/end are ready-to-use slice
+// bounds into a newest-first-sorted job slice of length totalCount.
+func labsPagination(totalCount, requestedPage int) (page, totalPages, start, end int) {
+	totalPages = (totalCount + labsPageSize - 1) / labsPageSize
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	page = requestedPage
+	if page < 1 {
+		page = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+	start = (page - 1) * labsPageSize
+	if start > totalCount {
+		start = totalCount
+	}
+	end = start + labsPageSize
+	if end > totalCount {
+		end = totalCount
+	}
+	return page, totalPages, start, end
+}
+
 func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
 	// Get all jobs (labs)
 	allJobs := h.jobManager.GetAllJobs()
+	totalCount := len(allJobs)
+	page, totalPages, start, end := labsPagination(totalCount, atoiForm(r.URL.Query().Get("page")))
+	allJobs = allJobs[start:end]
 
 	// Helper function to shorten lab ID
 	shortenLabID := func(id string) string {
@@ -3181,8 +3215,14 @@ func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := map[string]interface{}{
-		"Labs":  labsDisplay,
-		"Count": len(labsDisplay),
+		"Labs":       labsDisplay,
+		"Count":      totalCount,
+		"Page":       page,
+		"TotalPages": totalPages,
+		"HasPrev":    page > 1,
+		"HasNext":    page < totalPages,
+		"PrevPage":   page - 1,
+		"NextPage":   page + 1,
 	}
 
 	h.serveTemplate(w, "labs-list.html", data)
