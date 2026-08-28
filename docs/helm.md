@@ -111,7 +111,14 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 | `dns.azure.zone` | Azure DNS hosted zone name | `""` |
 | `dns.azure.tenantId` / `.subscriptionId` / `.resourceGroup` / `.clientId` / `.clientSecret` | Azure service principal credentials | `""` |
 | `dns.ovh.enabled` | Install `cert-manager-webhook-ovh` and let it create its own OVH DNS-01 ClusterIssuer — see [Certificates for the EasyLab ingress](#certificates-for-the-easylab-ingress) | `false` |
+| `dns.ovh.zone` | OVH DNS zone `ingress.host` is a subdomain of, e.g. `example.com` — only needed when `dns.externalDns.enabled=true`, see [Automatic DNS record for the EasyLab ingress](#automatic-dns-record-for-the-easylab-ingress-externaldns) | `""` |
 | `cert-manager-webhook-ovh.*` | Raw values for the vendored OVH webhook chart (issuer name, ACME email, OVH credentials, etc.) — deeply nested, see [upstream chart values](https://github.com/aureq/cert-manager-webhook-ovh) | see `values.yaml` |
+| `dns.externalDns.enabled` | Run a persistent ExternalDNS controller that keeps `ingress.host`'s A record pointed at the ingress controller's LoadBalancer IP — see [Automatic DNS record for the EasyLab ingress](#automatic-dns-record-for-the-easylab-ingress-externaldns) | `false` |
+| `dns.externalDns.image.repository` / `.tag` | ExternalDNS container image | `registry.k8s.io/external-dns/external-dns` / `v0.22.0` |
+| `dns.externalDns.policy` | `sync` also deletes the record if it's no longer needed; `upsert-only` never deletes | `sync` |
+| `dns.externalDns.txtOwnerId` | Scopes ExternalDNS's TXT ownership registry so this install never touches records owned by another ExternalDNS instance sharing the same zone; empty defaults to the release fullname | `""` |
+| `dns.externalDns.dryRun` | Log planned DNS changes without calling the provider API — recommended `true` for a first rollout | `false` |
+| `dns.externalDns.resources` | Resource requests/limits for the ExternalDNS pod | see `values.yaml` |
 | `resources.requests.memory` | Memory request | `1024Mi` |
 | `resources.requests.cpu` | CPU request | `500m` |
 | `resources.limits.memory` | Memory limit | `4096Mi` |
@@ -312,6 +319,56 @@ Once any of the above is applied, check certificate status with:
 kubectl describe clusterissuer <issuer-name>
 kubectl describe certificate -n easylab easylab-tls
 ```
+
+### Automatic DNS record for the EasyLab ingress (ExternalDNS)
+
+Everything above (`certManager.clusterIssuer.create`, `dns.azure.enabled`, `dns.ovh.enabled`) gets you a **certificate** for `ingress.host` — it does not make the hostname resolve. DNS-01 challenges only prove domain ownership via an ephemeral ACME TXT record that cert-manager deletes again once validated; the actual **A record** pointing `ingress.host` at the ingress controller's LoadBalancer IP has always been a manual step, done once by hand in your DNS provider's console.
+
+Setting `dns.externalDns.enabled=true` automates that: it runs a persistent [ExternalDNS](https://github.com/kubernetes-sigs/external-dns) controller that watches the EasyLab Ingress and keeps its A record in sync with the ingress controller's current LoadBalancer IP — including if that IP ever changes. It requires one of the OVH or Azure DNS-01 sections above to already be configured, since it reuses those same credentials (nothing new to enter, beyond the OVH zone below).
+
+**OVH**, layered onto the `ovh-dns01-values.yaml` example above — add `dns.ovh.zone` (the zone `ingress.host` is a subdomain of, e.g. `labdevrel.ovh`) and `dns.externalDns.enabled`:
+
+```yaml
+dns:
+  ovh:
+    enabled: true
+    zone: labdevrel.ovh   # NEW — ExternalDNS needs the zone itself, not the ingress host
+  externalDns:
+    enabled: true
+    dryRun: true            # recommended for a first rollout — see below
+```
+
+**Azure** needs no new value — `dns.azure.zone` is already required for the DNS-01 solver and is reused as-is:
+
+```yaml
+dns:
+  azure:
+    enabled: true
+    zone: example.com
+  externalDns:
+    enabled: true
+    dryRun: true
+```
+
+```bash
+helm upgrade easylab oci://registry-1.docker.io/yodamad/easylab-helm \
+  --version __VERSION__ \
+  --namespace easylab \
+  -f your-values.yaml \
+  --wait --timeout 5m
+```
+
+**Recommended: dry-run first.** With `dns.externalDns.dryRun=true`, ExternalDNS logs the DNS changes it would make without calling the OVH/Azure API. Confirm it identified the right record, then set `dryRun: false` and `helm upgrade` again to go live:
+
+```bash
+kubectl get deploy,pods -n easylab -l app.kubernetes.io/component=externaldns
+kubectl logs -n easylab -l app.kubernetes.io/component=externaldns
+```
+
+Once live, confirm the hostname resolves without any manual step: `dig +short <ingress.host>`.
+
+!!! note "Wildcard `ingress.host`"
+    A wildcard host (e.g. `*.easylab.example.com`) works with ExternalDNS — both OVH and Azure DNS accept a `*` subdomain prefix for an A record. The one constraint is TLS: Let's Encrypt only issues wildcard certificates via DNS-01, never HTTP-01, so a wildcard `ingress.host` needs `dns.ovh.enabled` or `dns.azure.enabled` already set (which `dns.externalDns.enabled` requires anyway) — it will not work with the default HTTP-01 `certManager.clusterIssuer.create` path.
 
 ### Exposing with Traefik
 

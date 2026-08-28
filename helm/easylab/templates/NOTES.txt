@@ -27,3 +27,9 @@ An OVH ClusterIssuer was created by the cert-manager-webhook-ovh subchart.
 Check status with:
   kubectl describe clusterissuer <name from cert-manager-webhook-ovh.issuers[].name>
 {{- end }}
+{{- if .Values.dns.externalDns.enabled }}
+
+ExternalDNS is managing the A record for {{ .Values.ingress.host }}.
+Check status with:
+  kubectl logs -n {{ include "easylab.namespace" . }} -l app.kubernetes.io/component=externaldns
+{{- end }}

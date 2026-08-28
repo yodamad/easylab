@@ -1,0 +1,143 @@
+{{- if .Values.dns.externalDns.enabled }}
+{{- if and .Values.dns.ovh.enabled .Values.dns.azure.enabled }}
+{{ fail "dns.externalDns.enabled=true requires exactly one of dns.ovh.enabled or dns.azure.enabled — ExternalDNS only supports a single --provider per instance." }}
+{{- end }}
+{{- if not (or .Values.dns.ovh.enabled .Values.dns.azure.enabled) }}
+{{ fail "dns.externalDns.enabled=true requires dns.ovh.enabled or dns.azure.enabled (ExternalDNS needs a DNS provider to create records with)." }}
+{{- end }}
+{{- if and .Values.dns.ovh.enabled (not .Values.dns.ovh.zone) }}
+{{ fail "dns.ovh.zone is required when dns.externalDns.enabled=true and dns.ovh.enabled=true (the OVH DNS zone, e.g. \"labdevrel.ovh\" — not the ingress host)." }}
+{{- end }}
+{{- $ovhIssuer := index .Values "cert-manager-webhook-ovh" "issuers" 0 }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "easylab.fullname" . }}-externaldns
+  namespace: {{ include "easylab.namespace" . }}
+  labels:
+    {{- include "easylab.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "easylab.fullname" . }}-externaldns
+  labels:
+    {{- include "easylab.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["services", "pods", "nodes"]
+    verbs: ["get", "watch", "list"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "watch", "list"]
+  - apiGroups: ["extensions", "networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "watch", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "easylab.fullname" . }}-externaldns
+  labels:
+    {{- include "easylab.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "easylab.fullname" . }}-externaldns
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "easylab.fullname" . }}-externaldns
+    namespace: {{ include "easylab.namespace" . }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "easylab.fullname" . }}-externaldns-credentials
+  namespace: {{ include "easylab.namespace" . }}
+  labels:
+    {{- include "easylab.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  {{- if .Values.dns.ovh.enabled }}
+  OVH_APPLICATION_KEY: {{ $ovhIssuer.ovhAuthentication.applicationKey | quote }}
+  OVH_APPLICATION_SECRET: {{ $ovhIssuer.ovhAuthentication.applicationSecret | quote }}
+  OVH_CONSUMER_KEY: {{ $ovhIssuer.ovhAuthentication.applicationConsumerKey | quote }}
+  {{- else }}
+  azure.json: |
+    {{- (dict
+          "tenantId" .Values.dns.azure.tenantId
+          "subscriptionId" .Values.dns.azure.subscriptionId
+          "resourceGroup" .Values.dns.azure.resourceGroup
+          "aadClientId" .Values.dns.azure.clientId
+          "aadClientSecret" .Values.dns.azure.clientSecret
+        ) | toJson | nindent 4 }}
+  {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "easylab.fullname" . }}-externaldns
+  namespace: {{ include "easylab.namespace" . }}
+  labels:
+    {{- include "easylab.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "easylab.externaldnsSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "easylab.externaldnsSelectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "easylab.fullname" . }}-externaldns
+      containers:
+        - name: externaldns
+          image: "{{ .Values.dns.externalDns.image.repository }}:{{ .Values.dns.externalDns.image.tag }}"
+          args:
+            - --source=ingress
+            - --provider={{ .Values.dns.ovh.enabled | ternary "ovh" "azure" }}
+            - --domain-filter={{ .Values.dns.ovh.enabled | ternary .Values.dns.ovh.zone .Values.dns.azure.zone }}
+            - --policy={{ .Values.dns.externalDns.policy }}
+            - --registry=txt
+            - --txt-owner-id={{ .Values.dns.externalDns.txtOwnerId | default (include "easylab.fullname" .) }}
+            {{- if .Values.dns.ovh.enabled }}
+            - --ovh-endpoint={{ $ovhIssuer.ovhEndpointName | default "ovh-eu" }}
+            {{- else }}
+            - --azure-resource-group={{ .Values.dns.azure.resourceGroup }}
+            {{- end }}
+            {{- if .Values.dns.externalDns.dryRun }}
+            - --dry-run
+            {{- end }}
+          {{- if .Values.dns.ovh.enabled }}
+          env:
+            - name: OVH_APPLICATION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "easylab.fullname" . }}-externaldns-credentials
+                  key: OVH_APPLICATION_KEY
+            - name: OVH_APPLICATION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "easylab.fullname" . }}-externaldns-credentials
+                  key: OVH_APPLICATION_SECRET
+            - name: OVH_CONSUMER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "easylab.fullname" . }}-externaldns-credentials
+                  key: OVH_CONSUMER_KEY
+          {{- else }}
+          volumeMounts:
+            - name: azure-config
+              mountPath: /etc/kubernetes
+              readOnly: true
+          {{- end }}
+          resources:
+            {{- toYaml .Values.dns.externalDns.resources | nindent 12 }}
+      {{- if not .Values.dns.ovh.enabled }}
+      volumes:
+        - name: azure-config
+          secret:
+            secretName: {{ include "easylab.fullname" . }}-externaldns-credentials
+      {{- end }}
+{{- end }}

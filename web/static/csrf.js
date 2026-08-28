@@ -44,4 +44,27 @@
         }
         input.value = token;
     }, true);
+
+    // Page JS calling fetch() directly (outside HTMX and native form submit)
+    // otherwise never attaches the token, so the same csrfProtect check in
+    // auth.go rejects it with 403. Wrap fetch once here so every state-changing,
+    // same-origin call gets the header without each call site having to know about it.
+    const SAFE_METHODS = ['GET', 'HEAD', 'OPTIONS', 'TRACE'];
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+        const method = ((init && init.method) || (input instanceof Request ? input.method : 'GET') || 'GET').toUpperCase();
+        if (SAFE_METHODS.includes(method)) return originalFetch(input, init);
+
+        const url = input instanceof Request ? input.url : input;
+        if (new URL(url, window.location.href).origin !== window.location.origin) {
+            return originalFetch(input, init);
+        }
+
+        const token = csrfToken();
+        if (!token) return originalFetch(input, init);
+
+        const headers = new Headers((init && init.headers) || (input instanceof Request ? input.headers : undefined));
+        headers.set('X-CSRF-Token', token);
+        return originalFetch(input, Object.assign({}, init, { headers: headers }));
+    };
 })();

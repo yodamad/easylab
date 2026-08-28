@@ -149,6 +149,49 @@ dns:
   # --namespace cert-manager — see the namespace alignment note above).
   ovh:
     enabled: false
+    # The OVH DNS zone ingress.host is a subdomain of, e.g. "example.com" for
+    # an ingress.host of "easylab.example.com". cert-manager-webhook-ovh above
+    # derives its own zone automatically from the ACME domain, so this is not
+    # needed for DNS-01 alone — only required when dns.externalDns.enabled is
+    # also true, since ExternalDNS's --domain-filter needs the zone itself
+    # (passing the ingress hostname instead makes every zone lookup return
+    # empty and ExternalDNS silently creates no record).
+    zone: ""
+
+  # Persistent ExternalDNS controller that keeps ingress.host's A record
+  # pointed at the ingress controller's LoadBalancer IP — automates the "go
+  # create the A record by hand" step that DNS-01 alone does not cover (DNS-01
+  # only proves domain ownership via an ephemeral ACME TXT record; it never
+  # touches the actual A record). Reuses the OVH/Azure credentials already
+  # configured above and in cert-manager-webhook-ovh.issuers[0] — nothing new
+  # to fill in beyond dns.ovh.zone for OVH. Requires exactly one of
+  # dns.ovh.enabled / dns.azure.enabled. Deliberately its own flag rather than
+  # turning on automatically whenever DNS-01 is configured, so an install that
+  # already manages its A record another way is not surprised by a new
+  # standing component.
+  externalDns:
+    enabled: false
+    image:
+      repository: registry.k8s.io/external-dns/external-dns
+      tag: "v0.22.0"
+    # "sync" also deletes the record if it's no longer needed (e.g.
+    # ingress.host changes); "upsert-only" only ever creates/updates, never
+    # deletes.
+    policy: sync
+    # Scopes ExternalDNS's TXT ownership registry so this install never
+    # touches DNS records owned by another ExternalDNS instance sharing the
+    # same zone. Empty string defaults to the release fullname.
+    txtOwnerId: ""
+    # Logs planned DNS changes without calling the provider API. Recommended
+    # true for a first rollout against a real zone, then flip to false.
+    dryRun: false
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "256Mi"
+        cpu: "200m"
 
 # Raw values for the vendored cert-manager-webhook-ovh chart (see dns.ovh
 # above). Deeply nested — see

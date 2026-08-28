@@ -49,6 +49,15 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+Selector labels for the ExternalDNS Deployment — distinct component label so
+its selector never overlaps the main app Deployment's.
+*/}}
+{{- define "easylab.externaldnsSelectorLabels" -}}
+{{ include "easylab.selectorLabels" . }}
+app.kubernetes.io/component: externaldns
+{{- end }}
+
+{{/*
 Namespace to use.
 */}}
 {{- define "easylab.namespace" -}}
