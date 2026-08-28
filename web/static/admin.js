@@ -253,6 +253,15 @@ const wizard = {
         noBtn.classList.toggle('selected', !isConfigured);
         yesBtn.classList.toggle('selected', isConfigured);
         hidden.value = isConfigured ? 'true' : 'false';
+
+        // Only meaningful once "Already configured" is picked: EasyLab then skips
+        // creating its own ClusterIssuer and must be told the existing one's name.
+        const issuerNameGroup = document.getElementById('cluster-issuer-name-group');
+        if (issuerNameGroup) issuerNameGroup.style.display = isConfigured ? '' : 'none';
+        if (!isConfigured) {
+            const issuerNameInput = document.getElementById('cluster_issuer_name');
+            if (issuerNameInput) issuerNameInput.value = '';
+        }
     },
 
     bindDNSRecordModeEvents() {
@@ -2539,6 +2548,7 @@ async function applyPrefill(config, templatesYaml, jobId, action) {
     // setters above) already forces this false everywhere else.
     if (config.install_cert_manager === false && domainMode === 'auto') {
         wizard.setDNSAlreadyConfigured(!!config.dns_already_configured);
+        setFieldValue('cluster_issuer_name', config.cluster_issuer_name);
     }
 
     // Step 5: Workspace

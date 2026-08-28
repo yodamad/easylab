@@ -45,6 +45,11 @@ func SetupHTTPS(
 
 	acmeEmail := utils.CoderConfigOptional(ctx, utils.CoderAcmeEmail)
 
+	clusterIssuerName := utils.CoderConfigOptional(ctx, utils.CoderClusterIssuerName)
+	if clusterIssuerName == "" {
+		clusterIssuerName = utils.DefaultClusterIssuerName
+	}
+
 	// Absent config key means "install" (default). Explicit "false" means skip (pre-installed).
 	installCertManager := utils.CoderConfigOptional(ctx, utils.CoderInstallCertManager) != "false"
 	// CoderInstallNginxIngress/CoderNginxIngressNamespace/CoderNginxIngressServiceName
@@ -299,9 +304,9 @@ func SetupHTTPS(
 	}
 
 	// Skipped when skipClusterIssuer is set: the ClusterIssuer already exists,
-	// created by an earlier lab sharing this cert-manager. createWildcardCertificate
-	// and per-workspace ingresses (handler.go) reference it by the same well-known
-	// name ("letsencrypt-prod") either way, so nothing else needs to change.
+	// created by an earlier lab sharing this cert-manager under this same name.
+	// createWildcardCertificate and per-workspace ingresses (handler.go) reference
+	// it by clusterIssuerName either way, so nothing else needs to change.
 	var issuer *apiextensions.CustomResource
 	if !skipClusterIssuer {
 		var issuerErr error
@@ -309,7 +314,7 @@ func SetupHTTPS(
 			ApiVersion: pulumi.String("cert-manager.io/v1"),
 			Kind:       pulumi.String("ClusterIssuer"),
 			Metadata: &metav1.ObjectMetaArgs{
-				Name: pulumi.String("letsencrypt-prod"),
+				Name: pulumi.String(clusterIssuerName),
 			},
 			OtherFields: map[string]any{
 				"spec": map[string]any{
@@ -317,7 +322,7 @@ func SetupHTTPS(
 						"server": "https://acme-v02.api.letsencrypt.org/directory",
 						"email":  acmeEmail,
 						"privateKeySecretRef": map[string]any{
-							"name": "letsencrypt-prod",
+							"name": clusterIssuerName,
 						},
 						"solvers": []any{solverSpec},
 					},
@@ -352,7 +357,7 @@ func SetupHTTPS(
 		if workspaceNs != nil {
 			wildcardDeps = append(wildcardDeps, workspaceNs)
 		}
-		if certErr := createWildcardCertificate(ctx, k8sProvider, workspaceNamespace(ctx), domain, wildcardDeps); certErr != nil {
+		if certErr := createWildcardCertificate(ctx, k8sProvider, workspaceNamespace(ctx), domain, clusterIssuerName, wildcardDeps); certErr != nil {
 			return nil, pulumi.StringOutput{}, certErr
 		}
 
@@ -426,6 +431,7 @@ func createWildcardCertificate(
 	k8sProvider *k8s.Provider,
 	nsName string,
 	domain string,
+	clusterIssuerName string,
 	deps []pulumi.Resource,
 ) error {
 	_, err := apiextensions.NewCustomResource(ctx, "workspace-wildcard-certificate", &apiextensions.CustomResourceArgs{
@@ -440,7 +446,7 @@ func createWildcardCertificate(
 				"secretName": WildcardTLSSecretName,
 				"dnsNames":   []any{domain, wildcardOf(domain)},
 				"issuerRef": map[string]any{
-					"name":  "letsencrypt-prod",
+					"name":  clusterIssuerName,
 					"kind":  "ClusterIssuer",
 					"group": "cert-manager.io",
 				},

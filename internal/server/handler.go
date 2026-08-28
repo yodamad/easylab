@@ -23,6 +23,7 @@ import (
 
 	"easylab/coder"
 	dnsregistry "easylab/internal/providers/dns"
+	"easylab/utils"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -693,6 +694,7 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 	config.InstallCertManager = &installCertM
 	if !installCertM {
 		config.CertManagerNamespace = r.FormValue("cert_manager_namespace")
+		config.ClusterIssuerName = r.FormValue("cluster_issuer_name")
 	} else {
 		config.CertManagerNodeSelector = parseNodeSelectorFromForm(r, "certmanager_nodeselector_key", "certmanager_nodeselector_value")
 	}
@@ -1901,6 +1903,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	namespace := job.workspaceNamespace()
 	domain := ""
 	dnsProvider := ""
+	clusterIssuerName := ""
 	lifetimeHours := 0
 	labName := ""
 	var labDeletionDate *time.Time
@@ -1908,12 +1911,16 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	if job.Config != nil {
 		domain = job.Config.Domain
 		dnsProvider = job.Config.DNSProvider
+		clusterIssuerName = job.Config.ClusterIssuerName
 		lifetimeHours = job.Config.WorkspaceLifetimeHours
 		labDeletionDate = job.Config.LabDeletionDate
 		labName = job.Config.StackName
 		templates = job.Config.GetWorkspaceTemplates()
 	}
 	job.mu.RUnlock()
+	if clusterIssuerName == "" {
+		clusterIssuerName = utils.DefaultClusterIssuerName
+	}
 
 	if status != JobStatusCompleted {
 		http.Error(w, "Lab is not ready yet", http.StatusBadRequest)
@@ -2004,7 +2011,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		GitAuthSecret:    selected.GitAuthSecret,
 		Devcontainer:     toWorkspaceDevcontainer(selected.Devcontainer),
 		Domain:           domain,
-		ClusterIssuer:    "letsencrypt-prod",
+		ClusterIssuer:    clusterIssuerName,
 		Token:            password,
 	}
 

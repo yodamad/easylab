@@ -382,12 +382,23 @@ pool, or for co-locating them with a specific pool for cost or locality reasons.
     Picking **Use existing cert-manager** together with **Custom domain — automatic**
     reveals **Is DNS-01 already set up on this cert-manager?**. Choose **Already
     configured** if an earlier lab on this same cluster already created the
-    `letsencrypt-prod` ClusterIssuer, DNS-01 webhook, and credential secret — EasyLab
-    then skips recreating them (which would otherwise conflict) and reuses them as-is.
-    You still fill in the DNS provider, zone, and credentials below: this lab still
-    needs its own DNS A-record created, since every lab has its own domain and ingress
-    IP. Leave it on **Set it up for me** (the default) for the first lab on a cluster,
-    or if you're not sure.
+    ClusterIssuer, DNS-01 webhook, and credential secret — EasyLab then skips
+    recreating them (which would otherwise conflict) and reuses them as-is. You still
+    fill in the DNS provider, zone, and credentials below: this lab still needs its
+    own DNS A-record created, since every lab has its own domain and ingress IP.
+    Leave it on **Set it up for me** (the default) for the first lab on a cluster, or
+    if you're not sure.
+
+    Choosing **Already configured** also reveals **Existing ClusterIssuer Name**.
+    EasyLab requests certificates from a ClusterIssuer named `letsencrypt-prod` by
+    default and, on a fresh cert-manager, creates one under that name itself — but
+    here it is skipping that creation and reusing whatever already exists. If the
+    existing ClusterIssuer was created under a different name (for example, by a
+    Helm-based install that names it after its DNS provider), set this field to that
+    exact name. A mismatch here doesn't fail loudly: cert-manager's
+    `CertificateRequest` just stalls waiting for an issuer that doesn't exist, no
+    certificate is ever issued, and the ingress controller falls back to serving its
+    own self-signed default certificate instead.
 
 An **Advanced options** section holds the **Wildcard Domain** override. It only
 appears for **Custom domain — automatic** with the **Wildcard record** DNS strategy

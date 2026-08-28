@@ -498,6 +498,60 @@ func TestGetConfigCommands_DNSAlreadyConfigured(t *testing.T) {
 	}
 }
 
+func TestGetConfigCommands_ClusterIssuerName(t *testing.T) {
+	installCertM := false
+
+	tests := []struct {
+		name     string
+		cfg      *LabConfig
+		wantVal  string
+		wantSeen bool
+	}{
+		{
+			name: "override emits coder:clusterIssuerName",
+			cfg: &LabConfig{
+				Domain:             "coder.example.com",
+				AcmeEmail:          "acme@example.com",
+				InstallCertManager: &installCertM,
+				ClusterIssuerName:  "letsencrypt-ovh",
+			},
+			wantVal:  "letsencrypt-ovh",
+			wantSeen: true,
+		},
+		{
+			name: "unset by default (coder/https.go falls back to letsencrypt-prod)",
+			cfg: &LabConfig{
+				Domain:    "coder.example.com",
+				AcmeEmail: "acme@example.com",
+			},
+			wantSeen: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			pe := &PulumiExecutor{}
+			cmds := pe.getConfigCommands(tt.cfg)
+
+			var gotVal string
+			seen := false
+			for _, c := range cmds {
+				if c.key == "coder:clusterIssuerName" {
+					seen = true
+					gotVal = c.value
+				}
+			}
+			if seen != tt.wantSeen {
+				t.Errorf("coder:clusterIssuerName present = %v, want %v", seen, tt.wantSeen)
+			}
+			if seen && gotVal != tt.wantVal {
+				t.Errorf("coder:clusterIssuerName = %q, want %q", gotVal, tt.wantVal)
+			}
+		})
+	}
+}
+
 func TestGetConfigCommands_NodeSelectors(t *testing.T) {
 	installTrue := true
 	installFalse := false

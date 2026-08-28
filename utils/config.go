@@ -130,6 +130,13 @@ const CoderNginxIngressServiceName = "nginxIngressServiceName"
 const CoderCertManagerNamespace = "certManagerNamespace"
 const CoderTraefikNodeSelector = "traefikNodeSelector"
 const CoderCertManagerNodeSelector = "certManagerNodeSelector"
+const CoderClusterIssuerName = "clusterIssuerName"
+
+// DefaultClusterIssuerName is the ClusterIssuer name EasyLab creates and
+// requests certificates from when CoderClusterIssuerName is not set. Override
+// it with CoderClusterIssuerName when reusing an existing cert-manager (see
+// DNSAlreadyConfigured) whose ClusterIssuer was created under a different name.
+const DefaultClusterIssuerName = "letsencrypt-prod"
 const CoderGithubLoginEnabled = "githubLoginEnabled"
 const CoderSessionDuration = "sessionDuration"             // maps to CODER_SESSION_DURATION (e.g. "24h")
 const CoderDormancyThreshold = "dormancyThreshold"         // maps to CODER_DORMANCY_THRESHOLD (e.g. "168h")

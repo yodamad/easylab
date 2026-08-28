@@ -311,6 +311,15 @@ type LabConfig struct {
 	InstallCertManager      *bool  `json:"install_cert_manager,omitempty"`
 	CertManagerNamespace    string `json:"cert_manager_namespace,omitempty"`
 
+	// ClusterIssuerName overrides the cert-manager ClusterIssuer name EasyLab
+	// creates and requests certificates from (default "letsencrypt-prod", see
+	// utils.DefaultClusterIssuerName). Only meaningful when reusing an existing
+	// cert-manager whose ClusterIssuer was already created under a different name
+	// — most commonly alongside DNSAlreadyConfigured below, since in that case
+	// EasyLab never creates its own ClusterIssuer and must match the existing one
+	// exactly, or certificate requests stall forever with no issuer to fulfill them.
+	ClusterIssuerName string `json:"cluster_issuer_name,omitempty"`
+
 	// TraefikNodeSelector/CertManagerNodeSelector pin the Traefik and
 	// cert-manager controller pods to nodes carrying these labels. Only
 	// meaningful when the respective component is installed (not reused from

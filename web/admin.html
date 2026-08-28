@@ -504,6 +504,12 @@
                                 <small>EasyLab will skip creating the ClusterIssuer, DNS-01 webhook, and credential secret, and reuse the existing ones. DNS credentials below are still needed to create this lab's own DNS record.</small>
                             </div>
 
+                            <div class="form-group" id="cluster-issuer-name-group" style="display: none;">
+                                <label for="cluster_issuer_name">Existing ClusterIssuer Name</label>
+                                <input type="text" id="cluster_issuer_name" name="cluster_issuer_name" placeholder="letsencrypt-prod">
+                                <small>Name of the ClusterIssuer already on this cluster. Must match exactly — EasyLab requests certificates from it by name and does not create a new one when "Already configured" is selected above. Defaults to <code>letsencrypt-prod</code>.</small>
+                            </div>
+
                             <div id="dns-ovh-fields" style="display:none">
                                 <div class="form-row">
                                     <div class="form-group">

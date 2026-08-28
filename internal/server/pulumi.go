@@ -1364,6 +1364,9 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 				commands = append(commands, configCommand{"coder:certManagerNodeSelector", string(b), false})
 			}
 		}
+		if config.ClusterIssuerName != "" {
+			commands = append(commands, configCommand{"coder:clusterIssuerName", config.ClusterIssuerName, false})
+		}
 	}
 
 	// DNS provider configuration (for A-record automation and DNS-01 cert issuance)
