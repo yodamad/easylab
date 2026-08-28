@@ -1,12 +1,14 @@
 package server
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -339,4 +341,116 @@ func (h *Handler) ServeAdminLabFeedback(w http.ResponseWriter, r *http.Request) 
 	}
 
 	h.serveTemplate(w, "admin-feedback.html", data)
+}
+
+// feedbackDifficultyPlainLabels is a plain-text counterpart to
+// ServeAdminLabFeedback's emoji difficultyLabel map, used for CSV export
+// where emoji add noise rather than clarity in a spreadsheet.
+var feedbackDifficultyPlainLabels = map[string]string{
+	"too-easy":    "Too Easy",
+	"a-bit-easy":  "A Bit Easy",
+	"just-right":  "Just Right",
+	"challenging": "Challenging",
+	"too-hard":    "Too Hard",
+}
+
+// feedbackDifficultyPlainLabel returns the plain-text label for a difficulty
+// code, falling back to the raw code itself for any unmapped value (more
+// useful in an export than a blank cell).
+func feedbackDifficultyPlainLabel(code string) string {
+	if label, ok := feedbackDifficultyPlainLabels[code]; ok {
+		return label
+	}
+	return code
+}
+
+// slugify converts s into a lowercase, hyphenated string safe for use in a
+// filename. Mirrors the equivalent client-side helper in
+// web/static/lab-workspaces.js (exportWorkspaceHistoryCSV's slug logic) so
+// exported filenames follow the same convention across the app.
+func slugify(s string) string {
+	var b strings.Builder
+	lastHyphen := true // treat the start as if preceded by a hyphen, to trim leading ones
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastHyphen = false
+		} else if !lastHyphen {
+			b.WriteByte('-')
+			lastHyphen = true
+		}
+	}
+	result := strings.TrimSuffix(b.String(), "-")
+	if result == "" {
+		return "lab"
+	}
+	return result
+}
+
+// csvSafeCell neutralizes CSV formula injection: if s begins with a
+// character a spreadsheet application (Excel, Google Sheets, LibreOffice)
+// would treat as a formula trigger, prefix it with a single quote so it's
+// imported as literal text instead of evaluated. Applied to every
+// user-controlled cell in an export (free-text comments, and any field not
+// otherwise constrained to a fixed set of server-known values).
+func csvSafeCell(s string) string {
+	if s == "" {
+		return s
+	}
+	switch s[0] {
+	case '=', '+', '-', '@', '\t', '\r':
+		return "'" + s
+	default:
+		return s
+	}
+}
+
+// ExportLabFeedbackCSV serves a lab's feedback entries as a downloadable CSV
+// file. Route: GET /admin/feedback/export?lab_id=...
+func (h *Handler) ExportLabFeedbackCSV(w http.ResponseWriter, r *http.Request) {
+	labID := r.URL.Query().Get("lab_id")
+	if labID == "" {
+		http.Error(w, "lab_id is required", http.StatusBadRequest)
+		return
+	}
+
+	entries, err := h.feedbackStore.GetByLab(labID)
+	if err != nil {
+		log.Printf("Failed to load feedback for lab %s: %v", labID, err)
+		http.Error(w, "Failed to load feedback", http.StatusInternalServerError)
+		return
+	}
+
+	// Resolve a friendly name for the filename, same lookup ServeAdminLabFeedback does.
+	labName := labID
+	for _, job := range h.jobManager.GetAllJobs() {
+		if job.ID == labID {
+			job.mu.RLock()
+			if job.Config != nil && job.Config.StackName != "" {
+				labName = job.Config.StackName
+			}
+			job.mu.RUnlock()
+			break
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="feedback-%s.csv"`, slugify(labName)))
+
+	cw := csv.NewWriter(w)
+	_ = cw.Write([]string{"Email", "Rating", "Difficulty", "Recommend", "Comment", "Submitted At"})
+	for _, e := range entries {
+		_ = cw.Write([]string{
+			csvSafeCell(e.Email),
+			strconv.Itoa(e.Rating),
+			feedbackDifficultyPlainLabel(e.Difficulty),
+			csvSafeCell(e.Recommend),
+			csvSafeCell(e.Comment),
+			e.SubmittedAt.Format("2006-01-02 15:04"),
+		})
+	}
+	cw.Flush()
+	if err := cw.Error(); err != nil {
+		log.Printf("Failed to write feedback CSV for lab %s: %v", labID, err)
+	}
 }

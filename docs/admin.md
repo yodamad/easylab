@@ -23,6 +23,7 @@ As an admin (trainer, speaker, ...), you have access to the admin space to manag
     * [x] Export a lab's workspace history to CSV
     * [x] Retry a failing lab installation, either as-is or with an edited configuration
 * [x] View student feedback per lab (rating, difficulty, comments)
+    * [x] Export a lab's feedback to CSV
 * [x] View deployment statistics (KPIs, monthly chart, per-project breakdown)
 * [x] Configure automatic workspace and lab deletion (cleaning policies)
 

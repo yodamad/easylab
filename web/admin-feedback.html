@@ -39,9 +39,14 @@
                 </div>
 
                 {{if .Feedbacks}}
-                    <h2 class="feedback-section-title">
-                        Feedback for <strong>{{.LabName}}</strong>
-                    </h2>
+                    <div class="feedback-section-header">
+                        <h2 class="feedback-section-title">
+                            Feedback for <strong>{{.LabName}}</strong>
+                        </h2>
+                        <a href="/admin/feedback/export?lab_id={{.LabID}}" class="btn btn-secondary btn-sm">
+                            <span class="btn-icon">⬇</span> Export CSV
+                        </a>
+                    </div>
 
                     {{range .Feedbacks}}
                     <div class="feedback-entry">

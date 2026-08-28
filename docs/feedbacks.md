@@ -23,3 +23,7 @@ The page shows:
 If no feedback has been submitted yet, an empty state is displayed.
 
 ![Admin feedback](screens/feedbacks.png){width=45%}
+
+## Exporting feedback
+
+When a selected lab has at least one response, an **Export CSV** button appears above the entries. It downloads the full feedback for that lab as a `feedback-<lab>.csv` file — one row per submission (email, rating, difficulty, recommendation, comment, and submission time) — handy for record-keeping or analysis outside the admin UI.

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -492,6 +493,164 @@ func TestServeAdminLabFeedback_UnknownLabID(t *testing.T) {
 
 	h.ServeAdminLabFeedback(w, req)
 	// lab not in jobManager → LabName falls back to labID value
+}
+
+// --- slugify / feedbackDifficultyPlainLabel ---
+
+func TestSlugify(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"simple", "my-lab", "my-lab"},
+		{"mixed case with spaces", "My Cool Lab", "my-cool-lab"},
+		{"special characters collapse", "Go 101 / Intro!!", "go-101-intro"},
+		{"leading and trailing junk trimmed", "  --Lab--  ", "lab"},
+		{"empty falls back to lab", "", "lab"},
+		{"only special characters falls back to lab", "!!!", "lab"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, slugify(tt.input))
+		})
+	}
+}
+
+func TestFeedbackDifficultyPlainLabel(t *testing.T) {
+	tests := []struct {
+		name string
+		code string
+		want string
+	}{
+		{"too easy", "too-easy", "Too Easy"},
+		{"just right", "just-right", "Just Right"},
+		{"too hard", "too-hard", "Too Hard"},
+		{"unmapped code falls back to the raw value", "weird-code", "weird-code"},
+		{"empty falls back to empty", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, feedbackDifficultyPlainLabel(tt.code))
+		})
+	}
+}
+
+// --- ExportLabFeedbackCSV ---
+
+func TestExportLabFeedbackCSV_MissingLabID(t *testing.T) {
+	h := newHandlerWithFeedbackStore(t)
+	req := httptest.NewRequest("GET", "/admin/feedback/export", nil)
+	w := httptest.NewRecorder()
+
+	h.ExportLabFeedbackCSV(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestExportLabFeedbackCSV_UnknownLabID(t *testing.T) {
+	fs, err := NewFeedbackStore(t.TempDir())
+	require.NoError(t, err)
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, fs)
+
+	req := httptest.NewRequest("GET", "/admin/feedback/export?lab_id=unknown-lab", nil)
+	w := httptest.NewRecorder()
+	h.ExportLabFeedbackCSV(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	rows, err := csv.NewReader(strings.NewReader(w.Body.String())).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "header row only, no feedback entries")
+	assert.Equal(t, []string{"Email", "Rating", "Difficulty", "Recommend", "Comment", "Submitted At"}, rows[0])
+}
+
+func TestExportLabFeedbackCSV_WithEntries(t *testing.T) {
+	jm := NewJobManager("")
+	jobID := jm.CreateJob(&LabConfig{StackName: "My Cool Lab"})
+
+	fs, err := NewFeedbackStore(t.TempDir())
+	require.NoError(t, err)
+	submitted := time.Date(2026, 3, 14, 9, 30, 0, 0, time.UTC)
+	require.NoError(t, fs.Add(Feedback{
+		ID: "1", LabID: jobID, Email: "a@b.com", Rating: 5,
+		Difficulty: "just-right", Recommend: "yes",
+		Comment: `He said "hi", thanks`, SubmittedAt: submitted,
+	}))
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, fs)
+	req := httptest.NewRequest("GET", "/admin/feedback/export?lab_id="+jobID, nil)
+	w := httptest.NewRecorder()
+	h.ExportLabFeedbackCSV(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "text/csv; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, `attachment; filename="feedback-my-cool-lab.csv"`, w.Header().Get("Content-Disposition"))
+
+	rows, err := csv.NewReader(strings.NewReader(w.Body.String())).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	assert.Equal(t, []string{"Email", "Rating", "Difficulty", "Recommend", "Comment", "Submitted At"}, rows[0])
+	assert.Equal(t, []string{"a@b.com", "5", "Just Right", "yes", `He said "hi", thanks`, "2026-03-14 09:30"}, rows[1])
+	assert.NotContains(t, rows[1][2], "👍", "CSV difficulty label must be plain text, not the emoji HTML display label")
+}
+
+// TestCsvSafeCell is a regression test for CSV formula injection: a cell
+// beginning with a character a spreadsheet app would treat as a formula
+// trigger must be neutralized with a leading single quote.
+func TestCsvSafeCell(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"plain text unchanged", "hello", "hello"},
+		{"empty unchanged", "", ""},
+		{"equals prefixed", `=cmd|'/c calc'!A1`, `'=cmd|'/c calc'!A1`},
+		{"plus prefixed", "+1+1", "'+1+1"},
+		{"minus prefixed", "-1+1", "'-1+1"},
+		{"at prefixed", "@SUM(A1)", "'@SUM(A1)"},
+		{"tab prefixed", "\tformula", "'\tformula"},
+		{"carriage return prefixed", "\rformula", "'\rformula"},
+		{"trigger character not at start is left alone", "a=b+c-d@e", "a=b+c-d@e"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, csvSafeCell(tt.input))
+		})
+	}
+}
+
+// TestExportLabFeedbackCSV_NeutralizesFormulaInjection is a regression test
+// for the fix above, exercised through the real handler: a comment or
+// recommend value starting with a formula-trigger character must reach the
+// CSV response with a defusing leading quote, not raw.
+func TestExportLabFeedbackCSV_NeutralizesFormulaInjection(t *testing.T) {
+	jm := NewJobManager("")
+	jobID := jm.CreateJob(&LabConfig{StackName: "lab"})
+
+	fs, err := NewFeedbackStore(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, fs.Add(Feedback{
+		ID: "1", LabID: jobID, Email: "=HYPERLINK(\"http://evil\")", Rating: 1,
+		Difficulty: "too-hard", Recommend: "=cmd|'/c calc'!A1",
+		Comment: "@SUM(1,1)", SubmittedAt: time.Now(),
+	}))
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, fs)
+	req := httptest.NewRequest("GET", "/admin/feedback/export?lab_id="+jobID, nil)
+	w := httptest.NewRecorder()
+	h.ExportLabFeedbackCSV(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	rows, err := csv.NewReader(strings.NewReader(w.Body.String())).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	row := rows[1]
+	assert.True(t, strings.HasPrefix(row[0], "'="), "Email starting with = must be neutralized")
+	assert.True(t, strings.HasPrefix(row[3], "'="), "Recommend starting with = must be neutralized")
+	assert.True(t, strings.HasPrefix(row[4], "'@"), "Comment starting with @ must be neutralized")
 }
 
 // --- ServeFeedback ---

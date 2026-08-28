@@ -5340,6 +5340,18 @@ details.credentials-box > :last-child {
     color: var(--text);
 }
 
+.feedback-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.feedback-section-header .feedback-section-title {
+    margin-bottom: 0;
+}
+
 .feedback-date {
     font-size: 0.8rem;
     color: #9ca3af;
