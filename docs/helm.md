@@ -274,6 +274,38 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 
 Unlike the HTTP-01/Azure path above, the OVH issuer is created directly by the vendored webhook chart's own templates, not deferred to a post-install hook — `--wait --timeout 5m` reduces but does not fully eliminate a possible webhook-readiness race on a fresh combined install. If the first install fails on this, a `helm upgrade` retry with the same values succeeds once cert-manager is up. See the [`cert-manager-webhook-ovh` values reference](https://github.com/aureq/cert-manager-webhook-ovh/blob/main/charts/cert-manager-webhook-ovh/values.yaml) for the full set of `issuers[]` fields (OAuth2 authentication, EAB, alternate OVH endpoints, etc.).
 
+!!! warning "Fresh cluster with `dns.ovh.enabled=true`: install in two steps"
+    Combining `cert-manager.enabled=true` and `dns.ovh.enabled=true` in a single `helm install` on a cluster that has no cert-manager CRDs yet fails with errors like:
+    ```
+    Error: INSTALLATION FAILED: unable to build kubernetes objects from release manifest:
+    [resource mapping not found for name: "letsencrypt-ovh" namespace: "" from "":
+    no matches for kind "ClusterIssuer" in version "cert-manager.io/v1"
+    ensure CRDs are installed first, ...]
+    ```
+    This is a general Helm/cert-manager limitation (related to the CRD-upgrade caveat above), not specific to bad values: Helm validates the *entire* combined manifest — EasyLab, cert-manager, and the `cert-manager-webhook-ovh` subchart — against the cluster's API discovery cache before applying anything. Since the `cert-manager-webhook-ovh` subchart's `Certificate`/`Issuer`/`ClusterIssuer` resources are validated in that same pass, and the cert-manager CRDs those kinds depend on don't exist on the API server yet, the whole install aborts before creating anything — including cert-manager itself.
+
+    Fix by splitting into two steps. First, install cert-manager and its CRDs only, with the OVH webhook disabled (`dns.ovh.enabled` is the `condition:` gate for that entire dependency in `Chart.yaml`, so setting it `false` drops its templates from the render):
+    ```bash
+    helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
+      --version __VERSION__ \
+      --namespace cert-manager --create-namespace \
+      --set secrets.adminPassword="SuperAdmin" \
+      --set traefik.enabled=true \
+      --set cert-manager.enabled=true \
+      --set cert-manager.crds.enabled=true \
+      --set dns.ovh.enabled=false \
+      --wait --timeout 5m
+    ```
+    Then upgrade with your full values file (`dns.ovh.enabled: true` included), now that the CRDs are registered:
+    ```bash
+    helm upgrade easylab oci://registry-1.docker.io/yodamad/easylab-helm \
+      --version __VERSION__ \
+      --namespace cert-manager \
+      -f ovh-dns01-values.yaml \
+      --wait --timeout 5m
+    ```
+    Verify the CRDs landed after step 1 if you want to confirm before upgrading: `kubectl get crd | grep cert-manager.io`.
+
 Once any of the above is applied, check certificate status with:
 
 ```bash
