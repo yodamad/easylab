@@ -96,6 +96,13 @@ const wizard = {
             githubDisable.addEventListener('click', () => this.setGithubLoginEnabled(false));
         }
 
+        const cacheExternal = document.getElementById('devcontainer-cache-external-btn');
+        const cacheInCluster = document.getElementById('devcontainer-cache-incluster-btn');
+        if (cacheExternal && cacheInCluster) {
+            cacheExternal.addEventListener('click', () => this.setDevcontainerCacheMode('external'));
+            cacheInCluster.addEventListener('click', () => this.setDevcontainerCacheMode('in-cluster'));
+        }
+
         const addTraefikNodeSelector = document.getElementById('btn-add-traefik-nodeselector');
         if (addTraefikNodeSelector) {
             addTraefikNodeSelector.addEventListener('click', () => {
@@ -129,6 +136,21 @@ const wizard = {
         fields.style.display = mode === 'existing' ? '' : 'none';
         if (nodeSelectorFields) nodeSelectorFields.style.display = mode === 'install' ? '' : 'none';
         hidden.value = mode === 'install' ? 'true' : 'false';
+    },
+
+    setDevcontainerCacheMode(mode) {
+        const externalBtn = document.getElementById('devcontainer-cache-external-btn');
+        const inClusterBtn = document.getElementById('devcontainer-cache-incluster-btn');
+        const externalFields = document.getElementById('devcontainer-cache-external-fields');
+        const credGroup = document.getElementById('devcontainer-registry-cred-group');
+        const hidden = document.getElementById('devcontainer_use_in_cluster_cache');
+        if (!externalBtn || !inClusterBtn || !hidden) return;
+
+        externalBtn.classList.toggle('selected', mode === 'external');
+        inClusterBtn.classList.toggle('selected', mode === 'in-cluster');
+        if (externalFields) externalFields.style.display = mode === 'in-cluster' ? 'none' : '';
+        if (credGroup) credGroup.style.display = mode === 'in-cluster' ? 'none' : '';
+        hidden.value = mode === 'in-cluster' ? 'true' : 'false';
     },
 
     setCertManagerMode(mode) {
@@ -2339,6 +2361,7 @@ if (btnRunDevcontainerImport) {
         body.append('git_branch', (document.getElementById('devcontainer_git_branch') || {}).value || '');
         body.append('devcontainer_dir', (document.getElementById('devcontainer_dir') || {}).value || '');
         body.append('cache_repo', (document.getElementById('devcontainer_cache_repo') || {}).value || '');
+        body.append('use_in_cluster_cache', (document.getElementById('devcontainer_use_in_cluster_cache') || {}).value || 'false');
         body.append('cpu', (document.getElementById('devcontainer_cpu') || {}).value || '');
         body.append('cpu_limit', (document.getElementById('devcontainer_cpu_limit') || {}).value || '');
         body.append('memory', (document.getElementById('devcontainer_memory') || {}).value || '');

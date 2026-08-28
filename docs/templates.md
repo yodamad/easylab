@@ -422,8 +422,9 @@ workspace_templates:
 |---|---|---|
 | `enabled` | bool | Turns the mode on. **Requires `git_repo`**, and **conflicts with `image`**. |
 | `dir` | string | Folder holding `devcontainer.json`. Defaults to `.devcontainer`. |
-| `cache_repo` | string | **Required.** Registry the built layers are cached in — see below. |
-| `registry_auth_secret` | string | Registry credential for **everything the build pulls or pushes**: the base image, `fallback_image`, and `cache_repo`. Omit for public registries. See [Private registries and repositories](#private-registries-and-repositories). |
+| `cache_repo` | string | Registry the built layers are cached in — see below. **Required unless `use_in_cluster_cache` is set.** |
+| `use_in_cluster_cache` | bool | Provisions the build cache **inside the lab's cluster** instead of requiring `cache_repo` to name an external registry. Ignored if `cache_repo` is also set — an explicit `cache_repo` always wins. See below. |
+| `registry_auth_secret` | string | Registry credential for **everything the build pulls or pushes**: the base image, `fallback_image`, and `cache_repo`. Omit for public registries, and always for an in-cluster cache. See [Private registries and repositories](#private-registries-and-repositories). |
 | `fallback_image` | string | Used when the devcontainer names neither an image nor a Dockerfile. |
 | `insecure` | bool | Skip TLS verification when cloning and pulling. |
 | `config_repo` | string | Reads `devcontainer.json` from a **separate** repo instead of `git_repo` — see [Devcontainer config from a separate repository](#devcontainer-config-from-a-separate-repository). `dir` then resolves inside this repo. |
@@ -557,15 +558,35 @@ keys the build ignores; and some keys are honoured by neither.
     block — see [A database sidecar](#a-database-sidecar).
 
 !!! danger "The cache registry is not optional"
-    `cache_repo` is required for a reason. Image layers are cached there and
-    pushed after the first build, so the first workspace pays for the build and
-    every later one starts from the cache — the difference is minutes versus
-    seconds, *per student*. Without it, all thirty students in a workshop would
-    each rebuild the whole devcontainer from scratch.
+    `cache_repo` (or `use_in_cluster_cache`) is required for a reason. Image
+    layers are cached there and pushed after the first build, so the first
+    workspace pays for the build and every later one starts from the cache —
+    the difference is minutes versus seconds, *per student*. Without either
+    one, all thirty students in a workshop would each rebuild the whole
+    devcontainer from scratch.
 
     The Secret named by `registry_auth_secret` must already exist in the workspace
     namespace — add it from the lab's **Credentials** panel, or with `kubectl`.
     See [Private registries and repositories](#private-registries-and-repositories).
+
+!!! tip "Hosting the cache registry in the cluster"
+    Set `use_in_cluster_cache: true` instead of `cache_repo` to have EasyLab
+    provision the registry itself, in the lab's own cluster:
+
+    ```yaml
+    devcontainer:
+      enabled: true
+      dir: .devcontainer
+      use_in_cluster_cache: true
+    ```
+
+    No `registry_auth_secret` is needed — the in-cluster registry has no
+    external exposure or authentication, envbuilder pushes and pulls it
+    directly over the cluster network. It is shared by every devcontainer
+    template in the lab that opts in, and disappears when the lab is
+    destroyed. An external `cache_repo` remains the right choice when a cache
+    needs to survive across labs (e.g. a shared base image reused by several
+    workshops) or be inspected outside the cluster.
 
 !!! tip "First start is slow, and it uses node disk"
     Even with a warm cache the first workspace of a lab builds the devcontainer
@@ -610,7 +631,7 @@ workshop edition to the next.
 | Workspace never opens | Often a `mounts` entry pointing at a ConfigMap/Secret that doesn't exist in the namespace. |
 | `apt-get` fails in the startup script | Prefix it with `sudo`; the workspace user has passwordless sudo but is not root. |
 | A sidecar is missing from the pod | It was named `workspace` (reserved) or has no `image`. |
-| `devcontainer.cache_repo is required` | Devcontainer mode needs a layer cache registry; see [Devcontainer workshops](#devcontainer-workshops). |
+| `devcontainer.cache_repo is required unless devcontainer.use_in_cluster_cache is set` | Devcontainer mode needs a layer cache registry — either an external `cache_repo`, or `use_in_cluster_cache: true` to have EasyLab host one; see [Devcontainer workshops](#devcontainer-workshops). |
 | `devcontainer.enabled conflicts with image` | The image is built from the repo's `devcontainer.json` — remove `image`. |
 | `devcontainer.enabled requires git_repo` | The `devcontainer.json` is read from the workshop repo, so there must be one. |
 | `git_auth_secret requires git_repo` | The credential has nothing to authenticate to — remove it, or add the repo. |

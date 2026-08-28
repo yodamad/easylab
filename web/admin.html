@@ -806,7 +806,29 @@
                                         <small>Relative to the workshop repository, or to the config repository above when set.</small>
                                     </div>
                                     <div class="form-group">
-                                        <label for="devcontainer_cache_repo">Cache registry</label>
+                                        <label>Cache registry</label>
+                                        <div class="button-group">
+                                            <button type="button" class="source-button selected" id="devcontainer-cache-external-btn" data-cache-mode="external">
+                                                <span class="source-icon">&#127760;</span>
+                                                <div class="source-content">
+                                                    <span class="source-title">External registry</span>
+                                                    <span class="source-description">Point at a registry you manage</span>
+                                                </div>
+                                            </button>
+                                            <button type="button" class="source-button" id="devcontainer-cache-incluster-btn" data-cache-mode="in-cluster">
+                                                <span class="source-icon">&#9729;</span>
+                                                <div class="source-content">
+                                                    <span class="source-title">Host in-cluster</span>
+                                                    <span class="source-description">EasyLab provisions it for you</span>
+                                                </div>
+                                            </button>
+                                        </div>
+                                        <input type="hidden" id="devcontainer_use_in_cluster_cache" name="devcontainer_use_in_cluster_cache" value="false">
+                                    </div>
+                                </div>
+                                <div class="form-row" id="devcontainer-cache-external-fields">
+                                    <div class="form-group">
+                                        <label for="devcontainer_cache_repo">Cache registry address</label>
                                         <input type="text" id="devcontainer_cache_repo" placeholder="registry.example.com/easylab/cache">
                                         <small>Required. Without it every student rebuilds the devcontainer from scratch.</small>
                                     </div>
@@ -844,7 +866,7 @@
                                     </select>
                                     <small>If the workshop repository is <strong>private</strong>, the git credential (from the <strong>Credentials</strong> section above) used to read the devcontainer during import and, baked into the generated template, to clone the repo in each student's workspace. With a single git credential this is applied automatically.</small>
                                 </div>
-                                <div class="form-group">
+                                <div class="form-group" id="devcontainer-registry-cred-group">
                                     <label for="devcontainer_registry_auth_secret">Registry credential for students (Optional)</label>
                                     <select id="devcontainer_registry_auth_secret" class="template-registry-cred-select">
                                         <option value="">None</option>

@@ -250,12 +250,15 @@ Choose **From a devcontainer** at the top of the **Templates** step:
 3. Choose **Git repository** (EasyLab clones the repo and finds the
    `devcontainer.json`) or **Upload** (a `devcontainer.json`, or a repository
    `.zip`).
-4. Fill in the **Cache registry**. If the devcontainer builds from a **private
-   base image** or pushes to a **private cache**, add a registry credential in the
-   **Credentials** section and choose it under **Registry credential for students**
-   — with a single registry credential it is applied automatically. envbuilder
-   pulls the base image (and pushes the cache) inside each student's pod with it;
-   without it the pull falls back to anonymous and the build fails.
+4. Choose a **Cache registry**: **Host in-cluster** has EasyLab provision the
+   registry itself, in the lab's own cluster — nothing else to fill in.
+   **External registry** requires a **Cache registry address**, and if the
+   devcontainer builds from a **private base image** or pushes to a **private
+   cache**, a registry credential from the **Credentials** section chosen
+   under **Registry credential for students** — with a single registry
+   credential it is applied automatically. envbuilder pulls the base image
+   (and pushes the cache) inside each student's pod with it; without it the
+   pull falls back to anonymous and the build fails.
 5. If the workshop repository is **private**, add a git token in the **Credentials**
    section and choose it under **Git credential** — with a single git credential it is
    applied automatically. The same credential reads the devcontainer during import and,
@@ -277,13 +280,18 @@ not run on Alpine/musl. If the workspace container exits with `no such file or
 directory`, this is why.
 
 !!! danger "A cache registry is required"
-    Devcontainer templates must set `cache_repo`. Layers are cached there and
-    pushed after the first build, so the first workspace pays for the build and
-    the rest start from the cache. Without it every student rebuilds the whole
-    devcontainer from scratch, which turns a seconds-long start into a
-    minutes-long one for each of them.
+    Devcontainer templates must have a cache registry, one way or the other.
+    Layers are cached there and pushed after the first build, so the first
+    workspace pays for the build and the rest start from the cache. Without
+    one every student rebuilds the whole devcontainer from scratch, which
+    turns a seconds-long start into a minutes-long one for each of them.
 
-    Create the credentials Secret in the workspace namespace beforehand:
+    **Host in-cluster** needs nothing further — EasyLab provisions the
+    registry in the lab's own cluster, with no external exposure or
+    authentication, and it disappears when the lab is destroyed.
+
+    **External registry** needs the credentials Secret created in the
+    workspace namespace beforehand:
 
     ```bash
     kubectl create secret docker-registry regcred \

@@ -211,6 +211,7 @@ func devcontainerTemplate(res devcontainer.Result, r *http.Request) WorkspaceTem
 			Enabled:            true,
 			Dir:                dir,
 			CacheRepo:          strings.TrimSpace(getFormValue(r, "cache_repo")),
+			UseInClusterCache:  getFormValue(r, "use_in_cluster_cache") == "true",
 			RegistryAuthSecret: strings.TrimSpace(getFormValue(r, "registry_auth_secret")),
 			// Set only when the admin pointed the import at a separate config repo —
 			// otherwise devcontainer.json keeps coming from git_repo, as today.
@@ -225,7 +226,7 @@ func devcontainerTemplate(res devcontainer.Result, r *http.Request) WorkspaceTem
 // admin discover it when saving. Validation rejects it either way; this just
 // moves the message to where it can still be acted on cheaply.
 func cacheRepoWarnings(t WorkspaceTemplate) []devcontainer.Warning {
-	if t.Devcontainer == nil || strings.TrimSpace(t.Devcontainer.CacheRepo) != "" {
+	if t.Devcontainer == nil || strings.TrimSpace(t.Devcontainer.CacheRepo) != "" || t.Devcontainer.UseInClusterCache {
 		return nil
 	}
 	return []devcontainer.Warning{{

@@ -177,9 +177,14 @@ type DevcontainerConfig struct {
 	// repo root when ConfigRepo is empty (default ".devcontainer"), or relative
 	// to ConfigRepo's root when it is set.
 	Dir string `json:"dir,omitempty"`
-	// CacheRepo is the container registry image layers are cached in. Required:
-	// without it every student's pod rebuilds the devcontainer from scratch.
+	// CacheRepo is the container registry image layers are cached in. Required
+	// unless UseInClusterCache is set: without one every student's pod rebuilds
+	// the devcontainer from scratch.
 	CacheRepo string `json:"cache_repo,omitempty"`
+	// UseInClusterCache, when true and CacheRepo is empty, provisions an
+	// in-cluster registry as the devcontainer build cache instead of requiring
+	// an external one. An explicit CacheRepo always takes priority over this.
+	UseInClusterCache bool `json:"use_in_cluster_cache,omitempty"`
 	// RegistryAuthSecret names an existing kubernetes.io/dockerconfigjson Secret
 	// in the workspace namespace, used to authenticate every registry operation the
 	// build makes from inside the pod: pulling the devcontainer's base image and

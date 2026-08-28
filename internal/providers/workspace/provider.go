@@ -226,6 +226,17 @@ type AuthSecret struct {
 	Username string   `json:"username,omitempty"`
 }
 
+// RegistryCacheProvider is implemented by backends that can host an in-cluster
+// registry for the devcontainer build cache. Optional and deliberately
+// separate from Backend, like SecretManager below — a backend that cannot host
+// one simply does not implement it, and callers type-assert for it.
+type RegistryCacheProvider interface {
+	// EnsureBuildCache provisions (idempotently) an in-cluster registry for
+	// envbuilder's devcontainer layer cache and returns its repo address. The
+	// registry has no TLS, so callers must also set DevcontainerSpec.Insecure.
+	EnsureBuildCache(ctx context.Context) (repo string, err error)
+}
+
 // SecretManager materializes the credential Secrets that templates reference by
 // name, so an admin can add a registry or git token without kubectl access to the
 // lab's cluster.

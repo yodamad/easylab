@@ -166,6 +166,23 @@ func TestParseWorkspaceTemplatesYAML(t *testing.T) {
 			}},
 		},
 		{
+			name: "devcontainer block with in-cluster cache needs no cache_repo",
+			input: `workspace_templates:
+  - name: go-workshop
+    git_repo: https://gitlab.com/org/workshop.git
+    devcontainer:
+      enabled: true
+      use_in_cluster_cache: true`,
+			expected: []WorkspaceTemplate{{
+				Name:    "go-workshop",
+				GitRepo: "https://gitlab.com/org/workshop.git",
+				Devcontainer: &DevcontainerConfig{
+					Enabled:           true,
+					UseInClusterCache: true,
+				},
+			}},
+		},
+		{
 			name: "devcontainer block disabled is inert",
 			input: `workspace_templates:
   - name: plain

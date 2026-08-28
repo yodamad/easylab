@@ -2025,6 +2025,23 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		spec.WildcardTLSSecret = coder.WildcardTLSSecretName
 	}
 
+	// An in-cluster registry can stand in for the external one a devcontainer
+	// template's cache_repo would otherwise have to name — only when the
+	// template opted in and left cache_repo blank; an explicit cache_repo
+	// always wins. Best-effort: on failure, fall through and let
+	// EnsureWorkspace fail with today's clear "cache repo empty" outcome
+	// rather than silently starting the build without a cache.
+	if spec.Devcontainer != nil && selected.Devcontainer.UseInClusterCache && spec.Devcontainer.CacheRepo == "" {
+		if rc, ok := backend.(workspace.RegistryCacheProvider); ok {
+			if repo, err := rc.EnsureBuildCache(r.Context()); err != nil {
+				log.Printf("Failed to provision in-cluster registry cache for lab %s: %v", labID, err)
+			} else {
+				spec.Devcontainer.CacheRepo = repo
+				spec.Devcontainer.Insecure = true
+			}
+		}
+	}
+
 	// Bound concurrent workspace-creation calls: EnsureWorkspace makes several
 	// sequential Kubernetes API calls, so an unbounded burst of students starting
 	// workspaces at once could otherwise hit the cluster's API server all

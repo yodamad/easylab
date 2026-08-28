@@ -60,7 +60,9 @@ workspace_templates:
     # devcontainer:                              # build the image from a devcontainer.json
     #   enabled: true                            # requires git_repo; conflicts with image
     #   dir: .devcontainer                       # folder holding devcontainer.json
-    #   cache_repo: registry.example.com/cache   # REQUIRED — without it every student rebuilds
+    #   cache_repo: registry.example.com/cache   # REQUIRED unless use_in_cluster_cache is set —
+    #                                             # without one every student rebuilds from scratch
+    #   use_in_cluster_cache: false               # provision the build cache in-cluster instead
     #   registry_auth_secret: regcred            # existing dockerconfigjson Secret in the namespace
     #   fallback_image: codercom/code-server:latest
     #   insecure: false                          # bypass registry/git TLS verification
@@ -391,8 +393,8 @@ func validateDevcontainer(where string, t WorkspaceTemplate) error {
 	if strings.TrimSpace(t.Image) != "" {
 		return fmt.Errorf("%s: devcontainer.enabled conflicts with image — the workspace image is built from devcontainer.json, so image would be ignored", where)
 	}
-	if strings.TrimSpace(dc.CacheRepo) == "" {
-		return fmt.Errorf("%s: devcontainer.cache_repo is required — without a layer cache registry every student rebuilds the devcontainer from scratch on first start", where)
+	if strings.TrimSpace(dc.CacheRepo) == "" && !dc.UseInClusterCache {
+		return fmt.Errorf("%s: devcontainer.cache_repo is required unless devcontainer.use_in_cluster_cache is set — without a layer cache registry every student rebuilds the devcontainer from scratch on first start", where)
 	}
 
 	configRepo := strings.TrimSpace(dc.ConfigRepo)
