@@ -1825,6 +1825,130 @@ func getProjectStats(t *testing.T, h *Handler, project string) statsAPIResponse 
 	return resp
 }
 
+func getProjectStatsWithRange(t *testing.T, h *Handler, project, rangeParam string) statsAPIResponse {
+	t.Helper()
+	req := httptest.NewRequest("GET", "/api/admin/stats?project="+project+"&range="+rangeParam, nil)
+	w := httptest.NewRecorder()
+	h.GetProjectStats(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp statsAPIResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	return resp
+}
+
+func TestStatsBucketFormat(t *testing.T) {
+	tests := []struct {
+		name       string
+		rangeParam string
+		want       string
+	}{
+		{"seven days uses daily buckets", "7d", "2006-01-02"},
+		{"one month uses daily buckets", "1m", "2006-01-02"},
+		{"three months uses monthly buckets", "3m", "2006-01"},
+		{"six months uses monthly buckets", "6m", "2006-01"},
+		{"one year uses monthly buckets", "1y", "2006-01"},
+		{"all time uses monthly buckets", "all", "2006-01"},
+		{"empty uses monthly buckets", "", "2006-01"},
+		{"unrecognized value uses monthly buckets", "bogus", "2006-01"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, statsBucketFormat(tt.rangeParam))
+		})
+	}
+}
+
+func TestStatsRangeCutoff(t *testing.T) {
+	now := time.Now()
+	tests := []struct {
+		name       string
+		rangeParam string
+		want       string
+	}{
+		{"seven days", "7d", now.AddDate(0, 0, -7).Format("2006-01-02")},
+		{"one month", "1m", now.AddDate(0, -1, 0).Format("2006-01-02")},
+		{"three months", "3m", now.AddDate(0, -3, 0).Format("2006-01")},
+		{"six months", "6m", now.AddDate(0, -6, 0).Format("2006-01")},
+		{"one year", "1y", now.AddDate(-1, 0, 0).Format("2006-01")},
+		{"all time keyword", "all", ""},
+		{"empty means all time", "", ""},
+		{"unrecognized value means all time", "bogus", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, statsRangeCutoff(tt.rangeParam))
+		})
+	}
+}
+
+func TestHandler_GetProjectStats_ShortRangeUsesDailyBuckets(t *testing.T) {
+	jm := NewJobManager("")
+
+	// Two jobs three days apart, both well within a 7-day window, must land
+	// in distinct daily buckets rather than collapsing into one monthly point.
+	idA := jm.CreateJob(&LabConfig{StackName: "proj-daily"})
+	require.NoError(t, jm.UpdateJobStatus(idA, JobStatusCompleted))
+	jobA, _ := jm.GetJob(idA)
+	jobA.mu.Lock()
+	jobA.CreatedAt = time.Now().AddDate(0, 0, -3)
+	jobA.mu.Unlock()
+
+	idB := jm.CreateJob(&LabConfig{StackName: "proj-daily"})
+	require.NoError(t, jm.UpdateJobStatus(idB, JobStatusCompleted))
+	jobB, _ := jm.GetJob(idB)
+	jobB.mu.Lock()
+	jobB.CreatedAt = time.Now()
+	jobB.mu.Unlock()
+
+	dayA := jobA.CreatedAt.Format("2006-01-02")
+	dayB := jobB.CreatedAt.Format("2006-01-02")
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	resp := getProjectStatsWithRange(t, h, "proj-daily", "7d")
+
+	assert.Contains(t, resp.Labels, dayA)
+	assert.Contains(t, resp.Labels, dayB)
+	assert.Equal(t, 2, resp.TotalActive)
+	for _, label := range resp.Labels {
+		assert.Len(t, label, len("2006-01-02"), "labels should be day-granular (YYYY-MM-DD) for a 7-day range")
+	}
+}
+
+func TestHandler_GetProjectStats_RangeFiltersOldMonths(t *testing.T) {
+	jm := NewJobManager("")
+
+	idOld := jm.CreateJob(&LabConfig{StackName: "proj-range"})
+	require.NoError(t, jm.UpdateJobStatus(idOld, JobStatusCompleted))
+	jobOld, _ := jm.GetJob(idOld)
+	jobOld.mu.Lock()
+	jobOld.CreatedAt = time.Now().AddDate(0, -5, 0)
+	jobOld.mu.Unlock()
+
+	idRecent := jm.CreateJob(&LabConfig{StackName: "proj-range"})
+	require.NoError(t, jm.UpdateJobStatus(idRecent, JobStatusCompleted))
+
+	oldMonth := jobOld.CreatedAt.Format("2006-01")
+	recentMonth := time.Now().Format("2006-01")
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	resp3m := getProjectStatsWithRange(t, h, "proj-range", "3m")
+	assert.NotContains(t, resp3m.Labels, oldMonth, "job from 5 months ago should be excluded by a 3-month range")
+	assert.Contains(t, resp3m.Labels, recentMonth)
+	assert.Equal(t, 1, resp3m.TotalActive, "KPI totals should be scoped to the filtered range, not all-time")
+
+	resp6m := getProjectStatsWithRange(t, h, "proj-range", "6m")
+	assert.Contains(t, resp6m.Labels, oldMonth, "job from 5 months ago should be included by a 6-month range")
+	assert.Contains(t, resp6m.Labels, recentMonth)
+	assert.Equal(t, 2, resp6m.TotalActive)
+
+	respAll := getProjectStats(t, h, "proj-range")
+	assert.Contains(t, respAll.Labels, oldMonth, "no range param means all-time history")
+	assert.Equal(t, 2, respAll.TotalActive)
+}
+
 func TestHandler_GetProjectStats_WorkspaceEventsDriveCounts(t *testing.T) {
 	jm := NewJobManager("")
 	// WorkspaceLifetimeHours left unset (0) — previously this caused
@@ -2019,10 +2143,11 @@ func TestHandler_GetProjectStats_RecomputesAfterTTLExpiry(t *testing.T) {
 	require.Equal(t, http.StatusOK, w1.Code)
 
 	// Force the cache entry to look older than the TTL instead of sleeping.
+	// Cache key is "<project>|<range>"; an absent range query param means "".
 	h.statsCacheMu.Lock()
-	entry := h.statsCache["cache-expiry-test"]
+	entry := h.statsCache["cache-expiry-test|"]
 	entry.computedAt = time.Now().Add(-statsCacheTTL - time.Second)
-	h.statsCache["cache-expiry-test"] = entry
+	h.statsCache["cache-expiry-test|"] = entry
 	h.statsCacheMu.Unlock()
 
 	id2 := jm.CreateJob(&LabConfig{StackName: "cache-expiry-test"})

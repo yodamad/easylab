@@ -23,6 +23,17 @@
                     {{end}}
                 </select>
             </div>
+            <div>
+                <label for="range_input">Time Span</label>
+                <select id="range_input" name="range">
+                    <option value="7d" {{if eq $.SelectedRange "7d"}}selected{{end}}>Last 7 days</option>
+                    <option value="1m" {{if eq $.SelectedRange "1m"}}selected{{end}}>Last month</option>
+                    <option value="3m" {{if eq $.SelectedRange "3m"}}selected{{end}}>Last 3 months</option>
+                    <option value="6m" {{if eq $.SelectedRange "6m"}}selected{{end}}>Last 6 months</option>
+                    <option value="1y" {{if eq $.SelectedRange "1y"}}selected{{end}}>Last year</option>
+                    <option value="all" {{if or (eq $.SelectedRange "") (eq $.SelectedRange "all")}}selected{{end}}>All time</option>
+                </select>
+            </div>
             <button type="submit">View Stats</button>
         </form>
 
@@ -50,7 +61,7 @@
             <div class="chart-title" id="chart-title">
                 {{if eq .SelectedProject "__all__"}}Workspace activity — All Projects{{else}}Workspace activity for <strong>{{.SelectedProject}}</strong>{{end}}
             </div>
-            <canvas id="statsChart" data-project="{{.SelectedProject}}"></canvas>
+            <canvas id="statsChart" data-project="{{.SelectedProject}}" data-range="{{if .SelectedRange}}{{.SelectedRange}}{{else}}all{{end}}"></canvas>
         </div>
         <div id="projects-table-container" style="display:none">
             <div class="chart-title">Per-project breakdown</div>
@@ -69,7 +80,7 @@
         {{else}}
         <div class="chart-card" id="chart-card">
             <div class="chart-title">Workspace activity — All Projects</div>
-            <canvas id="statsChart" data-project="__all__"></canvas>
+            <canvas id="statsChart" data-project="__all__" data-range="{{if .SelectedRange}}{{.SelectedRange}}{{else}}all{{end}}"></canvas>
         </div>
         <div id="projects-table-container" style="display:none">
             <div class="chart-title">Per-project breakdown</div>
@@ -95,6 +106,7 @@
 (function() {
     var canvas = document.getElementById('statsChart');
     var project = canvas.dataset.project;
+    var range = canvas.dataset.range || 'all';
 
     function escapeHTML(str) {
         return String(str)
@@ -124,7 +136,7 @@
         return Number.isInteger(value) ? value : '';
     }
 
-    fetch('/api/admin/stats?project=' + encodeURIComponent(project))
+    fetch('/api/admin/stats?project=' + encodeURIComponent(project) + '&range=' + encodeURIComponent(range))
         .then(function(r) { return r.json(); })
         .then(function(data) {
             // A single selected lab always has exactly one outcome (it either
@@ -150,9 +162,12 @@
             document.getElementById('kpi-grid').style.display = 'grid';
 
             if (!data.labels || data.labels.length === 0) {
+                var emptyMessage = range === 'all'
+                    ? 'No deployment history found yet.'
+                    : 'No deployment history found for the selected time span.';
                 document.getElementById('chart-card').innerHTML =
                     '<div class="empty-state"><span class="empty-state-icon">📊</span>' +
-                    '<p>No deployment history found yet.</p></div>';
+                    '<p>' + escapeHTML(emptyMessage) + '</p></div>';
                 if (data.projects && data.projects.length > 0) {
                     renderSummaryTable(data.projects);
                 }

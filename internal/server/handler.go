@@ -54,10 +54,10 @@ type Handler struct {
 	// destroys, retries, or recreations can exhaust host CPU/memory well before
 	// the number of labs involved gets large. Sized by pulumiExecutionConcurrency.
 	pulumiExecSem chan struct{}
-	// statsCache holds GetProjectStats results keyed by the "project" query
-	// param, since computing one walks every job's full event history — cheap
+	// statsCache holds GetProjectStats results keyed by "<project>|<range>",
+	// since computing one walks every job's full event history — cheap
 	// enough for an on-demand admin view, wasteful to repeat within seconds of
-	// the last call (e.g. flipping the project filter back and forth).
+	// the last call (e.g. flipping the project or time-span filter back and forth).
 	statsCache          map[string]statsCacheEntry
 	statsCacheMu        sync.Mutex
 	templates           map[string]*template.Template
@@ -4618,17 +4618,58 @@ func (h *Handler) ServeAdminStats(w http.ResponseWriter, r *http.Request) {
 	type StatsPageData struct {
 		Projects        []string
 		SelectedProject string
+		SelectedRange   string
 	}
 
 	h.serveTemplate(w, "admin-stats.html", StatsPageData{
 		Projects:        projects,
 		SelectedProject: r.URL.Query().Get("project"),
+		SelectedRange:   r.URL.Query().Get("range"),
 	})
 }
 
+// statsBucketFormat returns the time.Format layout used to key stats buckets
+// for the given time-span selector value. The short spans ("7d", "1m") use
+// daily buckets — otherwise "Last 7 days" would collapse to a single monthly
+// data point. Longer spans (and "all") stay monthly, matching the archived
+// (deleted-lab) history, which is only preserved at month granularity.
+func statsBucketFormat(rangeParam string) string {
+	switch rangeParam {
+	case "7d", "1m":
+		return "2006-01-02"
+	default:
+		return "2006-01"
+	}
+}
+
+// statsRangeCutoff returns the earliest bucket key (formatted with
+// statsBucketFormat) to include for the given time-span selector value, or ""
+// if the range is unrecognized or "all" (no cutoff, i.e. full history).
+func statsRangeCutoff(rangeParam string) string {
+	var cutoff time.Time
+	switch rangeParam {
+	case "7d":
+		cutoff = time.Now().AddDate(0, 0, -7)
+	case "1m":
+		cutoff = time.Now().AddDate(0, -1, 0)
+	case "3m":
+		cutoff = time.Now().AddDate(0, -3, 0)
+	case "6m":
+		cutoff = time.Now().AddDate(0, -6, 0)
+	case "1y":
+		cutoff = time.Now().AddDate(-1, 0, 0)
+	default:
+		return ""
+	}
+	return cutoff.Format(statsBucketFormat(rangeParam))
+}
+
 // GetProjectStats returns KPI totals and time-series JSON for deployed labs.
-// Accepts project=<stackName> or project=__all__ for aggregated view.
-// Route: GET /api/admin/stats?project=<stackName>
+// Accepts project=<stackName> or project=__all__ for aggregated view, plus an
+// optional range=7d|1m|3m|6m|1y to restrict to a trailing window (default: all
+// time). "7d"/"1m" use daily buckets so the chart doesn't collapse to a single
+// point; longer spans use monthly buckets — see statsBucketFormat.
+// Route: GET /api/admin/stats?project=<stackName>&range=<span>
 // statsCacheTTL bounds how stale the admin stats dashboard can be.
 const statsCacheTTL = 30 * time.Second
 
@@ -4638,22 +4679,22 @@ type statsCacheEntry struct {
 	computedAt time.Time
 }
 
-// statsCacheLookup returns a still-fresh cached response for project, if any.
-func (h *Handler) statsCacheLookup(project string) ([]byte, bool) {
+// statsCacheLookup returns a still-fresh cached response for cacheKey, if any.
+func (h *Handler) statsCacheLookup(cacheKey string) ([]byte, bool) {
 	h.statsCacheMu.Lock()
 	defer h.statsCacheMu.Unlock()
-	entry, ok := h.statsCache[project]
+	entry, ok := h.statsCache[cacheKey]
 	if !ok || time.Since(entry.computedAt) > statsCacheTTL {
 		return nil, false
 	}
 	return entry.data, true
 }
 
-// statsCacheStore caches a freshly computed response for project.
-func (h *Handler) statsCacheStore(project string, data []byte) {
+// statsCacheStore caches a freshly computed response for cacheKey.
+func (h *Handler) statsCacheStore(cacheKey string, data []byte) {
 	h.statsCacheMu.Lock()
 	defer h.statsCacheMu.Unlock()
-	h.statsCache[project] = statsCacheEntry{data: data, computedAt: time.Now()}
+	h.statsCache[cacheKey] = statsCacheEntry{data: data, computedAt: time.Now()}
 }
 
 func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
@@ -4662,14 +4703,22 @@ func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "project query param required", http.StatusBadRequest)
 		return
 	}
+	rangeParam := r.URL.Query().Get("range")
+	bucketFormat := statsBucketFormat(rangeParam)
+	cutoff := statsRangeCutoff(rangeParam)
+	// Cache is keyed per project+range since each combination yields a
+	// different filtered response.
+	cacheKey := project + "|" + rangeParam
 
-	if cached, ok := h.statsCacheLookup(project); ok {
+	if cached, ok := h.statsCacheLookup(cacheKey); ok {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(cached)
 		return
 	}
 
-	type monthBucket struct {
+	// bucket tallies activity for one time-series data point — keyed by day or
+	// by month depending on bucketFormat (see statsBucketFormat).
+	type bucket struct {
 		succeeded int
 		failed    int
 		destroyed int
@@ -4703,12 +4752,12 @@ func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 		return job.Status == JobStatusCompleted || job.Status == JobStatusFailed || job.Status == JobStatusDestroyed
 	}
 
-	buckets := make(map[string]*monthBucket)
-	var orderedMonths []string
-	addMonth := func(month string) {
-		if _, ok := buckets[month]; !ok {
-			buckets[month] = &monthBucket{}
-			orderedMonths = append(orderedMonths, month)
+	buckets := make(map[string]*bucket)
+	var orderedKeys []string
+	addBucket := func(key string) {
+		if _, ok := buckets[key]; !ok {
+			buckets[key] = &bucket{}
+			orderedKeys = append(orderedKeys, key)
 		}
 	}
 
@@ -4748,28 +4797,21 @@ func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if job.Status == JobStatusCompleted {
-			resp.TotalActive++
-		}
-		if job.Status == JobStatusFailed {
-			resp.TotalFailed++
-		}
-
 		switch job.Status {
 		case JobStatusCompleted:
-			month := job.CreatedAt.Format("2006-01")
-			addMonth(month)
-			buckets[month].succeeded++
+			key := job.CreatedAt.Format(bucketFormat)
+			addBucket(key)
+			buckets[key].succeeded++
 		case JobStatusFailed:
-			month := job.CreatedAt.Format("2006-01")
-			addMonth(month)
-			buckets[month].failed++
+			key := job.CreatedAt.Format(bucketFormat)
+			addBucket(key)
+			buckets[key].failed++
 		case JobStatusDestroyed:
 			// Bucket by UpdatedAt (refreshed on the Destroyed transition), not
 			// CreatedAt — a lab is typically destroyed long after it was created.
-			month := job.UpdatedAt.Format("2006-01")
-			addMonth(month)
-			buckets[month].destroyed++
+			key := job.UpdatedAt.Format(bucketFormat)
+			addBucket(key)
+			buckets[key].destroyed++
 		}
 
 		// Workspace creation/deletion events are recorded unconditionally for
@@ -4780,36 +4822,38 @@ func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 		job.mu.RLock()
 		events := append([]WorkspaceEvent(nil), job.WorkspaceEvents...)
 		job.mu.RUnlock()
-		jobCreated, jobCleaned := 0, 0
 		for _, evt := range events {
-			evtMonth := evt.At.Format("2006-01")
+			evtKey := evt.At.Format(bucketFormat)
 			switch evt.Action {
 			case WorkspaceEventCreated:
-				jobCreated++
-				addMonth(evtMonth)
-				buckets[evtMonth].created++
+				addBucket(evtKey)
+				buckets[evtKey].created++
 			case WorkspaceEventDeleted:
-				jobCleaned++
-				addMonth(evtMonth)
-				buckets[evtMonth].cleaned++
+				addBucket(evtKey)
+				buckets[evtKey].cleaned++
 			}
 		}
-		resp.TotalCleaned += jobCleaned
-		resp.TotalWorkspaces += jobCreated
 	}
 
 	// Merge in preserved history from jobs removed via DeleteLab, so deleting
-	// an old destroyed/failed lab doesn't erase its contribution to past months.
+	// an old destroyed/failed lab doesn't erase its contribution to past
+	// months. This archive only tracks month-level granularity, so under a
+	// daily bucketFormat each archived month is attributed to its 1st day —
+	// close enough for a range where such old, deleted-lab activity rarely
+	// falls within the (recent) cutoff anyway.
 	for month, archived := range h.jobManager.ArchivedMonthlyStats(project) {
-		addMonth(month)
-		buckets[month].succeeded += archived.Succeeded
-		buckets[month].failed += archived.Failed
-		buckets[month].destroyed += archived.Destroyed
-		buckets[month].created += archived.Created
-		buckets[month].cleaned += archived.Cleaned
-		resp.TotalFailed += archived.Failed
-		resp.TotalCleaned += archived.Cleaned
-		resp.TotalWorkspaces += archived.Created
+		key := month
+		if bucketFormat != "2006-01" {
+			if t, err := time.Parse("2006-01", month); err == nil {
+				key = t.Format(bucketFormat)
+			}
+		}
+		addBucket(key)
+		buckets[key].succeeded += archived.Succeeded
+		buckets[key].failed += archived.Failed
+		buckets[key].destroyed += archived.Destroyed
+		buckets[key].created += archived.Created
+		buckets[key].cleaned += archived.Cleaned
 	}
 	if project == "__all__" {
 		for name, totals := range h.jobManager.ArchivedProjectTotals() {
@@ -4823,20 +4867,34 @@ func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Build time-series arrays in chronological order.
-	sort.Strings(orderedMonths)
-	resp.Labels = orderedMonths
-	resp.Succeeded = make([]int, len(orderedMonths))
-	resp.Failed = make([]int, len(orderedMonths))
-	resp.Destroyed = make([]int, len(orderedMonths))
-	resp.Created = make([]int, len(orderedMonths))
-	resp.Cleaned = make([]int, len(orderedMonths))
-	for i, m := range orderedMonths {
-		resp.Succeeded[i] = buckets[m].succeeded
-		resp.Failed[i] = buckets[m].failed
-		resp.Destroyed[i] = buckets[m].destroyed
-		resp.Created[i] = buckets[m].created
-		resp.Cleaned[i] = buckets[m].cleaned
+	// Build time-series arrays in chronological order, restricted to the
+	// selected time span (cutoff == "" means no restriction / all time).
+	sort.Strings(orderedKeys)
+	var filteredKeys []string
+	for _, k := range orderedKeys {
+		if cutoff == "" || k >= cutoff {
+			filteredKeys = append(filteredKeys, k)
+		}
+	}
+	resp.Labels = filteredKeys
+	resp.Succeeded = make([]int, len(filteredKeys))
+	resp.Failed = make([]int, len(filteredKeys))
+	resp.Destroyed = make([]int, len(filteredKeys))
+	resp.Created = make([]int, len(filteredKeys))
+	resp.Cleaned = make([]int, len(filteredKeys))
+	for i, k := range filteredKeys {
+		b := buckets[k]
+		resp.Succeeded[i] = b.succeeded
+		resp.Failed[i] = b.failed
+		resp.Destroyed[i] = b.destroyed
+		resp.Created[i] = b.created
+		resp.Cleaned[i] = b.cleaned
+		// KPI totals are scoped to the same window as the chart: "currently
+		// active"/"failed"/"cleaned"/"total workspaces" for the selected span.
+		resp.TotalActive += b.succeeded
+		resp.TotalFailed += b.failed
+		resp.TotalWorkspaces += b.created
+		resp.TotalCleaned += b.cleaned
 	}
 
 	// Build projects summary slice for __all__ view, sorted by total descending.
@@ -4855,7 +4913,7 @@ func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	h.statsCacheStore(project, data)
+	h.statsCacheStore(cacheKey, data)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(data)
