@@ -65,6 +65,10 @@ type Handler struct {
 	ovhOptionsManager   *OVHOptionsManager
 	azureOptionsManager *AzureOptionsManager
 	feedbackStore       *FeedbackStore
+	// auditStore records admin/student/system actions (lab create/destroy,
+	// workspace create/delete, credential changes, ...). Optional — nil unless
+	// SetAuditStore is called, matching the other optional dependencies below.
+	auditStore *AuditStore
 	// pendingSecrets holds credentials captured in the creation wizard until the
 	// lab's cluster exists to receive them (see pending_secrets.go).
 	pendingSecrets              *pendingSecretStore
@@ -92,6 +96,36 @@ func (h *Handler) SetAdminGroupIDConfigurer(fn func(groupID string)) {
 // SetClassicAdminLoginConfigurer wires a callback to enable/disable password-based admin login at runtime.
 func (h *Handler) SetClassicAdminLoginConfigurer(fn func(disabled bool)) {
 	h.classicAdminLoginConfigurer = fn
+}
+
+// SetAuditStore wires the audit log store. Not required — audit recording is
+// a no-op when this is never called (e.g. in tests).
+func (h *Handler) SetAuditStore(store *AuditStore) {
+	h.auditStore = store
+}
+
+// recordAudit appends an audit entry if an audit store is configured. The
+// actual write happens off the response's critical path (a goroutine),
+// consistent with this codebase's convention for disk I/O triggered by a
+// request (see the SaveJob comment in UploadTemplateToLab) — an audit-log
+// write must never add latency to, or fail, the action it's recording.
+func (h *Handler) recordAudit(actor, role, action, labID, detail string) {
+	if h.auditStore == nil {
+		return
+	}
+	entry := AuditEntry{
+		At:     time.Now(),
+		Actor:  actor,
+		Role:   role,
+		Action: action,
+		LabID:  labID,
+		Detail: detail,
+	}
+	go func() {
+		if err := h.auditStore.Record(entry); err != nil {
+			log.Printf("[audit] failed to record %s: %v", action, err)
+		}
+	}()
 }
 
 // emailRegex is a simple email validation regex
@@ -918,6 +952,7 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 		"student-workspaces.html": "web/student-workspaces.html",
 		"student-feedback.html":   "web/student-feedback.html",
 		"admin-feedback.html":     "web/admin-feedback.html",
+		"admin-audit-log.html":    "web/admin-audit-log.html",
 		"credentials.html":        "web/credentials.html",
 		"ovh-credentials.html":    "web/ovh-credentials.html", // Keep for backward compatibility
 		"ovh-options.html":        "web/ovh-options.html",
@@ -1092,6 +1127,12 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 		})
 	}
 
+	auditAction := "lab.create"
+	if isDryRun {
+		auditAction = "lab.dry_run"
+	}
+	h.recordAudit(adminActor(r), "admin", auditAction, jobID, initialConfig.StackName)
+
 	_, html := h.executeLabJobWithID(initialConfig, isDryRun, jobID)
 
 	// Return job status div for HTMX to display with proper polling, preceded by
@@ -1222,6 +1263,7 @@ func (h *Handler) LaunchLab(w http.ResponseWriter, r *http.Request) {
 	// Reset job status to pending and start execution
 	h.jobManager.UpdateJobStatus(jobID, JobStatusPending)
 	h.jobManager.AppendOutput(jobID, fmt.Sprintf("Launching real deployment at %s", time.Now().Format(time.RFC3339)))
+	h.recordAudit(adminActor(r), "admin", "lab.launch", jobID, "")
 
 	// Start Pulumi execution in a goroutine
 	go func() {
@@ -1723,6 +1765,7 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 	for i, t := range templates {
 		names[i] = t.Name
 	}
+	h.recordAudit(adminActor(r), "admin", "lab.template_upload", jobID, strings.Join(names, ", "))
 	w.Header().Set("Content-Type", "application/json")
 	// "template" (first name) is kept for backward compatibility with older clients.
 	json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "template": names[0], "templates": names})
@@ -2005,6 +2048,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 				}
 			}()
 		}
+		h.recordAudit(email, "student", "workspace.create", labID, ws.Name)
 	}
 
 	workspaceURL := ws.URL
@@ -2539,6 +2583,7 @@ func (h *Handler) setOVHCredentialsFromForm(w http.ResponseWriter, r *http.Reque
 	}
 
 	log.Printf("OVH credentials saved successfully")
+	h.recordAudit(adminActor(r), "admin", "credentials.set", "", "provider: ovh")
 	w.Header().Set("Content-Type", "text/html")
 	fmt.Fprintf(w, `
 		<div class="success-message">
@@ -2573,6 +2618,7 @@ func (h *Handler) setAzureCredentialsFromForm(w http.ResponseWriter, r *http.Req
 	}
 
 	log.Printf("Azure credentials saved successfully")
+	h.recordAudit(adminActor(r), "admin", "credentials.set", "", "provider: azure")
 	w.Header().Set("Content-Type", "text/html")
 	fmt.Fprintf(w, `
 		<div class="success-message">
@@ -3521,6 +3567,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		// Reuses workspaceCreateSem, the same budget that already protects the
 		// cluster's API server from a burst of concurrent create requests.
 		var delErrors []string
+		var deletedNames []string
 		var delErrorsMu sync.Mutex
 		var wg sync.WaitGroup
 		for _, wsID := range workspaceIDs {
@@ -3544,6 +3591,9 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 				if wsName == "" {
 					wsName = wsID
 				}
+				delErrorsMu.Lock()
+				deletedNames = append(deletedNames, wsName)
+				delErrorsMu.Unlock()
 				if rerr := h.jobManager.RecordWorkspaceEvent(labID, WorkspaceEventDeleted, wsID, wsName, ownerDisplayName(wsInfo), wsInfo.Template); rerr != nil {
 					log.Printf("Failed to record workspace deletion event for %s: %v", wsID, rerr)
 				}
@@ -3557,6 +3607,9 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 				log.Printf("Failed to persist workspace deletion events for lab %s: %v", labID, serr)
 			}
 		}()
+		if len(deletedNames) > 0 {
+			h.recordAudit(adminActor(r), "admin", "workspace.delete", labID, fmt.Sprintf("bulk delete: %s", strings.Join(deletedNames, ", ")))
+		}
 
 		if len(delErrors) > 0 {
 			w.Header().Set("Content-Type", "application/json")
@@ -3645,6 +3698,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 	}
+	h.recordAudit(adminActor(r), "admin", "workspace.delete", labID, wsName)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -3709,6 +3763,8 @@ func (h *Handler) DestroyStack(w http.ResponseWriter, r *http.Request) {
 		h.renderHTMLError(w, "Credentials Not Configured", "Please configure your cloud provider credentials before destroying this lab.", `<a href="/credentials" class="btn btn-primary">Configure Credentials</a>`)
 		return
 	}
+
+	h.recordAudit(adminActor(r), "admin", "lab.destroy", jobID, stackName)
 
 	// Start destruction in a goroutine
 	go func() {
@@ -3813,6 +3869,7 @@ func (h *Handler) UpdateLabLifecycle(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Failed to persist lifecycle update for lab %s: %v", jobID, err)
 		}
 	}()
+	h.recordAudit(adminActor(r), "admin", "lab.lifecycle_update", jobID, fmt.Sprintf("workspace_lifetime_hours=%d", lifetime))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
@@ -3951,6 +4008,8 @@ func (h *Handler) RecreateLab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.recordAudit(adminActor(r), "admin", "lab.recreate", newJobID, fmt.Sprintf("recreated from %s", jobID))
+
 	// Start Pulumi execution in a goroutine
 	go func() {
 		h.pulumiExecSem <- struct{}{}
@@ -4047,6 +4106,7 @@ func (h *Handler) RetryJob(w http.ResponseWriter, r *http.Request) {
 
 	// Add retry message to output
 	h.jobManager.AppendOutput(jobID, fmt.Sprintf("Retrying job at %s", time.Now().Format(time.RFC3339)))
+	h.recordAudit(adminActor(r), "admin", "lab.retry", jobID, "")
 
 	// Start Pulumi execution in a goroutine using retry-optimized path
 	go func() {
@@ -4229,6 +4289,7 @@ func (h *Handler) RetryJobWithConfig(w http.ResponseWriter, r *http.Request) {
 
 	// Add retry message to output
 	h.jobManager.AppendOutput(jobID, fmt.Sprintf("Retrying job with edited configuration at %s", time.Now().Format(time.RFC3339)))
+	h.recordAudit(adminActor(r), "admin", "lab.retry", jobID, "with edited configuration")
 
 	// Start Pulumi execution in a goroutine using retry-optimized path. This
 	// reads job.Config fresh at call time and re-applies it via setStackConfig
@@ -4383,6 +4444,7 @@ func (h *Handler) DeleteLab(w http.ResponseWriter, r *http.Request) {
 	// Drop any credentials still waiting for a cluster that will now never exist.
 	h.pendingSecrets.Discard(labID)
 	h.evictWorkspaceBackend(labID)
+	h.recordAudit(adminActor(r), "admin", "lab.delete", labID, "")
 
 	http.Redirect(w, r, "/labs", http.StatusSeeOther)
 }

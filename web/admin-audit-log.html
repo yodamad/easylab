@@ -1,0 +1,58 @@
+{{define "title"}}Audit Log{{end}}
+{{define "body-class"}}admin-page{{end}}
+{{define "head-extra"}}{{end}}
+
+{{define "body"}}
+<div class="admin-layout">
+    {{template "admin-sidebar" .}}
+    <div class="admin-main">
+        <div class="admin-page-header">
+            <h1>Audit Log</h1>
+        </div>
+        <div class="admin-page-body">
+        <div class="admin-content-narrow">
+            <p class="audit-log-note">
+                Shows the {{.Count}} most recent recorded actions. Admin actions are attributed by email only when
+                signed in via Azure AD — classic password login has no per-admin identity, so those show as
+                <strong>admin</strong>.
+            </p>
+
+            {{if .Entries}}
+            <div class="audit-table-wrapper">
+                <table class="audit-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Actor</th>
+                            <th>Role</th>
+                            <th>Action</th>
+                            <th>Lab</th>
+                            <th>Detail</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .Entries}}
+                        <tr>
+                            <td>{{.At}}</td>
+                            <td>{{.Actor}}</td>
+                            <td><span class="audit-role-badge audit-role-{{.Role}}">{{.Role}}</span></td>
+                            <td>{{.Action}}</td>
+                            <td>{{if .LabID}}{{.LabID}}{{else}}—{{end}}</td>
+                            <td>{{if .Detail}}{{.Detail}}{{else}}—{{end}}</td>
+                        </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </div>
+            {{else}}
+            <div class="empty-state">
+                <div class="empty-state-icon">📜</div>
+                <h2>No Activity Yet</h2>
+                <p>Recorded lab, workspace, and credential actions will show up here.</p>
+            </div>
+            {{end}}
+        </div>
+        </div>
+    </div>
+</div>
+{{end}}

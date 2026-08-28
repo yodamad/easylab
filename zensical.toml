@@ -27,7 +27,8 @@ nav = [
         "templates.md",
         "student.md",
         "feedbacks.md",
-        "stats.md"
+        "stats.md",
+        "audit-log.md"
     ]},
     { "Configuration" = [
         "ovhcloud.md",

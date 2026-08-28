@@ -241,6 +241,109 @@ func TestAuthHandler_CreateSession(t *testing.T) {
 	}
 }
 
+func TestAuthHandler_CreateSessionWithEmail(t *testing.T) {
+	ah := &AuthHandler{
+		sessions: make(map[string]*Session),
+	}
+
+	token, csrfToken := ah.createSessionWithEmail("admin@example.com")
+	if token == "" || csrfToken == "" {
+		t.Fatal("createSessionWithEmail() returned an empty token or CSRF token")
+	}
+
+	ah.mu.RLock()
+	session := ah.sessions[token]
+	ah.mu.RUnlock()
+	if session == nil {
+		t.Fatal("createSessionWithEmail() did not add session to map")
+	}
+	if session.Email != "admin@example.com" {
+		t.Errorf("createSessionWithEmail() session.Email = %q, want %q", session.Email, "admin@example.com")
+	}
+	if ah.getSessionEmail(token) != "admin@example.com" {
+		t.Errorf("getSessionEmail() = %q, want %q", ah.getSessionEmail(token), "admin@example.com")
+	}
+}
+
+func TestAuthHandler_GetSessionEmail_ClassicLoginHasNoEmail(t *testing.T) {
+	ah := &AuthHandler{
+		sessions: make(map[string]*Session),
+	}
+	token, _ := ah.createSession()
+	if got := ah.getSessionEmail(token); got != "" {
+		t.Errorf("getSessionEmail() for a classic-login session = %q, want empty", got)
+	}
+}
+
+func TestAuthHandler_GetSessionEmail_UnknownToken(t *testing.T) {
+	ah := &AuthHandler{
+		sessions: make(map[string]*Session),
+	}
+	if got := ah.getSessionEmail("nonexistent-token"); got != "" {
+		t.Errorf("getSessionEmail() for an unknown token = %q, want empty", got)
+	}
+}
+
+// TestRequireAuth_InjectsAdminEmailFromAzureADSession is a regression test
+// for wiring the Azure AD admin identity through to handlers: a session
+// created via createSessionWithEmail must be readable via
+// adminEmailFromContext inside a handler wrapped in RequireAuth.
+func TestRequireAuth_InjectsAdminEmailFromAzureADSession(t *testing.T) {
+	ah := createTestAuthHandler()
+
+	var gotEmail string
+	protectedHandler := func(w http.ResponseWriter, r *http.Request) {
+		gotEmail = adminEmailFromContext(r)
+		w.WriteHeader(http.StatusOK)
+	}
+	wrappedHandler := ah.RequireAuth(protectedHandler)
+
+	token, csrfToken := ah.createSessionWithEmail("admin@example.com")
+	req := httptest.NewRequest("GET", "/protected", nil)
+	req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: token})
+	req.Header.Set("X-CSRF-Token", csrfToken)
+
+	w := httptest.NewRecorder()
+	wrappedHandler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("RequireAuth() status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if gotEmail != "admin@example.com" {
+		t.Errorf("adminEmailFromContext() inside handler = %q, want %q", gotEmail, "admin@example.com")
+	}
+}
+
+// TestRequireAuth_ClassicLoginHasEmptyAdminEmail proves a classic
+// shared-password session (no per-admin identity) yields an empty
+// adminEmailFromContext, not a stale or wrong value.
+func TestRequireAuth_ClassicLoginHasEmptyAdminEmail(t *testing.T) {
+	ah := createTestAuthHandler()
+
+	var gotEmail string
+	sawEmail := false
+	protectedHandler := func(w http.ResponseWriter, r *http.Request) {
+		gotEmail = adminEmailFromContext(r)
+		sawEmail = true
+		w.WriteHeader(http.StatusOK)
+	}
+	wrappedHandler := ah.RequireAuth(protectedHandler)
+
+	req := createAuthenticatedRequest("GET", "/protected", ah)
+	w := httptest.NewRecorder()
+	wrappedHandler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("RequireAuth() status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if !sawEmail {
+		t.Fatal("protected handler was not called")
+	}
+	if gotEmail != "" {
+		t.Errorf("adminEmailFromContext() for a classic-login session = %q, want empty", gotEmail)
+	}
+}
+
 func TestAuthHandler_ValidateSession(t *testing.T) {
 	ah := &AuthHandler{
 		sessions: make(map[string]*Session),

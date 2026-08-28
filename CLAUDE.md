@@ -236,6 +236,7 @@ Documentation is part of the deliverable, not a follow-up task. Any change to a 
 | Admin UI, lab creation, credentials, lab/workspace management | `docs/admin.md` |
 | Student feedback collection and admin feedback view | `docs/feedbacks.md` |
 | Stats / KPI dashboard | `docs/stats.md` |
+| Audit log (admin/student/system action history) | `docs/audit-log.md` |
 | Azure AD authentication setup and admin group configuration | `docs/azure-ad.md` |
 | Azure cloud provider setup | `docs/azure.md` |
 | Student portal, login, workspace access | `docs/student.md` |

@@ -69,6 +69,11 @@ type contextKey string
 // studentEmailContextKey is the context key for the student email
 const studentEmailContextKey contextKey = "studentEmail"
 
+// adminEmailContextKey is the context key for the admin's email, when known
+// (only populated for Azure AD admin login — classic shared-password login
+// has no per-admin identity, so this is empty for those sessions).
+const adminEmailContextKey contextKey = "adminEmail"
+
 // Session represents a user session
 type Session struct {
 	Token     string
@@ -424,6 +429,38 @@ func (ah *AuthHandler) sessionCSRFToken(token string) string {
 	return ""
 }
 
+// createSessionWithEmail is identical to createSession but records a known
+// admin identity on the session. Only Azure AD admin login can call this —
+// it verifies the email against a real directory before authenticating;
+// classic shared-password login has no per-admin identity and keeps using
+// plain createSession().
+func (ah *AuthHandler) createSessionWithEmail(email string) (string, string) {
+	ah.mu.Lock()
+	defer ah.mu.Unlock()
+
+	token := generateToken()
+	csrfToken := generateToken()
+	ah.sessions[token] = &Session{
+		Token:     token,
+		Email:     email,
+		ExpiresAt: time.Now().Add(SessionExpiry),
+		CSRFToken: csrfToken,
+	}
+
+	return token, csrfToken
+}
+
+// getSessionEmail returns the email associated with an admin session token,
+// or "" if the session has none (classic login) or doesn't exist.
+func (ah *AuthHandler) getSessionEmail(token string) string {
+	ah.mu.RLock()
+	defer ah.mu.RUnlock()
+	if s, ok := ah.sessions[token]; ok {
+		return s.Email
+	}
+	return ""
+}
+
 // validateSession checks if a session token is valid
 func (ah *AuthHandler) validateSession(token string) bool {
 	ah.mu.RLock()
@@ -632,7 +669,8 @@ func (ah *AuthHandler) RequireAuth(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "Invalid or missing CSRF token", http.StatusForbidden)
 			return
 		}
-		next(w, r)
+		ctx := context.WithValue(r.Context(), adminEmailContextKey, ah.getSessionEmail(cookie.Value))
+		next(w, r.WithContext(ctx))
 	}
 }
 
@@ -709,6 +747,14 @@ func (ah *AuthHandler) getStudentSessionEmail(token string) string {
 // studentEmailFromContext retrieves the student email stored in the request context
 func studentEmailFromContext(r *http.Request) string {
 	email, _ := r.Context().Value(studentEmailContextKey).(string)
+	return email
+}
+
+// adminEmailFromContext retrieves the admin email stored in the request
+// context by RequireAuth, or "" when the session has no known identity
+// (classic shared-password login).
+func adminEmailFromContext(r *http.Request) string {
+	email, _ := r.Context().Value(adminEmailContextKey).(string)
 	return email
 }
 
@@ -1109,7 +1155,7 @@ func (ah *AuthHandler) HandleAdminAzureADCallback(w http.ResponseWriter, r *http
 		return
 	}
 
-	sessionToken, csrfToken := ah.createSession()
+	sessionToken, csrfToken := ah.createSessionWithEmail(email)
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     SessionCookieName,

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"strconv"
@@ -180,6 +181,7 @@ func (h *Handler) cleanupExpiredWorkspaces() {
 					if rerr := h.jobManager.RecordWorkspaceEvent(job.ID, WorkspaceEventDeleted, wsID, ws.Name, ownerDisplayName(ws), ws.Template); rerr != nil {
 						log.Printf("[cleanup] failed to record deletion event for workspace %s: %v", wsID, rerr)
 					}
+					h.recordAudit("system", "system", "workspace.delete", job.ID, fmt.Sprintf("%s: auto-cleanup, exceeded %dh lifetime", ws.Name, job.Config.WorkspaceLifetimeHours))
 				}
 			}(ws, wsID)
 		}
@@ -224,6 +226,7 @@ func (h *Handler) cleanupExpiredLabs() {
 			log.Printf("[cleanup] failed to mark job %s as running before deletion: %v", jobID, err)
 			continue
 		}
+		h.recordAudit("system", "system", "lab.destroy", jobID, fmt.Sprintf("%s: auto-cleanup, past deletion date", job.Config.StackName))
 		go func(id string) {
 			h.pulumiExecSem <- struct{}{}
 			defer func() { <-h.pulumiExecSem }()

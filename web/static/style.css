@@ -5352,6 +5352,80 @@ details.credentials-box > :last-child {
     margin-bottom: 0;
 }
 
+.audit-log-note {
+    color: var(--text-light);
+    font-size: 0.875rem;
+    margin-bottom: 1.5rem;
+}
+
+.audit-table-wrapper {
+    overflow-x: auto;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.audit-table {
+    width: 100%;
+    min-width: 700px;
+    border-collapse: collapse;
+    background: var(--background);
+}
+
+.audit-table thead {
+    background: var(--surface);
+}
+
+.audit-table th {
+    padding: 0.75rem 1rem;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text);
+    border-bottom: 2px solid var(--border);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+}
+
+.audit-table td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    font-size: 0.875rem;
+}
+
+.audit-table tbody tr:hover {
+    background: var(--surface);
+}
+
+.audit-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.audit-role-badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+.audit-role-admin {
+    background: var(--primary-color);
+    color: #fff;
+}
+
+.audit-role-student {
+    background: var(--secondary-color);
+    color: #fff;
+}
+
+.audit-role-system {
+    background: var(--border);
+    color: var(--text);
+}
+
 .feedback-date {
     font-size: 0.8rem;
     color: #9ca3af;

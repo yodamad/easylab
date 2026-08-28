@@ -289,6 +289,12 @@ func main() {
 		log.Fatalf("Failed to initialize feedback store: %v", err)
 	}
 
+	// Initialize audit log store (persists alongside job data)
+	auditStore, err := server.NewAuditStore(filepath.Join(*dataDir, "audit"))
+	if err != nil {
+		log.Fatalf("Failed to initialize audit store: %v", err)
+	}
+
 	// Initialize handler (depends on all components)
 	handlerStart := time.Now()
 	handler = server.NewHandler(jobManager, pulumiExec, credentialsManager, ovhOptionsManager, azureOptionsManager, feedbackStore)
@@ -296,6 +302,7 @@ func main() {
 	handler.SetClassicLoginConfigurer(authHandler.SetClassicLoginDisabled)
 	handler.SetAdminGroupIDConfigurer(authHandler.SetAdminGroupID)
 	handler.SetClassicAdminLoginConfigurer(authHandler.SetClassicAdminLoginDisabled)
+	handler.SetAuditStore(auditStore)
 	log.Printf("[STARTUP] Handler initialization took %v", time.Since(handlerStart))
 
 	// Apply persisted Azure AD config (overrides env vars if set via UI)
@@ -361,6 +368,7 @@ func main() {
 	mux.HandleFunc("/admin", authHandler.RequireAuth(handler.ServeAdminUI))
 	mux.HandleFunc("/admin/feedback", authHandler.RequireAuth(handler.ServeAdminLabFeedback))
 	mux.HandleFunc("/admin/feedback/export", authHandler.RequireAuth(handler.ExportLabFeedbackCSV))
+	mux.HandleFunc("/admin/audit-log", authHandler.RequireAuth(handler.ServeAuditLog))
 	mux.HandleFunc("/admin/stats", authHandler.RequireAuth(handler.ServeAdminStats))
 	mux.HandleFunc("/api/admin/stats", authHandler.RequireAuth(handler.GetProjectStats))
 	mux.HandleFunc("/labs", authHandler.RequireAuth(handler.ServeLabsList))
