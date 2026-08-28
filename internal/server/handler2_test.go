@@ -490,6 +490,24 @@ func TestHandler_SetCredentials_WrongMethod(t *testing.T) {
 	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
 }
 
+// TestHandler_SetCredentials_ParseFormFailure_DoesNotLeakInternalError is a
+// regression test for sanitizing this handler's form-parse error response: it
+// must show a generic message, not the raw net/http multipart parse error.
+func TestHandler_SetCredentials_ParseFormFailure_DoesNotLeakInternalError(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	// A multipart Content-Type whose body doesn't match its declared boundary
+	// fails at r.ParseMultipartForm.
+	req := httptest.NewRequest("POST", "/api/credentials", strings.NewReader("not a valid multipart body"))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=doesnotmatch")
+	w := httptest.NewRecorder()
+	h.SetCredentials(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	body := w.Body.String()
+	assert.NotContains(t, body, "multipart:", "response must not echo the raw net/http parse error")
+	assert.Contains(t, body, "Failed to parse form data", "response should still explain what happened generically")
+}
+
 // --- GetCredentials paths ---
 
 func TestHandler_GetCredentials_AzureConfigured(t *testing.T) {

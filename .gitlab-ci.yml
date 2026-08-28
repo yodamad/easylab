@@ -112,6 +112,7 @@ test:
     - mkdir -p reports
     - go test -v -coverprofile=coverage.out ./...
     - go tool cover -func=coverage.out
+    - make coverage-check
   coverage: '/total:\s+\(statements\)\s+\d+\.\d+%/'
   artifacts:
     paths:

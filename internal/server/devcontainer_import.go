@@ -237,7 +237,7 @@ func cacheRepoWarnings(t WorkspaceTemplate) []devcontainer.Warning {
 // detectDevcontainerFromUpload reads a devcontainer.json, or a repository .zip
 // containing one.
 func (h *Handler) detectDevcontainerFromUpload(r *http.Request) (*devcontainer.Config, string, error) {
-	if err := r.ParseMultipartForm(50 << 20); err != nil {
+	if err := r.ParseMultipartForm(maxUploadSizeLarge); err != nil {
 		log.Printf("Failed to parse devcontainer upload form: %v", err)
 		return nil, "", errDevcontainerRead
 	}

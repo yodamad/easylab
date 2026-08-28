@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -102,4 +103,44 @@ func decryptSecret(s string) (string, error) {
 		return "", fmt.Errorf("failed to decrypt value: %w", err)
 	}
 	return string(plaintext), nil
+}
+
+// deriveEncryptionKey derives a 32-byte AES-256 key from email and student password
+func deriveEncryptionKey(email, studentPassword string) []byte {
+	// Combine email and password
+	combined := email + ":" + studentPassword
+	// Hash with SHA-256 to get 32 bytes (AES-256 key size)
+	hash := sha256.Sum256([]byte(combined))
+	return hash[:]
+}
+
+// encryptWorkspacePassword encrypts the workspace password using AES-256-GCM
+// Returns base64-encoded ciphertext with nonce prepended
+func encryptWorkspacePassword(plaintext, email, studentPassword string) (string, error) {
+	// Derive encryption key
+	key := deriveEncryptionKey(email, studentPassword)
+
+	// Create AES cipher
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	// Create GCM mode
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	// Generate random nonce
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return "", fmt.Errorf("failed to generate nonce: %w", err)
+	}
+
+	// Encrypt and authenticate
+	ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+
+	// Encode to base64 for storage
+	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }

@@ -2,13 +2,8 @@ package server
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"crypto/sha256"
 	"easylab/internal/providers/workspace"
 	"easylab/internal/tfparse"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -275,50 +270,19 @@ func (h *Handler) evictWorkspaceBackend(labID string) {
 	h.workspaceBackendsMu.Unlock()
 }
 
-// deriveEncryptionKey derives a 32-byte AES-256 key from email and student password
-func deriveEncryptionKey(email, studentPassword string) []byte {
-	// Combine email and password
-	combined := email + ":" + studentPassword
-	// Hash with SHA-256 to get 32 bytes (AES-256 key size)
-	hash := sha256.Sum256([]byte(combined))
-	return hash[:]
-}
-
-// encryptWorkspacePassword encrypts the workspace password using AES-256-GCM
-// Returns base64-encoded ciphertext with nonce prepended
-func encryptWorkspacePassword(plaintext, email, studentPassword string) (string, error) {
-	// Derive encryption key
-	key := deriveEncryptionKey(email, studentPassword)
-
-	// Create AES cipher
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return "", fmt.Errorf("failed to create cipher: %w", err)
-	}
-
-	// Create GCM mode
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", fmt.Errorf("failed to create GCM: %w", err)
-	}
-
-	// Generate random nonce
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return "", fmt.Errorf("failed to generate nonce: %w", err)
-	}
-
-	// Encrypt and authenticate
-	ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
-
-	// Encode to base64 for storage
-	return base64.StdEncoding.EncodeToString(ciphertext), nil
-}
+// Upload size limits, named so the same value is easy to recognize (and keep
+// consistent) across every call site that needs one, instead of repeating the
+// bit-shift literal.
+const (
+	maxUploadSizeSmall  = 10 << 20 // 10MB — small form submissions with no large attachment
+	maxUploadSizeMedium = 32 << 20 // 32MB — moderate attachments
+	maxUploadSizeLarge  = 50 << 20 // 50MB — full template/devcontainer archive uploads
+)
 
 // parseForm handles both multipart and urlencoded form data parsing
 func (h *Handler) parseForm(w http.ResponseWriter, r *http.Request, maxSize int64) error {
 	if maxSize == 0 {
-		maxSize = 50 << 20 // 50MB default (increased for template file uploads)
+		maxSize = maxUploadSizeLarge // default (increased for template file uploads)
 	}
 
 	contentType := r.Header.Get("Content-Type")
@@ -1019,7 +983,7 @@ func (h *Handler) ServeAdminUI(w http.ResponseWriter, r *http.Request) {
 // processLabRequest handles common lab request processing logic
 func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDryRun bool) {
 	// Parse form data - handle both multipart and urlencoded (50MB for template files)
-	if err := h.parseForm(w, r, 50<<20); err != nil {
+	if err := h.parseForm(w, r, maxUploadSizeLarge); err != nil {
 		log.Printf("Failed to parse form: %v", err)
 		h.renderHTMLError(w, "Form Parse Error", "Failed to parse form data, please try again.")
 		return
@@ -1702,7 +1666,7 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 
 	// The drawer posts multipart FormData; ErrNotMultipart just means an older
 	// urlencoded caller, which ParseForm (called below via getFormValue) handles.
-	if err := r.ParseMultipartForm(32 << 20); err != nil && err != http.ErrNotMultipart {
+	if err := r.ParseMultipartForm(maxUploadSizeMedium); err != nil && err != http.ErrNotMultipart {
 		log.Printf("Failed to parse form for lab %s: %v", jobID, err)
 		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
 		return
@@ -1860,7 +1824,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse form data - handle both application/x-www-form-urlencoded and multipart/form-data
-	if err := h.parseForm(w, r, 32<<20); err != nil {
+	if err := h.parseForm(w, r, maxUploadSizeMedium); err != nil {
 		return
 	}
 
@@ -2515,11 +2479,11 @@ func (h *Handler) SetCredentials(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse form data - handle both multipart and urlencoded
-	if err := h.parseForm(w, r, 10<<20); err != nil {
+	if err := h.parseForm(w, r, maxUploadSizeSmall); err != nil {
 		// Return HTML error for HTMX compatibility
 		log.Printf("SetCredentials - Failed to parse form: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
-		h.renderHTMLError(w, "Failed to Parse Form", err.Error())
+		h.renderHTMLError(w, "Failed to Parse Form", "Failed to parse form data, please try again.")
 		return
 	}
 
@@ -2792,7 +2756,7 @@ func (h *Handler) SaveOVHOptions(w http.ResponseWriter, r *http.Request) {
 	if err := h.ovhOptionsManager.SaveConfig(); err != nil {
 		log.Printf("SaveOVHOptions: failed to save config: %v", err)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, `<div class="error-message"><p>Failed to save: %s</p></div>`, escapeHTML(err.Error()))
+		fmt.Fprint(w, `<div class="error-message"><p>Failed to save configuration. Check the server logs for details.</p></div>`)
 		return
 	}
 
@@ -2815,7 +2779,7 @@ func (h *Handler) RefreshOVHOptions(w http.ResponseWriter, r *http.Request) {
 	if err := h.ovhOptionsManager.RefreshFromAPI(); err != nil {
 		log.Printf("RefreshOVHOptions: %v", err)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, `<div class="error-message"><p>Failed to refresh: %s</p></div>`, escapeHTML(err.Error()))
+		fmt.Fprint(w, `<div class="error-message"><p>Failed to refresh from the OVH API. Check your credentials and the server logs for details.</p></div>`)
 		return
 	}
 
@@ -2957,7 +2921,7 @@ func (h *Handler) SaveAzureADConfig(w http.ResponseWriter, r *http.Request) {
 		if err := h.azureOptionsManager.SetAzureADConfig(cfg); err != nil {
 			log.Printf("SaveAzureADConfig: failed to persist: %v", err)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			fmt.Fprintf(w, `<div class="error-message"><p>Failed to save Azure AD config: %s</p></div>`, escapeHTML(err.Error()))
+			fmt.Fprint(w, `<div class="error-message"><p>Failed to save Azure AD config. Check the server logs for details.</p></div>`)
 			return
 		}
 	}
@@ -3027,7 +2991,7 @@ func (h *Handler) SaveAzureOptions(w http.ResponseWriter, r *http.Request) {
 	if err := h.azureOptionsManager.SaveConfig(); err != nil {
 		log.Printf("SaveAzureOptions: failed to save config: %v", err)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, `<div class="error-message"><p>Failed to save: %s</p></div>`, escapeHTML(err.Error()))
+		fmt.Fprint(w, `<div class="error-message"><p>Failed to save configuration. Check the server logs for details.</p></div>`)
 		return
 	}
 
@@ -3054,7 +3018,7 @@ func (h *Handler) RefreshAzureOptions(w http.ResponseWriter, r *http.Request) {
 	if err := h.azureOptionsManager.RefreshFromAPI(); err != nil {
 		log.Printf("RefreshAzureOptions: %v", err)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, `<div class="error-message"><p>Failed to refresh: %s</p></div>`, escapeHTML(err.Error()))
+		fmt.Fprint(w, `<div class="error-message"><p>Failed to refresh from the Azure API. Check your credentials and the server logs for details.</p></div>`)
 		return
 	}
 
@@ -4122,7 +4086,7 @@ func (h *Handler) RetryJobWithConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse form data - handle both multipart and urlencoded (50MB for template files)
-	if err := h.parseForm(w, r, 50<<20); err != nil {
+	if err := h.parseForm(w, r, maxUploadSizeLarge); err != nil {
 		log.Printf("Failed to parse form: %v", err)
 		h.renderHTMLError(w, "Form Parse Error", "Failed to parse form data, please try again.")
 		return
@@ -4417,7 +4381,7 @@ func (h *Handler) DetectTemplateVariables(w http.ResponseWriter, r *http.Request
 }
 
 func (h *Handler) detectVariablesFromUpload(r *http.Request) ([]tfparse.TFVariable, error) {
-	if err := r.ParseMultipartForm(50 << 20); err != nil {
+	if err := r.ParseMultipartForm(maxUploadSizeLarge); err != nil {
 		return nil, fmt.Errorf("failed to parse form: %w", err)
 	}
 

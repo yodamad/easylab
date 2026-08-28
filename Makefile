@@ -134,7 +134,7 @@ coverage-html: coverage
 coverage-check: coverage
 	@COVERAGE=$$(go tool cover -func=$(COVERAGE_FILE) | grep total | awk '{print $$3}' | sed 's/%//'); \
 	echo "Total coverage: $$COVERAGE%"; \
-	if [ $$(echo "$$COVERAGE < $(COVERAGE_THRESHOLD)" | bc -l) -eq 1 ]; then \
+	if awk -v cov="$$COVERAGE" -v thr="$(COVERAGE_THRESHOLD)" 'BEGIN { exit !(cov < thr) }'; then \
 		echo "Coverage $$COVERAGE% is below threshold $(COVERAGE_THRESHOLD)%"; \
 		exit 1; \
 	else \

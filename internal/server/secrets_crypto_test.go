@@ -93,3 +93,56 @@ func TestDecryptSecret_Tampered(t *testing.T) {
 	_, err = decryptSecret(tampered)
 	require.Error(t, err)
 }
+
+func TestDeriveEncryptionKey(t *testing.T) {
+	key := deriveEncryptionKey("user@example.com", "password123")
+	if len(key) != 32 {
+		t.Errorf("deriveEncryptionKey() key length = %d, want 32", len(key))
+	}
+
+	key2 := deriveEncryptionKey("user@example.com", "password123")
+	for i := range key {
+		if key[i] != key2[i] {
+			t.Error("deriveEncryptionKey() is not deterministic")
+			break
+		}
+	}
+
+	keyDiff := deriveEncryptionKey("other@example.com", "password123")
+	same := true
+	for i := range key {
+		if key[i] != keyDiff[i] {
+			same = false
+			break
+		}
+	}
+	if same {
+		t.Error("deriveEncryptionKey() same key for different emails")
+	}
+}
+
+func TestEncryptWorkspacePassword(t *testing.T) {
+	plaintext := "secret-workspace-pw"
+	email := "user@example.com"
+	studentPw := "student-pw-123"
+
+	ciphertext, err := encryptWorkspacePassword(plaintext, email, studentPw)
+	if err != nil {
+		t.Fatalf("encryptWorkspacePassword() error = %v", err)
+	}
+	if ciphertext == "" {
+		t.Error("encryptWorkspacePassword() returned empty ciphertext")
+	}
+	if ciphertext == plaintext {
+		t.Error("encryptWorkspacePassword() ciphertext equals plaintext")
+	}
+
+	// Two encryptions of the same value should differ (GCM uses random nonce)
+	ciphertext2, err := encryptWorkspacePassword(plaintext, email, studentPw)
+	if err != nil {
+		t.Fatalf("encryptWorkspacePassword() second call error = %v", err)
+	}
+	if ciphertext == ciphertext2 {
+		t.Error("encryptWorkspacePassword() should produce different ciphertexts (random nonce)")
+	}
+}

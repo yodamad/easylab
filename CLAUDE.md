@@ -43,10 +43,6 @@ internal/
     ovh_api.go           # OVH-specific admin API handlers
     ovh_options.go       # OVH options cache (regions, VM sizes) with admin filtering
   providers/
-    provider.go          # Cloud provider interface
-    registry.go          # Provider registry
-    ovh/                 # OVH-specific provider implementation
-    azure/               # Azure-specific provider implementation
     dns/
       provider.go        # DNS provider interface (GetCredentialFields, SetupCertManagerDNS01, CreateARecord)
       registry.go        # DNS provider registry
@@ -120,8 +116,8 @@ CRITICAL: Do NOT modify, refactor, rename, or restructure existing files unless 
 - HTML templates use a base/child pattern: `web/base.html` defines layout, page templates define blocks (`title`, `content`, `scripts`). Serve via `handler.serveTemplate()`.
 - HTTP handlers live in `internal/server/` — use `net/http.HandlerFunc` and `http.ServeMux`. Do NOT introduce external routers (no gorilla/mux, no chi).
 - HTMX drives all dynamic UI — prefer `hx-get`, `hx-post`, `hx-target`, `hx-swap` over writing custom JavaScript. JS files in `web/static/` are only for page-specific logic that HTMX cannot handle (e.g. encryption, cookie management).
-- Pulumi programs are pure Go — infrastructure changes go in `ovh/`, `k8s/`, or `coder/`. The `templates/` directory is a self-contained Pulumi project copied into job workspaces.
-- **Provider registry**: Cloud providers (`internal/providers/`) implement a `Provider` interface registered via `registry.go`. DNS providers (`internal/providers/dns/`) implement a separate `dns.Provider` interface for cert-manager DNS-01 challenges and A-record creation. Add new providers to the registry — never hardcode provider selection in handlers.
+- Pulumi programs are pure Go — infrastructure changes go in `ovh/`, `k8s/`, or `coder/`. The `templates/` directory is a self-contained Pulumi project copied into job workspaces. Cloud provider selection (OVH vs. Azure) is a hardcoded branch in `internal/pulumi/program.go`, not a registry — there are only two providers and no active plan for a third, so keep it that way rather than adding registry indirection speculatively.
+- **DNS provider registry**: DNS providers (`internal/providers/dns/`) implement a `dns.Provider` interface for cert-manager DNS-01 challenges and A-record creation, self-registering via `init()` (see `internal/providers/dns/ovh/`, `internal/providers/dns/azure/`) and dispatched through `internal/providers/dns/registry.go`. Add a new DNS provider by implementing the interface and registering it — this one *is* a real, live registry, unlike cloud provider selection above.
 - **Workspace backend registry**: `internal/providers/workspace/` defines the `Backend` interface for provisioning student IDE workspaces on a Kubernetes cluster, registered via `registry.go`. The `kube` backend (`internal/providers/workspace/kube/`) is the default and only backend today — it provisions one code-server workspace per student directly via client-go (Deployment + Service + Ingress + optional PVC), replacing the former Coder-based workspace layer.
 - **Feedback system**: `internal/server/feedback.go` manages student ratings/comments (1–5 rating, difficulty, recommendation, free text) via `FeedbackStore` persisted to JSON. Admin view at `/admin/feedback?lab_id=`.
 - **Workspace cleanup**: `internal/server/cleanup.go` runs a background goroutine every 5 minutes that probes the lab's cluster API reachability, enforces `WorkspaceLifetimeHours` per job, and records cleanup events for the stats dashboard.
