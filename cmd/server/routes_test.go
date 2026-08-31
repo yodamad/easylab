@@ -83,6 +83,25 @@ func TestResolveLabRoute(t *testing.T) {
 			want:   routeUploadTemplate,
 		},
 		{
+			// bake-status must not be shadowed by the plainer /bake suffix check.
+			name:   "bake a template",
+			path:   "/api/labs/job-1/templates/go-workshop/bake",
+			method: http.MethodPost,
+			want:   routeBakeTemplate,
+		},
+		{
+			name:   "bake status is not a bake trigger",
+			path:   "/api/labs/job-1/templates/go-workshop/bake-status",
+			method: http.MethodGet,
+			want:   routeBakeTemplateStatus,
+		},
+		{
+			name:   "GET on bake falls through to status",
+			path:   "/api/labs/job-1/templates/go-workshop/bake",
+			method: http.MethodGet,
+			want:   routeJobStatus,
+		},
+		{
 			name:   "coder credentials",
 			path:   "/api/labs/job-1/coder-credentials",
 			method: http.MethodGet,

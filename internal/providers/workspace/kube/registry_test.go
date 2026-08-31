@@ -47,3 +47,21 @@ func TestEnsureBuildCache_Idempotent(t *testing.T) {
 
 	assert.Equal(t, repo1, repo2)
 }
+
+// TestBakedImageRepo_InternalIsBare guards a real bug found in production: an
+// explicit :latest suffix on the internal (ENVBUILDER_CACHE_REPO push) repo broke
+// envbuilder's own tag resolution for the whole-image push ("repository can only
+// contain the characters ...", from a real bake's logs) — the push failed
+// silently while the Job still exited 0, leaving the registry with nothing ever
+// pushed to it. envbuilder appends its own tag; the internal repo must be bare.
+func TestBakedImageRepo_InternalIsBare(t *testing.T) {
+	b, _ := newTestBackend()
+
+	internal, external := b.BakedImageRepo("job-1", "go-workshop", "lab.example.com")
+
+	assert.NotContains(t, internal, ":latest", "ENVBUILDER_CACHE_REPO must be a bare repository, no tag")
+	assert.Equal(t, "easylab-registry-cache.workshops.svc.cluster.local:5000/baked/job-1/go-workshop", internal)
+	// The external (pull) reference is unaffected — kubelet pulls/manifest
+	// lookups expect an explicit tag, which is where this bug did not occur.
+	assert.Equal(t, "easylab-registry-cache.lab.example.com/baked/job-1/go-workshop:latest", external)
+}

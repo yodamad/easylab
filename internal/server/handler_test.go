@@ -2519,7 +2519,7 @@ func TestBuildTemplateStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			statuses, unattributed := buildTemplateStatus(tt.templates, tt.workspaces)
+			statuses, unattributed := buildTemplateStatus(tt.templates, tt.workspaces, nil)
 
 			require.Len(t, statuses, len(tt.templates))
 			assert.Equal(t, tt.wantUnattributed, unattributed)
@@ -2538,7 +2538,7 @@ func TestBuildTemplateStatus_DisplayFields(t *testing.T) {
 		{Name: "python", Image: "python:3.12"},
 		{Name: "legacy-ide", IDE: "openvscode"},
 		{Name: "devc", Devcontainer: &DevcontainerConfig{}},
-	}, nil)
+	}, nil, nil)
 
 	require.Len(t, statuses, 3)
 	// Explicit image is preserved; code-server is the normalized IDE.
@@ -2548,6 +2548,35 @@ func TestBuildTemplateStatus_DisplayFields(t *testing.T) {
 	assert.Equal(t, workspace.DefaultIDEKind, statuses[1].IDE)
 	// A devcontainer template with no image is labelled "devcontainer".
 	assert.Equal(t, "devcontainer", statuses[2].Image)
+}
+
+func TestBuildTemplateStatus_BakedImage(t *testing.T) {
+	bakedAt := time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC)
+	statuses, _ := buildTemplateStatus([]WorkspaceTemplate{
+		{Name: "baked", Devcontainer: &DevcontainerConfig{Enabled: true}},
+		{Name: "not-baked", Devcontainer: &DevcontainerConfig{Enabled: true}},
+		{Name: "disabled", Devcontainer: &DevcontainerConfig{Enabled: false}},
+		{Name: "plain", Image: "golang:1.22"},
+	}, nil, map[string]BakedImage{
+		"baked": {Image: "registry.example.com/baked/lab/baked:latest", At: bakedAt},
+	})
+
+	require.Len(t, statuses, 4)
+	byName := map[string]TemplateStatus{}
+	for _, s := range statuses {
+		byName[s.Name] = s
+	}
+
+	assert.True(t, byName["baked"].IsDevcontainer)
+	assert.Equal(t, "registry.example.com/baked/lab/baked:latest", byName["baked"].BakedImage)
+	assert.Equal(t, "2026-03-04 12:00:00", byName["baked"].BakedAt)
+
+	assert.True(t, byName["not-baked"].IsDevcontainer)
+	assert.Empty(t, byName["not-baked"].BakedImage)
+
+	assert.False(t, byName["disabled"].IsDevcontainer, "an inert devcontainer block must not offer baking")
+
+	assert.False(t, byName["plain"].IsDevcontainer)
 }
 
 func TestWorkspaceDeletionTime(t *testing.T) {

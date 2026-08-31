@@ -54,6 +54,18 @@ type Handler struct {
 	// destroys, retries, or recreations can exhaust host CPU/memory well before
 	// the number of labs involved gets large. Sized by pulumiExecutionConcurrency.
 	pulumiExecSem chan struct{}
+	// bakeExecSem bounds how many pre-bake builds (BakeTemplate) run at once.
+	// Admin-triggered and rare, unlike workspaceCreateSem/pulumiExecSem, so a small
+	// size is enough headroom.
+	bakeExecSem chan struct{}
+	// bakeStatuses tracks an in-flight or last-failed bake, keyed by
+	// "<labID>/<template>". Deliberately not persisted — a restart mid-bake just
+	// leaves the admin needing to click "Rebuild" again, matching how in-flight
+	// Pulumi job state isn't durably tracked either. A successful bake is recorded
+	// on LabConfig.BakedImages instead (see updateJobConfig call sites), which is
+	// persisted; this map only ever holds "building" or "failed".
+	bakeStatuses   map[string]*bakeStatus
+	bakeStatusesMu sync.RWMutex
 	// statsCache holds GetProjectStats results keyed by "<project>|<range>",
 	// since computing one walks every job's full event history — cheap
 	// enough for an on-demand admin view, wasteful to repeat within seconds of
@@ -255,6 +267,8 @@ func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsM
 		workspaceBackends:   make(map[string]*cachedWorkspaceBackend),
 		workspaceCreateSem:  make(chan struct{}, workspaceCreateConcurrency()),
 		pulumiExecSem:       make(chan struct{}, pulumiExecutionConcurrency()),
+		bakeExecSem:         make(chan struct{}, bakeExecutionConcurrency()),
+		bakeStatuses:        make(map[string]*bakeStatus),
 		statsCache:          make(map[string]statsCacheEntry),
 		templates:           make(map[string]*template.Template),
 		credentialsManager:  credentialsManager,
@@ -1908,6 +1922,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	labName := ""
 	var labDeletionDate *time.Time
 	var templates []WorkspaceTemplate
+	var bakedImages map[string]BakedImage
 	if job.Config != nil {
 		domain = job.Config.Domain
 		dnsProvider = job.Config.DNSProvider
@@ -1916,6 +1931,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		labDeletionDate = job.Config.LabDeletionDate
 		labName = job.Config.StackName
 		templates = job.Config.GetWorkspaceTemplates()
+		bakedImages = job.Config.BakedImages
 	}
 	job.mu.RUnlock()
 	if clusterIssuerName == "" {
@@ -2025,13 +2041,19 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		spec.WildcardTLSSecret = coder.WildcardTLSSecretName
 	}
 
-	// An in-cluster registry can stand in for the external one a devcontainer
-	// template's cache_repo would otherwise have to name — only when the
-	// template opted in and left cache_repo blank; an explicit cache_repo
-	// always wins. Best-effort: on failure, fall through and let
-	// EnsureWorkspace fail with today's clear "cache repo empty" outcome
-	// rather than silently starting the build without a cache.
-	if spec.Devcontainer != nil && selected.Devcontainer.UseInClusterCache && spec.Devcontainer.CacheRepo == "" {
+	if baked, ok := bakedImages[selected.Name]; spec.Devcontainer != nil && ok {
+		// A template with a successful pre-bake skips the build entirely — every
+		// workspace just pulls the baked image, no envbuilder, no in-cluster-cache
+		// auto-provisioning below.
+		spec.Devcontainer.PrebuiltImage = baked.Image
+		spec.Devcontainer.RemoteUser = baked.RemoteUser
+	} else if spec.Devcontainer != nil && selected.Devcontainer.UseInClusterCache && spec.Devcontainer.CacheRepo == "" {
+		// An in-cluster registry can stand in for the external one a devcontainer
+		// template's cache_repo would otherwise have to name — only when the
+		// template opted in and left cache_repo blank; an explicit cache_repo
+		// always wins. Best-effort: on failure, fall through and let
+		// EnsureWorkspace fail with today's clear "cache repo empty" outcome
+		// rather than silently starting the build without a cache.
 		if rc, ok := backend.(workspace.RegistryCacheProvider); ok {
 			if repo, err := rc.EnsureBuildCache(r.Context()); err != nil {
 				log.Printf("Failed to provision in-cluster registry cache for lab %s: %v", labID, err)
@@ -3307,6 +3329,13 @@ type TemplateStatus struct {
 	Image        string
 	RunningCount int
 	HasRunning   bool
+	// IsDevcontainer gates the "Bake image"/"Rebuild" controls — only devcontainer
+	// templates can be baked.
+	IsDevcontainer bool
+	// BakedImage/BakedAt reflect the template's most recent successful pre-bake
+	// (LabConfig.BakedImages), if any. BakedImage empty means never baked.
+	BakedImage string
+	BakedAt    string
 }
 
 // buildTemplateStatus correlates a lab's configured templates with the live
@@ -3315,7 +3344,7 @@ type TemplateStatus struct {
 // whose Template is empty or does not match a configured template — for example
 // ones created before template attribution was added — are counted in
 // unattributed rather than dropped.
-func buildTemplateStatus(templates []WorkspaceTemplate, workspaces []workspace.Workspace) (statuses []TemplateStatus, unattributed int) {
+func buildTemplateStatus(templates []WorkspaceTemplate, workspaces []workspace.Workspace, bakedImages map[string]BakedImage) (statuses []TemplateStatus, unattributed int) {
 	known := make(map[string]bool, len(templates))
 	for _, t := range templates {
 		known[t.Name] = true
@@ -3341,14 +3370,20 @@ func buildTemplateStatus(templates []WorkspaceTemplate, workspaces []workspace.W
 			image = "devcontainer"
 		}
 		n := counts[t.Name]
-		statuses = append(statuses, TemplateStatus{
-			Name:         t.Name,
-			Description:  t.Description,
-			IDE:          ide,
-			Image:        image,
-			RunningCount: n,
-			HasRunning:   n > 0,
-		})
+		status := TemplateStatus{
+			Name:           t.Name,
+			Description:    t.Description,
+			IDE:            ide,
+			Image:          image,
+			RunningCount:   n,
+			HasRunning:     n > 0,
+			IsDevcontainer: t.Devcontainer != nil && t.Devcontainer.Enabled,
+		}
+		if baked, ok := bakedImages[t.Name]; ok {
+			status.BakedImage = baked.Image
+			status.BakedAt = baked.At.Format("2006-01-02 15:04:05")
+		}
+		statuses = append(statuses, status)
 	}
 	return statuses, unattributed
 }
@@ -3377,9 +3412,11 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 	namespace := job.workspaceNamespace()
 	stackName := ""
 	var templates []WorkspaceTemplate
+	var bakedImages map[string]BakedImage
 	if job.Config != nil {
 		stackName = job.Config.StackName
 		templates = job.Config.GetWorkspaceTemplates()
+		bakedImages = job.Config.BakedImages
 	}
 	events := append([]WorkspaceEvent(nil), job.WorkspaceEvents...)
 	job.mu.RUnlock()
@@ -3438,7 +3475,7 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	templateStatuses, unattributed := buildTemplateStatus(templates, workspaces)
+	templateStatuses, unattributed := buildTemplateStatus(templates, workspaces, bakedImages)
 
 	// Prepare workspace history for template — newest first, independent of
 	// whether the workspace it names is still running.

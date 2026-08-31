@@ -134,6 +134,18 @@ type DevcontainerSpec struct {
 	// namespace used to clone a private ConfigRepo. Injected by reference into
 	// the clone step only, like GitAuthSecret. Ignored when ConfigRepo is empty.
 	ConfigAuthSecret string
+	// PrebuiltImage, when set, skips the envbuilder build entirely: the workspace
+	// runs this already-built image directly (a prior admin-triggered bake of this
+	// same devcontainer), with only the IDE-injection and git-clone steps a plain
+	// build would otherwise skip. CacheRepo/RegistryAuthSecret/FallbackImage/Insecure
+	// are unused in this mode — there is no build to configure.
+	PrebuiltImage string
+	// RemoteUser is the devcontainer's declared remoteUser, recorded at bake time from
+	// the pushed image's devcontainer.metadata label. envbuilder normally drops to this
+	// user itself before running the init script; PrebuiltImage bypasses envbuilder, so
+	// this is how that privilege drop is replicated. Empty means run as the image's own
+	// default user (often root for a devcontainer base image).
+	RemoteUser string
 }
 
 // Spec describes the workspace to create for a student.
@@ -235,6 +247,66 @@ type RegistryCacheProvider interface {
 	// envbuilder's devcontainer layer cache and returns its repo address. The
 	// registry has no TLS, so callers must also set DevcontainerSpec.Insecure.
 	EnsureBuildCache(ctx context.Context) (repo string, err error)
+	// EnsureRegistryIngress provisions (idempotently) an Ingress exposing the
+	// in-cluster registry under domain, using the same TLS material a workspace
+	// Ingress would (WildcardTLSSecret when set, else a per-host cert via
+	// clusterIssuer), so the kubelet can pull a baked image over trusted HTTPS
+	// rather than the plain-HTTP path envbuilder uses. Returns the external host.
+	EnsureRegistryIngress(ctx context.Context, domain, wildcardTLSSecret, clusterIssuer string) (host string, err error)
+	// BakedImageRepo returns the internal (push, used by a bake Job) and external
+	// (pull, handed to student pods) repository references for a template's baked
+	// image. Pure string building — does not provision anything, and does not
+	// require EnsureRegistryIngress to have run yet. external is "" when domain is
+	// empty (no Ingress is possible without one).
+	BakedImageRepo(labID, template, domain string) (internalRepo, externalRepo string)
+}
+
+// BakeState reports the outcome of a template's most recent bake attempt.
+type BakeState string
+
+const (
+	BakeStateBuilding BakeState = "building"
+	BakeStateComplete BakeState = "complete"
+	BakeStateFailed   BakeState = "failed"
+	// BakeStateNone means no bake Job exists for this template.
+	BakeStateNone BakeState = ""
+)
+
+// BakeRequest describes a one-time devcontainer build to push as a normal image.
+type BakeRequest struct {
+	LabID, Template    string
+	GitRepo, GitBranch string
+	GitAuthSecret      string
+	// CPU/Memory/CPULimit/MemoryLimit size the bake Job's pod, same fields and
+	// defaulting as a live devcontainer build (see buildResources) — layer
+	// extraction during the build is just as CPU/disk-heavy here as it is per-student.
+	CPU, Memory, CPULimit, MemoryLimit string
+	// Devcontainer carries Dir/ConfigRepo/ConfigBranch/ConfigAuthSecret/FallbackImage/
+	// Insecure from the template as-is. CacheRepo/RegistryAuthSecret here name the
+	// *destination* the built image is pushed to, not a cache to pull from.
+	Devcontainer *DevcontainerSpec
+}
+
+// BakeProvider is implemented by backends that can pre-bake a devcontainer template
+// into a normal image, once, outside any student's pod. Optional and deliberately
+// separate from Backend, like SecretManager below — callers type-assert for it.
+type BakeProvider interface {
+	// EnsureBakeJob (re)starts a bake for req.LabID/req.Template. A Job's pod
+	// template is immutable, so a rebuild is delete-then-create rather than the
+	// idempotent Create-and-swallow-IsAlreadyExists idiom used elsewhere in this
+	// package.
+	EnsureBakeJob(ctx context.Context, req BakeRequest) error
+	// BakeJobStatus reports the current state of the most recent bake Job for
+	// labID/template. BakeStateNone means no Job (or an already-cleaned-up one) exists.
+	BakeJobStatus(ctx context.Context, labID, template string) (BakeState, error)
+	// BakeRemoteUser reads the devcontainer's declared remoteUser from a completed
+	// bake's pushed image (its devcontainer.metadata label), fetched via repoRef —
+	// the EXTERNAL reference from BakedImageRepo, or an external cache_repo. This
+	// deliberately does not use the internal in-cluster address: it runs from the
+	// EasyLab server, which is not necessarily inside the lab's own cluster network.
+	// Only meaningful once BakeJobStatus reports BakeStateComplete. "" with a nil
+	// error means the devcontainer declared no remoteUser.
+	BakeRemoteUser(ctx context.Context, repoRef string, insecure bool) (string, error)
 }
 
 // SecretManager materializes the credential Secrets that templates reference by

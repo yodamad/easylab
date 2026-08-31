@@ -75,15 +75,25 @@
                 <div class="templates-grid">
                     {{range .Templates}}
                     <div class="template-status-card">
-                        <div class="template-status-info">
-                            <span class="template-status-name">{{.Name}}</span>
-                            {{if .Description}}<span class="template-status-description">{{.Description}}</span>{{end}}
-                            <span class="template-status-meta">{{.IDE}}{{if .Image}} · {{.Image}}{{end}}</span>
+                        <div class="template-status-main">
+                            <div class="template-status-info">
+                                <span class="template-status-name">{{.Name}}</span>
+                                {{if .Description}}<span class="template-status-description">{{.Description}}</span>{{end}}
+                                <span class="template-status-meta">{{.IDE}}{{if .Image}} · {{.Image}}{{end}}</span>
+                            </div>
+                            {{if .HasRunning}}
+                            <span class="template-run-badge is-running">● {{.RunningCount}} running</span>
+                            {{else}}
+                            <span class="template-run-badge is-idle">none</span>
+                            {{end}}
                         </div>
-                        {{if .HasRunning}}
-                        <span class="template-run-badge is-running">● {{.RunningCount}} running</span>
-                        {{else}}
-                        <span class="template-run-badge is-idle">none</span>
+                        {{if .IsDevcontainer}}
+                        <div class="template-bake-row">
+                            <form hx-post="/api/labs/{{$.LabID}}/templates/{{.Name}}/bake" hx-target="#bake-status-{{.Name}}" hx-swap="innerHTML">
+                                <button type="submit" class="btn {{if .BakedImage}}btn-secondary{{else}}btn-primary{{end}} btn-sm">{{if .BakedImage}}Rebuild{{else}}Bake image{{end}}</button>
+                            </form>
+                            <div id="bake-status-{{.Name}}" class="template-bake-status" hx-get="/api/labs/{{$.LabID}}/templates/{{.Name}}/bake-status" hx-trigger="load" hx-swap="innerHTML"></div>
+                        </div>
                         {{end}}
                     </div>
                     {{end}}

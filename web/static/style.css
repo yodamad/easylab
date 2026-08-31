@@ -997,6 +997,11 @@ a.btn {
     color: #1e40af;
 }
 
+.status-idle {
+    background: var(--surface);
+    color: var(--text-light);
+}
+
 .status-destroyed {
     background: #f3f4f6;
     color: #6b7280;
@@ -6662,13 +6667,33 @@ body.admin-page .wizard-footer {
 
 .template-status-card {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
+    flex-direction: column;
+    gap: 0.5rem;
     padding: 0.6rem 0.85rem;
     background: var(--background);
     border: 1px solid var(--border);
     border-radius: var(--radius);
+}
+
+.template-status-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.template-bake-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+}
+
+.template-bake-status .status-badge {
+    margin-bottom: 0;
+    padding: 0.2rem 0.55rem;
+    font-size: 0.75rem;
 }
 
 .template-status-info {

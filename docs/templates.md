@@ -609,6 +609,26 @@ keys the build ignores; and some keys are honoured by neither.
     and `cpu_limit`/`memory_limit` (the limit) explicitly for the image and class
     size — the default is a floor, not a recommendation for every workload.
 
+### Pre-baking: skipping the build entirely
+
+Everything above describes making the build *fast*. A lab admin can instead skip it
+entirely: on the lab's **View Workspaces** page, a devcontainer template's card has
+a **Bake image** button. Baking builds the devcontainer once, pushes the result as
+an ordinary image, and records it on the lab — every student workspace for that
+template afterward does a plain image pull instead of running envbuilder at all, so
+neither the build nor the per-pod layer extraction above happens per student.
+
+This is an admin-triggered action on an already-created lab, not a template YAML
+key — there is nothing to set on the template itself. See
+[Pre-baking a devcontainer template](admin.md#pre-baking-a-devcontainer-template)
+in the admin guide for how to trigger it, what the status badges mean, and the
+domain requirement when baking to the in-cluster registry (an external
+`cache_repo` has no such requirement).
+
+The tradeoff: a bake is a snapshot. It does not track the workshop repository, so
+a `devcontainer.json` change after baking needs an explicit **Rebuild** — until
+then, students keep getting the previously baked image rather than the live one.
+
 ## Reusing a lab's templates
 
 Use **Export Templates YAML** on the [labs list](admin.md#manage-your-labs) to
@@ -643,3 +663,6 @@ workshop edition to the next.
 | Students can read the repo but cannot `git push` | Expected. The token authenticates the clone only and is never given to the IDE. |
 | A devcontainer import fails on `dockerComposeFile` | Compose-based devcontainers are not supported — use `sidecars` instead. |
 | Every student's workspace takes minutes to start | The cache registry is unreachable or unwritable, so each build starts cold. Check `registry_auth_secret`. If the cache *is* warm and it's still slow at scale, it's likely layer extraction contending for CPU/disk across many concurrent pods — see [A warm cache skips the build, not the extraction](#devcontainer-workshops) and size `cpu`/`memory` explicitly. |
+| "Bake image" is rejected for a template using the in-cluster registry | Baking to the in-cluster registry needs the lab to have a domain configured, so a student's pull can trust the registry over HTTPS — see [Pre-baking: skipping the build entirely](#pre-baking-skipping-the-build-entirely). Configure a domain for the lab, or set an external `cache_repo` on the template instead. |
+| A bake fails with "image was built, but never became pullable" | The image built and pushed fine, but nothing could fetch it back over a trusted connection — for the in-cluster registry this almost always means its TLS certificate never finished issuing. Check `kubectl get certificate,certificaterequest -n <workspace namespace>` in the lab's cluster; a stuck `CertificateRequest` usually means the lab's `ClusterIssuer` name doesn't match one that actually exists on that cluster (`kubectl get clusterissuer`). Click **Rebuild** once the certificate is fixed — EasyLab only records a bake as ready after confirming it. |
+| A workspace pod's pull error names a `*.traefik.default` (or similar auto-generated) certificate, not the registry's own hostname | Traefik never received a real certificate for that host and fell back to serving its own internal default one — the `ClusterIssuer`/`CertificateRequest` never actually completed. This is the same failure as the row above, just observed from the workspace pod's own pull error instead of the bake status; the fix is the same (fix the certificate, then **Rebuild** — a stale pre-fix bake record is cleared automatically once a rebuild confirms the pull path is still broken). |

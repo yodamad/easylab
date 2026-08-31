@@ -537,6 +537,8 @@ const (
 	routeDeleteLab
 	routeRetryJob
 	routeUploadTemplate
+	routeBakeTemplate
+	routeBakeTemplateStatus
 	routeCoderCredentials
 	routeKubeconfig
 	routeRecreateCredentials
@@ -573,6 +575,14 @@ func resolveLabRoute(path, method, format string) labRoute {
 		return routeRetryJob
 	case strings.HasSuffix(path, "/templates/upload") && method == http.MethodPost:
 		return routeUploadTemplate
+	// bake-status must be matched before the plainer /bake below, which
+	// "/bake-status" does not actually share a suffix with (HasSuffix is exact),
+	// but keeping the more specific check first matches this file's existing
+	// convention (see /secrets/delete above /secrets).
+	case strings.HasSuffix(path, "/bake-status") && method == http.MethodGet:
+		return routeBakeTemplateStatus
+	case strings.HasSuffix(path, "/bake") && method == http.MethodPost:
+		return routeBakeTemplate
 	case strings.HasSuffix(path, "/recreate-credentials") && method == http.MethodGet:
 		return routeRecreateCredentials
 	case strings.HasSuffix(path, "/coder-credentials") && method == http.MethodGet:
@@ -611,6 +621,10 @@ func labRequestRouter(h *server.Handler) http.HandlerFunc {
 			h.RetryJobWithConfig(w, r)
 		case routeUploadTemplate:
 			h.UploadTemplateToLab(w, r)
+		case routeBakeTemplate:
+			h.BakeTemplate(w, r)
+		case routeBakeTemplateStatus:
+			h.BakeTemplateStatus(w, r)
 		case routeRecreateCredentials:
 			h.ServeRecreateCredentials(w, r)
 		case routeCoderCredentials:

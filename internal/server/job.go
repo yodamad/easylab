@@ -216,6 +216,22 @@ type DevcontainerConfig struct {
 	ConfigAuthSecret string `json:"config_auth_secret,omitempty"`
 }
 
+// BakedImage is a devcontainer template's most recent successful pre-bake — see
+// LabConfig.BakedImages for why this lives there rather than on DevcontainerConfig.
+type BakedImage struct {
+	// Image is the pull ref a student workspace's kubelet-level pull uses: the
+	// Ingress-exposed in-cluster registry host, or the template's external cache_repo
+	// host when the bake destination was external.
+	Image string `json:"image"`
+	// RemoteUser is the devcontainer's declared remoteUser, read from the pushed
+	// image's devcontainer.metadata label at bake time. envbuilder normally drops to
+	// this user itself before running the init script; a baked workspace bypasses
+	// envbuilder, so this is how that privilege drop is replicated. Empty means run
+	// as the image's own default user (often root for a devcontainer base image).
+	RemoteUser string    `json:"remote_user,omitempty"`
+	At         time.Time `json:"at"`
+}
+
 // WorkspaceSidecar is an additional container co-located in the workspace pod.
 type WorkspaceSidecar struct {
 	Name  string            `json:"name"`
@@ -285,6 +301,15 @@ type LabConfig struct {
 	WorkspaceTemplates     []WorkspaceTemplate `json:"workspace_templates,omitempty"`
 	WorkspaceLifetimeHours int                 `json:"workspace_lifetime_hours,omitempty"`
 	LabDeletionDate        *time.Time          `json:"lab_deletion_date,omitempty"`
+
+	// BakedImages records each devcontainer template's most recent successful
+	// pre-bake, keyed by template name. Deliberately NOT part of WorkspaceTemplate/
+	// DevcontainerConfig: those bridge through the YAML template editor and its
+	// export/clone flow (workspace_yaml.go), and a baked image reference is derived,
+	// lab-scoped runtime state (its registry path embeds this lab's ID) — carrying it
+	// into a YAML export used to clone a *different* lab would point the clone at an
+	// unreachable or wrong image.
+	BakedImages map[string]BakedImage `json:"baked_images,omitempty"`
 
 	// OVH Endpoint
 	OvhEndpoint string `json:"ovh_endpoint"`

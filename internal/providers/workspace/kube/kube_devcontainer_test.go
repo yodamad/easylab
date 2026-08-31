@@ -516,3 +516,110 @@ func TestIdeInjectInit_Script(t *testing.T) {
 		`cp -dR "/usr/lib/code-server/." /ide/ && chmod -R a+rX /ide`,
 		c.Command[len(c.Command)-1])
 }
+
+// prebuiltDevcontainerSpec is a workable baked-workspace spec; tests tweak a copy.
+// Unlike devcontainerSpec, CacheRepo/Dir are irrelevant here — there is no build.
+func prebuiltDevcontainerSpec() workspace.Spec {
+	spec := devcontainerSpec()
+	spec.Devcontainer = &workspace.DevcontainerSpec{
+		PrebuiltImage: "easylab-registry-cache.lab.example.com/baked/job-1/go-workshop:latest",
+	}
+	return spec
+}
+
+func TestEnsureWorkspace_PrebuiltImageSkipsEnvbuilder(t *testing.T) {
+	b, cs := newTestBackend()
+
+	ws, err := b.EnsureWorkspace(context.Background(), prebuiltDevcontainerSpec())
+	require.NoError(t, err)
+
+	c := ideContainer(t, cs, ws.ID)
+	assert.Equal(t, "easylab-registry-cache.lab.example.com/baked/job-1/go-workshop:latest", c.Image)
+	for name := range envOf(c) {
+		assert.NotContains(t, name, "ENVBUILDER", "a baked workspace has no envbuilder to configure")
+	}
+
+	// No build here, so no reason to force root the way envbuilder needs — run as
+	// whatever the image's own default user is, same as the plain image: path.
+	assert.Nil(t, c.SecurityContext)
+
+	require.Len(t, c.Command, 3)
+	assert.Equal(t, []string{"/bin/bash", "-lc"}, c.Command[:2])
+}
+
+func TestEnsureWorkspace_PrebuiltImageInjectsIDE(t *testing.T) {
+	b, cs := newTestBackend()
+
+	ws, err := b.EnsureWorkspace(context.Background(), prebuiltDevcontainerSpec())
+	require.NoError(t, err)
+
+	_, ok := initContainerNamed(t, cs, ws.ID, "ide-inject")
+	assert.True(t, ok, "a baked image has no IDE, so it needs injection just like a live devcontainer build")
+
+	c := ideContainer(t, cs, ws.ID)
+	var mounted bool
+	for _, m := range c.VolumeMounts {
+		if m.Name == ideVolumeName && m.MountPath == ideMountPath {
+			mounted = true
+		}
+	}
+	assert.True(t, mounted)
+}
+
+func TestEnsureWorkspace_PrebuiltImageClonesGitRepo(t *testing.T) {
+	b, cs := newTestBackend()
+
+	ws, err := b.EnsureWorkspace(context.Background(), prebuiltDevcontainerSpec())
+	require.NoError(t, err)
+
+	_, ok := initContainerNamed(t, cs, ws.ID, "git-clone")
+	assert.True(t, ok, "a baked image has no envbuilder to clone the repo itself, unlike a live devcontainer build")
+}
+
+func TestEnsureWorkspace_PrebuiltImageSkipsConfigRepoClone(t *testing.T) {
+	b, cs := newTestBackend()
+
+	spec := prebuiltDevcontainerSpec()
+	spec.Devcontainer.ConfigRepo = "https://gitlab.com/org/devcontainer-config.git"
+
+	ws, err := b.EnsureWorkspace(context.Background(), spec)
+	require.NoError(t, err)
+
+	_, ok := initContainerNamed(t, cs, ws.ID, "devcontainer-config-clone")
+	assert.False(t, ok, "nothing reads a separately-cloned devcontainer config once envbuilder is bypassed")
+}
+
+func TestEnsureWorkspace_PrebuiltImageDoesNotForceDevcontainerResourceDefaults(t *testing.T) {
+	b, cs := newTestBackend()
+
+	ws, err := b.EnsureWorkspace(context.Background(), prebuiltDevcontainerSpec())
+	require.NoError(t, err)
+
+	c := ideContainer(t, cs, ws.ID)
+	assert.Empty(t, c.Resources.Requests, "a baked workspace is an ordinary pull + IDE start, the plain-path cost profile, not envbuilder's extraction cost")
+}
+
+func TestEnsureWorkspace_PrebuiltImageRemoteUserWrapsCommand(t *testing.T) {
+	b, cs := newTestBackend()
+
+	spec := prebuiltDevcontainerSpec()
+	spec.Devcontainer.RemoteUser = "vscode"
+
+	ws, err := b.EnsureWorkspace(context.Background(), spec)
+	require.NoError(t, err)
+
+	c := ideContainer(t, cs, ws.ID)
+	script := c.Command[len(c.Command)-1]
+	assert.Contains(t, script, "su -s /bin/bash 'vscode' -c", "envbuilder normally drops to the devcontainer's remoteUser itself; bypassing it must replicate that")
+}
+
+func TestEnsureWorkspace_PrebuiltImageNoRemoteUserRunsPlainScript(t *testing.T) {
+	b, cs := newTestBackend()
+
+	ws, err := b.EnsureWorkspace(context.Background(), prebuiltDevcontainerSpec())
+	require.NoError(t, err)
+
+	c := ideContainer(t, cs, ws.ID)
+	script := c.Command[len(c.Command)-1]
+	assert.NotContains(t, script, "su -s", "no declared remoteUser means run as the image's own default user")
+}

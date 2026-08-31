@@ -455,7 +455,10 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Ports:           []corev1.ContainerPort{{ContainerPort: p.port, Name: "http"}},
 		Env:             env,
-		Resources:       buildResources(spec.CPU, spec.Memory, spec.CPULimit, spec.MemoryLimit, spec.Devcontainer != nil),
+		// A baked (PrebuiltImage) devcontainer is an ordinary pull + IDE start, the
+		// same cost profile as a plain image: workspace — it does not run envbuilder's
+		// extraction step, so it should not carry the beefier devcontainer defaults.
+		Resources: buildResources(spec.CPU, spec.Memory, spec.CPULimit, spec.MemoryLimit, spec.Devcontainer != nil && spec.Devcontainer.PrebuiltImage == ""),
 		// Only mark the pod Ready once the IDE is actually listening — a wrapped
 		// startup script runs before the server exec, so the port opens late.
 		ReadinessProbe: &corev1.Probe{
@@ -481,8 +484,10 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 		})
 		// A separately-cloned devcontainer config repo lands on its own volume,
 		// outside the content repo's clone — envbuilder is pointed at it with an
-		// absolute ENVBUILDER_DEVCONTAINER_DIR (see devcontainerEnv).
-		if repo := strings.TrimSpace(spec.Devcontainer.ConfigRepo); repo != "" {
+		// absolute ENVBUILDER_DEVCONTAINER_DIR (see devcontainerEnv). A baked
+		// (PrebuiltImage) workspace never runs envbuilder, so nothing reads this
+		// clone — skip it.
+		if repo := strings.TrimSpace(spec.Devcontainer.ConfigRepo); repo != "" && spec.Devcontainer.PrebuiltImage == "" {
 			initContainers = append(initContainers, devcontainerConfigCloneInit(repo, spec.Devcontainer.ConfigBranch, spec.Devcontainer.ConfigAuthSecret))
 			volumes = append(volumes, corev1.Volume{
 				Name:         devcontainerConfigVolumeName,
@@ -519,8 +524,10 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 		}
 		volumes = append(volumes, vol)
 		// In devcontainer mode envbuilder does its own clone, so a git-clone init
-		// container would only race it for the same directory.
-		if strings.TrimSpace(spec.GitRepo) != "" && spec.Devcontainer == nil {
+		// container would only race it for the same directory — unless the workspace
+		// is running a baked (PrebuiltImage) image, which has no envbuilder to do it
+		// and needs the ordinary clone, same as a plain image: + git_repo template.
+		if strings.TrimSpace(spec.GitRepo) != "" && (spec.Devcontainer == nil || spec.Devcontainer.PrebuiltImage != "") {
 			initContainers = append(initContainers, gitCloneInit(spec.GitRepo, spec.GitBranch, p.workspaceDir, spec.GitAuthSecret))
 		}
 	}
@@ -685,6 +692,10 @@ func devcontainerProfile(p ideProfile) ideProfile {
 // init script inside the result. Because the build replaces the filesystem,
 // anything the IDE needs must arrive on a volume the build is told to leave alone.
 func applyDevcontainer(c *corev1.Container, spec workspace.Spec, p ideProfile, dockerConfig string) {
+	if img := strings.TrimSpace(spec.Devcontainer.PrebuiltImage); img != "" {
+		applyPrebuiltDevcontainer(c, spec, p, img)
+		return
+	}
 	c.Image = envbuilderImage
 	// envbuilder requires root to build; it drops to the devcontainer's user
 	// before running the init script, so the IDE itself does not stay root.
@@ -699,6 +710,26 @@ func applyDevcontainer(c *corev1.Container, spec workspace.Spec, p ideProfile, d
 	c.Command = nil
 	c.Args = nil
 	c.Env = append(c.Env, devcontainerEnv(spec, p, dockerConfig)...)
+}
+
+// applyPrebuiltDevcontainer runs a previously-baked devcontainer image directly,
+// skipping envbuilder entirely. The image carries the devcontainer's environment but
+// no IDE, so it still needs the same IDE-injection volume a live envbuilder build
+// gets — just no build to configure, and no forced root (that was only ever an
+// envbuilder-needs-root-to-build artifact).
+func applyPrebuiltDevcontainer(c *corev1.Container, spec workspace.Spec, p ideProfile, image string) {
+	c.Image = image
+	c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: ideVolumeName, MountPath: ideMountPath})
+	script := devcontainerInitScript(spec, p)
+	if user := strings.TrimSpace(spec.Devcontainer.RemoteUser); user != "" {
+		// envbuilder normally drops to the devcontainer's declared remoteUser itself
+		// before running the init script; bypassing envbuilder here loses that, so
+		// replicate it with su rather than resolving a numeric UID for a
+		// SecurityContext — the image's own /etc/passwd already knows this user.
+		script = fmt.Sprintf("exec su -s /bin/bash %s -c %s", shellQuote(user), shellQuote(script))
+	}
+	c.Command = []string{"/bin/bash", "-lc", script}
+	c.Args = nil
 }
 
 // devcontainerEnv builds envbuilder's configuration.

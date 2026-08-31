@@ -632,6 +632,51 @@ workspaces.
 > the workspace is recreated. Because workspaces are cleaned up on their lifetime,
 > this resolves on its own.
 
+### Pre-baking a devcontainer template
+
+A devcontainer template's card carries a **Bake image** button (**Rebuild** once a
+bake has already succeeded); a plain (non-devcontainer) template shows neither:
+
+![Bake image and Rebuild buttons on devcontainer template cards](screens/template-bake.png){width=700}
+
+Baking builds the devcontainer **once**, pushes the result as a normal image, and
+records it on the lab — every student workspace for that template then does an
+ordinary image pull instead of running the build itself.
+This skips both the build *and* the per-pod layer extraction described in
+[A warm cache skips the build, not the extraction](templates.md#devcontainer-workshops), which is the larger cost even with a warm `cache_repo`.
+
+Clicking the button starts a background build and shows a **building** badge that
+updates on its own; it turns into a **baked _(date)_** badge once done, or shows the
+failure if it did not succeed. Building runs as a one-off job in the lab's cluster,
+entirely separate from any student's workspace — no one waits on it.
+
+A **failed** badge covers two different things, both worth knowing apart: the build
+itself can fail (a bad devcontainer.json, an unreachable base image), or the build
+can succeed and push fine but the image never becomes *pullable* — EasyLab confirms
+the image is actually fetchable, over the same trusted connection a student's pod
+would use, before ever showing **baked**. The second case almost always means an
+in-cluster registry whose TLS certificate hasn't finished issuing (or never will,
+if the lab's cert-manager `ClusterIssuer` doesn't exist) — see the troubleshooting
+table in [Devcontainer workshops](templates.md#devcontainer-workshops) for what to
+check. **Rebuild** retries the whole thing once the underlying issue is fixed.
+
+!!! warning "Baking to the in-cluster registry needs a domain"
+    A template using **Host in-cluster** for its cache registry can only be baked
+    once the lab has a domain configured. The build itself doesn't need one — the
+    reason is what happens *after*: a student's workspace pulls the baked image the
+    same way it pulls any other image, which requires a registry the cluster
+    trusts. The in-cluster registry gets that trust from the lab's own domain
+    certificate; without a domain there is nothing to issue one from, and baking is
+    rejected with an explanation. A template with an **external** cache registry
+    has no such requirement — that registry is already trusted independently of
+    this lab.
+
+!!! tip "A bake does not track the repository"
+    Baking is a point-in-time snapshot: it is not re-triggered automatically if the
+    workshop repository's `devcontainer.json` changes afterward. Click **Rebuild**
+    whenever the source changes and you want students to get the update — until
+    then, students keep getting the previously baked image.
+
 ### Workspace history
 
 The workspace list sits behind an **Active Workspaces** / **History** pair of tabs
