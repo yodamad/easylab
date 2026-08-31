@@ -19,6 +19,7 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/auto"
 	"github.com/pulumi/pulumi/sdk/v3/go/auto/optdestroy"
 	"github.com/pulumi/pulumi/sdk/v3/go/auto/optpreview"
+	"github.com/pulumi/pulumi/sdk/v3/go/auto/optremove"
 	"github.com/pulumi/pulumi/sdk/v3/go/auto/optup"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
@@ -1135,9 +1136,52 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 	job.mu.RUnlock()
 	jobDir := filepath.Join(pe.workDir, jobID)
 
+	// cert-manager and traefik are shared ingress/TLS infrastructure: on a BYO
+	// cluster (LabConfig.UseExistingCluster) they are installed once and reused
+	// by every subsequent lab on that cluster (see the skipClusterIssuer reuse
+	// logic in coder.SetupHTTPS), so tearing them down when any single lab is
+	// destroyed would take down TLS/ingress for every other lab sharing the
+	// cluster. Exclude their Pulumi resources from this destroy so they survive
+	// regardless of which lab is being destroyed or whether cleanup is manual
+	// or automatic. On a dedicated per-lab cluster this has no effect: the
+	// underlying OVH Kubernetes cluster is destroyed anyway, taking everything
+	// running on it down with it.
+	sharedIngressTLSURNs := []string{
+		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:core/v1:Namespace::cert-manager-ns", stackName),
+		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:helm.sh/v3:Release::cert-manager", stackName),
+		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:core/v1:Namespace::traefik-ns", stackName),
+		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:helm.sh/v3:Release::traefik", stackName),
+	}
+
+	// The cert-manager DNS-01 plumbing is shared the same way once a lab is
+	// created with "DNS-01 already set up on this cert-manager" (skipClusterIssuer
+	// in coder.SetupHTTPS): the lab that happens to own these resources (the one
+	// that had skipClusterIssuer=false and actually created them) is not
+	// necessarily the last one destroyed, and every later lab on the same cluster
+	// references them by these same well-known names rather than through its own
+	// Pulumi state. Losing any of these breaks DNS-01 for every lab still relying
+	// on them, not just the one being destroyed — the ClusterIssuer name is fixed
+	// in code (letsencrypt-prod-issuer) regardless of the configured
+	// utils.CoderClusterIssuerName, so this URN is correct even when that name is
+	// overridden. The OVH solver webhook (cert-manager-webhook-ovh-ns/-webhook) is
+	// only present with the OVH DNS provider; Azure uses cert-manager's native
+	// solver and creates no webhook, so those two URNs simply won't match on an
+	// Azure-DNS or HTTP-01 stack.
+	sharedDNS01URNs := []string{
+		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:cert-manager.io/v1:ClusterIssuer::letsencrypt-prod-issuer", stackName),
+		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:core/v1:Secret::dns-credentials-secret", stackName),
+		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:rbac.authorization.k8s.io/v1:Role::cert-manager-webhook-ovh-secret-reader", stackName),
+		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:rbac.authorization.k8s.io/v1:RoleBinding::cert-manager-webhook-ovh-secret-reader", stackName),
+		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:core/v1:Namespace::cert-manager-webhook-ovh-ns", stackName),
+		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:helm.sh/v3:Release::cert-manager-webhook-ovh", stackName),
+	}
+
 	// Run pulumi destroy with streaming output
-	pe.jobManager.AppendOutput(jobID, "Running pulumi destroy...")
-	destroyResult, err := prep.Stack.Destroy(prep.Context, optdestroy.ProgressStreams(prep.Writer))
+	pe.jobManager.AppendOutput(jobID, "Running pulumi destroy (preserving shared cert-manager, traefik, and DNS-01 infrastructure)...")
+	destroyResult, err := prep.Stack.Destroy(prep.Context,
+		optdestroy.ProgressStreams(prep.Writer),
+		optdestroy.Exclude(append(sharedIngressTLSURNs, sharedDNS01URNs...)),
+	)
 	if err != nil {
 		// Destroy failed - don't continue with stack removal or mark as destroyed
 		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("ERROR: pulumi destroy failed: %v", err))
@@ -1185,7 +1229,10 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 		pe.jobManager.AppendOutput(jobID, "Stack resources were destroyed, but stack metadata removal failed.")
 		// Don't fail the job - resources are destroyed, just metadata cleanup failed
 	} else {
-		if removeErr := workspace.RemoveStack(prep.Context, stackName); removeErr != nil {
+		// Force: cert-manager/traefik are deliberately excluded from the destroy
+		// above, so the stack's state is not empty even on a fully successful
+		// destroy — a plain RemoveStack would refuse to remove it.
+		if removeErr := workspace.RemoveStack(prep.Context, stackName, optremove.Force()); removeErr != nil {
 			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to remove stack from workspace: %v", removeErr))
 			pe.jobManager.AppendOutput(jobID, "Stack resources were destroyed, but stack metadata removal failed.")
 			// Don't fail the job - resources are destroyed, just metadata cleanup failed

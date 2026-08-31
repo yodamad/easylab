@@ -418,6 +418,19 @@ The following components are deployed into the cluster:
 * **Traefik** — Kubernetes ingress controller (gets its own LoadBalancer IP, exported as `ingressIP`). Installed whether or not a domain is set, since the nip.io fallback routes through it too.
 * **cert-manager** — automates TLS certificate issuance from Let's Encrypt. Installed only when a domain is set; the nip.io fallback has no certificates to issue.
 
+!!! note "Destroying a lab never removes shared Traefik, cert-manager, or DNS-01 infrastructure"
+    Whether triggered manually or by [scheduled lab deletion](#lab-deletion),
+    destroying a lab always leaves its Traefik and cert-manager installations (and
+    their namespaces) in place, even if this lab created them — and the same goes
+    for the DNS-01 plumbing above: the ClusterIssuer, the DNS credential secret,
+    and (for OVH) the solver webhook and its RBAC grant. This matters most on
+    [Use Existing Cluster](#use-existing-cluster) setups, where other labs on the
+    same cluster keep reusing all of it exactly as described above — destroying
+    one lab, including whichever lab originally set DNS-01 up, can never take
+    down ingress, TLS, or certificate issuance for the others. On a dedicated
+    **Create New Infrastructure** cluster this has no visible effect, since the
+    underlying Kubernetes cluster is destroyed anyway.
+
 !!! note "The nip.io fallback needs a routable LoadBalancer IP"
     nip.io resolves an IP embedded in the hostname, so the fallback only applies when
     the ingress controller has an external **IP**. On a cluster whose LoadBalancer
@@ -520,6 +533,8 @@ Set a **Date** (and optionally a **Time**) for the entire lab to be automaticall
 
 * If only a date is set, the lab is destroyed at 23:59 that day.
 * Leave the date empty to disable scheduled lab deletion.
+* Like a manual destroy, this never removes the lab's Traefik or cert-manager
+  installation — see [the note above](#https-configuration-optional) on why.
 
 !!! note
     The cleanup service also runs scheduled lab deletion checks at the same interval as workspace cleanup. Set `CLEANUP_INTERVAL_MINUTES` to a lower value if you need finer-grained precision (default is 5 minutes).
