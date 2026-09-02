@@ -419,6 +419,58 @@ func TestSubmitFeedback_CommentTruncated(t *testing.T) {
 	assert.Len(t, entries[0].Comment, 2000)
 }
 
+// --- buildFeedbackSummary tests ---
+
+func TestBuildFeedbackSummary(t *testing.T) {
+	tests := []struct {
+		name          string
+		entries       []Feedback
+		wantCount     int
+		wantAvgRating string
+		wantStars     []string
+	}{
+		{
+			name:          "no entries",
+			entries:       nil,
+			wantCount:     0,
+			wantAvgRating: "—",
+		},
+		{
+			name: "single five-star entry",
+			entries: []Feedback{
+				{ID: "1", Rating: 5, Difficulty: "just-right"},
+			},
+			wantCount:     1,
+			wantAvgRating: "5.0",
+			wantStars:     []string{"★★★★★"},
+		},
+		{
+			name: "mixed ratings average and rounds to one decimal",
+			entries: []Feedback{
+				{ID: "1", Rating: 5},
+				{ID: "2", Rating: 3},
+				{ID: "3", Rating: 4},
+			},
+			wantCount:     3,
+			wantAvgRating: "4.0",
+			wantStars:     []string{"★★★★★", "★★★☆☆", "★★★★☆"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			summary := buildFeedbackSummary(tt.entries)
+			assert.Equal(t, tt.wantCount, summary.Count)
+			assert.Equal(t, tt.wantAvgRating, summary.AvgRating)
+			require.Len(t, summary.Entries, len(tt.wantStars))
+			for i, wantStars := range tt.wantStars {
+				assert.Equal(t, wantStars, summary.Entries[i].Stars)
+			}
+		})
+	}
+}
+
 // --- ServeAdminLabFeedback tests ---
 
 func TestServeAdminLabFeedback_NoLabID(t *testing.T) {

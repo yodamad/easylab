@@ -109,6 +109,28 @@ func (as *AuditStore) Recent(limit int) ([]AuditEntry, error) {
 	return entries, nil
 }
 
+// RecentForLab returns up to limit audit entries for a single lab, newest
+// first. limit <= 0 means no cap. Same scan/tolerance-for-malformed-lines
+// behavior as Recent, filtered to entries whose LabID matches.
+func (as *AuditStore) RecentForLab(labID string, limit int) ([]AuditEntry, error) {
+	entries, err := as.Recent(0)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := make([]AuditEntry, 0, len(entries))
+	for _, e := range entries {
+		if e.LabID != labID {
+			continue
+		}
+		filtered = append(filtered, e)
+		if limit > 0 && len(filtered) >= limit {
+			break
+		}
+	}
+	return filtered, nil
+}
+
 // adminActor returns a display string for the audit log's actor field: the
 // admin's email when known (Azure AD admin login), or a generic "admin"
 // label when the deployment uses classic shared-password login and no
@@ -120,18 +142,21 @@ func adminActor(r *http.Request) string {
 	return "admin"
 }
 
+// AuditDisplay is an audit entry formatted for display (timestamp rendered
+// as a string), shared by the full admin audit log page and the lab detail
+// page's per-lab activity section.
+type AuditDisplay struct {
+	At     string
+	Actor  string
+	Role   string
+	Action string
+	LabID  string
+	Detail string
+}
+
 // ServeAuditLog serves the admin audit log page, showing the most recent
 // actions across labs, workspaces, and credentials.
 func (h *Handler) ServeAuditLog(w http.ResponseWriter, r *http.Request) {
-	type AuditDisplay struct {
-		At     string
-		Actor  string
-		Role   string
-		Action string
-		LabID  string
-		Detail string
-	}
-
 	var entries []AuditDisplay
 	if h.auditStore != nil {
 		recent, err := h.auditStore.Recent(200)

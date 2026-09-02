@@ -10,7 +10,7 @@ clone, resources, and anything extra the workshop needs (a database, a Docker
 daemon, some VS Code extensions).
 
 This page is a cookbook of complete, copy-pasteable examples. For the field-by-field
-reference and the wizard form, see [Configure workspaces](admin.md#configure-workspaces).
+reference and the wizard form, see [Configure workspaces](admin-lab-creation.md#configure-workspaces).
 
 ## Using these examples
 
@@ -321,8 +321,9 @@ written to the lab's cluster and EasyLab keeps no copy:
   section. Add a row for each credential your templates reference. Because the
   cluster does not exist yet, the tokens are held in memory and written the moment
   provisioning finishes — before the lab reports itself ready.
-- **On the lab's Workspaces page**, once the lab is up. Expand **Credentials**, add
-  a *Container registry* or *Git repository* credential, and paste the token.
+- **In the lab detail page's Workspaces & Templates section**, once the lab is up.
+  Expand **Credentials**, add a *Container registry* or *Git repository* credential,
+  and paste the token.
 
 Saving over an existing name **rotates** it. Workspaces already running keep the
 old token — the kubelet resolved it when the pod started — so a rotation reaches
@@ -612,15 +613,15 @@ keys the build ignores; and some keys are honoured by neither.
 ### Pre-baking: skipping the build entirely
 
 Everything above describes making the build *fast*. A lab admin can instead skip it
-entirely: on the lab's **View Workspaces** page, a devcontainer template's card has
-a **Bake image** button. Baking builds the devcontainer once, pushes the result as
+entirely: in the lab detail page's **Workspaces & Templates** section, a devcontainer
+template's card has a **Bake image** button. Baking builds the devcontainer once, pushes the result as
 an ordinary image, and records it on the lab — every student workspace for that
 template afterward does a plain image pull instead of running envbuilder at all, so
 neither the build nor the per-pod layer extraction above happens per student.
 
 This is an admin-triggered action on an already-created lab, not a template YAML
 key — there is nothing to set on the template itself. See
-[Pre-baking a devcontainer template](admin.md#pre-baking-a-devcontainer-template)
+[Pre-baking a devcontainer template](admin-lab-management.md#pre-baking-a-devcontainer-template)
 in the admin guide for how to trigger it, what the status badges mean, and the
 domain requirement when baking to the in-cluster registry (an external
 `cache_repo` has no such requirement).
@@ -631,7 +632,7 @@ then, students keep getting the previously baked image rather than the live one.
 
 ## Reusing a lab's templates
 
-Use **Export Templates YAML** on the [labs list](admin.md#manage-your-labs) to
+Use **Export Templates YAML** on the [labs list](admin-lab-management.md#manage-your-labs) to
 download an existing lab's `workspace-templates-<stack>.yaml`, then load it into a
 new lab with **Upload file**. Only the templates are exported — credentials are
 never included.
@@ -656,7 +657,7 @@ workshop edition to the next.
 | `devcontainer.enabled requires git_repo` | The `devcontainer.json` is read from the workshop repo, so there must be one. |
 | `git_auth_secret requires git_repo` | The credential has nothing to authenticate to — remove it, or add the repo. |
 | `git_auth_secret needs an http(s) git_repo` | A username and password is not how `ssh://` authenticates. Use an `https://` remote. |
-| `failed to read git auth secret "x"` | The template names a credential the lab's cluster does not have. Add it in **Credentials** on the Workspaces page. |
+| `failed to read git auth secret "x"` | The template names a credential the lab's cluster does not have. Add it in **Credentials** in the lab detail page's Workspaces & Templates section. |
 | Workspace pods stuck in `ImagePullBackOff` | A private image with no `image_pull_secrets`, or a name that does not match a credential. |
 | The devcontainer build fails pulling its base image | Devcontainer images are pulled by the build, not the kubelet — they need `devcontainer.registry_auth_secret`, not `image_pull_secrets`. |
 | Devcontainer build fails with `devcontainer.json: no such file or directory` on a private repo | The clone ran with no credentials (`Using no authentication!` in the pod logs), so nothing was fetched. Add `git_auth_secret` — see [Devcontainer workshops](#devcontainer-workshops). Recreate the workspace so the clone runs again on a clean volume. |

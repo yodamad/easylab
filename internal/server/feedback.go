@@ -231,6 +231,72 @@ func (h *Handler) SubmitFeedback(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// FeedbackDisplay is a single feedback entry formatted for display (star
+// rating rendered as a string, human-readable difficulty label/timestamp).
+type FeedbackDisplay struct {
+	ID          string
+	Email       string
+	Rating      int
+	Stars       string
+	Difficulty  string
+	Comment     string
+	SubmittedAt string
+}
+
+// FeedbackSummary is a lab's feedback at a glance: how many entries, the
+// average rating, and the entries themselves formatted for display. Used by
+// both the full admin feedback page and the lab detail page's compact
+// feedback section.
+type FeedbackSummary struct {
+	Count     int
+	AvgRating string
+	Entries   []FeedbackDisplay
+}
+
+// feedbackDifficultyEmojiLabels is ServeAdminLabFeedback/buildFeedbackSummary's
+// display label for each difficulty code, with an emoji for quick scanning.
+var feedbackDifficultyEmojiLabels = map[string]string{
+	"too-easy":    "😴 Too Easy",
+	"a-bit-easy":  "🙂 A Bit Easy",
+	"just-right":  "👍 Just Right",
+	"challenging": "🤔 Challenging",
+	"too-hard":    "🔥 Too Hard",
+}
+
+// buildFeedbackSummary formats a lab's raw feedback entries for display and
+// computes the average rating.
+func buildFeedbackSummary(entries []Feedback) FeedbackSummary {
+	summary := FeedbackSummary{Count: len(entries), AvgRating: "—"}
+
+	var totalRating int
+	for _, e := range entries {
+		stars := ""
+		for i := 0; i < 5; i++ {
+			if i < e.Rating {
+				stars += "★"
+			} else {
+				stars += "☆"
+			}
+		}
+		summary.Entries = append(summary.Entries, FeedbackDisplay{
+			ID:          e.ID,
+			Email:       e.Email,
+			Rating:      e.Rating,
+			Stars:       stars,
+			Difficulty:  feedbackDifficultyEmojiLabels[e.Difficulty],
+			Comment:     e.Comment,
+			SubmittedAt: e.SubmittedAt.Format("2006-01-02 15:04"),
+		})
+		totalRating += e.Rating
+	}
+
+	if summary.Count > 0 {
+		summary.AvgRating = fmt.Sprintf("%.1f", float64(totalRating)/float64(summary.Count))
+	}
+
+	return summary
+}
+
 // ServeAdminLabFeedback serves the admin feedback view for a specific lab
 // Route: GET /admin/feedback?lab_id=...
 func (h *Handler) ServeAdminLabFeedback(w http.ResponseWriter, r *http.Request) {
@@ -240,16 +306,6 @@ func (h *Handler) ServeAdminLabFeedback(w http.ResponseWriter, r *http.Request) 
 		ID       string
 		Name     string
 		Selected bool
-	}
-
-	type FeedbackDisplay struct {
-		ID          string
-		Email       string
-		Rating      int
-		Stars       string
-		Difficulty  string
-		Comment     string
-		SubmittedAt string
 	}
 
 	type LabFeedbackData struct {
@@ -301,43 +357,10 @@ func (h *Handler) ServeAdminLabFeedback(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		difficultyLabel := map[string]string{
-			"too-easy":    "😴 Too Easy",
-			"a-bit-easy":  "🙂 A Bit Easy",
-			"just-right":  "👍 Just Right",
-			"challenging": "🤔 Challenging",
-			"too-hard":    "🔥 Too Hard",
-		}
-
-		var totalRating int
-		for _, e := range entries {
-			stars := ""
-			for i := 0; i < 5; i++ {
-				if i < e.Rating {
-					stars += "★"
-				} else {
-					stars += "☆"
-				}
-			}
-			data.Feedbacks = append(data.Feedbacks, FeedbackDisplay{
-				ID:          e.ID,
-				Email:       e.Email,
-				Rating:      e.Rating,
-				Stars:       stars,
-				Difficulty:  difficultyLabel[e.Difficulty],
-				Comment:     e.Comment,
-				SubmittedAt: e.SubmittedAt.Format("2006-01-02 15:04"),
-			})
-			totalRating += e.Rating
-		}
-
-		data.Count = len(entries)
-		if data.Count > 0 {
-			avg := float64(totalRating) / float64(data.Count)
-			data.AvgRating = fmt.Sprintf("%.1f", avg)
-		} else {
-			data.AvgRating = "—"
-		}
+		summary := buildFeedbackSummary(entries)
+		data.Feedbacks = summary.Entries
+		data.Count = summary.Count
+		data.AvgRating = summary.AvgRating
 	}
 
 	h.serveTemplate(w, "admin-feedback.html", data)

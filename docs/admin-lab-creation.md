@@ -1,0 +1,529 @@
+---
+icon: lucide/rocket
+title: Create a Lab
+---
+# Creating a Lab
+
+This page walks through the lab creation wizard: choosing infrastructure, defining
+workspace templates, configuring HTTPS/DNS, and setting cleaning policies. See
+[Managing Labs](admin-lab-management.md) for retrying, recreating, and everything
+else you can do once a lab exists.
+
+## Create a new lab
+
+![Steps](screens/steps.png)
+
+Start by naming the lab:
+
+* **Lab Name** (required) — a unique name used as the prefix for all cloud resources (letters, numbers, hyphens and underscores only).
+* **Description** (optional) — a free-text summary of what the lab is for (e.g. *Kubernetes 101 workshop, June 2025 cohort*). It is shown in the [labs list](admin-lab-management.md#manage-your-labs) to help you tell labs apart, and to students on the environment picker when they request a workspace.
+
+First you need to choose how to provide the Kubernetes cluster:
+
+* [x] [Create New Infrastructure](#on-ovhcloud) — Provision a new cluster on a cloud provider (OVHcloud)
+* [x] [Use Existing Cluster](#use-existing-cluster) — Provide a kubeconfig for an existing Kubernetes cluster
+
+![Infrastructure selection](screens/infra-choice.png)
+
+### Use Existing Cluster
+
+When you choose **Use Existing Cluster**, EasyLab skips cloud provider provisioning and uses your own Kubernetes cluster. This is useful when you already have a cluster (e.g. from your organization, a local dev environment, or another cloud provider).
+
+**What you need to provide:**
+
+* **Kubeconfig** — Either:
+    * Upload a `.yaml` or `.yml` kubeconfig file, or
+    * Paste the kubeconfig YAML content directly
+
+**What is skipped:**
+
+* No cloud provider credentials required
+* No cluster provisioning — EasyLab does not create or manage node pools; it only
+  schedules onto whatever nodes the cluster already has (optionally constrained per
+  template, see below)
+* The wizard goes directly to workspace and template configuration
+
+The kubeconfig must have sufficient permissions to create namespaces, Deployments, Services, Ingresses and PersistentVolumeClaims, and (when a domain is set) to install the Traefik ingress controller and cert-manager Helm releases.
+
+#### Splitting EasyLab and workspaces across node pools
+
+If your existing cluster has more than one node pool, you can run the EasyLab
+server on one and student workspaces on another:
+
+1. **Label each pool** so pods can target it (e.g. `pool=control-plane` and
+   `pool=workspaces`) — how you do this depends on where the cluster runs (for an
+   OVHcloud Managed Kubernetes cluster, set it on the node pool itself; for any
+   cluster you can also label nodes directly with `kubectl label nodes <node>
+   pool=workspaces`).
+2. **Pin the EasyLab server** by setting `nodeSelector` (and `tolerations`, if the
+   pool is tainted) in the Helm chart's values — see
+   [Helm Chart Deployment](helm.md#key-values).
+3. **Pin student workspaces** by setting the **Node Selector** field on each
+   workspace template (under **Advanced options**, see above) to match the
+   workspace pool's label, e.g. key `pool`, value `workspaces`.
+
+Workspace pods only support `nodeSelector` (label matching), not tolerations, so
+the workspace pool should be labeled rather than tainted.
+
+### On OVHcloud (Create New Infrastructure)
+
+When creating new infrastructure, you choose OVHcloud as the cloud provider. Most of the configuration is preconfigured; you only need to select the ID for the private network.
+
+??? info "Others parameters can be overridden if needed"
+
+    | Category | Parameter                       | Description                                              |
+    |----------|----------------------------------|---------------------------------------------------------|
+    | Network | | |
+    | | Gateway Name             | The name of the network gateway                          |
+    | | Gateway Model            | The model of the network gateway                         |
+    | | Private Network Name     | The name of the network private network                  |
+    | | Region                   | The region of the network                                |
+    | | Mask                     | The mask of the network                                  |
+    | Node Pool | | |
+    | | Name                   | The name of the node pool                                |
+    | | Flavor                 | The flavor of the node pool                              |
+    | | Desired Node Count     | The desired number of nodes in the node pool             |
+    | | Min Node Count         | The minimum number of nodes in the node pool             |
+    | | Max Node Count         | The maximum number of nodes in the node pool             |
+
+### Configure workspaces
+
+Student workspaces run as **code-server** pods provisioned directly on the
+lab's Kubernetes cluster — there is no separate IDE server or database to
+configure. On the **Workspace** step you only set:
+
+* **Workspace Namespace** (optional) — the Kubernetes namespace student
+  workspaces are created in. Defaults to `workshops`.
+
+Then, on the **Templates** step, you define **one or more** workspace templates
+for the lab. Each template is a different workspace flavor that students can
+choose when requesting a workspace.
+
+![Workspace template selection](screens/templates.png)
+
+At the top of the step you choose **how** to define the workspace:
+
+* **Build with a form** — fill in the fields for each template (the default).
+* **From a devcontainer** — import a workshop repository's `.devcontainer`; see
+  [Workshops with a devcontainer](#workshops-with-a-devcontainer).
+* **Paste YAML** — edit the templates as YAML directly; see
+  [Editing templates as YAML](#editing-templates-as-yaml).
+
+With **Build with a form**, each template shows two **essentials** up front and
+tucks the rest behind **Advanced options**, so simple labs stay simple. Use **Add
+Template** to define additional templates.
+
+The **essentials**:
+
+* **Template name** — Name shown in the student template selector.
+* **Description** (optional) — a free-text summary of what the template provides (e.g. *Go 1.26 + Postgres*). Shown next to the template name in the lab's **Templates** panel.
+* **Git Repository** (optional) — a repo cloned into the workspace on first start (a persistent volume is provisioned automatically). The **branch** field clones a specific branch; **subfolder** opens a subdirectory of the repo.
+
+Under **Advanced options** (all optional):
+
+* **Git credential** — the credential (from the **Credentials** section at the top of the step) that unlocks a **private** Git Repository. Define a single git credential and it is wired into every template with a private repo automatically; add more than one and pick the right one per template here.
+* **Image** — a container image override. Defaults to `codercom/code-server:latest`.
+* **CPU / Memory / Disk Size** — resource requests for the workspace pod (e.g. `500m`, `1Gi`, `5Gi`).
+* **CPU Limit / Memory Limit** (optional) — override the pod's resource limit independently of the request above. Left blank, the limit matches the request, as it always has. See [Workshops with a devcontainer](#workshops-with-a-devcontainer) for why a devcontainer template in particular benefits from setting these explicitly.
+* **Startup Script** — shell commands run (best-effort) on start, *before* the IDE opens: install tools, configure the shell, run a bootstrap. Failures are shown in `kubectl logs` but never block the workspace from opening.
+* **Dotfiles Repository** — cloned to `~/.dotfiles`; its `install.sh` / `setup.sh` / `bootstrap.sh` is run if present.
+* **Extensions** — comma-separated VS Code extension IDs installed on start.
+* **Environment Variables** — passed to the workspace container.
+* **Sidecars** — extra containers in the workspace pod (name / image / ports / env), reachable from the IDE at `localhost:<port>` — e.g. a `postgres:16` database. Each sidecar can also be marked **privileged** and given extra **capabilities** (e.g. `SYS_ADMIN`) — needed to run **docker-in-docker** (see below).
+* **Mounts** — mount an existing **ConfigMap** or **Secret** into the workspace container. The referenced object **must already exist** in the workspace namespace, or the pod won't start.
+* **Node Selector** (optional, [Use Existing Cluster](#use-existing-cluster) only) — pin this template's workspace pods to nodes carrying specific labels, e.g. a dedicated `pool: workspaces` node pool. Useful when you want student workspaces scheduled onto different nodes than the EasyLab server itself — see [Splitting EasyLab and workspaces across node pools](#splitting-easylab-and-workspaces-across-node-pools).
+
+If no template is defined, a `default` code-server workspace is used.
+Students can request **one workspace per template** within a lab, so multiple
+templates let them get multiple workspaces in the same environment.
+
+A template can also build its workspace from a workshop repository's
+`devcontainer.json` instead of an **Image** — see
+[Workshops with a devcontainer](#workshops-with-a-devcontainer).
+
+#### Editing templates as YAML
+
+At the top of the **Templates** step, pick **Paste YAML** to edit the lab's
+workspace templates directly instead of filling in the form — useful for labs
+with several templates, for reusing a previous workshop, or for keeping the
+configuration in a git repository.
+
+```yaml
+workspace_templates:
+  - name: go-workshop
+    image: codercom/enterprise-base:ubuntu
+    git_repo: https://gitlab.com/user/workshop.git
+    git_branch: main
+    git_folder: exercises
+    cpu: "2"
+    memory: 4Gi
+    disk_size: 10Gi
+    startup_script: |
+      sudo apt-get update && sudo apt-get install -y jq
+    dotfiles_repo: https://github.com/you/dotfiles
+    extensions:
+      - golang.go
+    env:
+      DOCKER_HOST: tcp://localhost:2375
+    sidecars:
+      - name: db
+        image: postgres:16
+        ports: [5432]
+        env:
+          POSTGRES_PASSWORD: postgres
+        privileged: false
+        capabilities: [SYS_ADMIN]
+    mounts:
+      - type: configmap   # configmap | secret
+        name: my-config
+        path: /etc/config
+  - name: minimal
+```
+
+The keys are exactly the fields described above, and only `name` is required.
+
+* **Switching to Paste YAML** seeds the editor from whatever the form currently
+  holds, so you can fill in the easy parts first and then hand-edit. With nothing
+  filled in yet you get a commented skeleton listing every supported key.
+* **YAML is authoritative.** While **Paste YAML** is selected, the form fields are
+  ignored when the lab is created — switching back to **Build with a form** does
+  *not* carry your YAML edits over.
+* **Validate** checks the document without creating anything. Unknown keys are
+  rejected rather than ignored, so a typo like `imagee:` is reported instead of
+  silently dropping the image from the lab.
+* **Insert skeleton** replaces the editor with the commented template, and
+  **Upload file** loads a `.yaml` file from disk.
+* Invalid YAML fails the lab creation itself, so a broken document can never
+  produce a half-configured lab.
+
+To reuse the templates from an existing lab, use **Export Templates YAML** on the
+[labs list](admin-lab-management.md#manage-your-labs) to download its `workspace-templates-<stack>.yaml`,
+then load it with **Upload file**. Only the templates are exported — credentials
+are never included.
+
+See [Workspace template examples](templates.md) for complete, copy-pasteable
+documents: git-backed workshops, database sidecars, docker-in-docker, mounts, and
+the gotchas each one comes with.
+
+#### Workshops with a devcontainer
+
+If the workshop repository already ships a `.devcontainer/devcontainer.json`, a
+template can build the workspace from it instead of naming an **Image**. The
+devcontainer is built inside each student's workspace on first start, so the
+workshop's own `Dockerfile` and `features` work as written.
+
+Choose **From a devcontainer** at the top of the **Templates** step:
+
+1. Give the workspace a **Template name** — this is how students see it, and it
+   must be unique within the lab. It is lowercased with dashes for anything else,
+   so `Day Two` becomes `day-two`. The devcontainer's own `name` is only a display
+   string and is often identical across repositories, so importing two of them
+   without naming them yourself would collide.
+2. Optionally add a **Description** — shown to students when they pick a template.
+   Left blank, the student picker falls back to showing the IDE, resources and repo
+   instead, which is a poor substitute for explaining what the template is for.
+3. Choose **Git repository** (EasyLab clones the repo and finds the
+   `devcontainer.json`) or **Upload** (a `devcontainer.json`, or a repository
+   `.zip`).
+4. Choose a **Cache registry**: **Host in-cluster** has EasyLab provision the
+   registry itself, in the lab's own cluster — nothing else to fill in.
+   **External registry** requires a **Cache registry address**, and if the
+   devcontainer builds from a **private base image** or pushes to a **private
+   cache**, a registry credential from the **Credentials** section chosen
+   under **Registry credential for students** — with a single registry
+   credential it is applied automatically. envbuilder pulls the base image
+   (and pushes the cache) inside each student's pod with it; without it the
+   pull falls back to anonymous and the build fails.
+5. If the workshop repository is **private**, add a git token in the **Credentials**
+   section and choose it under **Git credential** — with a single git credential it is
+   applied automatically. The same credential reads the devcontainer during import and,
+   baked into the template, clones the repo in each student's workspace.
+6. Click **Import** — this step is required. EasyLab turns the devcontainer into a
+   workspace template and lists anything in it that will not take effect. The wizard
+   will not advance to the next step until the import has run, since the import is
+   what generates the workspace the lab is created from.
+7. Click **Review generated YAML** to open the result in the editor, adjust it if
+   needed, then finish the wizard.
+
+The import is a starting point, not a black box — what it produces is ordinary
+template YAML you can change.
+
+The image the devcontainer builds carries no IDE, so code-server is injected
+into it. This is independent of the devcontainer's own base image, with one
+catch — that base must be **glibc**-based, since code-server's bundled Node does
+not run on Alpine/musl. If the workspace container exits with `no such file or
+directory`, this is why.
+
+!!! danger "A cache registry is required"
+    Devcontainer templates must have a cache registry, one way or the other.
+    Layers are cached there and pushed after the first build, so the first
+    workspace pays for the build and the rest start from the cache. Without
+    one every student rebuilds the whole devcontainer from scratch, which
+    turns a seconds-long start into a minutes-long one for each of them.
+
+    **Host in-cluster** needs nothing further — EasyLab provisions the
+    registry in the lab's own cluster, with no external exposure or
+    authentication, and it disappears when the lab is destroyed.
+
+    **External registry** needs the credentials Secret created in the
+    workspace namespace beforehand:
+
+    ```bash
+    kubectl create secret docker-registry regcred \
+      --docker-server=registry.example.com \
+      --docker-username=<user> \
+      --docker-password=<token> \
+      --namespace=workshops
+    ```
+
+    Then choose it under **Registry credential for students** (or leave the picker
+    on **Auto** if it is your only registry credential). A public cache registry
+    with a public base image needs no Secret.
+
+!!! warning "Not every devcontainer can be used"
+    Devcontainers built on **docker-compose** (`dockerComposeFile`) are rejected:
+    the workspace is built as a single image, not a set of orchestrated services.
+    A hand-written `sidecars:` block is the nearest equivalent. `forwardPorts`,
+    `mounts`, `privileged` and `postStartCommand` are also not applied — the
+    import lists them so you can decide what to do. See
+    [Devcontainer workshops](templates.md#devcontainer-workshops) for the full
+    breakdown of what is honoured.
+
+!!! tip "Installing system tools"
+    Startup scripts run as the workspace user, which has passwordless `sudo`, so `sudo apt-get install …` works. For anything slow or large, bake it into a **custom image** instead so students don't wait for it on every start, and set that image as the template **Image**:
+
+    ```dockerfile
+    FROM codercom/code-server:latest
+    USER root
+    RUN apt-get update && apt-get install -y golang nodejs && rm -rf /var/lib/apt/lists/*
+    USER coder
+    ```
+
+    Build, push to a registry your cluster can pull from, and set **Image** to it.
+
+!!! tip "Docker inside a workspace (docker-in-docker)"
+    Managed clusters (OVHcloud, AKS) run **containerd**, not Docker, so there is no host Docker socket to reuse. To give students a working `docker`, run a **Docker-in-Docker sidecar** and point the workspace CLI at it:
+
+    * **Sidecar** — name `docker`, image `docker:dind`, port `2375`, env `DOCKER_TLS_CERTDIR=` (empty, disables TLS), **privileged** ✅ (dind requires it; capability `SYS_ADMIN` alone is not enough for full dind).
+    * **Env** (on the template) — `DOCKER_HOST=tcp://localhost:2375`.
+    * **Startup Script** — install the CLI (`sudo` is available in the workspace):
+
+    ```bash
+    sudo apt-get update && sudo apt-get install -y docker.io
+    until docker info >/dev/null 2>&1; do sleep 2; done
+    ```
+
+    Each workspace then gets its **own isolated** Docker daemon. ⚠️ Privileged containers can escalate to the node — only enable this on a trusted workshop cluster you control. For an unprivileged alternative, use `docker:dind-rootless` with the right capabilities, or install a Sysbox/Kata RuntimeClass on the cluster.
+
+#### HTTPS Configuration (Optional)
+
+The wizard step asks one question — **"How will students reach their workspaces?"** —
+with three choices:
+
+* **Quick start** — no domain. Workspaces fall back to [nip.io](https://nip.io)
+  wildcard DNS over the ingress controller's LoadBalancer IP, serving each workspace at
+  `http://{workspace}.{ingressIP}.nip.io`. Needs no DNS setup at all, which makes it
+  convenient for quick or throwaway labs, but it is **plain HTTP with no TLS**.
+* **Custom domain — automatic** (recommended) — you own a domain and also configure a
+  [DNS provider](#dns-provider-optional) below. EasyLab creates the DNS records and a
+  single wildcard TLS certificate for you.
+* **Custom domain — manual DNS** — you own a domain but manage DNS yourself. See the
+  warning below before picking this for a large lab.
+
+Picking either custom-domain option reveals:
+
+* **Domain Name** — the base FQDN for the lab (e.g. `lab.example.com`). Each student workspace gets a subdomain (`{workspace}.{domain}`), served over HTTPS.
+* **Contact email** — used only if a Let's Encrypt certificate needs attention; not shown to students.
+
+!!! warning "Manual DNS needs a wildcard record you create yourself"
+    Workspace URLs are `{workspace}.{domain}`, so **nothing resolves without a wildcard
+    record**. With "Custom domain — manual DNS", EasyLab cannot create that record for
+    you — you must add `*.<domain> → <ingressIP>` in your DNS zone once the lab is
+    provisioned. Until you do, workspace URLs return NXDOMAIN and their certificates
+    stay pending forever, because cert-manager's HTTP-01 self-check fails on the very
+    same lookup. The wizard shows this same guidance inline as soon as you pick that
+    option.
+
+![DNS configuration](screens/dns-config.png)
+
+Two infrastructure toggles sit in the main flow, not tucked behind a click, so you
+can find them even if you're just skimming: **Ingress Controller** (always shown) and
+**cert-manager** (shown once a custom domain is selected — it has nothing to do in
+Quick start mode). Both default to "install a new one"; switch to "use existing" if
+your cluster already has one, and a namespace/service-name override appears.
+
+When installing (not reusing) either component, a **Node Selector** field appears
+underneath it — **Traefik Node Selector** and **cert-manager Node Selector**. Add
+key/value label pairs to pin that component's pod to nodes carrying those labels,
+the same mechanism used for [workspace template node
+selectors](#splitting-easylab-and-workspaces-across-node-pools), applied here to the
+ingress controller and cert-manager themselves rather than to student workspaces.
+Useful for keeping shared infrastructure pods off a tainted or GPU-flavored node
+pool, or for co-locating them with a specific pool for cost or locality reasons.
+
+!!! note "Reusing cert-manager across labs on the same cluster"
+    Picking **Use existing cert-manager** together with **Custom domain — automatic**
+    reveals **Is DNS-01 already set up on this cert-manager?**. Choose **Already
+    configured** if an earlier lab on this same cluster already created the
+    ClusterIssuer, DNS-01 webhook, and credential secret — EasyLab then skips
+    recreating them (which would otherwise conflict) and reuses them as-is. You still
+    fill in the DNS provider, zone, and credentials below: this lab still needs its
+    own DNS A-record created, since every lab has its own domain and ingress IP.
+    Leave it on **Set it up for me** (the default) for the first lab on a cluster, or
+    if you're not sure.
+
+    Choosing **Already configured** also reveals **Existing ClusterIssuer Name**.
+    EasyLab requests certificates from a ClusterIssuer named `letsencrypt-prod` by
+    default and, on a fresh cert-manager, creates one under that name itself — but
+    here it is skipping that creation and reusing whatever already exists. If the
+    existing ClusterIssuer was created under a different name (for example, by a
+    Helm-based install that names it after its DNS provider), set this field to that
+    exact name. A mismatch here doesn't fail loudly: cert-manager's
+    `CertificateRequest` just stalls waiting for an issuer that doesn't exist, no
+    certificate is ever issued, and the ingress controller falls back to serving its
+    own self-signed default certificate instead.
+
+An **Advanced options** section holds the **Wildcard Domain** override. It only
+appears for **Custom domain — automatic** with the **Wildcard record** DNS strategy
+(see [ExternalDNS](#externaldns-optional) below) — that override has no effect in any
+other mode, so the wizard hides it rather than show a field that silently does nothing.
+
+The following components are deployed into the cluster:
+
+* **Traefik** — Kubernetes ingress controller (gets its own LoadBalancer IP, exported as `ingressIP`). Installed whether or not a domain is set, since the nip.io fallback routes through it too.
+* **cert-manager** — automates TLS certificate issuance from Let's Encrypt. Installed only when a domain is set; the nip.io fallback has no certificates to issue.
+
+!!! note "Destroying a lab never removes shared Traefik, cert-manager, or DNS-01 infrastructure"
+    Whether triggered manually or by [scheduled lab deletion](#lab-deletion),
+    destroying a lab always leaves its Traefik and cert-manager installations (and
+    their namespaces) in place, even if this lab created them — and the same goes
+    for the DNS-01 plumbing above: the ClusterIssuer, the DNS credential secret,
+    and (for OVH) the solver webhook and its RBAC grant. This matters most on
+    [Use Existing Cluster](#use-existing-cluster) setups, where other labs on the
+    same cluster keep reusing all of it exactly as described above — destroying
+    one lab, including whichever lab originally set DNS-01 up, can never take
+    down ingress, TLS, or certificate issuance for the others. On a dedicated
+    **Create New Infrastructure** cluster this has no visible effect, since the
+    underlying Kubernetes cluster is destroyed anyway.
+
+!!! note "The nip.io fallback needs a routable LoadBalancer IP"
+    nip.io resolves an IP embedded in the hostname, so the fallback only applies when
+    the ingress controller has an external **IP**. On a cluster whose LoadBalancer
+    exposes a hostname instead, or with no ingress controller, workspaces stay
+    cluster-internal and the lab's base URL shows as empty.
+
+![DNS configuration](screens/dns.png)
+
+After `pulumi up` completes, the stack output `ingressIP` is printed. **You must create a DNS A record** pointing `<domain> → <ingressIP>` in your DNS provider before the TLS certificate can be issued.
+
+!!! warning "TLS certificates and large labs"
+    **Without a DNS provider**, each student workspace obtains its **own** Let's Encrypt
+    certificate for its subdomain. Let's Encrypt limits issuance to about **50
+    certificates per week per registered domain** — and that budget is shared across
+    every subdomain of it, including services unrelated to EasyLab. A large lab (many
+    students × templates) can exceed the limit, and some workspaces then fail to get
+    TLS. Mitigations:
+
+    * **Configure a DNS provider** (below). EasyLab then issues a single wildcard
+      certificate for `*.<domain>` that every workspace shares — one certificate per
+      lab instead of one per workspace. This is the recommended fix.
+    * Keep labs modest, or spread them across more than one domain.
+    * Use the Let's Encrypt **staging** issuer while testing (no rate limit; browsers show an untrusted cert).
+
+!!! note "Opening a workspace"
+    A workspace only shows the **Open** button once its IDE is actually serving (a
+    readiness probe gates it), so a workspace running a long startup script stays in
+    the "starting" state until setup finishes — avoiding a connection-refused click.
+
+#### DNS Provider (Optional)
+
+Shown once you pick **Custom domain — automatic**. Select a DNS provider to automate A-record creation and unlock wildcard certificates (DNS-01 challenge):
+
+| Provider | Setup required |
+|----------|---------------|
+| **OVH DNS** | OVH application key, secret, and consumer key with `/domain/zone/*` permissions |
+| **Azure DNS** | Azure service principal with `DNS Zone Contributor` role on the DNS zone resource group |
+
+!!! warning "DNS Zone is required"
+    When you select a DNS provider you **must** fill in the **DNS Zone** field with the parent zone that hosts your domain — for example, domain `ai-bb.yodamad.fr` belongs to zone `yodamad.fr`. The domain must sit inside the zone. Leaving the zone empty (or entering a zone the domain is not part of) is rejected as soon as you submit the form, before any infrastructure is provisioned.
+
+When a DNS provider is configured:
+
+1. EasyLab automatically creates the A record `<domain> → <ingressIP>` during deployment.
+2. The wildcard A record `*.<domain> → <ingressIP>` is created too, so every student workspace subdomain resolves without any manual DNS work.
+3. cert-manager uses DNS-01 (instead of HTTP-01) to prove domain ownership, which supports wildcard certificates.
+4. A single **wildcard certificate** for `*.<domain>` is issued into the workspace namespace, and every workspace ingress is served from it. No workspace requests a certificate of its own, so the Let's Encrypt weekly limit stops being a concern — and because the certificate already exists, workspaces are reachable over HTTPS as soon as their pod is ready, with no ACME wait.
+
+##### ExternalDNS (Optional)
+
+Some DNS administrators will not hand out a wildcard record. Once a DNS provider is
+selected, a **DNS record strategy** choice appears below the credential fields —
+**Wildcard record** (default) or **ExternalDNS**. Picking **ExternalDNS** installs
+[ExternalDNS](https://kubernetes-sigs.github.io/external-dns/) into the cluster
+instead: it watches the workspace ingresses and creates one DNS record per workspace,
+removing each one when its workspace goes away.
+
+Both supported DNS providers work with it — Azure DNS at ExternalDNS's *Stable* support
+tier, OVHcloud at *Beta*. It reuses the same credentials you entered above, so there is
+nothing extra to configure. Note that OVH needs the `POST /domain/zone/*/refresh` right
+in addition to the `/domain/zone/*` record rights.
+
+Trade-offs versus the wildcard record:
+
+* Records appear roughly a minute after a workspace starts (ExternalDNS's sync interval, plus DNS TTL) rather than resolving instantly. The student portal already accounts for this — it withholds the **Open** button until the hostname actually resolves, so nobody clicks too early.
+* It adds a component to the cluster and holds a copy of the DNS credentials in its own namespace.
+
+The wildcard **certificate** is unaffected either way: it is issued through DNS-01 TXT
+records written by cert-manager, independently of what creates the A records.
+
+!!! note "OVH DNS credentials"
+    The OVH credentials for DNS management may differ from your cloud project credentials. Create a separate OVH application at <https://www.ovh.com/auth/api/createApp> with access to the `/domain/zone/*` endpoints.
+
+!!! note "Azure DNS credentials"
+    Create a service principal (`az ad sp create-for-rbac`) and assign it the `DNS Zone Contributor` role on the resource group that contains your Azure DNS zone. Azure DNS uses cert-manager's native solver — no additional webhook is required. If you also enable ExternalDNS, the same service principal needs `Reader` on that resource group on top of `DNS Zone Contributor`.
+
+### Environment Variables
+
+Each workspace template can define environment variables passed to the workspace container.
+
+**Manual entry** — Click **+ Add Variable** on a template row to add an environment variable name and value.
+
+![Environment variables](screens/variables.png)
+
+### Cleaning Configuration (Step 7)
+
+The last step of the wizard lets you configure automatic cleanup policies for both workspaces and the entire lab.
+
+![Cleaning configuration step](screens/cleaning-config.png){width=700}
+
+#### Workspace Lifetime
+
+Set **Workspace Lifetime** (with a unit of Hours or Days) to automatically delete student workspaces after a given duration. The cleanup service checks at a regular interval (default 5 minutes, configurable via `CLEANUP_INTERVAL_MINUTES`) and deletes any workspace whose creation time exceeds the limit.
+
+Leave the field at `0` or leave it empty to disable automatic workspace cleanup.
+
+#### Lab Deletion
+
+Set a **Date** (and optionally a **Time**) for the entire lab to be automatically destroyed. When the scheduled date/time is reached, EasyLab runs `pulumi destroy` on the lab without any manual action.
+
+* If only a date is set, the lab is destroyed at 23:59 that day.
+* Leave the date empty to disable scheduled lab deletion.
+* Like a manual destroy, this never removes the lab's Traefik or cert-manager
+  installation — see [the note above](#https-configuration-optional) on why.
+
+!!! note
+    The cleanup service also runs scheduled lab deletion checks at the same interval as workspace cleanup. Set `CLEANUP_INTERVAL_MINUTES` to a lower value if you need finer-grained precision (default is 5 minutes).
+
+!!! note "Recreating a lab that had a deletion date"
+    When you **Recreate** a lab whose scheduled deletion date has already passed, EasyLab prompts you for a **new** deletion date before recreating. This prevents the recreated lab from being destroyed immediately by the cleanup service. Enter a future date, or leave it blank to keep the recreated lab running with no scheduled deletion.
+
+## Dry run (preview before create)
+
+Before creating a lab, you can run a **dry run** to preview what Pulumi would do without actually provisioning resources. This is useful to validate configuration and catch errors early.
+
+1. Complete the lab creation wizard up to the final step.
+2. Click **Dry Run** instead of **Create Lab**. EasyLab runs `pulumi preview` and shows the planned changes.
+3. If the dry run succeeds, the job appears in the labs list with status **dry-run-completed** (🔍).
+4. From the labs list, you can then **Create Lab** on that job to perform the real deployment with the same configuration.
+
+Dry-run jobs do not create any cloud or Kubernetes resources; only real runs do.

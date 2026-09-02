@@ -11,6 +11,9 @@
         <div class="admin-page-header">
             <h1>Labs</h1>
             <div class="admin-page-header-actions">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="openStudentPasswordModal()">
+                    <span class="btn-icon">🔑</span> Student Password
+                </button>
                 <a href="/admin" class="btn btn-primary btn-sm">
                     <span class="btn-icon">➕</span> New Lab
                 </a>
@@ -72,89 +75,20 @@
                             </td>
                             <td class="lab-col-actions-cell">
                                 <div class="lab-row-actions-inline">
-                                    <a href="/admin/feedback?lab_id={{.ID}}" class="btn btn-info btn-icon-only tooltip-trigger" title="View student feedback for this lab">
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                                        </svg>
-                                        <span class="tooltip">View Feedback</span>
-                                    </a>
-                                    <a href="/admin?job={{.ID}}" class="btn btn-secondary btn-icon-only tooltip-trigger" title="View lab details and logs">
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                                        </svg>
-                                        <span class="tooltip">View Details</span>
-                                    </a>
-                                    {{if .HasKubeconfig}}
-                                    <a href="/api/labs/{{.ID}}/kubeconfig" class="btn btn-download btn-icon-only tooltip-trigger" title="Download Kubernetes kubeconfig file" download="kubeconfig-{{.ID}}.yaml">
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                        </svg>
-                                        <span class="tooltip">Download Kubeconfig</span>
-                                    </a>
-                                    {{end}}
-                                    <a href="/api/labs/templates/yaml?lab_id={{.ID}}&amp;download=1" class="btn btn-download btn-icon-only tooltip-trigger" title="Export this lab's workspace templates as YAML">
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-                                        </svg>
-                                        <span class="tooltip">Export Templates YAML</span>
-                                    </a>
-                                    {{if eq .Status "completed"}}
-                                    <a href="/labs/{{.ID}}/workspaces" class="btn btn-info btn-icon-only tooltip-trigger" title="View and manage workspaces">
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                                        </svg>
-                                        <span class="tooltip">View Workspaces</span>
-                                    </a>
-                                    <button type="button" class="btn btn-secondary btn-icon-only tooltip-trigger" title="Lab endpoint info" onclick="showCoderCredentials('{{.ID}}')">
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                        </svg>
-                                        <span class="tooltip">Lab Endpoint Info</span>
-                                    </button>
-                                    <button type="button" class="btn btn-primary btn-icon-only tooltip-trigger" title="Add a template to this lab" onclick="showUploadTemplateModal('{{.ID}}', '{{.StackName}}', '{{.WorkspaceTemplateNamesCSV}}')">
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                                        </svg>
-                                        <span class="tooltip">Add Template</span>
-                                    </button>
-                                    <button type="button" class="btn btn-secondary btn-icon-only tooltip-trigger" title="Edit workspace lifetime and lab deletion date" onclick="showEditLifecycleModal('{{.ID}}', '{{.StackName}}', {{.WorkspaceLifetimeHours}}, '{{.LabDeletionDateValue}}', '{{.LabDeletionTimeValue}}')">
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                        </svg>
-                                        <span class="tooltip">Edit Lifecycle</span>
-                                    </button>
-                                    {{end}}
+                                    <a href="/labs/{{.ID}}" class="btn btn-primary btn-sm">Manage</a>
                                     {{if eq .Status "failed"}}
-                                    <button type="button" class="btn btn-primary btn-icon-only tooltip-trigger" title="Retry this failed lab deployment" onclick="openRetryChoiceModal('{{.ID}}')">
+                                    <button type="button" class="btn btn-secondary btn-icon-only tooltip-trigger" title="Retry this failed lab deployment" onclick="openRetryChoiceModal('{{.ID}}')">
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                                         </svg>
                                         <span class="tooltip">Retry Lab</span>
                                     </button>
-                                    {{end}}
-                                    {{if and .StackName (or (eq .Status "completed") (eq .Status "failed"))}}
-                                    <button type="button" class="btn btn-danger btn-icon-only tooltip-trigger" title="Destroy stack and all resources" onclick="destroyStack('{{.ID}}')">
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                        </svg>
-                                        <span class="tooltip">Destroy Stack</span>
-                                    </button>
-                                    {{end}}
-                                    {{if .IsDestroyed}}
+                                    {{else if .IsDestroyed}}
                                     <button type="button" class="btn btn-success btn-icon-only tooltip-trigger" title="Recreate this lab" onclick="openRecreateChoiceModal('{{.ID}}')">
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                                         </svg>
                                         <span class="tooltip">Recreate Lab</span>
-                                    </button>
-                                    {{end}}
-                                    {{if or (eq .Status "destroyed") (eq .Status "failed")}}
-                                    <button type="button" class="btn btn-danger btn-icon-only tooltip-trigger" title="Remove this lab from the list" onclick="removeLab('{{.ID}}')">
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                                        </svg>
-                                        <span class="tooltip">Remove Lab</span>
                                     </button>
                                     {{end}}
                                 </div>
@@ -194,285 +128,28 @@
         </div>
         </div>
 
-        <div id="upload-template-overlay" class="ut-drawer-overlay" onclick="closeUploadTemplateModal()" aria-hidden="true">
-            <div class="ut-panel" onclick="event.stopPropagation()" role="dialog" aria-modal="true" aria-labelledby="ut-panel-title">
-                <div class="ut-panel-header">
-                    <div class="ut-panel-title-group">
-                        <svg class="ut-panel-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                        </svg>
-                        <h3 id="ut-panel-title" class="ut-panel-title">Add Template</h3>
-                    </div>
-                    <button type="button" class="ut-panel-close" onclick="closeUploadTemplateModal()" title="Close" aria-label="Close">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
+        <div id="student-password-overlay" class="credentials-modal-overlay" onclick="closeStudentPasswordModal()" aria-hidden="true">
+            <div class="credentials-modal" onclick="event.stopPropagation()">
+                <div class="credentials-modal-header">
+                    <h3>Student Portal Login</h3>
+                    <button type="button" class="credentials-modal-close" onclick="closeStudentPasswordModal()" title="Close" aria-label="Close">&times;</button>
                 </div>
-
-                <div class="ut-drawer-context" id="ut-drawer-lab-context" style="display: none;"></div>
-
-                <div class="ut-panel-body">
-                    <div id="upload-template-error" class="ut-alert ut-alert--error" style="display: none;"></div>
-
-                    <form id="upload-template-form" onsubmit="submitUploadTemplate(event)" novalidate>
-
-                        <!-- Mode selector: same three ways to define a workspace as lab creation -->
-                        <div class="ut-step">
-                            <div class="ut-step-header">
-                                <span class="ut-step-label">How do you want to define this workspace?</span>
-                            </div>
-                            <div class="ut-step-body">
-                                <div class="button-group">
-                                    <button type="button" class="source-button selected" data-templates-mode="form" id="ut-templates-mode-form">
-                                        <span class="source-icon">&#128221;</span>
-                                        <div class="source-content">
-                                            <span class="source-title">Build with a form</span>
-                                            <span class="source-description">Fill in the fields</span>
-                                        </div>
-                                    </button>
-                                    <button type="button" class="source-button" data-templates-mode="devcontainer" id="ut-templates-mode-devcontainer">
-                                        <span class="source-icon">&#128230;</span>
-                                        <div class="source-content">
-                                            <span class="source-title">From a devcontainer</span>
-                                            <span class="source-description">Import a repo's .devcontainer</span>
-                                        </div>
-                                    </button>
-                                    <button type="button" class="source-button" data-templates-mode="yaml" id="ut-templates-mode-yaml">
-                                        <span class="source-icon">&#128196;</span>
-                                        <div class="source-content">
-                                            <span class="source-title">Paste YAML</span>
-                                            <span class="source-description">Write it as YAML</span>
-                                        </div>
-                                    </button>
-                                </div>
-                                <input type="hidden" id="ut-templates-mode" name="templates_mode" value="form">
+                <div class="credentials-modal-body">
+                    <p>The shared password every student uses to sign in to the student area (<code>LAB_STUDENT_PASSWORD</code>). This is separate from a student's own workspace password, which is personal to them and is never shown here.</p>
+                    <div id="student-password-loading">Loading…</div>
+                    <div id="student-password-error" class="error-message" style="display: none;"></div>
+                    <div id="student-password-fields" class="credentials-modal-fields" style="display: none;">
+                        <div class="credentials-modal-row">
+                            <label for="student-password-value">Password</label>
+                            <div class="credentials-modal-value-wrap">
+                                <input type="text" id="student-password-value" readonly class="credentials-modal-input">
+                                <button type="button" class="btn btn-secondary credentials-copy-btn" onclick="copyStudentPasswordToClipboard(this)" title="Copy">Copy</button>
                             </div>
                         </div>
-
-                        <!-- Form mode -->
-                        <div id="ut-templates-form-mode">
-                            <div class="ut-template-fields" data-template-index="0">
-                                <div class="ut-step">
-                                    <div class="ut-step-header">
-                                        <span class="ut-step-number" aria-hidden="true">1</span>
-                                        <span class="ut-step-label">Template name</span>
-                                    </div>
-                                    <div class="ut-step-body">
-                                        <input type="text" name="template_0_name" data-field="name" class="ut-name-input" placeholder="e.g. docker-workspace" autocomplete="off" required />
-                                    </div>
-                                </div>
-                                <div class="ut-step">
-                                    <div class="ut-step-header">
-                                        <span class="ut-step-number" aria-hidden="true">2</span>
-                                        <span class="ut-step-label">Git repository</span>
-                                        <span class="ut-optional-badge">optional</span>
-                                    </div>
-                                    <div class="ut-step-body">
-                                        <input type="text" name="template_0_git_repo" data-field="git_repo" class="ut-name-input" placeholder="https://gitlab.com/user/repo.git" autocomplete="off" />
-                                        <div class="form-row">
-                                            <input type="text" name="template_0_git_branch" data-field="git_branch" class="ut-name-input" placeholder="branch (default branch)" autocomplete="off" />
-                                            <input type="text" name="template_0_git_folder" data-field="git_folder" class="ut-name-input" placeholder="subfolder to open" autocomplete="off" />
-                                        </div>
-                                    </div>
-                                </div>
-                                <details class="template-advanced">
-                                    <summary>Advanced options</summary>
-                                    <div class="template-advanced-body">
-                                        <div class="form-group">
-                                            <label>Git credential (Optional)</label>
-                                            <select name="template_0_git_auth_secret" data-field="git_auth_secret" class="template-git-cred-select">
-                                                <option value="">None</option>
-                                            </select>
-                                            <small>Credentials are configured when a lab is created; a private repository added here needs one that already exists on the lab.</small>
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Image (Optional)</label>
-                                            <input type="text" name="template_0_image" data-field="image" placeholder="codercom/code-server:latest">
-                                            <small>Container image override. Defaults to the code-server image.</small>
-                                        </div>
-                                        <div class="template-resources">
-                                            <div class="form-group">
-                                                <label>CPU (Optional)</label>
-                                                <input type="text" name="template_0_cpu" data-field="cpu" placeholder="500m">
-                                            </div>
-                                            <div class="form-group">
-                                                <label>CPU Limit (Optional)</label>
-                                                <input type="text" name="template_0_cpu_limit" data-field="cpu_limit" placeholder="defaults to CPU">
-                                            </div>
-                                            <div class="form-group">
-                                                <label>Memory (Optional)</label>
-                                                <input type="text" name="template_0_memory" data-field="memory" placeholder="1Gi">
-                                            </div>
-                                            <div class="form-group">
-                                                <label>Memory Limit (Optional)</label>
-                                                <input type="text" name="template_0_memory_limit" data-field="memory_limit" placeholder="defaults to Memory">
-                                            </div>
-                                            <div class="form-group">
-                                                <label>Disk Size (Optional)</label>
-                                                <input type="text" name="template_0_disk_size" data-field="disk_size" placeholder="5Gi">
-                                            </div>
-                                        </div>
-                                        <div class="form-group">
-                                            <small>CPU/Memory are the request; CPU Limit/Memory Limit override the limit independently — left blank, the limit matches the request. For a devcontainer-enabled template, layer extraction is CPU/disk-heavy under concurrent load: when all four are left blank, EasyLab defaults to 500m CPU (limit 2) / 2Gi memory / 5Gi ephemeral storage, but set them explicitly to size for your base image and expected class size.</small>
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Startup Script (Optional)</label>
-                                            <textarea name="template_0_startup_script" data-field="startup_script" rows="4" class="monospace" placeholder="# runs before the IDE starts"></textarea>
-                                            <small>Runs (best-effort) on start. code-server has passwordless sudo, so the script can install system packages with apt.</small>
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Dotfiles Repository (Optional)</label>
-                                            <input type="text" name="template_0_dotfiles_repo" data-field="dotfiles_repo" placeholder="https://github.com/you/dotfiles">
-                                            <small>Cloned to ~/.dotfiles; its install.sh / setup.sh / bootstrap.sh is run if present.</small>
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Extensions (Optional)</label>
-                                            <input type="text" name="template_0_extensions" data-field="extensions" placeholder="golang.go, ms-python.python">
-                                            <small>Comma-separated VS Code extension IDs installed on start.</small>
-                                        </div>
-                                        <div class="template-variables-section">
-                                            <div class="template-variables-header">
-                                                <label>Environment Variables</label>
-                                                <div class="template-variables-actions">
-                                                    <button type="button" class="btn btn-secondary btn-add-variable">+ Add Variable</button>
-                                                </div>
-                                            </div>
-                                            <small>Environment variables passed to the workspace container.</small>
-                                            <div class="template-variables-container"></div>
-                                        </div>
-                                        <div class="template-variables-section">
-                                            <div class="template-variables-header">
-                                                <label>Sidecars</label>
-                                                <div class="template-variables-actions">
-                                                    <button type="button" class="btn btn-secondary btn-add-sidecar">+ Add Sidecar</button>
-                                                </div>
-                                            </div>
-                                            <small>Extra containers in the pod (e.g. a database), reachable from the IDE at localhost:&lt;port&gt;.</small>
-                                            <div class="template-sidecars-container"></div>
-                                        </div>
-                                        <div class="template-variables-section">
-                                            <div class="template-variables-header">
-                                                <label>Mounts</label>
-                                                <div class="template-variables-actions">
-                                                    <button type="button" class="btn btn-secondary btn-add-mount">+ Add Mount</button>
-                                                </div>
-                                            </div>
-                                            <small>Mount an existing ConfigMap/Secret (in the workspace namespace) into the container.</small>
-                                            <div class="template-mounts-container"></div>
-                                        </div>
-                                    </div>
-                                </details>
-                            </div>
-                        </div>
-
-                        <!-- Devcontainer mode -->
-                        <div id="ut-templates-devcontainer-mode" style="display: none;">
-                            <div class="devcontainer-import">
-                                <p class="devcontainer-import-intro">
-                                    Build the workspace from the workshop repository's <code>.devcontainer/devcontainer.json</code>.
-                                    Anything the builder cannot honour is written into a YAML document that opens for review before the template is added.
-                                </p>
-                                <div class="form-group">
-                                    <label for="ut-dc-template-name">Template name</label>
-                                    <input type="text" id="ut-dc-template-name" placeholder="e.g. go-workshop" autocomplete="off" required>
-                                    <small>How students see this workspace. Lowercased, with dashes for anything else. Must not clash with a template already on this lab.</small>
-                                </div>
-                                <div class="form-group">
-                                    <label>Read the devcontainer from</label>
-                                    <div class="button-group">
-                                        <button type="button" class="source-button selected" data-devcontainer-source="git" id="ut-dc-source-git">
-                                            <span class="source-icon">&#128279;</span>
-                                            <div class="source-content">
-                                                <span class="source-title">Git repository</span>
-                                                <span class="source-description">Clone the repo and read its devcontainer</span>
-                                            </div>
-                                        </button>
-                                        <button type="button" class="source-button" data-devcontainer-source="upload" id="ut-dc-source-upload">
-                                            <span class="source-icon">&#128228;</span>
-                                            <div class="source-content">
-                                                <span class="source-title">Upload</span>
-                                                <span class="source-description">A devcontainer.json or a repository .zip</span>
-                                            </div>
-                                        </button>
-                                    </div>
-                                </div>
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label for="ut-dc-git-repo">Workshop repository</label>
-                                        <input type="text" id="ut-dc-git-repo" placeholder="https://gitlab.com/org/workshop.git">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="ut-dc-git-branch">Branch</label>
-                                        <input type="text" id="ut-dc-git-branch" placeholder="default branch">
-                                    </div>
-                                </div>
-                                <div id="ut-dc-upload-row" class="form-group" style="display: none;">
-                                    <label for="ut-dc-file">devcontainer.json or repository .zip</label>
-                                    <input type="file" id="ut-dc-file" accept=".json,.zip">
-                                    <small>The repository field above is still used for the generated template's <code>git_repo</code>, since that is what students clone.</small>
-                                </div>
-                                <div id="ut-dc-git-auth-row" class="form-row">
-                                    <div class="form-group">
-                                        <label for="ut-dc-git-username">Username</label>
-                                        <input type="text" id="ut-dc-git-username" placeholder="oauth2" autocomplete="off">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="ut-dc-git-token">Access token</label>
-                                        <input type="password" id="ut-dc-git-token" autocomplete="off">
-                                        <small>Only if the repository is private. Used to read the devcontainer now and then discarded — it is not saved.</small>
-                                    </div>
-                                </div>
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label for="ut-dc-dir">Devcontainer folder</label>
-                                        <input type="text" id="ut-dc-dir" placeholder=".devcontainer">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="ut-dc-cache-repo">Cache registry</label>
-                                        <input type="text" id="ut-dc-cache-repo" placeholder="registry.example.com/easylab/cache">
-                                        <small>Required. Without it every student rebuilds the devcontainer from scratch.</small>
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <small>code-server is injected into the built image, so it is independent of the devcontainer's base image. That base must be glibc — the injected IDE cannot run on Alpine/musl.</small>
-                                </div>
-                                <div class="devcontainer-import-actions">
-                                    <button type="button" id="ut-dc-import-btn" class="btn btn-primary btn-sm">Import</button>
-                                    <button type="button" id="ut-dc-review-yaml-btn" class="btn btn-secondary btn-sm" style="display: none;">Review generated YAML &rarr;</button>
-                                </div>
-                                <div id="ut-dc-result" class="devcontainer-import-result"></div>
-                            </div>
-                        </div>
-
-                        <!-- Paste YAML mode -->
-                        <div id="ut-templates-yaml-mode" style="display: none;">
-                            <div class="form-group">
-                                <div class="templates-yaml-header">
-                                    <label for="ut-templates-yaml">Workspace Templates YAML</label>
-                                    <div class="templates-yaml-actions">
-                                        <button type="button" id="ut-yaml-validate-btn" class="btn btn-secondary btn-sm">Validate</button>
-                                        <button type="button" id="ut-yaml-skeleton-btn" class="btn btn-secondary btn-sm">Insert skeleton</button>
-                                        <button type="button" id="ut-yaml-upload-btn" class="btn btn-secondary btn-sm">Upload file</button>
-                                        <input type="file" id="ut-yaml-file" accept=".yaml,.yml" class="file-input-hidden">
-                                    </div>
-                                </div>
-                                <textarea id="ut-templates-yaml" name="templates_yaml" rows="16" class="monospace" spellcheck="false"></textarea>
-                                <small>The YAML is used as-is when this mode is selected — the form fields are ignored. It may define more than one template.</small>
-                                <div id="ut-templates-yaml-validation" class="templates-yaml-validation"></div>
-                            </div>
-                        </div>
-
-                        <div class="ut-footer">
-                            <button type="submit" id="upload-template-submit-btn" class="ut-submit-btn">
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                                </svg>
-                                Add Template
-                            </button>
-                        </div>
-
-                    </form>
+                    </div>
+                    <div id="student-password-unset" class="info-box" style="display: none;">
+                        <p><code>LAB_STUDENT_PASSWORD</code> is not set on this deployment, so classic student login is disabled. Students can only sign in via Azure AD, if configured (<a href="/admin/azure-ad">Azure AD settings</a>).</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -508,105 +185,10 @@
                 </div>
             </div>
         </div>
-
-        <div id="recreate-credentials-overlay" class="credentials-modal-overlay" onclick="closeRecreateCredentialsModal()" aria-hidden="true">
-            <div class="credentials-modal" onclick="event.stopPropagation()">
-                <div class="credentials-modal-header">
-                    <h3>Recreate lab</h3>
-                    <button type="button" class="credentials-modal-close" onclick="closeRecreateCredentialsModal()" title="Close" aria-label="Close">&times;</button>
-                </div>
-                <div class="credentials-modal-body">
-                    <form id="recreate-credentials-form">
-                        <input type="hidden" name="job_id" id="recreate-job-id">
-                        <div id="recreate-credentials-error" style="display: none;"></div>
-                        <div id="recreate-credentials-rows"></div>
-                        <div class="credentials-modal-actions">
-                            <button type="submit" class="btn btn-success btn-sm">Recreate lab</button>
-                            <button type="button" class="btn btn-secondary btn-sm" onclick="closeRecreateCredentialsModal()">Cancel</button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        </div>
-
-        <div id="coder-credentials-overlay" class="credentials-modal-overlay" onclick="closeCoderCredentialsModal()" aria-hidden="true">
-            <div class="credentials-modal" onclick="event.stopPropagation()">
-                <div class="credentials-modal-header">
-                    <h3>Lab Endpoint Info</h3>
-                    <button type="button" class="credentials-modal-close" onclick="closeCoderCredentialsModal()" title="Close" aria-label="Close">&times;</button>
-                </div>
-                <div id="coder-credentials-content" class="credentials-modal-body">
-                    <div id="coder-credentials-loading" class="credentials-modal-loading" style="display: none;">Loading…</div>
-                    <div id="coder-credentials-error" class="credentials-modal-error" style="display: none;"></div>
-                    <div id="coder-credentials-fields" class="credentials-modal-fields" style="display: none;">
-                        <div class="credentials-modal-row">
-                            <label for="coder-cred-url">Workspace base URL</label>
-                            <div class="credentials-modal-value-wrap">
-                                <input type="text" id="coder-cred-url" readonly class="credentials-modal-input" />
-                                <button type="button" class="btn btn-secondary credentials-copy-btn" onclick="copyCoderCredToClipboard('coder-cred-url', this)" title="Copy">Copy</button>
-                            </div>
-                        </div>
-                        <div class="credentials-modal-row">
-                            <label for="coder-cred-email">Namespace</label>
-                            <div class="credentials-modal-value-wrap">
-                                <input type="text" id="coder-cred-email" readonly class="credentials-modal-input" />
-                                <button type="button" class="btn btn-secondary credentials-copy-btn" onclick="copyCoderCredToClipboard('coder-cred-email', this)" title="Copy">Copy</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div id="edit-lifecycle-overlay" class="credentials-modal-overlay" onclick="closeEditLifecycleModal()" aria-hidden="true">
-            <div class="credentials-modal" onclick="event.stopPropagation()">
-                <div class="credentials-modal-header">
-                    <h3>Edit Lifecycle</h3>
-                    <button type="button" class="credentials-modal-close" onclick="closeEditLifecycleModal()" title="Close" aria-label="Close">&times;</button>
-                </div>
-                <div class="credentials-modal-body">
-                    <form id="edit-lifecycle-form">
-                        <input type="hidden" name="job_id" id="edit-lifecycle-job-id">
-                        <div id="edit-lifecycle-error" style="display: none;"></div>
-
-                        <div class="form-group">
-                            <label for="edit-lifecycle-hours">Workspace Lifetime (Optional)</label>
-                            <div class="lifetime-input">
-                                <input type="number" id="edit-lifecycle-hours" name="workspace_lifetime_hours" min="0" placeholder="0">
-                                <select id="edit-lifecycle-unit" name="workspace_lifetime_unit">
-                                    <option value="hours">Hours</option>
-                                    <option value="days">Days</option>
-                                </select>
-                            </div>
-                            <small>Auto-delete workspaces after this duration. Leave 0 to disable.</small>
-                        </div>
-
-                        <div class="form-group">
-                            <label>Lab Deletion (Optional)</label>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="edit-lifecycle-date">Date</label>
-                                    <input type="date" id="edit-lifecycle-date" name="lab_deletion_date">
-                                </div>
-                                <div class="form-group">
-                                    <label for="edit-lifecycle-time">Time</label>
-                                    <input type="time" id="edit-lifecycle-time" name="lab_deletion_time" placeholder="23:59">
-                                </div>
-                            </div>
-                            <small>Automatically destroy the entire lab at the specified date and time. Time defaults to end of day (23:59) if not set. Leave date empty to disable.</small>
-                        </div>
-
-                        <div class="credentials-modal-actions">
-                            <button type="submit" class="btn btn-success btn-sm">Save</button>
-                            <button type="button" class="btn btn-secondary btn-sm" onclick="closeEditLifecycleModal()">Cancel</button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        </div>
     </div>
 </div>
 
     <script src="/static/header-provider.js"></script>
+    <script src="/static/lab-detail.js"></script>
     <script src="/static/labs-list.js"></script>
 {{end}}

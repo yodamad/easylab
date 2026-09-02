@@ -418,6 +418,7 @@ func main() {
 	mux.HandleFunc("/api/azure-options", authHandler.RequireAuth(handler.SaveAzureOptions))
 	mux.HandleFunc("/api/azure-options/refresh", authHandler.RequireAuth(handler.RefreshAzureOptions))
 	mux.HandleFunc("/api/azure-ad-config", authHandler.RequireAuth(handler.SaveAzureADConfig))
+	mux.HandleFunc("/api/student-portal-password", authHandler.RequireAuth(handler.GetStudentPortalPassword))
 	mux.HandleFunc("/api/templates/detect-variables", authHandler.RequireAuth(handler.DetectTemplateVariables))
 	mux.HandleFunc("/api/templates/detect-devcontainer", authHandler.RequireAuth(handler.DetectDevcontainer))
 	mux.HandleFunc("/api/labs", authHandler.RequireAuth(handler.CreateLab))
@@ -431,14 +432,14 @@ func main() {
 	mux.HandleFunc("/api/labs/", authHandler.RequireAuth(routeLabRequest))
 	// Backward compatibility route
 	mux.HandleFunc("/api/jobs/", authHandler.RequireAuth(routeLabRequest))
-	// Workspace management routes
+	// Per-lab pages: the old dedicated workspaces page now redirects into the
+	// consolidated lab detail page (see ServeLabWorkspaces/ServeLabDetail).
 	mux.HandleFunc("/labs/", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
-		// Check if this is a workspace page request
 		if strings.HasSuffix(r.URL.Path, "/workspaces") {
 			handler.ServeLabWorkspaces(w, r)
 			return
 		}
-		http.NotFound(w, r)
+		handler.ServeLabDetail(w, r)
 	}))
 
 	// Configure server with timeouts

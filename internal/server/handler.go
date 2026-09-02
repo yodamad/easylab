@@ -976,7 +976,7 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 		"azure-provider.html":     "web/azure-provider.html",
 		"azure-ad.html":           "web/azure-ad.html",
 		"labs-list.html":          "web/labs-list.html",
-		"lab-workspaces.html":     "web/lab-workspaces.html",
+		"lab-detail.html":         "web/lab-detail.html",
 		"admin-stats.html":        "web/admin-stats.html",
 	}
 
@@ -2964,6 +2964,29 @@ func (h *Handler) ServeAzureAD(w http.ResponseWriter, r *http.Request) {
 	h.serveTemplate(w, "azure-ad.html", azureAD)
 }
 
+// GetStudentPortalPassword returns the current shared password students use to
+// sign in to the student area (classic login, set via LAB_STUDENT_PASSWORD).
+// This lets an admin without shell/deployment access hand it out without
+// tracking down whoever set the environment variable. It is the one password
+// every student shares to reach the portal — distinct from, and unrelated to,
+// a student's own per-workspace code-server password, which is personal and
+// is never exposed through the admin UI.
+func (h *Handler) GetStudentPortalPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	password := os.Getenv(EnvStudentPassword)
+	h.recordAudit(adminActor(r), "admin", "student_portal_password.view", "", "")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"password": password,
+		"set":      password != "",
+	})
+}
+
 // SaveAzureADConfig handles saving Azure AD OAuth configuration from the admin page.
 func (h *Handler) SaveAzureADConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -3215,95 +3238,9 @@ func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
 	page, totalPages, start, end := labsPagination(totalCount, atoiForm(r.URL.Query().Get("page")))
 	allJobs = allJobs[start:end]
 
-	// Helper function to shorten lab ID
-	shortenLabID := func(id string) string {
-		if len(id) <= 16 {
-			return id
-		}
-		return id[:8] + "..." + id[len(id)-4:]
-	}
-
-	// Prepare lab data for template (without sensitive info)
-	type LabDisplay struct {
-		ID                        string
-		IDShort                   string
-		Status                    string
-		CreatedAt                 string
-		UpdatedAt                 string
-		StackName                 string
-		Description               string
-		IsDryRun                  bool
-		HasError                  bool
-		ErrorMsg                  string
-		HasKubeconfig             bool
-		IsDestroyed               bool
-		WorkspaceLifetimeHours    int
-		LabDeletionDate           string
-		LabDeletionDateValue      string
-		LabDeletionTimeValue      string
-		HasDeletionDate           bool
-		WorkspaceTemplateNamesCSV string
-	}
-
-	labsDisplay := make([]LabDisplay, 0, len(allJobs))
+	labsDisplay := make([]LabSummary, 0, len(allJobs))
 	for _, job := range allJobs {
-		job.mu.RLock()
-		status := string(job.Status)
-		stackName := ""
-		description := ""
-		if job.Config != nil {
-			stackName = job.Config.StackName
-			description = job.Config.Description
-		}
-		isDryRun := job.Status == JobStatusDryRunCompleted
-		hasError := job.Error != ""
-		errorMsg := job.Error
-		hasKubeconfig := job.Kubeconfig != ""
-		isDestroyed := job.Status == JobStatusDestroyed
-		createdAt := job.CreatedAt.Format("2006-01-02 15:04:05")
-		updatedAt := job.UpdatedAt.Format("2006-01-02 15:04:05")
-		workspaceLifetimeHours := 0
-		if job.Config != nil {
-			workspaceLifetimeHours = job.Config.WorkspaceLifetimeHours
-		}
-		labDeletionDate := ""
-		labDeletionDateValue := ""
-		labDeletionTimeValue := ""
-		hasLabDeletionDate := false
-		if job.Config != nil && job.Config.LabDeletionDate != nil {
-			labDeletionDate = job.Config.LabDeletionDate.Format("Jan 02, 2006 at 15:04")
-			labDeletionDateValue = job.Config.LabDeletionDate.Format("2006-01-02")
-			labDeletionTimeValue = job.Config.LabDeletionDate.Format("15:04")
-			hasLabDeletionDate = true
-		}
-		var templateNames []string
-		if job.Config != nil {
-			for _, t := range job.Config.WorkspaceTemplates {
-				templateNames = append(templateNames, t.Name)
-			}
-		}
-		job.mu.RUnlock()
-
-		labsDisplay = append(labsDisplay, LabDisplay{
-			ID:                        job.ID,
-			IDShort:                   shortenLabID(job.ID),
-			Status:                    status,
-			CreatedAt:                 createdAt,
-			UpdatedAt:                 updatedAt,
-			StackName:                 stackName,
-			Description:               description,
-			IsDryRun:                  isDryRun,
-			HasError:                  hasError,
-			ErrorMsg:                  errorMsg,
-			HasKubeconfig:             hasKubeconfig,
-			IsDestroyed:               isDestroyed,
-			WorkspaceLifetimeHours:    workspaceLifetimeHours,
-			LabDeletionDate:           labDeletionDate,
-			LabDeletionDateValue:      labDeletionDateValue,
-			LabDeletionTimeValue:      labDeletionTimeValue,
-			HasDeletionDate:           hasLabDeletionDate,
-			WorkspaceTemplateNamesCSV: strings.Join(templateNames, ", "),
-		})
+		labsDisplay = append(labsDisplay, buildLabSummary(job))
 	}
 
 	data := map[string]interface{}{
@@ -3318,6 +3255,117 @@ func (h *Handler) ServeLabsList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.serveTemplate(w, "labs-list.html", data)
+}
+
+// shortenLabID shortens a job ID for compact display (e.g. table rows),
+// keeping enough of the prefix/suffix to stay identifiable.
+func shortenLabID(id string) string {
+	if len(id) <= 16 {
+		return id
+	}
+	return id[:8] + "..." + id[len(id)-4:]
+}
+
+// LabSummary is the display-safe summary of a lab (job), shared by the labs
+// list and the lab detail page.
+type LabSummary struct {
+	ID                        string
+	IDShort                   string
+	Status                    string
+	CreatedAt                 string
+	UpdatedAt                 string
+	StackName                 string
+	Description               string
+	Provider                  string
+	Domain                    string
+	K8sClusterName            string
+	NodePoolFlavor            string
+	NodePoolDesiredNodeCount  int
+	DNSProvider               string
+	UseExistingCluster        bool
+	IsDryRun                  bool
+	HasError                  bool
+	ErrorMsg                  string
+	HasKubeconfig             bool
+	IsDestroyed               bool
+	WorkspaceLifetimeHours    int
+	LabDeletionDate           string
+	LabDeletionDateValue      string
+	LabDeletionTimeValue      string
+	HasDeletionDate           bool
+	WorkspaceTemplateNamesCSV string
+}
+
+// buildLabSummary builds the display-safe summary for a single lab (job),
+// reading its fields under a read lock.
+func buildLabSummary(job *Job) LabSummary {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+
+	stackName := ""
+	description := ""
+	provider := ""
+	domain := ""
+	k8sClusterName := ""
+	nodePoolFlavor := ""
+	nodePoolDesiredNodeCount := 0
+	dnsProvider := ""
+	useExistingCluster := false
+	workspaceLifetimeHours := 0
+	labDeletionDate := ""
+	labDeletionDateValue := ""
+	labDeletionTimeValue := ""
+	hasLabDeletionDate := false
+	var templateNames []string
+	if job.Config != nil {
+		stackName = job.Config.StackName
+		description = job.Config.Description
+		provider = job.Config.Provider
+		domain = job.Config.Domain
+		k8sClusterName = job.Config.K8sClusterName
+		nodePoolFlavor = job.Config.NodePoolFlavor
+		nodePoolDesiredNodeCount = job.Config.NodePoolDesiredNodeCount
+		dnsProvider = job.Config.DNSProvider
+		useExistingCluster = job.Config.UseExistingCluster
+		workspaceLifetimeHours = job.Config.WorkspaceLifetimeHours
+		if job.Config.LabDeletionDate != nil {
+			labDeletionDate = job.Config.LabDeletionDate.Format("Jan 02, 2006 at 15:04")
+			labDeletionDateValue = job.Config.LabDeletionDate.Format("2006-01-02")
+			labDeletionTimeValue = job.Config.LabDeletionDate.Format("15:04")
+			hasLabDeletionDate = true
+		}
+		for _, t := range job.Config.WorkspaceTemplates {
+			templateNames = append(templateNames, t.Name)
+		}
+	}
+
+	return LabSummary{
+		ID:                        job.ID,
+		IDShort:                   shortenLabID(job.ID),
+		Status:                    string(job.Status),
+		CreatedAt:                 job.CreatedAt.Format("2006-01-02 15:04:05"),
+		UpdatedAt:                 job.UpdatedAt.Format("2006-01-02 15:04:05"),
+		StackName:                 stackName,
+		Description:               description,
+		Provider:                  provider,
+		Domain:                    domain,
+		K8sClusterName:            k8sClusterName,
+		NodePoolFlavor:            nodePoolFlavor,
+		NodePoolDesiredNodeCount:  nodePoolDesiredNodeCount,
+		DNSProvider:               dnsProvider,
+		UseExistingCluster:        useExistingCluster,
+		IsDryRun:                  job.Status == JobStatusDryRunCompleted,
+		HasError:                  job.Error != "",
+		ErrorMsg:                  job.Error,
+		HasKubeconfig:             job.Kubeconfig != "",
+		IsDestroyed:               job.Status == JobStatusDestroyed,
+		WorkspaceLifetimeHours:    workspaceLifetimeHours,
+		LabDeletionDate:           labDeletionDate,
+		LabDeletionDateValue:      labDeletionDateValue,
+		LabDeletionTimeValue:      labDeletionTimeValue,
+		HasDeletionDate:           hasLabDeletionDate,
+		WorkspaceTemplateNamesCSV: strings.Join(templateNames, ", "),
+	}
 }
 
 // TemplateStatus summarizes a configured workspace template and how many live
@@ -3388,7 +3436,10 @@ func buildTemplateStatus(templates []WorkspaceTemplate, workspaces []workspace.W
 	return statuses, unattributed
 }
 
-// ServeLabWorkspaces serves the workspaces page for a lab
+// ServeLabWorkspaces used to serve a standalone workspaces page for a lab.
+// That content now lives in the Workspaces & Templates section of the lab
+// detail page (see ServeLabDetail) — this route is kept only for
+// backward compatibility with bookmarked/scripted links.
 func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 	// Extract lab ID from path like /labs/{id}/workspaces
 	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
@@ -3396,18 +3447,54 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
 	}
-
 	labID := pathParts[1]
+	http.Redirect(w, r, "/labs/"+labID+"#workspaces", http.StatusMovedPermanently)
+}
 
-	// Get the lab (job)
-	job, exists := h.jobManager.GetJob(labID)
-	if !exists {
-		http.Error(w, "Lab not found", http.StatusNotFound)
-		return
-	}
+// WorkspaceDisplay is a live workspace's display-safe summary, shown in the
+// lab detail page's Workspaces & Templates section.
+type WorkspaceDisplay struct {
+	ID        string
+	Name      string
+	Owner     string
+	Status    string
+	CreatedAt string
+	UpdatedAt string
+}
 
+// WorkspaceHistoryDisplay is one workspace creation/deletion event, shown in
+// the lab detail page's workspace history, newest first.
+type WorkspaceHistoryDisplay struct {
+	Action   string
+	Name     string
+	Owner    string
+	Template string
+	At       string
+}
+
+// WorkspacesViewModel is the data needed to render a lab's Workspaces &
+// Templates section: live workspaces, configured templates with bake
+// status, and workspace history.
+type WorkspacesViewModel struct {
+	LabID        string
+	StackName    string
+	Workspaces   []WorkspaceDisplay
+	Count        int
+	Templates    []TemplateStatus
+	Unattributed int
+	History      []WorkspaceHistoryDisplay
+}
+
+// buildWorkspacesViewModel assembles the Workspaces & Templates view for a
+// lab. It returns (nil, nil) when the lab isn't completed or has no
+// kubeconfig yet — callers should treat that as "nothing to show" rather
+// than an error. A non-nil error means the lab is completed but its cluster
+// could not be reached, which callers can surface inline without failing
+// the rest of the page.
+func (h *Handler) buildWorkspacesViewModel(ctx context.Context, job *Job) (*WorkspacesViewModel, error) {
 	job.mu.RLock()
 	status := job.Status
+	labID := job.ID
 	kubeconfig := extractStringFromConfigValue(job.Kubeconfig)
 	namespace := job.workspaceNamespace()
 	stackName := ""
@@ -3421,38 +3508,18 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 	events := append([]WorkspaceEvent(nil), job.WorkspaceEvents...)
 	job.mu.RUnlock()
 
-	if status != JobStatusCompleted {
-		http.Error(w, "Lab is not ready yet", http.StatusBadRequest)
-		return
-	}
-
-	if kubeconfig == "" {
-		http.Error(w, "Lab cluster configuration not available", http.StatusInternalServerError)
-		return
+	if status != JobStatusCompleted || kubeconfig == "" {
+		return nil, nil
 	}
 
 	backend, err := h.workspaceBackendFor(labID, kubeconfig, namespace)
 	if err != nil {
-		log.Printf("ServeLabWorkspaces: failed to build backend for lab %s: %v", labID, err)
-		http.Error(w, "Failed to reach lab cluster", http.StatusInternalServerError)
-		return
+		return nil, fmt.Errorf("failed to reach lab cluster: %w", err)
 	}
 
-	workspaces, err := backend.ListWorkspaces(r.Context(), labID)
+	workspaces, err := backend.ListWorkspaces(ctx, labID)
 	if err != nil {
-		log.Printf("Failed to list workspaces: %v", err)
-		http.Error(w, "Failed to list workspaces", http.StatusInternalServerError)
-		return
-	}
-
-	// Prepare workspace data for template
-	type WorkspaceDisplay struct {
-		ID        string
-		Name      string
-		Owner     string
-		Status    string
-		CreatedAt string
-		UpdatedAt string
+		return nil, fmt.Errorf("failed to list workspaces: %w", err)
 	}
 
 	workspacesDisplay := make([]WorkspaceDisplay, 0, len(workspaces))
@@ -3477,16 +3544,7 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 	templateStatuses, unattributed := buildTemplateStatus(templates, workspaces, bakedImages)
 
-	// Prepare workspace history for template — newest first, independent of
-	// whether the workspace it names is still running.
-	type WorkspaceHistoryDisplay struct {
-		Action   string
-		Name     string
-		Owner    string
-		Template string
-		At       string
-	}
-
+	// Newest first, independent of whether the workspace it names is still running.
 	history := make([]WorkspaceHistoryDisplay, 0, len(events))
 	for i := len(events) - 1; i >= 0; i-- {
 		e := events[i]
@@ -3499,17 +3557,121 @@ func (h *Handler) ServeLabWorkspaces(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	data := map[string]interface{}{
-		"LabID":        labID,
-		"StackName":    stackName,
-		"Workspaces":   workspacesDisplay,
-		"Count":        len(workspacesDisplay),
-		"Templates":    templateStatuses,
-		"Unattributed": unattributed,
-		"History":      history,
+	return &WorkspacesViewModel{
+		LabID:        labID,
+		StackName:    stackName,
+		Workspaces:   workspacesDisplay,
+		Count:        len(workspacesDisplay),
+		Templates:    templateStatuses,
+		Unattributed: unattributed,
+		History:      history,
+	}, nil
+}
+
+// ServeLabDetail serves the single consolidated per-lab admin page: overview,
+// deployment progress, workspaces & templates, feedback, lifecycle & cleanup,
+// activity, and the danger zone (retry/recreate/destroy/remove). It replaces
+// the dozen inline actions the labs list used to show per row.
+func (h *Handler) ServeLabDetail(w http.ResponseWriter, r *http.Request) {
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) != 2 || pathParts[0] != "labs" {
+		http.NotFound(w, r)
+		return
+	}
+	labID := pathParts[1]
+
+	job, exists := h.jobManager.GetJob(labID)
+	if !exists {
+		http.Error(w, "Lab not found", http.StatusNotFound)
+		return
 	}
 
-	h.serveTemplate(w, "lab-workspaces.html", data)
+	lab := buildLabSummary(job)
+
+	job.mu.RLock()
+	cleanupEvents := append([]CleanupEvent(nil), job.CleanupEvents...)
+	createdAtRaw := job.CreatedAt
+	updatedAtRaw := job.UpdatedAt
+	job.mu.RUnlock()
+
+	type CleanupEventDisplay struct {
+		At    string
+		Count int
+	}
+	cleanupDisplay := make([]CleanupEventDisplay, 0, len(cleanupEvents))
+	for _, e := range cleanupEvents {
+		cleanupDisplay = append(cleanupDisplay, CleanupEventDisplay{
+			At:    e.At.Format("2006-01-02 15:04:05"),
+			Count: e.Count,
+		})
+	}
+	// The lifecycle strip is a compact visual summary, not a full history —
+	// cap it to the most recent few sweeps so a long-lived lab doesn't turn
+	// the timeline into an unreadable wall of dots.
+	stripCleanupEvents := cleanupDisplay
+	const maxStripCleanupEvents = 3
+	if len(stripCleanupEvents) > maxStripCleanupEvents {
+		stripCleanupEvents = stripCleanupEvents[len(stripCleanupEvents)-maxStripCleanupEvents:]
+	}
+
+	workspacesVM, err := h.buildWorkspacesViewModel(r.Context(), job)
+	if err != nil {
+		log.Printf("ServeLabDetail: failed to build workspaces view for lab %s: %v", labID, err)
+	}
+
+	var feedback FeedbackSummary
+	if h.feedbackStore != nil {
+		entries, err := h.feedbackStore.GetByLab(labID)
+		if err != nil {
+			log.Printf("ServeLabDetail: failed to load feedback for lab %s: %v", labID, err)
+		} else {
+			feedback = buildFeedbackSummary(entries)
+			// The detail page shows a compact, most-recent-first preview — Count
+			// and AvgRating above still reflect every entry; the full list lives
+			// on the dedicated feedback page linked from this section.
+			const maxDetailFeedbackEntries = 5
+			if len(feedback.Entries) > maxDetailFeedbackEntries {
+				feedback.Entries = feedback.Entries[len(feedback.Entries)-maxDetailFeedbackEntries:]
+			}
+			for i, j := 0, len(feedback.Entries)-1; i < j; i, j = i+1, j-1 {
+				feedback.Entries[i], feedback.Entries[j] = feedback.Entries[j], feedback.Entries[i]
+			}
+		}
+	}
+
+	var activity []AuditDisplay
+	if h.auditStore != nil {
+		entries, err := h.auditStore.RecentForLab(labID, 50)
+		if err != nil {
+			log.Printf("ServeLabDetail: failed to load activity for lab %s: %v", labID, err)
+		} else {
+			for _, e := range entries {
+				activity = append(activity, AuditDisplay{
+					At:     e.At.Format("2006-01-02 15:04:05"),
+					Actor:  e.Actor,
+					Role:   e.Role,
+					Action: e.Action,
+					LabID:  e.LabID,
+					Detail: e.Detail,
+				})
+			}
+		}
+	}
+
+	data := map[string]interface{}{
+		"Lab":                lab,
+		"Workspaces":         workspacesVM,
+		"WorkspacesFailed":   err != nil,
+		"Feedback":           feedback,
+		"Activity":           activity,
+		"CleanupEvents":      cleanupDisplay,
+		"StripCleanupEvents": stripCleanupEvents,
+		"CreatedAtRaw":       createdAtRaw.Format("2006-01-02 15:04"),
+		"UpdatedAtRaw":       updatedAtRaw.Format("2006-01-02 15:04"),
+		"ShowProgress":       job.Status == JobStatusPending || job.Status == JobStatusRunning || job.Status == JobStatusFailed || job.Status == JobStatusDryRunCompleted,
+	}
+
+	h.serveTemplate(w, "lab-detail.html", data)
 }
 
 // ListLabWorkspaces returns JSON list of workspaces for a lab

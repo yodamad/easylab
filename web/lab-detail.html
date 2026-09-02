@@ -1,0 +1,841 @@
+{{define "title"}}{{if .Lab.StackName}}{{.Lab.StackName}}{{else}}{{.Lab.IDShort}}{{end}}{{end}}
+{{define "body-class"}}admin-page{{end}}
+{{define "head-extra"}}
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.0/dist/htmx.min.js" integrity="sha384-wS5l5IKJBvK6sPTKa2WZ1js3d947pvWXbPJ1OmWfEuxLgeHcEbjUUA5i9V5ZkpCw" crossorigin="anonymous"></script>
+{{end}}
+
+{{define "body"}}
+<div class="admin-layout">
+    {{template "admin-sidebar" .}}
+    <div class="admin-main">
+        <div class="admin-page-header">
+            <h1>
+                {{if .Lab.StackName}}{{.Lab.StackName}}{{else}}{{.Lab.IDShort}}{{end}}
+                <span class="lab-detail-header-badges">
+                    <span class="status-badge status-{{.Lab.Status}}" title="{{.Lab.Status}}">
+                        {{if eq .Lab.Status "completed"}}✓{{else if eq .Lab.Status "failed"}}✗{{else if eq .Lab.Status "running"}}⟳{{else if eq .Lab.Status "pending"}}⏳{{else if eq .Lab.Status "destroyed"}}🗑{{else}}{{.Lab.Status}}{{end}}
+                    </span>
+                    <span class="lab-type-badge" title="{{if .Lab.IsDryRun}}Dry Run{{else}}Real Run{{end}}">{{if .Lab.IsDryRun}}🔍{{else}}🚀{{end}}</span>
+                </span>
+                {{if .Lab.Description}}<span class="lab-detail-description">{{.Lab.Description}}</span>{{end}}
+            </h1>
+            <div class="admin-page-header-actions">
+                <a href="/labs" class="btn btn-secondary btn-sm">← Back to Labs</a>
+            </div>
+        </div>
+        <div class="admin-page-body">
+        <div class="lab-detail-container">
+
+            <div class="lab-lifecycle-strip">
+                <div class="lab-lifecycle-point is-done">
+                    <span class="lab-lifecycle-dot"></span>
+                    <span class="lab-lifecycle-label">Created</span>
+                    <span class="lab-lifecycle-time">{{.CreatedAtRaw}}</span>
+                </div>
+                <div class="lab-lifecycle-point {{if eq .Lab.Status "failed"}}is-danger{{else if or (eq .Lab.Status "pending") (eq .Lab.Status "running")}}is-current{{else}}is-done{{end}}">
+                    <span class="lab-lifecycle-dot"></span>
+                    <span class="lab-lifecycle-label">{{if eq .Lab.Status "failed"}}Failed{{else if eq .Lab.Status "pending"}}Pending{{else if eq .Lab.Status "running"}}Deploying{{else if .Lab.IsDryRun}}Dry Run{{else}}Deployed{{end}}</span>
+                    <span class="lab-lifecycle-time">{{.UpdatedAtRaw}}</span>
+                </div>
+                {{range .StripCleanupEvents}}
+                <div class="lab-lifecycle-point is-done">
+                    <span class="lab-lifecycle-dot"></span>
+                    <span class="lab-lifecycle-label">Cleanup &middot; {{.Count}}</span>
+                    <span class="lab-lifecycle-time">{{.At}}</span>
+                </div>
+                {{end}}
+                {{if .Lab.IsDestroyed}}
+                <div class="lab-lifecycle-point is-danger">
+                    <span class="lab-lifecycle-dot"></span>
+                    <span class="lab-lifecycle-label">Destroyed</span>
+                    <span class="lab-lifecycle-time">{{.UpdatedAtRaw}}</span>
+                </div>
+                {{else if .Lab.HasDeletionDate}}
+                <div class="lab-lifecycle-point is-current">
+                    <span class="lab-lifecycle-dot"></span>
+                    <span class="lab-lifecycle-label">Scheduled deletion</span>
+                    <span class="lab-lifecycle-time">{{.Lab.LabDeletionDate}}</span>
+                </div>
+                {{end}}
+            </div>
+
+            <div class="lab-detail-tabs" role="tablist">
+                <button type="button" class="lab-detail-tab is-active" role="tab" id="lab-tab-overview" aria-selected="true" aria-controls="overview" onclick="switchLabDetailTab('overview')"><span class="lab-detail-tab-icon" aria-hidden="true">📋</span> Overview</button>
+                {{if .ShowProgress}}<button type="button" class="lab-detail-tab" role="tab" id="lab-tab-progress" aria-selected="false" aria-controls="progress" onclick="switchLabDetailTab('progress')"><span class="lab-detail-tab-icon" aria-hidden="true">⏳</span> Progress</button>{{end}}
+                {{if .Workspaces}}<button type="button" class="lab-detail-tab" role="tab" id="lab-tab-workspaces" aria-selected="false" aria-controls="workspaces" onclick="switchLabDetailTab('workspaces')"><span class="lab-detail-tab-icon" aria-hidden="true">🧩</span> Workspaces & Templates</button>{{end}}
+                <button type="button" class="lab-detail-tab" role="tab" id="lab-tab-feedback" aria-selected="false" aria-controls="feedback" onclick="switchLabDetailTab('feedback')"><span class="lab-detail-tab-icon" aria-hidden="true">💬</span> Feedback</button>
+                <button type="button" class="lab-detail-tab" role="tab" id="lab-tab-lifecycle" aria-selected="false" aria-controls="lifecycle" onclick="switchLabDetailTab('lifecycle')"><span class="lab-detail-tab-icon" aria-hidden="true">♻️</span> Lifecycle & Cleanup</button>
+                <button type="button" class="lab-detail-tab" role="tab" id="lab-tab-activity" aria-selected="false" aria-controls="activity" onclick="switchLabDetailTab('activity')"><span class="lab-detail-tab-icon" aria-hidden="true">📜</span> Activity</button>
+                <div class="lab-detail-tabs-divider" aria-hidden="true"></div>
+                <button type="button" class="lab-detail-tab is-danger" role="tab" id="lab-tab-danger" aria-selected="false" aria-controls="danger" onclick="switchLabDetailTab('danger')"><span class="lab-detail-tab-icon" aria-hidden="true">⚠️</span> Danger Zone</button>
+            </div>
+
+            <section id="overview" class="lab-detail-section" role="tabpanel" aria-labelledby="lab-tab-overview">
+                <h2 class="lab-detail-section-title">Overview</h2>
+                <div class="lab-detail-config-grid">
+                    <div class="lab-detail-config-item">
+                        <span class="lab-detail-config-label">Provider</span>
+                        <span class="lab-detail-config-value">{{if .Lab.Provider}}{{.Lab.Provider}}{{else}}—{{end}}</span>
+                    </div>
+                    <div class="lab-detail-config-item">
+                        <span class="lab-detail-config-label">Cluster</span>
+                        <span class="lab-detail-config-value">{{if .Lab.UseExistingCluster}}Existing (BYO) cluster{{else if .Lab.K8sClusterName}}{{.Lab.K8sClusterName}}{{else}}—{{end}}</span>
+                    </div>
+                    <div class="lab-detail-config-item">
+                        <span class="lab-detail-config-label">Node pool</span>
+                        <span class="lab-detail-config-value">{{if .Lab.NodePoolFlavor}}{{.Lab.NodePoolFlavor}} &times; {{.Lab.NodePoolDesiredNodeCount}}{{else}}—{{end}}</span>
+                    </div>
+                    <div class="lab-detail-config-item">
+                        <span class="lab-detail-config-label">Domain</span>
+                        <span class="lab-detail-config-value">{{if .Lab.Domain}}{{.Lab.Domain}}{{else}}—{{end}}</span>
+                    </div>
+                    <div class="lab-detail-config-item">
+                        <span class="lab-detail-config-label">DNS provider</span>
+                        <span class="lab-detail-config-value">{{if .Lab.DNSProvider}}{{.Lab.DNSProvider}}{{else}}—{{end}}</span>
+                    </div>
+                    <div class="lab-detail-config-item">
+                        <span class="lab-detail-config-label">Workspace templates</span>
+                        <span class="lab-detail-config-value">{{if .Lab.WorkspaceTemplateNamesCSV}}{{.Lab.WorkspaceTemplateNamesCSV}}{{else}}—{{end}}</span>
+                    </div>
+                    <div class="lab-detail-config-item">
+                        <span class="lab-detail-config-label">Created</span>
+                        <span class="lab-detail-config-value">{{.Lab.CreatedAt}}</span>
+                    </div>
+                    <div class="lab-detail-config-item">
+                        <span class="lab-detail-config-label">Last updated</span>
+                        <span class="lab-detail-config-value">{{.Lab.UpdatedAt}}</span>
+                    </div>
+                </div>
+
+                {{if .Lab.HasError}}
+                <div class="error-message">
+                    <h3>Last Error</h3>
+                    <p>{{.Lab.ErrorMsg}}</p>
+                </div>
+                {{end}}
+
+                <div class="lab-detail-config-actions">
+                    {{if .Lab.HasKubeconfig}}
+                    <a href="/api/labs/{{.Lab.ID}}/kubeconfig" class="btn btn-download btn-sm" download="kubeconfig-{{.Lab.ID}}.yaml">
+                        <span class="btn-icon">⬇</span> Download Kubeconfig
+                    </a>
+                    {{end}}
+                    <a href="/api/labs/templates/yaml?lab_id={{.Lab.ID}}&amp;download=1" class="btn btn-secondary btn-sm">
+                        <span class="btn-icon">⬇</span> Export Templates YAML
+                    </a>
+                </div>
+
+                {{if eq .Lab.Status "completed"}}
+                <details class="secrets-section" ontoggle="if (this.open) loadCoderCredentials('{{.Lab.ID}}')">
+                    <summary class="secrets-summary">
+                        <span class="secrets-summary-title">Lab Endpoint Info</span>
+                        <span class="secrets-summary-hint">Workspace base URL and namespace for this lab's cluster</span>
+                    </summary>
+                    <div id="coder-credentials-loading">Loading…</div>
+                    <div id="coder-credentials-error" class="error-message" style="display: none;"></div>
+                    <div id="coder-credentials-fields" class="credentials-modal-fields" style="display: none;">
+                        <div class="credentials-modal-row">
+                            <label for="coder-cred-url">Workspace base URL</label>
+                            <div class="credentials-modal-value-wrap">
+                                <input type="text" id="coder-cred-url" readonly class="credentials-modal-input">
+                                <button type="button" class="btn btn-secondary credentials-copy-btn" onclick="copyCoderCredToClipboard('coder-cred-url', this)" title="Copy">Copy</button>
+                            </div>
+                        </div>
+                        <div class="credentials-modal-row">
+                            <label for="coder-cred-namespace">Namespace</label>
+                            <div class="credentials-modal-value-wrap">
+                                <input type="text" id="coder-cred-namespace" readonly class="credentials-modal-input">
+                                <button type="button" class="btn btn-secondary credentials-copy-btn" onclick="copyCoderCredToClipboard('coder-cred-namespace', this)" title="Copy">Copy</button>
+                            </div>
+                        </div>
+                    </div>
+                </details>
+                {{end}}
+            </section>
+
+            {{if .ShowProgress}}
+            <section id="progress" class="lab-detail-section is-hidden" role="tabpanel" aria-labelledby="lab-tab-progress">
+                <h2 class="lab-detail-section-title">Deployment Progress</h2>
+                <div id="job-status" hx-get="/api/labs/{{.Lab.ID}}/status" hx-trigger="load" hx-swap="innerHTML">
+                    <p>Loading status…</p>
+                </div>
+            </section>
+            {{end}}
+
+            {{if .WorkspacesFailed}}
+            <section id="workspaces" class="lab-detail-section is-hidden" role="tabpanel" aria-labelledby="lab-tab-workspaces">
+                <h2 class="lab-detail-section-title">Workspaces & Templates</h2>
+                <div class="error-message">
+                    <h3>Could Not Reach Lab Cluster</h3>
+                    <p>Workspace and template information isn't available right now. Try refreshing in a moment.</p>
+                </div>
+            </section>
+            {{else if .Workspaces}}
+            <section id="workspaces" class="lab-detail-section is-hidden" role="tabpanel" aria-labelledby="lab-tab-workspaces">
+                <div class="lab-detail-section-header">
+                    <h2 class="lab-detail-section-title">Workspaces & Templates</h2>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="showUploadTemplateModal('{{.Lab.ID}}', '{{.Lab.StackName}}', '{{.Lab.WorkspaceTemplateNamesCSV}}')">+ Add Template</button>
+                </div>
+                {{with .Workspaces}}
+                {{$ws := .}}
+                <details class="secrets-section">
+                    <summary class="secrets-summary">
+                        <span class="secrets-summary-title">Credentials</span>
+                        <span class="secrets-summary-hint">Registry and git tokens for private images and repositories</span>
+                    </summary>
+
+                    <p class="secrets-intro">
+                        Credentials are stored in this lab's cluster, never in EasyLab. Reference one
+                        from a workspace template by name — <code>image_pull_secrets</code> for a private
+                        image, <code>git_auth_secret</code> for a private repository. Saving over an
+                        existing name rotates its token; workspaces already running keep the old one
+                        until they are recreated.
+                    </p>
+
+                    <div id="secrets-panel" hx-get="/api/labs/{{.LabID}}/secrets" hx-trigger="load">
+                        <p class="secrets-empty">Loading credentials…</p>
+                    </div>
+
+                    <form class="secrets-form" hx-post="/api/labs/{{.LabID}}/secrets" hx-target="#secrets-panel"
+                          hx-on::after-request="if (event.detail.successful) this.reset()">
+                        <div class="secrets-form-row">
+                            <label for="secret-kind">Type</label>
+                            <select id="secret-kind" name="kind" onchange="toggleSecretServerField()">
+                                <option value="registry">Container registry</option>
+                                <option value="git">Git repository</option>
+                            </select>
+                        </div>
+                        <div class="secrets-form-row">
+                            <label for="secret-name">Name</label>
+                            <input type="text" id="secret-name" name="name" placeholder="regcred" required>
+                        </div>
+                        <div class="secrets-form-row" id="secret-server-row">
+                            <label for="secret-server">Server</label>
+                            <input type="text" id="secret-server" name="server" placeholder="registry.example.com">
+                        </div>
+                        <div class="secrets-form-row">
+                            <label for="secret-username">Username</label>
+                            <input type="text" id="secret-username" name="username" placeholder="oauth2" autocomplete="off">
+                        </div>
+                        <div class="secrets-form-row">
+                            <label for="secret-token">Token</label>
+                            <input type="password" id="secret-token" name="token" placeholder="Personal access token" autocomplete="off" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-sm">Save credential</button>
+                    </form>
+                </details>
+
+                {{if .Templates}}
+                <div class="templates-panel">
+                    <div class="templates-panel-header">
+                        <h3 class="templates-panel-title">Templates on this lab</h3>
+                        <span class="templates-panel-hint">{{len .Templates}} configured</span>
+                    </div>
+                    <div class="templates-grid">
+                        {{range .Templates}}
+                        <div class="template-status-card">
+                            <div class="template-status-main">
+                                <div class="template-status-info">
+                                    <span class="template-status-name">{{.Name}}</span>
+                                    {{if .Description}}<span class="template-status-description">{{.Description}}</span>{{end}}
+                                    <span class="template-status-meta">{{.IDE}}{{if .Image}} · {{.Image}}{{end}}</span>
+                                </div>
+                                {{if .HasRunning}}
+                                <span class="template-run-badge is-running">● {{.RunningCount}} running</span>
+                                {{else}}
+                                <span class="template-run-badge is-idle">none</span>
+                                {{end}}
+                            </div>
+                            {{if .IsDevcontainer}}
+                            <div class="template-bake-row">
+                                <form hx-post="/api/labs/{{$ws.LabID}}/templates/{{.Name}}/bake" hx-target="#bake-status-{{.Name}}" hx-swap="innerHTML">
+                                    <button type="submit" class="btn {{if .BakedImage}}btn-secondary{{else}}btn-primary{{end}} btn-sm">{{if .BakedImage}}Rebuild{{else}}Bake image{{end}}</button>
+                                </form>
+                                <div id="bake-status-{{.Name}}" class="template-bake-status" hx-get="/api/labs/{{$ws.LabID}}/templates/{{.Name}}/bake-status" hx-trigger="load" hx-swap="innerHTML"></div>
+                            </div>
+                            {{end}}
+                        </div>
+                        {{end}}
+                    </div>
+                    {{if gt .Unattributed 0}}
+                    <p class="templates-unattributed-note">
+                        {{.Unattributed}} running workspace(s) aren't attributed to a template — they were created before template tracking was added and will be attributed once recreated.
+                    </p>
+                    {{end}}
+                </div>
+                {{end}}
+
+                <div class="workspaces-tabs" role="tablist">
+                    <div class="workspaces-tabs-list">
+                        <button type="button" class="workspaces-tab is-active" role="tab" id="tab-active" aria-selected="true" aria-controls="panel-active" onclick="switchWorkspacesTab('active')">
+                            Active Workspaces <span class="workspaces-tab-count">{{.Count}}</span>
+                        </button>
+                        <button type="button" class="workspaces-tab" role="tab" id="tab-history" aria-selected="false" aria-controls="panel-history" onclick="switchWorkspacesTab('history')">
+                            History <span class="workspaces-tab-count">{{len .History}}</span>
+                        </button>
+                    </div>
+                    <button type="button" class="btn btn-secondary btn-icon-only tooltip-trigger workspaces-tabs-refresh" onclick="refreshWorkspaces()" title="Refresh workspace list">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        <span class="tooltip">Refresh</span>
+                    </button>
+                </div>
+
+                <div id="panel-active" role="tabpanel" aria-labelledby="tab-active">
+                    {{if .Workspaces}}
+                    <div class="workspaces-table-toolbar">
+                        <button type="button" id="delete-selected-btn" class="btn btn-danger btn-icon-only tooltip-trigger is-hidden" onclick="deleteSelected()" title="Delete selected workspaces">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            <span class="tooltip">Delete Selected</span>
+                        </button>
+                    </div>
+
+                    <div class="workspace-table-wrapper">
+                        <table class="workspace-table">
+                            <thead>
+                                <tr>
+                                    <th class="col-checkbox">
+                                        <input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll()" aria-label="Select all workspaces">
+                                    </th>
+                                    <th class="col-status">Status</th>
+                                    <th>Name</th>
+                                    <th>Owner</th>
+                                    <th>Created</th>
+                                    <th>Updated</th>
+                                    <th class="col-actions">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {{range .Workspaces}}
+                                <tr class="workspace-row workspace-row-status-{{.Status}}" data-workspace-id="{{.ID}}">
+                                    <td class="col-checkbox">
+                                        <input type="checkbox" class="workspace-checkbox" value="{{.ID}}" id="workspace-{{.ID}}" onchange="updateDeleteButton()" aria-label="Select {{.Name}}">
+                                    </td>
+                                    <td class="col-status">
+                                        <span class="workspace-status-badge status-{{.Status}}" title="{{.Status}}">
+                                            {{if eq .Status "running"}}✓{{else if eq .Status "stopped"}}⏸{{else if eq .Status "starting"}}⟳{{else if eq .Status "stopping"}}⟳{{else if eq .Status "failed"}}✗{{else}}⏳{{end}}
+                                        </span>
+                                    </td>
+                                    <td title="{{.Name}}"><span class="workspace-name">{{.Name}}</span></td>
+                                    <td class="workspace-owner-cell" title="{{.Owner}}">{{.Owner}}</td>
+                                    <td class="workspace-date-cell">{{.CreatedAt}}</td>
+                                    <td class="workspace-date-cell">{{.UpdatedAt}}</td>
+                                    <td class="col-actions">
+                                        <button type="button" class="btn btn-danger btn-icon-only tooltip-trigger" title="Delete this workspace" onclick="deleteWorkspace('{{.ID}}', '{{.Name}}')">
+                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
+                                            <span class="tooltip">Delete Workspace</span>
+                                        </button>
+                                    </td>
+                                </tr>
+                                {{end}}
+                            </tbody>
+                        </table>
+                    </div>
+                    {{else}}
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📦</div>
+                        <h2>No Workspaces Yet</h2>
+                        <p>No workspaces have been created for this lab yet.</p>
+                    </div>
+                    {{end}}
+                </div>
+
+                <div id="panel-history" role="tabpanel" aria-labelledby="tab-history" class="is-hidden">
+                    {{if .History}}
+                    <div class="workspace-history-toolbar">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="exportWorkspaceHistoryCSV()">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+                            </svg>
+                            Export CSV
+                        </button>
+                    </div>
+                    <div class="workspace-history-list">
+                        {{range .History}}
+                        <div class="workspace-history-row" data-action="{{if eq .Action "created"}}Created{{else}}Deleted{{end}}" data-name="{{.Name}}" data-owner="{{.Owner}}" data-template="{{.Template}}" data-at="{{.At}}">
+                            <span class="workspace-history-badge is-{{.Action}}" aria-hidden="true">{{if eq .Action "created"}}+{{else}}−{{end}}</span>
+                            <div class="workspace-history-main">
+                                <span class="workspace-history-name">{{.Name}}</span>
+                                <span class="workspace-history-meta">{{.Owner}}{{if .Template}} · {{.Template}}{{end}}</span>
+                            </div>
+                            <span class="workspace-history-action">{{if eq .Action "created"}}Created{{else}}Deleted{{end}}</span>
+                            <span class="workspace-history-time">{{.At}}</span>
+                        </div>
+                        {{end}}
+                    </div>
+                    {{else}}
+                    <div class="empty-state">
+                        <div class="empty-state-icon">🕑</div>
+                        <h2>No Activity Yet</h2>
+                        <p>Creations and deletions will appear here as students request and release workspaces.</p>
+                    </div>
+                    {{end}}
+                </div>
+
+                <div id="message-container" class="message-container"></div>
+                {{end}}
+            </section>
+            {{end}}
+
+            <section id="feedback" class="lab-detail-section is-hidden" role="tabpanel" aria-labelledby="lab-tab-feedback">
+                <h2 class="lab-detail-section-title">Feedback</h2>
+                {{if gt .Feedback.Count 0}}
+                <div class="lab-detail-feedback-summary">
+                    <span class="lab-detail-feedback-rating">{{.Feedback.AvgRating}} ★</span>
+                    <span class="lab-detail-feedback-count">{{.Feedback.Count}} response{{if ne .Feedback.Count 1}}s{{end}} · showing the most recent {{len .Feedback.Entries}}</span>
+                </div>
+                {{range .Feedback.Entries}}
+                <div class="lab-detail-feedback-entry">
+                    <div class="lab-detail-feedback-stars">{{.Stars}}</div>
+                    {{if .Comment}}<p>{{.Comment}}</p>{{end}}
+                    <span class="lab-meta-muted">{{.Difficulty}} &middot; {{.SubmittedAt}}</span>
+                </div>
+                {{end}}
+                {{else}}
+                <p class="lab-meta-muted">No feedback submitted yet for this lab.</p>
+                {{end}}
+                <div class="lab-detail-config-actions">
+                    <a href="/admin/feedback?lab_id={{.Lab.ID}}" class="btn btn-secondary btn-sm">View all feedback →</a>
+                </div>
+            </section>
+
+            <section id="lifecycle" class="lab-detail-section is-hidden" role="tabpanel" aria-labelledby="lab-tab-lifecycle">
+                <h2 class="lab-detail-section-title">Lifecycle & Cleanup</h2>
+
+                {{if eq .Lab.Status "completed"}}
+                <form id="lifecycle-form">
+                    <input type="hidden" name="job_id" id="lifecycle-job-id" value="{{.Lab.ID}}">
+                    <div id="lifecycle-form-error" style="display: none;"></div>
+
+                    <div class="form-group">
+                        <label for="lifecycle-hours">Workspace Lifetime (Optional)</label>
+                        <div class="lifetime-input">
+                            <input type="number" id="lifecycle-hours" name="workspace_lifetime_hours" min="0" placeholder="0" value="{{if gt .Lab.WorkspaceLifetimeHours 0}}{{.Lab.WorkspaceLifetimeHours}}{{end}}">
+                            <select id="lifecycle-unit" name="workspace_lifetime_unit">
+                                <option value="hours">Hours</option>
+                                <option value="days">Days</option>
+                            </select>
+                        </div>
+                        <small>Auto-delete workspaces after this duration. Leave 0 to disable.</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Lab Deletion (Optional)</label>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="lifecycle-date">Date</label>
+                                <input type="date" id="lifecycle-date" name="lab_deletion_date" value="{{.Lab.LabDeletionDateValue}}">
+                            </div>
+                            <div class="form-group">
+                                <label for="lifecycle-time">Time</label>
+                                <input type="time" id="lifecycle-time" name="lab_deletion_time" placeholder="23:59" value="{{.Lab.LabDeletionTimeValue}}">
+                            </div>
+                        </div>
+                        <small>Automatically destroy the entire lab at the specified date and time. Time defaults to end of day (23:59) if not set. Leave date empty to disable.</small>
+                    </div>
+
+                    <button type="submit" class="btn btn-success btn-sm">Save</button>
+                </form>
+                {{else}}
+                <p class="lab-meta-muted">Lifecycle settings can be edited once the lab has completed deploying.</p>
+                {{end}}
+
+                {{if .CleanupEvents}}
+                <h3 class="lab-detail-section-title">Cleanup History</h3>
+                <div class="workspace-table-wrapper">
+                    <table class="lab-detail-history-table">
+                        <thead><tr><th>When</th><th>Workspaces Cleaned Up</th></tr></thead>
+                        <tbody>
+                            {{range .CleanupEvents}}
+                            <tr><td>{{.At}}</td><td>{{.Count}}</td></tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                </div>
+                {{end}}
+            </section>
+
+            <section id="activity" class="lab-detail-section is-hidden" role="tabpanel" aria-labelledby="lab-tab-activity">
+                <h2 class="lab-detail-section-title">Activity</h2>
+                {{if .Activity}}
+                <div class="workspace-table-wrapper">
+                    <table class="lab-detail-history-table">
+                        <thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Detail</th></tr></thead>
+                        <tbody>
+                            {{range .Activity}}
+                            <tr><td>{{.At}}</td><td>{{.Actor}}</td><td>{{.Action}}</td><td>{{.Detail}}</td></tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                </div>
+                {{else}}
+                <p class="lab-meta-muted">No recorded activity for this lab yet.</p>
+                {{end}}
+            </section>
+
+            <section id="danger" class="lab-detail-section lab-detail-section--danger is-hidden" role="tabpanel" aria-labelledby="lab-tab-danger">
+                <h2 class="lab-detail-section-title">Danger Zone</h2>
+                <div class="lab-detail-danger-actions">
+                    {{if eq .Lab.Status "failed"}}
+                    <button type="button" class="btn btn-primary btn-sm" onclick="openRetryChoiceModal('{{.Lab.ID}}')">Retry Lab</button>
+                    {{end}}
+                    {{if .Lab.IsDestroyed}}
+                    <button type="button" class="btn btn-success btn-sm" onclick="openRecreateChoiceModal('{{.Lab.ID}}')">Recreate Lab</button>
+                    {{end}}
+                    {{if and .Lab.StackName (or (eq .Lab.Status "completed") (eq .Lab.Status "failed"))}}
+                    <button type="button" class="btn btn-danger btn-sm" onclick="destroyStack('{{.Lab.ID}}')">Destroy Stack</button>
+                    {{end}}
+                    {{if or (eq .Lab.Status "destroyed") (eq .Lab.Status "failed")}}
+                    <button type="button" class="btn btn-danger btn-sm" onclick="removeLab('{{.Lab.ID}}')">Remove Lab</button>
+                    {{end}}
+                </div>
+            </section>
+
+        </div>
+        </div>
+    </div>
+</div>
+
+<div id="upload-template-overlay" class="ut-drawer-overlay" onclick="closeUploadTemplateModal()" aria-hidden="true">
+    <div class="ut-panel" onclick="event.stopPropagation()" role="dialog" aria-modal="true" aria-labelledby="ut-panel-title">
+        <div class="ut-panel-header">
+            <div class="ut-panel-title-group">
+                <svg class="ut-panel-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+                <h3 id="ut-panel-title" class="ut-panel-title">Add Template</h3>
+            </div>
+            <button type="button" class="ut-panel-close" onclick="closeUploadTemplateModal()" title="Close" aria-label="Close">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+
+        <div class="ut-drawer-context" id="ut-drawer-lab-context" style="display: none;"></div>
+
+        <div class="ut-panel-body">
+            <div id="upload-template-error" class="ut-alert ut-alert--error" style="display: none;"></div>
+
+            <form id="upload-template-form" onsubmit="submitUploadTemplate(event)" novalidate>
+
+                <div class="ut-step">
+                    <div class="ut-step-header">
+                        <span class="ut-step-label">How do you want to define this workspace?</span>
+                    </div>
+                    <div class="ut-step-body">
+                        <div class="button-group">
+                            <button type="button" class="source-button selected" data-templates-mode="form" id="ut-templates-mode-form">
+                                <span class="source-icon">&#128221;</span>
+                                <div class="source-content">
+                                    <span class="source-title">Build with a form</span>
+                                    <span class="source-description">Fill in the fields</span>
+                                </div>
+                            </button>
+                            <button type="button" class="source-button" data-templates-mode="devcontainer" id="ut-templates-mode-devcontainer">
+                                <span class="source-icon">&#128230;</span>
+                                <div class="source-content">
+                                    <span class="source-title">From a devcontainer</span>
+                                    <span class="source-description">Import a repo's .devcontainer</span>
+                                </div>
+                            </button>
+                            <button type="button" class="source-button" data-templates-mode="yaml" id="ut-templates-mode-yaml">
+                                <span class="source-icon">&#128196;</span>
+                                <div class="source-content">
+                                    <span class="source-title">Paste YAML</span>
+                                    <span class="source-description">Write it as YAML</span>
+                                </div>
+                            </button>
+                        </div>
+                        <input type="hidden" id="ut-templates-mode" name="templates_mode" value="form">
+                    </div>
+                </div>
+
+                <div id="ut-templates-form-mode">
+                    <div class="ut-template-fields" data-template-index="0">
+                        <div class="ut-step">
+                            <div class="ut-step-header">
+                                <span class="ut-step-number" aria-hidden="true">1</span>
+                                <span class="ut-step-label">Template name</span>
+                            </div>
+                            <div class="ut-step-body">
+                                <input type="text" name="template_0_name" data-field="name" class="ut-name-input" placeholder="e.g. docker-workspace" autocomplete="off" required />
+                            </div>
+                        </div>
+                        <div class="ut-step">
+                            <div class="ut-step-header">
+                                <span class="ut-step-number" aria-hidden="true">2</span>
+                                <span class="ut-step-label">Git repository</span>
+                                <span class="ut-optional-badge">optional</span>
+                            </div>
+                            <div class="ut-step-body">
+                                <input type="text" name="template_0_git_repo" data-field="git_repo" class="ut-name-input" placeholder="https://gitlab.com/user/repo.git" autocomplete="off" />
+                                <div class="form-row">
+                                    <input type="text" name="template_0_git_branch" data-field="git_branch" class="ut-name-input" placeholder="branch (default branch)" autocomplete="off" />
+                                    <input type="text" name="template_0_git_folder" data-field="git_folder" class="ut-name-input" placeholder="subfolder to open" autocomplete="off" />
+                                </div>
+                            </div>
+                        </div>
+                        <details class="template-advanced">
+                            <summary>Advanced options</summary>
+                            <div class="template-advanced-body">
+                                <div class="form-group">
+                                    <label>Git credential (Optional)</label>
+                                    <select name="template_0_git_auth_secret" data-field="git_auth_secret" class="template-git-cred-select">
+                                        <option value="">None</option>
+                                    </select>
+                                    <small>Credentials are configured when a lab is created; a private repository added here needs one that already exists on the lab.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label>Image (Optional)</label>
+                                    <input type="text" name="template_0_image" data-field="image" placeholder="codercom/code-server:latest">
+                                    <small>Container image override. Defaults to the code-server image.</small>
+                                </div>
+                                <div class="template-resources">
+                                    <div class="form-group">
+                                        <label>CPU (Optional)</label>
+                                        <input type="text" name="template_0_cpu" data-field="cpu" placeholder="500m">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>CPU Limit (Optional)</label>
+                                        <input type="text" name="template_0_cpu_limit" data-field="cpu_limit" placeholder="defaults to CPU">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Memory (Optional)</label>
+                                        <input type="text" name="template_0_memory" data-field="memory" placeholder="1Gi">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Memory Limit (Optional)</label>
+                                        <input type="text" name="template_0_memory_limit" data-field="memory_limit" placeholder="defaults to Memory">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Disk Size (Optional)</label>
+                                        <input type="text" name="template_0_disk_size" data-field="disk_size" placeholder="5Gi">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <small>CPU/Memory are the request; CPU Limit/Memory Limit override the limit independently — left blank, the limit matches the request. For a devcontainer-enabled template, layer extraction is CPU/disk-heavy under concurrent load: when all four are left blank, EasyLab defaults to 500m CPU (limit 2) / 2Gi memory / 5Gi ephemeral storage, but set them explicitly to size for your base image and expected class size.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label>Startup Script (Optional)</label>
+                                    <textarea name="template_0_startup_script" data-field="startup_script" rows="4" class="monospace" placeholder="# runs before the IDE starts"></textarea>
+                                    <small>Runs (best-effort) on start. code-server has passwordless sudo, so the script can install system packages with apt.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label>Dotfiles Repository (Optional)</label>
+                                    <input type="text" name="template_0_dotfiles_repo" data-field="dotfiles_repo" placeholder="https://github.com/you/dotfiles">
+                                    <small>Cloned to ~/.dotfiles; its install.sh / setup.sh / bootstrap.sh is run if present.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label>Extensions (Optional)</label>
+                                    <input type="text" name="template_0_extensions" data-field="extensions" placeholder="golang.go, ms-python.python">
+                                    <small>Comma-separated VS Code extension IDs installed on start.</small>
+                                </div>
+                                <div class="template-variables-section">
+                                    <div class="template-variables-header">
+                                        <label>Environment Variables</label>
+                                        <div class="template-variables-actions">
+                                            <button type="button" class="btn btn-secondary btn-add-variable">+ Add Variable</button>
+                                        </div>
+                                    </div>
+                                    <small>Environment variables passed to the workspace container.</small>
+                                    <div class="template-variables-container"></div>
+                                </div>
+                                <div class="template-variables-section">
+                                    <div class="template-variables-header">
+                                        <label>Sidecars</label>
+                                        <div class="template-variables-actions">
+                                            <button type="button" class="btn btn-secondary btn-add-sidecar">+ Add Sidecar</button>
+                                        </div>
+                                    </div>
+                                    <small>Extra containers in the pod (e.g. a database), reachable from the IDE at localhost:&lt;port&gt;.</small>
+                                    <div class="template-sidecars-container"></div>
+                                </div>
+                                <div class="template-variables-section">
+                                    <div class="template-variables-header">
+                                        <label>Mounts</label>
+                                        <div class="template-variables-actions">
+                                            <button type="button" class="btn btn-secondary btn-add-mount">+ Add Mount</button>
+                                        </div>
+                                    </div>
+                                    <small>Mount an existing ConfigMap/Secret (in the workspace namespace) into the container.</small>
+                                    <div class="template-mounts-container"></div>
+                                </div>
+                            </div>
+                        </details>
+                    </div>
+                </div>
+
+                <div id="ut-templates-devcontainer-mode" style="display: none;">
+                    <div class="devcontainer-import">
+                        <p class="devcontainer-import-intro">
+                            Build the workspace from the workshop repository's <code>.devcontainer/devcontainer.json</code>.
+                            Anything the builder cannot honour is written into a YAML document that opens for review before the template is added.
+                        </p>
+                        <div class="form-group">
+                            <label for="ut-dc-template-name">Template name</label>
+                            <input type="text" id="ut-dc-template-name" placeholder="e.g. go-workshop" autocomplete="off" required>
+                            <small>How students see this workspace. Lowercased, with dashes for anything else. Must not clash with a template already on this lab.</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Read the devcontainer from</label>
+                            <div class="button-group">
+                                <button type="button" class="source-button selected" data-devcontainer-source="git" id="ut-dc-source-git">
+                                    <span class="source-icon">&#128279;</span>
+                                    <div class="source-content">
+                                        <span class="source-title">Git repository</span>
+                                        <span class="source-description">Clone the repo and read its devcontainer</span>
+                                    </div>
+                                </button>
+                                <button type="button" class="source-button" data-devcontainer-source="upload" id="ut-dc-source-upload">
+                                    <span class="source-icon">&#128228;</span>
+                                    <div class="source-content">
+                                        <span class="source-title">Upload</span>
+                                        <span class="source-description">A devcontainer.json or a repository .zip</span>
+                                    </div>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="ut-dc-git-repo">Workshop repository</label>
+                                <input type="text" id="ut-dc-git-repo" placeholder="https://gitlab.com/org/workshop.git">
+                            </div>
+                            <div class="form-group">
+                                <label for="ut-dc-git-branch">Branch</label>
+                                <input type="text" id="ut-dc-git-branch" placeholder="default branch">
+                            </div>
+                        </div>
+                        <div id="ut-dc-upload-row" class="form-group" style="display: none;">
+                            <label for="ut-dc-file">devcontainer.json or repository .zip</label>
+                            <input type="file" id="ut-dc-file" accept=".json,.zip">
+                            <small>The repository field above is still used for the generated template's <code>git_repo</code>, since that is what students clone.</small>
+                        </div>
+                        <div id="ut-dc-git-auth-row" class="form-row">
+                            <div class="form-group">
+                                <label for="ut-dc-git-username">Username</label>
+                                <input type="text" id="ut-dc-git-username" placeholder="oauth2" autocomplete="off">
+                            </div>
+                            <div class="form-group">
+                                <label for="ut-dc-git-token">Access token</label>
+                                <input type="password" id="ut-dc-git-token" autocomplete="off">
+                                <small>Only if the repository is private. Used to read the devcontainer now and then discarded — it is not saved.</small>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="ut-dc-dir">Devcontainer folder</label>
+                                <input type="text" id="ut-dc-dir" placeholder=".devcontainer">
+                            </div>
+                            <div class="form-group">
+                                <label for="ut-dc-cache-repo">Cache registry</label>
+                                <input type="text" id="ut-dc-cache-repo" placeholder="registry.example.com/easylab/cache">
+                                <small>Required. Without it every student rebuilds the devcontainer from scratch.</small>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <small>code-server is injected into the built image, so it is independent of the devcontainer's base image. That base must be glibc — the injected IDE cannot run on Alpine/musl.</small>
+                        </div>
+                        <div class="devcontainer-import-actions">
+                            <button type="button" id="ut-dc-import-btn" class="btn btn-primary btn-sm">Import</button>
+                            <button type="button" id="ut-dc-review-yaml-btn" class="btn btn-secondary btn-sm" style="display: none;">Review generated YAML &rarr;</button>
+                        </div>
+                        <div id="ut-dc-result" class="devcontainer-import-result"></div>
+                    </div>
+                </div>
+
+                <div id="ut-templates-yaml-mode" style="display: none;">
+                    <div class="form-group">
+                        <div class="templates-yaml-header">
+                            <label for="ut-templates-yaml">Workspace Templates YAML</label>
+                            <div class="templates-yaml-actions">
+                                <button type="button" id="ut-yaml-validate-btn" class="btn btn-secondary btn-sm">Validate</button>
+                                <button type="button" id="ut-yaml-skeleton-btn" class="btn btn-secondary btn-sm">Insert skeleton</button>
+                                <button type="button" id="ut-yaml-upload-btn" class="btn btn-secondary btn-sm">Upload file</button>
+                                <input type="file" id="ut-yaml-file" accept=".yaml,.yml" class="file-input-hidden">
+                            </div>
+                        </div>
+                        <textarea id="ut-templates-yaml" name="templates_yaml" rows="16" class="monospace" spellcheck="false"></textarea>
+                        <small>The YAML is used as-is when this mode is selected — the form fields are ignored. It may define more than one template.</small>
+                        <div id="ut-templates-yaml-validation" class="templates-yaml-validation"></div>
+                    </div>
+                </div>
+
+                <div class="ut-footer">
+                    <button type="submit" id="upload-template-submit-btn" class="ut-submit-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                        </svg>
+                        Add Template
+                    </button>
+                </div>
+
+            </form>
+        </div>
+    </div>
+</div>
+
+<div id="retry-choice-overlay" class="credentials-modal-overlay" onclick="closeRetryChoiceModal()" aria-hidden="true">
+    <div class="credentials-modal" onclick="event.stopPropagation()">
+        <div class="credentials-modal-header">
+            <h3>Retry lab</h3>
+            <button type="button" class="credentials-modal-close" onclick="closeRetryChoiceModal()" title="Close" aria-label="Close">&times;</button>
+        </div>
+        <div class="credentials-modal-body">
+            <p>Rerun this lab's deployment with the configuration it already has, or open it in the wizard to fix a value first.</p>
+            <div class="credentials-modal-actions">
+                <button type="button" class="btn btn-primary btn-sm" onclick="confirmRetryAsIs()">Rerun as-is</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="confirmRetryEdit()">Edit configuration first</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="recreate-choice-overlay" class="credentials-modal-overlay" onclick="closeRecreateChoiceModal()" aria-hidden="true">
+    <div class="credentials-modal" onclick="event.stopPropagation()">
+        <div class="credentials-modal-header">
+            <h3>Recreate lab</h3>
+            <button type="button" class="credentials-modal-close" onclick="closeRecreateChoiceModal()" title="Close" aria-label="Close">&times;</button>
+        </div>
+        <div class="credentials-modal-body">
+            <p>Recreate this lab with the configuration it had, or open it in the wizard to fix a value first.</p>
+            <div class="credentials-modal-actions">
+                <button type="button" class="btn btn-primary btn-sm" onclick="confirmRecreateAsIs()">Rerun as-is</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="confirmRecreateEdit()">Edit configuration first</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="recreate-credentials-overlay" class="credentials-modal-overlay" onclick="closeRecreateCredentialsModal()" aria-hidden="true">
+    <div class="credentials-modal" onclick="event.stopPropagation()">
+        <div class="credentials-modal-header">
+            <h3>Recreate lab</h3>
+            <button type="button" class="credentials-modal-close" onclick="closeRecreateCredentialsModal()" title="Close" aria-label="Close">&times;</button>
+        </div>
+        <div class="credentials-modal-body">
+            <form id="recreate-credentials-form">
+                <input type="hidden" name="job_id" id="recreate-job-id">
+                <div id="recreate-credentials-error" style="display: none;"></div>
+                <div id="recreate-credentials-rows"></div>
+                <div class="credentials-modal-actions">
+                    <button type="submit" class="btn btn-success btn-sm">Recreate lab</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="closeRecreateCredentialsModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+    <script src="/static/lab-workspaces.js"></script>
+    <script src="/static/lab-detail.js"></script>
+    <script>
+        const LAB_ID = '{{.Lab.ID}}';
+        const LAB_STACK_NAME = '{{.Lab.StackName}}';
+    </script>
+{{end}}

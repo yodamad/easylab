@@ -19,11 +19,16 @@ Navigate to **Audit Log** in the admin sidebar. The page lists the 200 most rece
 
 If nothing has been recorded yet, an empty state is displayed.
 
+A single lab's own entries are also shown, pre-filtered, in the **Activity** section of
+its [detail page](admin-lab-management.md#the-lab-detail-page) — handy when you only care about one
+lab's history rather than scanning the global log.
+
 ## What's tracked
 
 * Lab actions: create, dry run, launch, destroy, retry (with or without an edited configuration), recreate, delete, template upload, lifecycle edit
 * Workspace actions: student-initiated creation, admin-initiated deletion (single or bulk)
 * Credential changes: saving OVH or Azure credentials (the credential values themselves are never recorded)
+* Admin viewing the shared student portal login password
 * Automatic (system) actions: workspaces deleted for exceeding their configured lifetime, labs auto-destroyed past their scheduled deletion date
 
 ## Admin identity caveat

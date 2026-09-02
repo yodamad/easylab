@@ -8,7 +8,7 @@ EasyLab collects feedback from students after each lab session. Admins can revie
 
 ## Viewing feedback
 
-Navigate to **Feedback** in the admin header. Select a lab from the dropdown and click **View Feedback**.
+Navigate to **Feedback** in the admin header. Select a lab from the dropdown and click **View Feedback** — or, from a lab's own [detail page](admin-lab-management.md#the-lab-detail-page), open its **Feedback** section and click **View all feedback →**, which lands here pre-filtered to that lab.
 
 The page shows:
 

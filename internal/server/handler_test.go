@@ -1064,6 +1064,165 @@ func TestParseRecreateDeletionDate_BlankClearsSchedule(t *testing.T) {
 	assert.Nil(t, got)
 }
 
+func TestBuildLabSummary(t *testing.T) {
+	t.Parallel()
+
+	future := time.Now().Add(48 * time.Hour)
+
+	jm := NewJobManager("")
+	jobID := jm.CreateJob(&LabConfig{
+		StackName:              "my-lab",
+		Description:            "a test lab",
+		Provider:               "ovh",
+		WorkspaceLifetimeHours: 4,
+		LabDeletionDate:        &future,
+		WorkspaceTemplates:     []WorkspaceTemplate{{Name: "code-server"}, {Name: "extra"}},
+	})
+	require.NoError(t, jm.SetKubeconfig(jobID, "fake-kubeconfig"))
+	job, ok := jm.GetJob(jobID)
+	require.True(t, ok)
+
+	summary := buildLabSummary(job)
+
+	assert.Equal(t, jobID, summary.ID)
+	assert.Equal(t, string(JobStatusPending), summary.Status)
+	assert.Equal(t, "my-lab", summary.StackName)
+	assert.Equal(t, "a test lab", summary.Description)
+	assert.Equal(t, "ovh", summary.Provider)
+	assert.True(t, summary.HasKubeconfig)
+	assert.False(t, summary.IsDestroyed)
+	assert.Equal(t, 4, summary.WorkspaceLifetimeHours)
+	assert.True(t, summary.HasDeletionDate)
+	assert.Equal(t, "code-server, extra", summary.WorkspaceTemplateNamesCSV)
+}
+
+func TestBuildLabSummary_DestroyedNoConfig(t *testing.T) {
+	t.Parallel()
+
+	jm := NewJobManager("")
+	jobID := jm.CreateJob(nil)
+	require.NoError(t, jm.UpdateJobStatus(jobID, JobStatusDestroyed))
+	job, ok := jm.GetJob(jobID)
+	require.True(t, ok)
+
+	summary := buildLabSummary(job)
+
+	assert.True(t, summary.IsDestroyed)
+	assert.Empty(t, summary.StackName)
+	assert.False(t, summary.HasDeletionDate)
+	assert.Empty(t, summary.WorkspaceTemplateNamesCSV)
+}
+
+func TestShortenLabID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		id   string
+		want string
+	}{
+		{"short id unchanged", "job-123", "job-123"},
+		{"exactly 16 chars unchanged", "1234567890123456", "1234567890123456"},
+		{"long id shortened", "job-abcdefghijklmnopqrstuvwxyz", "job-abcd...wxyz"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, shortenLabID(tt.id))
+		})
+	}
+}
+
+func TestHandler_ServeLabDetail_NotFound(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("GET", "/labs/does-not-exist", nil)
+	w := httptest.NewRecorder()
+
+	h.ServeLabDetail(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestHandler_ServeLabDetail_InvalidPath(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	req := httptest.NewRequest("GET", "/labs/", nil)
+	w := httptest.NewRecorder()
+
+	h.ServeLabDetail(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestHandler_ServeLabDetail_KnownLab(t *testing.T) {
+	jm := NewJobManager("")
+	jobID := jm.CreateJob(&LabConfig{StackName: "my-lab"})
+
+	fs, err := NewFeedbackStore(t.TempDir())
+	require.NoError(t, err)
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, fs)
+
+	as, err := NewAuditStore(t.TempDir())
+	require.NoError(t, err)
+	h.SetAuditStore(as)
+
+	req := httptest.NewRequest("GET", "/labs/"+jobID, nil)
+	w := httptest.NewRecorder()
+
+	h.ServeLabDetail(w, req)
+	// Template loading will fail in tests (no web/ dir), but the data-building
+	// code (lab summary, feedback, activity, workspaces-not-applicable) is exercised.
+	assert.NotEqual(t, http.StatusNotFound, w.Code)
+}
+
+func TestHandler_ServeLabWorkspaces_RedirectsToLabDetail(t *testing.T) {
+	jm := NewJobManager("")
+	jobID := jm.CreateJob(&LabConfig{StackName: "my-lab"})
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	req := httptest.NewRequest("GET", "/labs/"+jobID+"/workspaces", nil)
+	w := httptest.NewRecorder()
+
+	h.ServeLabWorkspaces(w, req)
+
+	assert.Equal(t, http.StatusMovedPermanently, w.Code)
+	assert.Equal(t, "/labs/"+jobID+"#workspaces", w.Header().Get("Location"))
+}
+
+func TestHandler_GetStudentPortalPassword_WrongMethod(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	req := httptest.NewRequest("POST", "/api/student-portal-password", nil)
+	w := httptest.NewRecorder()
+
+	h.GetStudentPortalPassword(w, req)
+
+	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+}
+
+func TestHandler_GetStudentPortalPassword_Set(t *testing.T) {
+	t.Setenv(EnvStudentPassword, "my-student-password")
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	req := httptest.NewRequest("GET", "/api/student-portal-password", nil)
+	w := httptest.NewRecorder()
+
+	h.GetStudentPortalPassword(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{"password":"my-student-password","set":true}`, w.Body.String())
+}
+
+func TestHandler_GetStudentPortalPassword_Unset(t *testing.T) {
+	t.Setenv(EnvStudentPassword, "")
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	req := httptest.NewRequest("GET", "/api/student-portal-password", nil)
+	w := httptest.NewRecorder()
+
+	h.GetStudentPortalPassword(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{"password":"","set":false}`, w.Body.String())
+}
+
 func TestHandler_ServeLabsList(t *testing.T) {
 	jm := NewJobManager("")
 	jm.CreateJob(&LabConfig{StackName: "lab-a"})

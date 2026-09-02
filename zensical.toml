@@ -24,6 +24,8 @@ nav = [
     "index.md",
     { "Spaces" = [
         "admin.md",
+        "admin-lab-creation.md",
+        "admin-lab-management.md",
         "templates.md",
         "student.md",
         "feedbacks.md",

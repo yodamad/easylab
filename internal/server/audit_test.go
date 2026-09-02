@@ -73,6 +73,49 @@ func TestAuditStore_Recent_LimitCaps(t *testing.T) {
 	assert.Len(t, entries, 2)
 }
 
+func TestAuditStore_RecentForLab_FiltersByLab(t *testing.T) {
+	as, err := NewAuditStore(t.TempDir())
+	require.NoError(t, err)
+
+	base := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	require.NoError(t, as.Record(AuditEntry{At: base, Actor: "admin", Role: "admin", Action: "lab.create", LabID: "job-1"}))
+	require.NoError(t, as.Record(AuditEntry{At: base.Add(time.Minute), Actor: "admin", Role: "admin", Action: "lab.create", LabID: "job-2"}))
+	require.NoError(t, as.Record(AuditEntry{At: base.Add(2 * time.Minute), Actor: "admin", Role: "admin", Action: "lab.destroy", LabID: "job-1"}))
+
+	entries, err := as.RecentForLab("job-1", 0)
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+	// Newest first, only job-1's entries.
+	assert.Equal(t, "lab.destroy", entries[0].Action)
+	assert.Equal(t, "lab.create", entries[1].Action)
+	for _, e := range entries {
+		assert.Equal(t, "job-1", e.LabID)
+	}
+}
+
+func TestAuditStore_RecentForLab_LimitCaps(t *testing.T) {
+	as, err := NewAuditStore(t.TempDir())
+	require.NoError(t, err)
+
+	for i := 0; i < 5; i++ {
+		require.NoError(t, as.Record(AuditEntry{At: time.Now(), Actor: "admin", Role: "admin", Action: "lab.create", LabID: "job-1"}))
+	}
+
+	entries, err := as.RecentForLab("job-1", 2)
+	require.NoError(t, err)
+	assert.Len(t, entries, 2)
+}
+
+func TestAuditStore_RecentForLab_NoMatches(t *testing.T) {
+	as, err := NewAuditStore(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, as.Record(AuditEntry{At: time.Now(), Actor: "admin", Role: "admin", Action: "lab.create", LabID: "job-1"}))
+
+	entries, err := as.RecentForLab("job-unknown", 0)
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+}
+
 func TestAuditStore_Recent_SkipsMalformedLines(t *testing.T) {
 	dir := t.TempDir()
 	as, err := NewAuditStore(dir)

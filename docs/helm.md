@@ -485,7 +485,7 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 ### Pinning to a dedicated node pool
 
 To keep the EasyLab server off the node pool student workspaces run on (see
-[Splitting EasyLab and workspaces across node pools](admin.md#splitting-easylab-and-workspaces-across-node-pools)),
+[Splitting EasyLab and workspaces across node pools](admin-lab-creation.md#splitting-easylab-and-workspaces-across-node-pools)),
 label a "control-plane" pool and target it:
 
 ```bash

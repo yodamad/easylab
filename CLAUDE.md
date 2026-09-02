@@ -233,7 +233,9 @@ Documentation is part of the deliverable, not a follow-up task. Any change to a 
 
 | Area | Doc file |
 |------|----------|
-| Admin UI, lab creation, credentials, lab/workspace management | `docs/admin.md` |
+| Admin UI overview, login, provider credentials | `docs/admin.md` |
+| Lab creation wizard (infrastructure, workspace templates, HTTPS/DNS, cleaning policies) | `docs/admin-lab-creation.md` |
+| Lab management (labs list, lab detail page, retry/recreate, workspace history, lab credentials) | `docs/admin-lab-management.md` |
 | Student feedback collection and admin feedback view | `docs/feedbacks.md` |
 | Stats / KPI dashboard | `docs/stats.md` |
 | Audit log (admin/student/system action history) | `docs/audit-log.md` |

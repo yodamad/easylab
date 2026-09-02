@@ -875,6 +875,17 @@ a.btn {
     box-shadow: var(--shadow-lg);
 }
 
+.btn-danger {
+    background: var(--error);
+    color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+    background: #dc2626;
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-lg);
+}
+
 .btn-download {
     background: linear-gradient(135deg, #059669 0%, #047857 100%);
     color: white;
@@ -6288,8 +6299,8 @@ body.admin-page .wizard-footer {
 
 .labs-page-container .labs-table th:nth-child(6),
 .labs-page-container .labs-table td:nth-child(6) {
-    width: 340px;
-    min-width: 340px;
+    width: 160px;
+    min-width: 160px;
     text-align: right;
 }
 
@@ -6426,6 +6437,23 @@ body.admin-page .wizard-footer {
     align-items: baseline;
     gap: 0.75rem;
     font-weight: 600;
+    list-style: none;
+}
+
+.secrets-summary::-webkit-details-marker {
+    display: none;
+}
+
+.secrets-summary::after {
+    content: "▸";
+    margin-left: auto;
+    align-self: center;
+    font-size: 0.75rem;
+    color: var(--text-light);
+}
+
+details[open] > .secrets-summary::after {
+    content: "▾";
 }
 
 .secrets-summary-title {
@@ -6855,5 +6883,327 @@ body.admin-page .wizard-footer {
     .workspace-history-action,
     .workspace-history-time {
         width: auto;
+    }
+}
+
+/* ============================================
+   LAB DETAIL PAGE (lab-detail.html)
+   ============================================ */
+
+.lab-detail-container {
+    max-width: 1400px;
+}
+
+.lab-detail-description {
+    display: block;
+    margin-top: 0.375rem;
+    font-size: 0.9375rem;
+    color: var(--text-light);
+    font-weight: 400;
+}
+
+.lab-detail-header-badges {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: 0.75rem;
+    vertical-align: middle;
+}
+
+/* Lifecycle strip: a small horizontal timeline of created -> running ->
+   completed -> cleanup sweeps -> scheduled/actual destruction. */
+.lab-lifecycle-strip {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+    margin: 1.5rem 0 2rem;
+    padding: 1.25rem 1.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow-x: auto;
+}
+
+.lab-lifecycle-point {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+    min-width: 7rem;
+    position: relative;
+}
+
+.lab-lifecycle-point::before {
+    content: "";
+    position: absolute;
+    top: 0.5rem;
+    left: -50%;
+    width: 100%;
+    height: 2px;
+    background: var(--border);
+    z-index: 0;
+}
+
+.lab-lifecycle-point:first-child::before {
+    display: none;
+}
+
+.lab-lifecycle-dot {
+    width: 1.125rem;
+    height: 1.125rem;
+    border-radius: 50%;
+    background: var(--border);
+    border: 2px solid var(--surface);
+    box-shadow: 0 0 0 2px var(--border);
+    z-index: 1;
+}
+
+.lab-lifecycle-point.is-done .lab-lifecycle-dot {
+    background: var(--success);
+    box-shadow: 0 0 0 2px var(--success);
+}
+
+.lab-lifecycle-point.is-current .lab-lifecycle-dot {
+    background: var(--primary-color);
+    box-shadow: 0 0 0 2px var(--primary-color);
+}
+
+.lab-lifecycle-point.is-danger .lab-lifecycle-dot {
+    background: var(--error);
+    box-shadow: 0 0 0 2px var(--error);
+}
+
+.lab-lifecycle-label {
+    margin-top: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text);
+    text-align: center;
+}
+
+.lab-lifecycle-time {
+    margin-top: 0.125rem;
+    font-size: 0.75rem;
+    color: var(--text-light);
+    text-align: center;
+    white-space: nowrap;
+}
+
+/* Page-level tabs (Overview / Progress / Workspaces & Templates / Feedback /
+   Lifecycle & Cleanup / Activity / Danger Zone) — a segmented-control style
+   pill group, echoing the icon+label vocabulary already used in the admin
+   sidebar (admin-nav-icon/admin-nav-label). Danger Zone sits after a hairline
+   divider inside the same group, so it reads as deliberately set apart
+   rather than an unexplained gap in the row. */
+.lab-detail-tabs {
+    display: flex;
+    align-items: stretch;
+    flex-wrap: wrap;
+    gap: 0.125rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.3rem;
+    margin-bottom: 1.5rem;
+}
+
+.lab-detail-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.5rem 0.875rem;
+    border: none;
+    border-radius: calc(var(--radius) - 0.15rem);
+    background: transparent;
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-light);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+}
+
+.lab-detail-tab-icon {
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.lab-detail-tab:hover {
+    color: var(--text);
+    background: rgba(37, 99, 235, 0.08);
+}
+
+.lab-detail-tab.is-active {
+    color: var(--primary-color);
+    background: var(--background);
+    box-shadow: var(--shadow);
+}
+
+.lab-detail-tabs-divider {
+    width: 1px;
+    align-self: stretch;
+    margin: 0.25rem 0.25rem 0.25rem auto;
+    background: var(--border);
+}
+
+.lab-detail-tab.is-danger {
+    color: var(--error);
+}
+
+.lab-detail-tab.is-danger:hover {
+    color: var(--error);
+    background: #fef2f2;
+}
+
+.lab-detail-tab.is-danger.is-active {
+    color: var(--error);
+    background: #fef2f2;
+    box-shadow: var(--shadow);
+}
+
+/* Section cards */
+.lab-detail-section {
+    background: var(--background);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    scroll-margin-top: 1rem;
+}
+
+.lab-detail-section-title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 1rem;
+}
+
+.lab-detail-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.lab-detail-section-header .lab-detail-section-title {
+    margin-bottom: 0;
+}
+
+.lab-detail-section--danger {
+    border-color: #fecaca;
+    background: #fffafa;
+}
+
+.lab-detail-section--danger .lab-detail-section-title {
+    color: var(--error);
+}
+
+.lab-detail-danger-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+/* Overview config grid */
+.lab-detail-config-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 1rem;
+}
+
+.lab-detail-config-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.lab-detail-config-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-light);
+}
+
+.lab-detail-config-value {
+    font-size: 0.9375rem;
+    color: var(--text);
+    word-break: break-word;
+}
+
+.lab-detail-config-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 1.25rem;
+    margin-bottom: 1.5rem;
+}
+
+/* Lifecycle & Cleanup / Activity history tables */
+.lab-detail-history-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+    margin-top: 0.75rem;
+}
+
+.lab-detail-history-table th,
+.lab-detail-history-table td {
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+}
+
+.lab-detail-history-table th {
+    color: var(--text-light);
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+/* Feedback summary */
+.lab-detail-feedback-summary {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    margin-bottom: 1rem;
+}
+
+.lab-detail-feedback-rating {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.lab-detail-feedback-count {
+    font-size: 0.875rem;
+    color: var(--text-light);
+}
+
+.lab-detail-feedback-entry {
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.lab-detail-feedback-entry:last-child {
+    border-bottom: none;
+}
+
+.lab-detail-feedback-stars {
+    color: #f59e0b;
+    letter-spacing: 0.1em;
+}
+
+@media (max-width: 640px) {
+    .lab-lifecycle-strip {
+        flex-direction: column;
+        gap: 1.5rem;
+    }
+
+    .lab-lifecycle-point::before {
+        display: none;
     }
 }
