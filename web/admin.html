@@ -799,32 +799,31 @@
                                     </div>
                                 </div>
 
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label for="devcontainer_dir">Devcontainer folder</label>
-                                        <input type="text" id="devcontainer_dir" placeholder=".devcontainer">
-                                        <small>Relative to the workshop repository, or to the config repository above when set.</small>
+                                <div class="form-group">
+                                    <label for="devcontainer_dir">Devcontainer folder</label>
+                                    <input type="text" id="devcontainer_dir" placeholder=".devcontainer">
+                                    <small>Relative to the workshop repository, or to the config repository above when set.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Cache registry</label>
+                                    <div class="button-group">
+                                        <button type="button" class="source-button selected" id="devcontainer-cache-external-btn" data-cache-mode="external">
+                                            <span class="source-icon">&#127760;</span>
+                                            <div class="source-content">
+                                                <span class="source-title">External registry</span>
+                                                <span class="source-description">Point at a registry you manage</span>
+                                            </div>
+                                        </button>
+                                        <button type="button" class="source-button" id="devcontainer-cache-incluster-btn" data-cache-mode="in-cluster">
+                                            <span class="source-icon">&#9729;</span>
+                                            <div class="source-content">
+                                                <span class="source-title">Host in-cluster</span>
+                                                <span class="source-description">EasyLab provisions it for you</span>
+                                            </div>
+                                        </button>
                                     </div>
-                                    <div class="form-group">
-                                        <label>Cache registry</label>
-                                        <div class="button-group">
-                                            <button type="button" class="source-button selected" id="devcontainer-cache-external-btn" data-cache-mode="external">
-                                                <span class="source-icon">&#127760;</span>
-                                                <div class="source-content">
-                                                    <span class="source-title">External registry</span>
-                                                    <span class="source-description">Point at a registry you manage</span>
-                                                </div>
-                                            </button>
-                                            <button type="button" class="source-button" id="devcontainer-cache-incluster-btn" data-cache-mode="in-cluster">
-                                                <span class="source-icon">&#9729;</span>
-                                                <div class="source-content">
-                                                    <span class="source-title">Host in-cluster</span>
-                                                    <span class="source-description">EasyLab provisions it for you</span>
-                                                </div>
-                                            </button>
-                                        </div>
-                                        <input type="hidden" id="devcontainer_use_in_cluster_cache" name="devcontainer_use_in_cluster_cache" value="false">
-                                    </div>
+                                    <input type="hidden" id="devcontainer_use_in_cluster_cache" name="devcontainer_use_in_cluster_cache" value="false">
                                 </div>
                                 <div class="form-row" id="devcontainer-cache-external-fields">
                                     <div class="form-group">
