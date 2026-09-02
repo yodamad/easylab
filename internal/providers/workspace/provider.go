@@ -304,9 +304,13 @@ type BakeProvider interface {
 	// the EXTERNAL reference from BakedImageRepo, or an external cache_repo. This
 	// deliberately does not use the internal in-cluster address: it runs from the
 	// EasyLab server, which is not necessarily inside the lab's own cluster network.
-	// Only meaningful once BakeJobStatus reports BakeStateComplete. "" with a nil
-	// error means the devcontainer declared no remoteUser.
-	BakeRemoteUser(ctx context.Context, repoRef string, insecure bool) (string, error)
+	// registryAuthSecret names the same kubernetes.io/dockerconfigjson Secret used to
+	// push (DevcontainerSpec.RegistryAuthSecret) — many registries require auth for
+	// reads too, not just writes, so verifying the pull path anonymously would report
+	// a correctly-pushed image as unpullable. Empty means an anonymous request. Only
+	// meaningful once BakeJobStatus reports BakeStateComplete. "" with a nil error
+	// means the devcontainer declared no remoteUser.
+	BakeRemoteUser(ctx context.Context, repoRef string, insecure bool, registryAuthSecret string) (string, error)
 }
 
 // SecretManager materializes the credential Secrets that templates reference by

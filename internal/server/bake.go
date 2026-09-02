@@ -194,6 +194,7 @@ func (h *Handler) BakeTemplate(w http.ResponseWriter, r *http.Request) {
 
 	var destRepo, pullRepo string
 	var pushInsecure, pullInsecure bool
+	var pullRegistryAuthSecret string
 	if useInCluster {
 		rc, ok := backend.(workspace.RegistryCacheProvider)
 		if !ok {
@@ -234,6 +235,9 @@ func (h *Handler) BakeTemplate(w http.ResponseWriter, r *http.Request) {
 		pullRepo = destRepo
 		pushInsecure = tmpl.Devcontainer.Insecure
 		pullInsecure = tmpl.Devcontainer.Insecure
+		// The destination registry may require auth for reads too, not just the
+		// push — verifying pullability must authenticate the same way the push did.
+		pullRegistryAuthSecret = tmpl.Devcontainer.RegistryAuthSecret
 	}
 
 	dc := toWorkspaceDevcontainer(tmpl.Devcontainer)
@@ -268,7 +272,7 @@ func (h *Handler) BakeTemplate(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		h.bakeExecSem <- struct{}{}
 		defer func() { <-h.bakeExecSem }()
-		h.awaitBake(jobID, templateName, bp, pullRepo, pullInsecure)
+		h.awaitBake(jobID, templateName, bp, pullRepo, pullInsecure, pullRegistryAuthSecret)
 	}()
 
 	w.Header().Set("Content-Type", "text/html")
@@ -278,7 +282,7 @@ func (h *Handler) BakeTemplate(w http.ResponseWriter, r *http.Request) {
 // awaitBake polls the bake Job to completion (or failure/timeout), then records the
 // result: LabConfig.BakedImages on success, bakeStatuses on failure. Runs in its own
 // goroutine, bounded by bakeExecSem.
-func (h *Handler) awaitBake(jobID, templateName string, bp workspace.BakeProvider, pullRepo string, pullInsecure bool) {
+func (h *Handler) awaitBake(jobID, templateName string, bp workspace.BakeProvider, pullRepo string, pullInsecure bool, pullRegistryAuthSecret string) {
 	key := jobID + "/" + templateName
 	ctx, cancel := context.WithTimeout(context.Background(), bakeTimeout())
 	defer cancel()
@@ -331,7 +335,7 @@ poll:
 	var remoteUser string
 	var verifyErr error
 	for attempt := 1; attempt <= bakeRegistryReadyAttempts(); attempt++ {
-		remoteUser, verifyErr = bp.BakeRemoteUser(context.Background(), pullRepo, pullInsecure)
+		remoteUser, verifyErr = bp.BakeRemoteUser(context.Background(), pullRepo, pullInsecure, pullRegistryAuthSecret)
 		if verifyErr == nil {
 			break
 		}

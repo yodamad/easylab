@@ -3,6 +3,7 @@ package kube
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -179,7 +180,7 @@ func TestBakeRemoteUser(t *testing.T) {
 	b, _ := newTestBackend()
 	host := strings.TrimPrefix(srv.URL, "http://")
 
-	user, err := b.BakeRemoteUser(context.Background(), host+"/baked/job-1/go-workshop:latest", true)
+	user, err := b.BakeRemoteUser(context.Background(), host+"/baked/job-1/go-workshop:latest", true, "")
 	require.NoError(t, err)
 	assert.Equal(t, "vscode", user)
 }
@@ -201,9 +202,65 @@ func TestBakeRemoteUser_NoLabelMeansNoUser(t *testing.T) {
 	b, _ := newTestBackend()
 	host := strings.TrimPrefix(srv.URL, "http://")
 
-	user, err := b.BakeRemoteUser(context.Background(), host+"/baked/job-1/go-workshop:latest", true)
+	user, err := b.BakeRemoteUser(context.Background(), host+"/baked/job-1/go-workshop:latest", true, "")
 	require.NoError(t, err)
 	assert.Empty(t, user)
+}
+
+// TestBakeRemoteUser_AuthenticatesWithRegistryAuthSecret guards the bug where a
+// pull-verification GET was always anonymous, even against a registry that requires
+// auth for reads (not just writes) — a correctly-pushed image was reported as
+// permanently unpullable because BakeRemoteUser never sent the credentials that
+// envbuilder's push itself used.
+func TestBakeRemoteUser_AuthenticatesWithRegistryAuthSecret(t *testing.T) {
+	configDigest := "sha256:deadbeef"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Basic dXNlcjpwYXNz" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/manifests/latest"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"config": map[string]string{"digest": configDigest},
+			})
+		case strings.HasSuffix(r.URL.Path, "/blobs/"+configDigest):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"config": map[string]any{
+					"Labels": map[string]string{
+						devcontainerMetadataLabel: `[{"remoteUser":"vscode"}]`,
+					},
+				},
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	b, cs := newTestBackend()
+	host := strings.TrimPrefix(srv.URL, "http://")
+	repoRef := host + "/baked/job-1/go-workshop:latest"
+
+	t.Run("anonymous request is rejected", func(t *testing.T) {
+		_, err := b.BakeRemoteUser(context.Background(), repoRef, true, "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "401")
+	})
+
+	dockerConfig := fmt.Sprintf(`{"auths":{%q:{"auth":"dXNlcjpwYXNz"}}}`, host)
+	_, err := cs.CoreV1().Secrets("workshops").Create(context.Background(), &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "regcred", Namespace: "workshops"},
+		Type:       corev1.SecretTypeDockerConfigJson,
+		Data:       map[string][]byte{corev1.DockerConfigJsonKey: []byte(dockerConfig)},
+	}, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	t.Run("authenticated request using the same secret the push used succeeds", func(t *testing.T) {
+		user, err := b.BakeRemoteUser(context.Background(), repoRef, true, "regcred")
+		require.NoError(t, err)
+		assert.Equal(t, "vscode", user)
+	})
 }
 
 func TestSplitImageRef(t *testing.T) {

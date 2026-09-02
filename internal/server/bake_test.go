@@ -29,7 +29,7 @@ func (f *fakeBakeProvider) EnsureBakeJob(context.Context, workspace.BakeRequest)
 func (f *fakeBakeProvider) BakeJobStatus(context.Context, string, string) (workspace.BakeState, error) {
 	return f.jobStatus, nil
 }
-func (f *fakeBakeProvider) BakeRemoteUser(context.Context, string, bool) (string, error) {
+func (f *fakeBakeProvider) BakeRemoteUser(context.Context, string, bool, string) (string, error) {
 	n := atomic.AddInt32(&f.remoteUserCalls, 1)
 	if n <= f.remoteUserErrs {
 		return "", errors.New("tls: failed to verify certificate")
@@ -179,7 +179,7 @@ func TestAwaitBake_PersistentPullFailureMarksBakeFailed(t *testing.T) {
 	id := bakeLab(t, jm, WorkspaceTemplate{Name: "go-workshop", Devcontainer: &DevcontainerConfig{Enabled: true, CacheRepo: "registry.example.com/cache"}})
 
 	fp := &fakeBakeProvider{jobStatus: workspace.BakeStateComplete, remoteUserErrs: 999}
-	h.awaitBake(id, "go-workshop", fp, "registry.example.com/cache/baked-go-workshop:latest", false)
+	h.awaitBake(id, "go-workshop", fp, "registry.example.com/cache/baked-go-workshop:latest", false, "")
 
 	job, _ := jm.GetJob(id)
 	job.mu.RLock()
@@ -220,7 +220,7 @@ func TestAwaitBake_FailedRebuildInvalidatesStaleBakedImage(t *testing.T) {
 	job.mu.Unlock()
 
 	fp := &fakeBakeProvider{jobStatus: workspace.BakeStateComplete, remoteUserErrs: 999}
-	h.awaitBake(id, "go-workshop", fp, "registry.example.com/cache/baked-go-workshop:latest", false)
+	h.awaitBake(id, "go-workshop", fp, "registry.example.com/cache/baked-go-workshop:latest", false, "")
 
 	job, _ = jm.GetJob(id)
 	job.mu.RLock()
@@ -240,7 +240,7 @@ func TestAwaitBake_TransientPullFailureRecovers(t *testing.T) {
 	id := bakeLab(t, jm, WorkspaceTemplate{Name: "go-workshop", Devcontainer: &DevcontainerConfig{Enabled: true, CacheRepo: "registry.example.com/cache"}})
 
 	fp := &fakeBakeProvider{jobStatus: workspace.BakeStateComplete, remoteUserErrs: 2, remoteUser: "vscode"}
-	h.awaitBake(id, "go-workshop", fp, "registry.example.com/cache/baked-go-workshop:latest", false)
+	h.awaitBake(id, "go-workshop", fp, "registry.example.com/cache/baked-go-workshop:latest", false, "")
 
 	job, _ := jm.GetJob(id)
 	job.mu.RLock()

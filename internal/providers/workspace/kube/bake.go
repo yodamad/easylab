@@ -3,6 +3,7 @@ package kube
 import (
 	"context"
 	"crypto/sha1"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -193,8 +194,11 @@ const devcontainerMetadataLabel = "devcontainer.metadata"
 // declared remoteUser, if any. repoRef must be reachable from wherever this process
 // runs — the EXTERNAL reference from BakedImageRepo, or an external cache_repo — not
 // the in-cluster address envbuilder pushed to, since the EasyLab server is not
-// necessarily inside the lab's own cluster network.
-func (b *Backend) BakeRemoteUser(ctx context.Context, repoRef string, insecure bool) (string, error) {
+// necessarily inside the lab's own cluster network. registryAuthSecret names the same
+// dockerconfigjson Secret used to push: many registries require auth for reads too
+// (e.g. a private internal registry), so this must authenticate the same way the push
+// did rather than assuming an anonymous GET works wherever an anonymous push doesn't.
+func (b *Backend) BakeRemoteUser(ctx context.Context, repoRef string, insecure bool, registryAuthSecret string) (string, error) {
 	host, repo, tag := splitImageRef(repoRef)
 	if host == "" || repo == "" {
 		return "", fmt.Errorf("invalid image reference %q", repoRef)
@@ -205,11 +209,16 @@ func (b *Backend) BakeRemoteUser(ctx context.Context, repoRef string, insecure b
 	}
 	client := &http.Client{Timeout: 15 * time.Second}
 
-	digest, err := fetchConfigDigest(ctx, client, scheme, host, repo, tag)
+	authHeader, err := b.registryPullAuthHeader(ctx, registryAuthSecret, host)
 	if err != nil {
 		return "", err
 	}
-	labels, err := fetchImageConfigLabels(ctx, client, scheme, host, repo, digest)
+
+	digest, err := fetchConfigDigest(ctx, client, scheme, host, repo, tag, authHeader)
+	if err != nil {
+		return "", err
+	}
+	labels, err := fetchImageConfigLabels(ctx, client, scheme, host, repo, digest, authHeader)
 	if err != nil {
 		return "", err
 	}
@@ -234,6 +243,44 @@ func (b *Backend) BakeRemoteUser(ctx context.Context, repoRef string, insecure b
 	return "", nil
 }
 
+// registryPullAuthHeader reads the same kubernetes.io/dockerconfigjson Secret used to
+// push (DevcontainerSpec.RegistryAuthSecret) and returns the "Authorization" header
+// value for host, if the secret carries credentials for it. An empty secret name, or
+// no entry for host, both return "", nil — an anonymous request, which is correct for
+// the in-cluster build cache (no auth configured at all).
+func (b *Backend) registryPullAuthHeader(ctx context.Context, secretName, host string) (string, error) {
+	secretName = strings.TrimSpace(secretName)
+	if secretName == "" {
+		return "", nil
+	}
+	sec, err := b.client.CoreV1().Secrets(b.namespace).Get(ctx, secretName, metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to read registry auth secret %q: %w", secretName, err)
+	}
+	raw := sec.Data[corev1.DockerConfigJsonKey]
+	if len(raw) == 0 {
+		raw = sec.Data["config.json"]
+	}
+	if len(raw) == 0 {
+		return "", fmt.Errorf("registry auth secret %q has no %q key", secretName, corev1.DockerConfigJsonKey)
+	}
+	var cfg dockerConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return "", fmt.Errorf("failed to parse registry auth secret %q: %w", secretName, err)
+	}
+	auth, ok := cfg.Auths[host]
+	if !ok {
+		return "", nil
+	}
+	if auth.Auth != "" {
+		return "Basic " + auth.Auth, nil
+	}
+	if auth.Username != "" || auth.Password != "" {
+		return "Basic " + base64.StdEncoding.EncodeToString([]byte(auth.Username+":"+auth.Password)), nil
+	}
+	return "", nil
+}
+
 // splitImageRef splits host[:port]/path/to/repo:tag into its host, repo path and tag,
 // defaulting tag to "latest" when absent. Not a general-purpose image reference
 // parser — it only needs to handle the shapes this package itself produces.
@@ -250,13 +297,16 @@ func splitImageRef(ref string) (host, repo, tag string) {
 	return host, rest, "latest"
 }
 
-func fetchConfigDigest(ctx context.Context, client *http.Client, scheme, host, repo, tag string) (string, error) {
+func fetchConfigDigest(ctx context.Context, client *http.Client, scheme, host, repo, tag, authHeader string) (string, error) {
 	url := fmt.Sprintf("%s://%s/v2/%s/manifests/%s", scheme, host, repo, tag)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Accept", "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json")
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch image manifest: %w", err)
@@ -279,11 +329,14 @@ func fetchConfigDigest(ctx context.Context, client *http.Client, scheme, host, r
 	return manifest.Config.Digest, nil
 }
 
-func fetchImageConfigLabels(ctx context.Context, client *http.Client, scheme, host, repo, digest string) (map[string]string, error) {
+func fetchImageConfigLabels(ctx context.Context, client *http.Client, scheme, host, repo, digest, authHeader string) (map[string]string, error) {
 	url := fmt.Sprintf("%s://%s/v2/%s/blobs/%s", scheme, host, repo, digest)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
+	}
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
