@@ -1306,9 +1306,15 @@ func (h *Handler) LaunchLab(w http.ResponseWriter, r *http.Request) {
 
 // GetJobStatus returns the current status of a job
 func (h *Handler) GetJobStatus(w http.ResponseWriter, r *http.Request) {
-	// Extract job ID from path like /api/jobs/{id}/status or /api/jobs/{id}
+	// Extract job ID from path like /api/jobs/{id}/status or /api/labs/{id}/status
 	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(pathParts) < 3 || pathParts[0] != "api" || pathParts[1] != "jobs" {
+	if len(pathParts) < 3 || pathParts[0] != "api" {
+		log.Printf("Invalid path for job status: %s", r.URL.Path)
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	// Accept both "jobs" and "labs" as the second path segment
+	if pathParts[1] != "jobs" && pathParts[1] != "labs" {
 		log.Printf("Invalid path for job status: %s", r.URL.Path)
 		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
@@ -1388,9 +1394,14 @@ func (h *Handler) GetJobStatus(w http.ResponseWriter, r *http.Request) {
 
 // GetJobStatusJSON returns job status as JSON (for API clients)
 func (h *Handler) GetJobStatusJSON(w http.ResponseWriter, r *http.Request) {
-	// Extract job ID from path like /api/jobs/{id}/status or /api/jobs/{id}
+	// Extract job ID from path like /api/jobs/{id}/status or /api/labs/{id}/status
 	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(pathParts) < 3 || pathParts[0] != "api" || pathParts[1] != "jobs" {
+	if len(pathParts) < 3 || pathParts[0] != "api" {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	// Accept both "jobs" and "labs" as the second path segment
+	if pathParts[1] != "jobs" && pathParts[1] != "labs" {
 		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
 	}

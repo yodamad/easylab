@@ -248,6 +248,27 @@ func TestHandler_GetJobStatus_Found(t *testing.T) {
 	}
 }
 
+func TestHandler_GetJobStatus_LabsPrefix(t *testing.T) {
+	jm := NewJobManager("")
+	config := &LabConfig{StackName: "test"}
+	jobID := jm.CreateJob(config)
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	req := httptest.NewRequest("GET", "/api/labs/"+jobID+"/status", nil)
+	w := httptest.NewRecorder()
+
+	h.GetJobStatus(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("GetJobStatus() status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	if !strings.Contains(w.Body.String(), "pending") {
+		t.Error("GetJobStatus() response should contain 'pending' status")
+	}
+}
+
 func TestHandler_GetJobStatusJSON_InvalidPath(t *testing.T) {
 	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
 
@@ -282,6 +303,28 @@ func TestHandler_GetJobStatusJSON_Found(t *testing.T) {
 	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/jobs/"+jobID, nil)
+	w := httptest.NewRecorder()
+
+	h.GetJobStatusJSON(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("GetJobStatusJSON() status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "application/json" {
+		t.Errorf("GetJobStatusJSON() Content-Type = %s, want application/json", contentType)
+	}
+}
+
+func TestHandler_GetJobStatusJSON_LabsPrefix(t *testing.T) {
+	jm := NewJobManager("")
+	config := &LabConfig{StackName: "test"}
+	jobID := jm.CreateJob(config)
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	req := httptest.NewRequest("GET", "/api/labs/"+jobID+"/status", nil)
 	w := httptest.NewRecorder()
 
 	h.GetJobStatusJSON(w, req)

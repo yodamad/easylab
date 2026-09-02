@@ -9,6 +9,7 @@ spec:
   replicas: {{ .Values.replicaCount }}
   strategy:
     type: Recreate
+    rollingUpdate: null
   selector:
     matchLabels:
       {{- include "easylab.selectorLabels" . | nindent 6 }}
