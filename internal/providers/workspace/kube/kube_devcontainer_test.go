@@ -73,7 +73,7 @@ func TestEnsureWorkspace_DevcontainerRunsEnvbuilder(t *testing.T) {
 	assert.Equal(t, int64(0), *c.SecurityContext.RunAsUser)
 
 	// Routing is unchanged: still the IDE's port, so the student contract holds.
-	assert.Equal(t, int32(8080), c.Ports[0].ContainerPort)
+	assert.Equal(t, int32(13337), c.Ports[0].ContainerPort)
 	assert.Equal(t, workspace.IDECodeServer, ws.IDE)
 	assert.NotContains(t, ws.OpenURL, "tkn=", "code-server authenticates on its own login page")
 }
@@ -111,7 +111,7 @@ func TestEnsureWorkspace_DevcontainerEnv(t *testing.T) {
 	// The init script starts the injected IDE, not one from the image. Args are
 	// shell-quoted because the script is handed to a shell, not exec'd directly.
 	assert.Contains(t, env["ENVBUILDER_INIT_SCRIPT"], "exec "+ideMountPath+"/bin/code-server")
-	assert.Contains(t, env["ENVBUILDER_INIT_SCRIPT"], "'--bind-addr' '0.0.0.0:8080'")
+	assert.Contains(t, env["ENVBUILDER_INIT_SCRIPT"], "'--bind-addr' '0.0.0.0:13337'")
 	assert.Contains(t, env["ENVBUILDER_INIT_SCRIPT"], "'--auth' 'password'")
 }
 
@@ -478,7 +478,7 @@ func TestEnsureWorkspace_DevcontainerLegacyIDEValue(t *testing.T) {
 	require.NoError(t, err)
 	c := ideContainer(t, cs, ws.ID)
 
-	assert.Equal(t, int32(8080), c.Ports[0].ContainerPort)
+	assert.Equal(t, int32(13337), c.Ports[0].ContainerPort)
 	assert.Equal(t, workspace.IDECodeServer, ws.IDE, "the retired value must not leak back out")
 
 	script := envOf(c)["ENVBUILDER_INIT_SCRIPT"]

@@ -55,8 +55,8 @@ func TestEnsureWorkspace_CodeServerDefaults(t *testing.T) {
 	if !strings.Contains(c.Image, "code-server") {
 		t.Errorf("expected code-server image, got %q", c.Image)
 	}
-	if c.Ports[0].ContainerPort != 8080 {
-		t.Errorf("expected port 8080, got %d", c.Ports[0].ContainerPort)
+	if c.Ports[0].ContainerPort != 13337 {
+		t.Errorf("expected port 13337, got %d", c.Ports[0].ContainerPort)
 	}
 	if !hasArg(c.Args, "--auth", "password") {
 		t.Errorf("expected --auth password arg, got %v", c.Args)
@@ -102,8 +102,8 @@ func TestEnsureWorkspace_CodeServerAuth(t *testing.T) {
 	if !strings.Contains(c.Image, "code-server") {
 		t.Errorf("expected code-server image, got %q", c.Image)
 	}
-	if c.Ports[0].ContainerPort != 8080 {
-		t.Errorf("expected port 8080, got %d", c.Ports[0].ContainerPort)
+	if c.Ports[0].ContainerPort != 13337 {
+		t.Errorf("expected port 13337, got %d", c.Ports[0].ContainerPort)
 	}
 	foundPassword := false
 	for _, e := range c.Env {
@@ -1085,8 +1085,8 @@ func TestEnsureWorkspace_ReadinessProbeAndProgressDeadline(t *testing.T) {
 	if c.ReadinessProbe == nil || c.ReadinessProbe.TCPSocket == nil {
 		t.Fatalf("expected a TCP readiness probe, got %+v", c.ReadinessProbe)
 	}
-	if c.ReadinessProbe.TCPSocket.Port.IntValue() != 8080 {
-		t.Errorf("expected readiness probe on port 8080, got %v", c.ReadinessProbe.TCPSocket.Port)
+	if c.ReadinessProbe.TCPSocket.Port.IntValue() != 13337 {
+		t.Errorf("expected readiness probe on port 13337, got %v", c.ReadinessProbe.TCPSocket.Port)
 	}
 }
 

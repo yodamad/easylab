@@ -167,7 +167,7 @@ type ideProfile struct {
 var codeServerProfile = ideProfile{
 	kind:         workspace.IDECodeServer,
 	defaultImage: DefaultImage,
-	port:         8080,
+	port:         13337,
 	workspaceDir: "/home/coder/project",
 	serverBin:    "code-server",
 	// The .deb installs the self-contained bundle here; /usr/bin/code-server is
