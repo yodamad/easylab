@@ -985,9 +985,17 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 		return nil, fmt.Errorf("template %s not found", filename)
 	}
 
+	// Shared partials a page pulls in with {{template "..."}}. They have to be
+	// parsed alongside the page or the define is unknown at execution time.
+	extraPartials := map[string][]string{
+		"admin.html":      {"web/partials/template-editor.html"},
+		"lab-detail.html": {"web/partials/template-editor.html"},
+	}
+
 	var err error
-	// Parse base template and page template together
-	tmpl, err = template.New("base.html").Funcs(templateFuncMap).ParseFiles("web/base.html", tmplPath)
+	// Parse base template, page template and any shared partials together
+	files := append([]string{"web/base.html", tmplPath}, extraPartials[filename]...)
+	tmpl, err = template.New("base.html").Funcs(templateFuncMap).ParseFiles(files...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load template %s: %w", tmplPath, err)
 	}

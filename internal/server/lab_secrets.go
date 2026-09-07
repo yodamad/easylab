@@ -1,6 +1,8 @@
 package server
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"log"
@@ -23,23 +25,25 @@ import (
 // Because the Secret lives in the cluster, these routes only work once the lab is
 // up: the cluster has to exist before anything can be written to it.
 
-// labSecretManager resolves the lab's workspace backend and its optional
+// Why a lab's SecretManager may not be available. Named so the HTTP wrapper can
+// map each to its own status without the resolver knowing about HTTP — the
+// devcontainer import resolves a credential through the same path and has no
+// response to write.
+var (
+	errLabNotFound        = errors.New("lab not found")
+	errLabNotReady        = errors.New("lab is not ready yet")
+	errLabNoKubeconfig    = errors.New("lab cluster configuration not available")
+	errLabUnreachable     = errors.New("failed to reach lab cluster")
+	errSecretsUnsupported = errors.New("this lab's workspace backend cannot manage secrets")
+)
+
+// labSecretManagerFor resolves a lab's workspace backend and its optional
 // SecretManager, applying the same gates as ServeLabWorkspaces: the lab must
 // exist, have finished provisioning, and have a kubeconfig.
-//
-// It writes the HTTP error itself and reports ok=false, so callers can return
-// immediately.
-func (h *Handler) labSecretManager(w http.ResponseWriter, r *http.Request) (sm workspace.SecretManager, labID string, ok bool) {
-	labID = labIDFromPath(r.URL.Path)
-	if labID == "" {
-		http.Error(w, "Invalid path", http.StatusBadRequest)
-		return nil, "", false
-	}
-
+func (h *Handler) labSecretManagerFor(labID string) (workspace.SecretManager, error) {
 	job, exists := h.jobManager.GetJob(labID)
 	if !exists {
-		http.Error(w, "Lab not found", http.StatusNotFound)
-		return nil, "", false
+		return nil, errLabNotFound
 	}
 
 	job.mu.RLock()
@@ -49,27 +53,62 @@ func (h *Handler) labSecretManager(w http.ResponseWriter, r *http.Request) (sm w
 	job.mu.RUnlock()
 
 	if status != JobStatusCompleted {
-		http.Error(w, "Lab is not ready yet", http.StatusBadRequest)
-		return nil, "", false
+		return nil, errLabNotReady
 	}
 	if kubeconfig == "" {
-		http.Error(w, "Lab cluster configuration not available", http.StatusInternalServerError)
-		return nil, "", false
+		return nil, errLabNoKubeconfig
 	}
 
 	backend, err := h.workspaceBackendFor(labID, kubeconfig, namespace)
 	if err != nil {
 		log.Printf("Lab secrets: failed to build backend for lab %s: %v", labID, err)
-		http.Error(w, "Failed to reach lab cluster", http.StatusInternalServerError)
-		return nil, "", false
+		return nil, errLabUnreachable
 	}
 
 	sm, supported := backend.(workspace.SecretManager)
 	if !supported {
-		http.Error(w, "This lab's workspace backend cannot manage secrets", http.StatusNotImplemented)
+		return nil, errSecretsUnsupported
+	}
+	return sm, nil
+}
+
+// labSecretManager is labSecretManagerFor for the secrets routes: it takes the
+// lab ID from the path, writes the HTTP error itself and reports ok=false, so
+// callers can return immediately.
+func (h *Handler) labSecretManager(w http.ResponseWriter, r *http.Request) (sm workspace.SecretManager, labID string, ok bool) {
+	labID = labIDFromPath(r.URL.Path)
+	if labID == "" {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return nil, "", false
 	}
-	return sm, labID, true
+
+	sm, err := h.labSecretManagerFor(labID)
+	if err == nil {
+		return sm, labID, true
+	}
+
+	status := http.StatusInternalServerError
+	switch {
+	case errors.Is(err, errLabNotFound):
+		status = http.StatusNotFound
+	case errors.Is(err, errLabNotReady):
+		status = http.StatusBadRequest
+	case errors.Is(err, errSecretsUnsupported):
+		status = http.StatusNotImplemented
+	}
+	// These messages describe the lab's own state rather than anything internal,
+	// so they are safe to return as-is.
+	http.Error(w, capitalizeFirst(err.Error()), status)
+	return nil, "", false
+}
+
+// capitalizeFirst upper-cases the first letter, so a Go error string reads as the
+// sentence the HTTP response has always been.
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 // labIDFromPath pulls the lab ID out of /api/labs/{id}/secrets (and the
@@ -86,7 +125,12 @@ func labIDFromPath(path string) string {
 
 // ServeLabSecrets renders the lab's credential Secrets panel.
 //
-//	GET /api/labs/{id}/secrets
+//	GET /api/labs/{id}/secrets              the HTML panel
+//	GET /api/labs/{id}/secrets?format=json  the same credentials as JSON
+//
+// The JSON form backs the "Add Template" drawer's credential pickers, which need
+// the names to offer. workspace.AuthSecret carries no secret material by
+// construction, so this exposes nothing the HTML panel does not already show.
 func (h *Handler) ServeLabSecrets(w http.ResponseWriter, r *http.Request) {
 	sm, labID, ok := h.labSecretManager(w, r)
 	if !ok {
@@ -111,6 +155,17 @@ func (h *Handler) ServeLabSecrets(w http.ResponseWriter, r *http.Request) {
 		job.mu.RUnlock()
 	}
 	missing := pendingCredentialNames(secrets, templates)
+
+	if r.URL.Query().Get("format") == "json" {
+		w.Header().Set("Content-Type", "application/json")
+		if secrets == nil {
+			secrets = []workspace.AuthSecret{}
+		}
+		if err := json.NewEncoder(w).Encode(secrets); err != nil {
+			log.Printf("Failed to encode credentials for lab %s: %v", labID, err)
+		}
+		return
+	}
 
 	w.Header().Set("Content-Type", "text/html")
 	fmt.Fprint(w, renderLabSecrets(labID, secrets, missing))

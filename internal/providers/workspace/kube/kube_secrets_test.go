@@ -224,3 +224,53 @@ func TestEnsureWorkspace_AcceptsSecretFromEnsureGitAuthSecret(t *testing.T) {
 	_, err := b.EnsureWorkspace(ctx, spec)
 	assert.NoError(t, err, "a secret written by EnsureGitAuthSecret must satisfy verifyGitAuthSecret")
 }
+
+// ReadGitAuth is the one place a credential's material is read back out, for a
+// clone EasyLab makes itself (reading a private workshop's devcontainer.json
+// during an import). Everything else goes through verifyGitAuthSecret, which
+// reads the same keys and deliberately discards them.
+func TestReadGitAuth(t *testing.T) {
+	b, cs := newTestBackend()
+	ctx := context.Background()
+
+	gitAuthSecret(t, cs, "gitcred", "oauth2", "glpat-x")
+
+	user, token, err := b.ReadGitAuth(ctx, "gitcred")
+	require.NoError(t, err)
+	assert.Equal(t, "oauth2", user)
+	assert.Equal(t, "glpat-x", token)
+}
+
+func TestReadGitAuth_Errors(t *testing.T) {
+	b, cs := newTestBackend()
+	ctx := context.Background()
+
+	// A basic-auth Secret missing a key would otherwise clone as an empty
+	// username/password and fail at the remote with a confusing message.
+	_, err := cs.CoreV1().Secrets("workshops").Create(ctx, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "halfcred", Namespace: "workshops"},
+		Type:       corev1.SecretTypeBasicAuth,
+		Data:       map[string][]byte{corev1.BasicAuthUsernameKey: []byte("oauth2")},
+	}, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	tests := []struct {
+		name    string
+		secret  string
+		wantErr string
+	}{
+		{name: "empty name", secret: "", wantErr: "name is required"},
+		{name: "missing secret", secret: "nope", wantErr: `failed to read git auth secret "nope"`},
+		{name: "secret without a password", secret: "halfcred", wantErr: `has no "password" key`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			user, token, err := b.ReadGitAuth(ctx, tt.secret)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+			assert.Empty(t, user)
+			assert.Empty(t, token)
+		})
+	}
+}

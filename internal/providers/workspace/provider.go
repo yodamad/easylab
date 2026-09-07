@@ -335,6 +335,16 @@ type SecretManager interface {
 	// ListAuthSecrets reports the credential Secrets a template can reference,
 	// whoever created them — including ones made out of band with kubectl.
 	ListAuthSecrets(ctx context.Context) ([]AuthSecret, error)
+	// ReadGitAuth returns a git credential's username and token, for a clone
+	// EasyLab performs itself: reading a private workshop repo's devcontainer.json
+	// during an import, where this process is the git client.
+	//
+	// It is the one place secret material is read back out. A student's workspace
+	// never goes through here — there the kubelet resolves the Secret through a
+	// secretKeyRef and this process never handles the token at all. Callers hold
+	// the result for the lifetime of the request and must not persist it or return
+	// it to a client.
+	ReadGitAuth(ctx context.Context, name string) (username, token string, err error)
 	// DeleteAuthSecret removes a credential Secret. Deleting one that is not there
 	// is not an error.
 	DeleteAuthSecret(ctx context.Context, name string) error

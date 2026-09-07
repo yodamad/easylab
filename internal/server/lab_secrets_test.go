@@ -32,6 +32,12 @@ type fakeSecretBackend struct {
 	RegistryCalls []registryCall
 	GitCalls      []gitCall
 	DeleteCalls   []string
+
+	// gitAuth is what ReadGitAuth hands back, keyed by credential name, and
+	// ReadGitAuthCalls records what was asked for.
+	gitAuth          map[string]gitCall
+	readGitAuthErr   error
+	ReadGitAuthCalls []string
 }
 
 type registryCall struct{ Name, Server, Username, Token string }
@@ -64,6 +70,18 @@ func (f *fakeSecretBackend) ListAuthSecrets(context.Context) ([]workspace.AuthSe
 		return nil, f.listErrSecrets
 	}
 	return f.secrets, nil
+}
+
+func (f *fakeSecretBackend) ReadGitAuth(_ context.Context, name string) (string, string, error) {
+	f.ReadGitAuthCalls = append(f.ReadGitAuthCalls, name)
+	if f.readGitAuthErr != nil {
+		return "", "", f.readGitAuthErr
+	}
+	got, ok := f.gitAuth[name]
+	if !ok {
+		return "", "", fmt.Errorf("git auth secret %q not found", name)
+	}
+	return got.Username, got.Token, nil
 }
 
 func (f *fakeSecretBackend) DeleteAuthSecret(_ context.Context, name string) error {
@@ -460,4 +478,74 @@ func TestRequestWorkspace_BackendErrorIsNotShownToTheStudent(t *testing.T) {
 	for _, leak := range []string{"gitcred", "workshops", "forbidden", "serviceaccount", "secrets"} {
 		assert.NotContains(t, body, leak, "internal detail %q leaked to the student", leak)
 	}
+}
+
+// The "Add Template" drawer's credential pickers read this. Before it existed the
+// pickers rendered with nothing but "None", so a template added from a lab's
+// detail page could never reference a private repo — the field was there and the
+// help text promised it worked.
+func TestServeLabSecrets_JSONFormat(t *testing.T) {
+	h, fb, labID := newSecretsTestHandler(t)
+	fb.secrets = []workspace.AuthSecret{
+		{Name: "regcred", Type: workspace.AuthSecretRegistry, Servers: []string{"registry.example.com"}, Username: "bob"},
+		{Name: "gitcred", Type: workspace.AuthSecretGit, Username: "oauth2"},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/labs/"+labID+"/secrets?format=json", nil)
+	rec := httptest.NewRecorder()
+	h.ServeLabSecrets(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+
+	var got []workspace.AuthSecret
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Len(t, got, 2)
+	assert.Equal(t, "regcred", got[0].Name)
+	assert.Equal(t, workspace.AuthSecretRegistry, got[0].Type)
+	assert.Equal(t, "gitcred", got[1].Name)
+	assert.Equal(t, workspace.AuthSecretGit, got[1].Type)
+}
+
+// A lab with no credentials must answer with an empty array, not "null": the
+// drawer iterates the response straight away.
+func TestServeLabSecrets_JSONEmptyIsAnArray(t *testing.T) {
+	h, _, labID := newSecretsTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/labs/"+labID+"/secrets?format=json", nil)
+	rec := httptest.NewRecorder()
+	h.ServeLabSecrets(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.JSONEq(t, `[]`, rec.Body.String())
+}
+
+// Whatever the format, a token must not come back. ListAuthSecrets is the only
+// source here and it never carries secret material, but the route is what the
+// browser actually calls, so the property is pinned where it is exposed.
+func TestServeLabSecrets_JSONNeverCarriesTheToken(t *testing.T) {
+	h, fb, labID := newSecretsTestHandler(t)
+	require.NoError(t, fb.EnsureGitAuthSecret(context.Background(), "gitcred", "oauth2", "glpat-supersecret"))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/labs/"+labID+"/secrets?format=json", nil)
+	rec := httptest.NewRecorder()
+	h.ServeLabSecrets(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.NotContains(t, rec.Body.String(), "glpat-supersecret")
+}
+
+// The HTML panel is what the page itself loads, so the JSON branch must not have
+// taken it over.
+func TestServeLabSecrets_DefaultsToHTML(t *testing.T) {
+	h, fb, labID := newSecretsTestHandler(t)
+	fb.secrets = []workspace.AuthSecret{{Name: "regcred", Type: workspace.AuthSecretRegistry}}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/labs/"+labID+"/secrets", nil)
+	rec := httptest.NewRecorder()
+	h.ServeLabSecrets(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "text/html", rec.Header().Get("Content-Type"))
+	assert.Contains(t, rec.Body.String(), "secret-row")
 }

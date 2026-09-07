@@ -80,6 +80,69 @@ func TestUploadTemplateToLab_FormMode(t *testing.T) {
 	assert.Equal(t, "bar", got.Env["FOO"])
 }
 
+// The drawer used to be a hand-copy of the wizard's Step 6 and had quietly fallen
+// behind it: no description, no node selectors, and a git-credential picker that
+// was never populated. Both surfaces now render the same partial, so a
+// drawer-shaped post carries everything the wizard's does.
+func TestUploadTemplateToLab_FormModeCarriesEveryEditorField(t *testing.T) {
+	h, jm := newUploadTestHandler(t)
+	id := completedLab(t, jm)
+
+	body := url.Values{
+		"templates_mode":                {"form"},
+		"template_0_name":               {"go-workshop"},
+		"template_0_description":        {"Go 1.26 with delve"},
+		"template_0_git_repo":           {"https://gitlab.com/o/r.git"},
+		"template_0_git_branch":         {"main"},
+		"template_0_git_folder":         {"exercises"},
+		"template_0_git_auth_secret":    {"gitcred"},
+		"template_0_image":              {"codercom/code-server:latest"},
+		"template_0_cpu":                {"500m"},
+		"template_0_cpu_limit":          {"2"},
+		"template_0_memory":             {"2Gi"},
+		"template_0_memory_limit":       {"4Gi"},
+		"template_0_disk_size":          {"10Gi"},
+		"template_0_startup_script":     {"echo hi"},
+		"template_0_dotfiles_repo":      {"https://github.com/you/dotfiles"},
+		"template_0_extensions":         {"golang.go, ms-python.python"},
+		"template_0_env_name":           {"FOO"},
+		"template_0_env_value":          {"bar"},
+		"template_0_nodeselector_key":   {"pool"},
+		"template_0_nodeselector_value": {"workspaces"},
+		"template_0_sidecar_name":       {"db"},
+		"template_0_sidecar_image":      {"postgres:16"},
+		"template_0_sidecar_ports":      {"5432"},
+		"template_0_mount_type":         {"secret"},
+		"template_0_mount_name":         {"tls"},
+		"template_0_mount_path":         {"/etc/tls"},
+	}.Encode()
+
+	rec := postUpload(h, id, body)
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+
+	job, _ := jm.GetJob(id)
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	require.Len(t, job.Config.WorkspaceTemplates, 1)
+	got := job.Config.WorkspaceTemplates[0]
+
+	assert.Equal(t, "go-workshop", got.Name)
+	assert.Equal(t, "Go 1.26 with delve", got.Description)
+	assert.Equal(t, "exercises", got.GitFolder)
+	assert.Equal(t, "gitcred", got.GitAuthSecret)
+	assert.Equal(t, "2", got.CPULimit)
+	assert.Equal(t, "4Gi", got.MemoryLimit)
+	assert.Equal(t, "10Gi", got.DiskSize)
+	assert.Equal(t, "echo hi", got.StartupScript)
+	assert.Equal(t, []string{"golang.go", "ms-python.python"}, got.Extensions)
+	assert.Equal(t, map[string]string{"FOO": "bar"}, got.Env)
+	assert.Equal(t, map[string]string{"pool": "workspaces"}, got.NodeSelector)
+	require.Len(t, got.Sidecars, 1)
+	assert.Equal(t, "postgres:16", got.Sidecars[0].Image)
+	require.Len(t, got.Mounts, 1)
+	assert.Equal(t, "/etc/tls", got.Mounts[0].Path)
+}
+
 func TestUploadTemplateToLab_YamlModeMultiple(t *testing.T) {
 	h, jm := newUploadTestHandler(t)
 	id := completedLab(t, jm)

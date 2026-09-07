@@ -4340,14 +4340,41 @@ select.loading {
     color: var(--text-light);
 }
 
-/* The create-lab Step 6 choice cards are laid out for full page width; inside the
-   narrow drawer panel, stack them so each card keeps its title and description. */
+/* The create-lab Step 6 choice cards are laid out for full page width. Stacking
+   them in the drawer costs about a third of the panel before a single field, and
+   the drawer now carries everything the wizard step does — so here they collapse
+   to one compact row. The three labels say enough on their own: the admin got
+   here by clicking "Add Template", so the descriptions are answering a question
+   they have already asked. */
 .ut-panel .button-group {
-    flex-wrap: wrap;
+    gap: 0.5rem;
 }
 
 .ut-panel .source-button {
-    flex: 1 1 100%;
+    flex: 1 1 0;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.375rem;
+    padding: 0.75rem 0.875rem;
+}
+
+.ut-panel .source-icon {
+    font-size: 1.375rem;
+}
+
+.ut-panel .source-title {
+    font-size: 0.8125rem;
+}
+
+.ut-panel .source-description {
+    display: none;
+}
+
+/* The lift on hover reads as noise in a panel this dense, and shifts a card out
+   from under the cursor on a short pointer travel. */
+.ut-panel .source-button:hover,
+.ut-panel .source-button.selected:hover {
+    transform: none;
 }
 
 .ut-panel-header {

@@ -14,15 +14,16 @@ reference and the wizard form, see [Configure workspaces](admin-lab-creation.md#
 
 ## Using these examples
 
-1. Go to **New Lab** and walk through to the **Templates** step.
-2. Set **Configuration Mode** to **YAML**.
+1. Go to **New Lab** and walk through to the **Templates** step — or open **Add
+   Template** on an existing lab's detail page, which is the same editor.
+2. Choose **Paste YAML**.
 3. Paste an example below (or save it as a `.yaml` file and use **Upload file**).
 4. Click **Validate** — it checks the document without creating anything.
-5. Finish the wizard and click **Create Lab**.
+5. Finish the wizard and click **Create Lab** (or **Add Template** in the drawer).
 
 !!! warning "YAML wins while it is selected"
-    While **YAML** mode is selected, the form fields are ignored when the lab is
-    created. Switching back to **Form** does *not* carry your YAML edits over.
+    While **Paste YAML** is selected, the form fields are ignored. Switching back to
+    **Build with a form** does *not* carry your YAML edits over.
 
 Only `name` is required, and template names must be unique within a lab. Unknown
 keys are **rejected** rather than ignored, so a typo like `imagee:` fails
@@ -514,11 +515,12 @@ see [Private registries and repositories](#private-registries-and-repositories).
 
 ### Importing a devcontainer
 
-Rather than writing the block by hand, use **Import from devcontainer** in the
-Templates step. It reads a `devcontainer.json` — by cloning a repo, or from a
-`devcontainer.json` / repository `.zip` you upload — fills the template in, and
-reports anything in the devcontainer that will not take effect. The result is
-ordinary YAML: review and edit it before creating the lab.
+Rather than writing the block by hand, choose **From a devcontainer** in the
+Templates step — or in the **Add Template** drawer on an existing lab. It reads a
+`devcontainer.json` — by cloning a repo, or from a `devcontainer.json` / repository
+`.zip` you upload — fills the template in, and reports anything in the devcontainer
+that will not take effect. The result is ordinary YAML: review and edit it before
+creating the lab.
 
 By default the import clones the **workshop repository** field to read the
 devcontainer. Choose **Different repository** under **Devcontainer config** to
@@ -634,8 +636,8 @@ then, students keep getting the previously baked image rather than the live one.
 
 Use **Export Templates YAML** on the [labs list](admin-lab-management.md#manage-your-labs) to
 download an existing lab's `workspace-templates-<stack>.yaml`, then load it into a
-new lab with **Upload file**. Only the templates are exported — credentials are
-never included.
+new lab — or into a running one through **Add Template** — with **Upload file**. Only
+the templates are exported — credentials are never included.
 
 This makes template documents easy to keep in a git repository and reuse from one
 workshop edition to the next.

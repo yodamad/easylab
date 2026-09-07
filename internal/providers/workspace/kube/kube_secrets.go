@@ -207,3 +207,29 @@ func (b *Backend) DeleteAuthSecret(ctx context.Context, name string) error {
 	}
 	return nil
 }
+
+// ReadGitAuth returns a git credential's username and token so EasyLab can clone
+// a private repo itself — reading a workshop's devcontainer.json during an
+// import, where this process is the git client rather than the kubelet.
+//
+// verifyGitAuthSecret deliberately reads the same keys and throws the values
+// away, because a student's workspace gets them through a secretKeyRef instead.
+// This is the exception, not a relaxation of that rule: the caller uses the
+// credentials for one clone and drops them.
+func (b *Backend) ReadGitAuth(ctx context.Context, name string) (string, string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", "", fmt.Errorf("git auth secret name is required")
+	}
+
+	sec, err := b.client.CoreV1().Secrets(b.namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return "", "", fmt.Errorf("failed to read git auth secret %q: %w", name, err)
+	}
+	for _, key := range []string{corev1.BasicAuthUsernameKey, corev1.BasicAuthPasswordKey} {
+		if len(sec.Data[key]) == 0 {
+			return "", "", fmt.Errorf("git auth secret %q has no %q key", name, key)
+		}
+	}
+	return string(sec.Data[corev1.BasicAuthUsernameKey]), string(sec.Data[corev1.BasicAuthPasswordKey]), nil
+}

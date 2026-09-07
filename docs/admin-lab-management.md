@@ -225,27 +225,45 @@ with someone who doesn't have admin access.
 
 The **Workspaces & Templates** section of a completed lab's detail page has an **Add
 Template** button that opens a side drawer for appending a workspace template without
-recreating the lab. It mirrors the wizard's **Workspace
-Templates** step, so you define the workspace the same three ways:
+recreating the lab.
 
-* **Build with a form** — fill in the template name and git repository, with an
-  **Advanced options** section for image, CPU/memory/disk, startup script, dotfiles,
-  extensions, environment variables, sidecars, and mounts.
-* **From a devcontainer** — name the template, then point at a workshop repository
-  (or upload a `devcontainer.json` / repository `.zip`); EasyLab reads the
-  devcontainer, generates the template YAML, and opens it for review before you add
-  it. The name is required here too, so an import cannot silently reuse the name of
-  a template already on the lab.
-* **Paste YAML** — write (or **Validate**, or **Insert skeleton**) the template YAML
-  directly. The document may define more than one template, and all are appended.
+The drawer *is* the wizard's [**Workspace Templates**
+step](admin-lab-creation.md#configure-workspaces) — the same editor, rendered from the
+same source — so every option available when creating a lab is available here, and the
+three ways to define a workspace are the same:
+
+![Add Template drawer](screens/add-template-drawer.png){width=480}
+
+* **Build with a form** — template name and description, git repository (branch and
+  subfolder), then **Advanced options** for the git credential, image,
+  CPU/memory/disk with independent limits, startup script, dotfiles, extensions,
+  environment variables, sidecars, mounts, and node selectors.
+* **From a devcontainer** — name and describe the template, then point at a workshop
+  repository (or upload a `devcontainer.json` / repository `.zip`). The devcontainer
+  can live in the workshop repository or in a separate, shared config repository; the
+  build cache can be an external registry or one EasyLab hosts in the cluster; and
+  resource overrides sit under **Advanced options**. EasyLab reads the devcontainer,
+  generates the template YAML, and opens it for review before you add it. The name is
+  required here too, so an import cannot silently reuse the name of a template already
+  on the lab.
+* **Paste YAML** — write (or **Validate**, or **Insert skeleton**, or **Upload file**)
+  the template YAML directly. The document may define more than one template, and all
+  are appended.
 
 The drawer's context bar names the lab and lists the templates it already has, so a
 duplicate name is visible before you submit (a clash is rejected). On success a toast
 confirms the addition and the list refreshes.
 
-> Credentials for private registries and repositories are configured when the lab is
-> created (see below). A template added here can only reference a credential that
-> already exists on the lab.
+Credentials work the same way as in the wizard, with one difference: the pickers offer
+the credentials **this lab already has** (see [Lab credentials](#lab-credentials-private-registries-and-repositories)
+below). Add one in the **Credentials** panel just above and it appears in the drawer's
+pickers straight away — you do not have to recreate the lab to introduce a new token.
+When a private repository's credential is picked, EasyLab reads it from the lab's
+cluster to clone the devcontainer during the import, so there is no token to retype.
+
+> A devcontainer template added here still needs baking before students use it — see
+> [Pre-baking a devcontainer template](#pre-baking-a-devcontainer-template) above. The
+> **Bake image** button appears on the new template's card once it is added.
 
 ### Edit a lab's lifecycle
 

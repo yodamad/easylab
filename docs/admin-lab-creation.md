@@ -238,15 +238,25 @@ Choose **From a devcontainer** at the top of the **Templates** step:
    section and choose it under **Git credential** — with a single git credential it is
    applied automatically. The same credential reads the devcontainer during import and,
    baked into the template, clones the repo in each student's workspace.
-6. Click **Import** — this step is required. EasyLab turns the devcontainer into a
+6. Optionally open **Advanced options** to override **CPU / CPU Limit / Memory /
+   Memory Limit** for the built workspace. These override whatever the
+   devcontainer's `hostRequirements` would otherwise set. Left entirely blank,
+   EasyLab defaults to 500m CPU (limit 2) / 2Gi memory / 5Gi ephemeral storage —
+   layer extraction is CPU- and disk-heavy under concurrent load, so a workshop
+   with many students starting at once should size these explicitly.
+7. Click **Import** — this step is required. EasyLab turns the devcontainer into a
    workspace template and lists anything in it that will not take effect. The wizard
    will not advance to the next step until the import has run, since the import is
    what generates the workspace the lab is created from.
-7. Click **Review generated YAML** to open the result in the editor, adjust it if
+8. Click **Review generated YAML** to open the result in the editor, adjust it if
    needed, then finish the wizard.
 
 The import is a starting point, not a black box — what it produces is ordinary
 template YAML you can change.
+
+This whole step is also available on an existing lab: **Add Template** on a lab's
+detail page opens the same editor, with the same options. See
+[Add a template to an existing lab](admin-lab-management.md#add-a-template-to-an-existing-lab).
 
 The image the devcontainer builds carries no IDE, so code-server is injected
 into it. This is independent of the devcontainer's own base image, with one

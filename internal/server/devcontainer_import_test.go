@@ -203,12 +203,13 @@ func TestDevcontainerCloneSource(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name         string
-		form         url.Values
-		wantURL      string
-		wantBranch   string
-		wantUsername string
-		wantErr      string
+		name           string
+		form           url.Values
+		wantURL        string
+		wantBranch     string
+		wantUsername   string
+		wantAuthSecret string
+		wantErr        string
 	}{
 		{
 			name:    "git_repo is required",
@@ -223,26 +224,33 @@ func TestDevcontainerCloneSource(t *testing.T) {
 		{
 			name: "no config repo clones git_repo",
 			form: url.Values{
-				"git_repo":     {"https://gitlab.com/org/workshop.git"},
-				"git_branch":   {"main"},
-				"git_username": {"alice"},
+				"git_repo":        {"https://gitlab.com/org/workshop.git"},
+				"git_branch":      {"main"},
+				"git_username":    {"alice"},
+				"git_auth_secret": {"gitcred"},
 			},
-			wantURL:      "https://gitlab.com/org/workshop.git",
-			wantBranch:   "main",
-			wantUsername: "alice",
+			wantURL:        "https://gitlab.com/org/workshop.git",
+			wantBranch:     "main",
+			wantUsername:   "alice",
+			wantAuthSecret: "gitcred",
 		},
 		{
 			name: "config repo wins over git_repo",
 			form: url.Values{
-				"git_repo":                     {"https://gitlab.com/org/workshop.git"},
-				"git_branch":                   {"main"},
-				"devcontainer_config_repo":     {"https://gitlab.com/org/devcontainer-config.git"},
-				"devcontainer_config_branch":   {"config-branch"},
-				"devcontainer_config_username": {"bob"},
+				"git_repo":                        {"https://gitlab.com/org/workshop.git"},
+				"git_branch":                      {"main"},
+				"devcontainer_config_repo":        {"https://gitlab.com/org/devcontainer-config.git"},
+				"devcontainer_config_branch":      {"config-branch"},
+				"devcontainer_config_username":    {"bob"},
+				"devcontainer_config_auth_secret": {"configcred"},
+				// The workshop repo's own credential must not leak into the config
+				// repo's clone: they can be different tokens.
+				"git_auth_secret": {"gitcred"},
 			},
-			wantURL:      "https://gitlab.com/org/devcontainer-config.git",
-			wantBranch:   "config-branch",
-			wantUsername: "bob",
+			wantURL:        "https://gitlab.com/org/devcontainer-config.git",
+			wantBranch:     "config-branch",
+			wantUsername:   "bob",
+			wantAuthSecret: "configcred",
 		},
 		{
 			name: "invalid config repo",
@@ -259,7 +267,7 @@ func TestDevcontainerCloneSource(t *testing.T) {
 			t.Parallel()
 			req := postForm(t, "/api/templates/detect-devcontainer", tt.form)
 
-			gotURL, branch, username, _, err := devcontainerCloneSource(req)
+			gotURL, branch, username, _, authSecret, err := devcontainerCloneSource(req)
 			if tt.wantErr != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantErr)
@@ -269,6 +277,7 @@ func TestDevcontainerCloneSource(t *testing.T) {
 			assert.Equal(t, tt.wantURL, gotURL)
 			assert.Equal(t, tt.wantBranch, branch)
 			assert.Equal(t, tt.wantUsername, username)
+			assert.Equal(t, tt.wantAuthSecret, authSecret)
 		})
 	}
 }
@@ -827,4 +836,80 @@ func TestDetectDevcontainer_NoIDESelectionStaysUnset(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, templates, 1)
 	assert.Empty(t, templates[0].IDE)
+}
+
+// The devcontainer import clones the repo itself, so it needs real credentials —
+// but where they come from differs by surface.
+//
+// The create-lab wizard has no cluster yet, so it sends the token straight from
+// the page. The "Add Template" drawer works on a lab whose credentials are
+// already in its cluster and must stay there, so it sends lab_id plus the
+// credential's name and the Secret is read server-side. Only the name is ever
+// written into the generated template either way.
+func TestResolveCloneAuth(t *testing.T) {
+	labWithCredential := func(t *testing.T) (*Handler, string) {
+		t.Helper()
+		h, fb, labID := newSecretsTestHandler(t)
+		fb.gitAuth = map[string]gitCall{"gitcred": {Name: "gitcred", Username: "oauth2", Token: "glpat-x"}}
+		return h, labID
+	}
+
+	t.Run("an explicit token is used as-is", func(t *testing.T) {
+		h, labID := labWithCredential(t)
+		req := postForm(t, "/api/templates/detect-devcontainer", url.Values{
+			"lab_id":          {labID},
+			"git_auth_secret": {"gitcred"},
+			"git_username":    {"alice"},
+			"git_token":       {"typed-by-hand"},
+		})
+
+		user, token := h.resolveCloneAuth(req, "alice", "typed-by-hand", "gitcred")
+		assert.Equal(t, "alice", user)
+		assert.Equal(t, "typed-by-hand", token, "the wizard's own token must win over the lab's")
+	})
+
+	t.Run("a credential name resolves against the lab", func(t *testing.T) {
+		h, labID := labWithCredential(t)
+		req := postForm(t, "/api/templates/detect-devcontainer", url.Values{
+			"lab_id":          {labID},
+			"git_auth_secret": {"gitcred"},
+		})
+
+		user, token := h.resolveCloneAuth(req, "", "", "gitcred")
+		assert.Equal(t, "oauth2", user)
+		assert.Equal(t, "glpat-x", token)
+	})
+
+	t.Run("no credential name stays anonymous", func(t *testing.T) {
+		h, labID := labWithCredential(t)
+		req := postForm(t, "/api/templates/detect-devcontainer", url.Values{"lab_id": {labID}})
+
+		user, token := h.resolveCloneAuth(req, "", "", "")
+		assert.Empty(t, user)
+		assert.Empty(t, token)
+	})
+
+	t.Run("no lab_id stays anonymous", func(t *testing.T) {
+		h, _ := labWithCredential(t)
+		req := postForm(t, "/api/templates/detect-devcontainer", url.Values{"git_auth_secret": {"gitcred"}})
+
+		user, token := h.resolveCloneAuth(req, "", "", "gitcred")
+		assert.Empty(t, user, "without a lab there is no cluster to read the Secret from")
+		assert.Empty(t, token)
+	})
+
+	// A credential that is named but missing must not stop the import: a public
+	// repo still clones, and a private one fails at the clone with a message about
+	// the repository rather than about EasyLab's plumbing.
+	t.Run("an unknown credential falls back to anonymous", func(t *testing.T) {
+		h, labID := labWithCredential(t)
+		req := postForm(t, "/api/templates/detect-devcontainer", url.Values{
+			"lab_id":          {labID},
+			"git_auth_secret": {"deleted-last-week"},
+		})
+
+		user, token := h.resolveCloneAuth(req, "", "", "deleted-last-week")
+		assert.Empty(t, user)
+		assert.Empty(t, token)
+	})
 }

@@ -288,25 +288,59 @@ func (h *Handler) detectDevcontainerFromUpload(r *http.Request) (*devcontainer.C
 // devcontainer_config_repo when set (see detectDevcontainerFromGit's doc
 // comment). Pulled out as a pure function so the selection is testable without
 // a real clone.
-func devcontainerCloneSource(r *http.Request) (repoURL, branch, username, token string, err error) {
+func devcontainerCloneSource(r *http.Request) (repoURL, branch, username, token, authSecret string, err error) {
 	gitRepo := strings.TrimSpace(getFormValue(r, "git_repo"))
 	if gitRepo == "" {
-		return "", "", "", "", clientErrorf("git_repo is required")
+		return "", "", "", "", "", clientErrorf("git_repo is required")
 	}
 	if !validateURL(gitRepo) {
-		return "", "", "", "", clientErrorf("git_repo is not a valid URL")
+		return "", "", "", "", "", clientErrorf("git_repo is not a valid URL")
 	}
 
 	if configRepo := strings.TrimSpace(getFormValue(r, "devcontainer_config_repo")); configRepo != "" {
 		if !validateURL(configRepo) {
-			return "", "", "", "", clientErrorf("devcontainer_config_repo is not a valid URL")
+			return "", "", "", "", "", clientErrorf("devcontainer_config_repo is not a valid URL")
 		}
 		return configRepo, strings.TrimSpace(getFormValue(r, "devcontainer_config_branch")),
-			getFormValue(r, "devcontainer_config_username"), getFormValue(r, "devcontainer_config_token"), nil
+			getFormValue(r, "devcontainer_config_username"), getFormValue(r, "devcontainer_config_token"),
+			strings.TrimSpace(getFormValue(r, "devcontainer_config_auth_secret")), nil
 	}
 
 	return gitRepo, strings.TrimSpace(getFormValue(r, "git_branch")),
-		getFormValue(r, "git_username"), getFormValue(r, "git_token"), nil
+		getFormValue(r, "git_username"), getFormValue(r, "git_token"),
+		strings.TrimSpace(getFormValue(r, "git_auth_secret")), nil
+}
+
+// resolveCloneAuth decides what the import's own clone authenticates with.
+//
+// The create-lab wizard sends the token directly: the credential only exists in
+// the admin's browser at that point, there being no cluster to hold it yet. The
+// "Add Template" drawer cannot — its lab's credentials live in the cluster and
+// must stay there — so it sends lab_id and the credential's name instead, and the
+// Secret is read here. Either way the credentials are used for this one clone and
+// dropped; only the name is ever written into the generated template.
+func (h *Handler) resolveCloneAuth(r *http.Request, username, token, authSecret string) (string, string) {
+	if username != "" || token != "" || authSecret == "" {
+		return username, token
+	}
+	labID := strings.TrimSpace(getFormValue(r, "lab_id"))
+	if labID == "" {
+		return username, token
+	}
+
+	sm, err := h.labSecretManagerFor(labID)
+	if err != nil {
+		// Not fatal: a public repo clones anonymously, and a private one fails at
+		// the clone with a message about the repo rather than about plumbing.
+		log.Printf("Devcontainer import: no secret manager for lab %s: %v", labID, err)
+		return username, token
+	}
+	user, pass, err := sm.ReadGitAuth(r.Context(), authSecret)
+	if err != nil {
+		log.Printf("Devcontainer import: failed to read credential %q on lab %s: %v", authSecret, labID, err)
+		return username, token
+	}
+	return user, pass
 }
 
 // detectDevcontainerFromGit shallow-clones a repo and reads its
@@ -316,10 +350,11 @@ func devcontainerCloneSource(r *http.Request) (repoURL, branch, username, token 
 // becomes the generated template's content repo (see devcontainerTemplate), it
 // is just not what gets read here.
 func (h *Handler) detectDevcontainerFromGit(r *http.Request) (*devcontainer.Config, string, error) {
-	cloneURL, cloneBranch, cloneUsername, cloneToken, err := devcontainerCloneSource(r)
+	cloneURL, cloneBranch, cloneUsername, cloneToken, cloneAuthSecret, err := devcontainerCloneSource(r)
 	if err != nil {
 		return nil, "", err
 	}
+	cloneUsername, cloneToken = h.resolveCloneAuth(r, cloneUsername, cloneToken, cloneAuthSecret)
 
 	tmpDir, err := os.MkdirTemp("", "detect-devcontainer-git-*")
 	if err != nil {
