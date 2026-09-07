@@ -205,8 +205,9 @@
                             </div>
 
                             <div class="form-group">
-                                <label for="network_id">Network ID</label>
-                                <input type="text" id="network_id" name="network_id" placeholder="New network ID">
+                                <label for="network_id">VLAN ID *</label>
+                                <input type="number" id="network_id" name="network_id" min="0" placeholder="e.g. 100">
+                                <small>VLAN ID assigned to the private network EasyLab creates. Pick any free ID in your OVHcloud project.</small>
                             </div>
 
                             <div class="form-group">
@@ -359,7 +360,12 @@
                             </div>
                         </div>
 
-                        <div class="form-group">
+                        <p id="new-infra-install-note" class="install-note" style="display: none;">
+                            <span id="install-note-ingress-only">EasyLab installs <strong>Traefik</strong> on the new cluster to route workspace traffic.</span>
+                            <span id="install-note-with-tls">EasyLab installs <strong>Traefik</strong> for ingress and <strong>cert-manager</strong> for TLS on the new cluster.</span>
+                        </p>
+
+                        <div class="form-group byok-only" id="ingress-mode-group">
                             <label>Ingress Controller</label>
                             <div class="button-group">
                                 <button type="button" class="source-button selected" id="ingress-install-btn" data-ingress-mode="install">
@@ -379,7 +385,7 @@
                             </div>
                             <input type="hidden" id="install_nginx_ingress" name="install_nginx_ingress" value="true">
                         </div>
-                        <div id="ingress-existing-fields" style="display: none;">
+                        <div id="ingress-existing-fields" class="byok-only" style="display: none;">
                             <div class="form-row">
                                 <div class="form-group">
                                     <label for="nginx_ingress_namespace">Ingress Namespace</label>
@@ -393,7 +399,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div id="traefik-nodeselector-fields">
+                        <div id="traefik-nodeselector-fields" class="byok-only">
                             <div class="template-variables-section">
                                 <div class="template-variables-header">
                                     <label>Traefik Node Selector</label>
@@ -421,7 +427,7 @@
                             </div>
                         </div>
 
-                        <div id="certmanager-toggle-group" style="display: none;">
+                        <div id="certmanager-toggle-group" class="byok-only" style="display: none;">
                             <div class="form-group">
                                 <label>cert-manager</label>
                                 <div class="button-group">

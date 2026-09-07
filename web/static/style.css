@@ -354,6 +354,34 @@ main {
     border-top: 1px dashed var(--border);
 }
 
+/* Create New Infrastructure path: EasyLab builds the cluster from scratch, so
+   nothing can already be installed on it. Anything that presupposes a
+   pre-existing cluster is hidden — reusing an ingress controller or
+   cert-manager, and node selectors, which have only one node pool to point at.
+   Driven by a class on #lab-form so template rows added after load are covered
+   too. The hidden inputs inside these blocks still submit their defaults. */
+.new-infra .byok-only,
+.new-infra .template-nodeselector-section {
+    display: none;
+}
+
+/* States what EasyLab will install now that the choice is gone. Mirrors the
+   small.name-preview "here is what gets created" treatment used on steps 2 and 3. */
+.install-note {
+    margin: 1.5rem 0;
+    padding: 0.75rem 1rem;
+    background: var(--surface);
+    border-left: 3px solid var(--primary-color);
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+    color: var(--text-light);
+}
+
+.install-note strong {
+    color: var(--text);
+    font-weight: 600;
+}
+
 /* Sticky Footer */
 .wizard-footer {
     position: fixed;

@@ -501,7 +501,7 @@
     </div>
 </div>
 
-<div id="upload-template-overlay" class="ut-drawer-overlay" onclick="closeUploadTemplateModal()" aria-hidden="true">
+<div id="upload-template-overlay" class="ut-drawer-overlay{{if not .Lab.UseExistingCluster}} new-infra{{end}}" onclick="closeUploadTemplateModal()" aria-hidden="true">
     <div class="ut-panel" onclick="event.stopPropagation()" role="dialog" aria-modal="true" aria-labelledby="ut-panel-title">
         <div class="ut-panel-header">
             <div class="ut-panel-title-group">

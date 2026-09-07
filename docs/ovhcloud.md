@@ -41,7 +41,7 @@ All configuration keys related to OVHcloud are listed below. These are set via t
 | `network:gatewayName` | Name of the gateway | Yes |
 | `network:gatewayModel` | Gateway model | Yes |
 | `network:privateNetworkName` | Name of the private network | Yes |
-| `network:networkId` | Network ID | Yes |
+| `network:networkId` | VLAN ID for the private network EasyLab creates | Yes |
 | `network:networkMask` | Network mask (e.g. `255.255.255.0`) | Yes |
 | `network:networkStartIp` | Start IP of the subnet range | Yes |
 | `network:networkEndIp` | End IP of the subnet range | Yes |

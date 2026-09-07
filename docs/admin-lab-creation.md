@@ -67,7 +67,9 @@ the workspace pool should be labeled rather than tainted.
 
 ### On OVHcloud (Create New Infrastructure)
 
-When creating new infrastructure, you choose OVHcloud as the cloud provider. Most of the configuration is preconfigured; you only need to select the ID for the private network.
+When creating new infrastructure, you choose OVHcloud as the cloud provider. Most of the
+configuration is preconfigured; the one value you need to supply is the **VLAN ID** for the
+private network EasyLab creates — any ID that is free in your OVHcloud project.
 
 ??? info "Others parameters can be overridden if needed"
 
@@ -77,6 +79,7 @@ When creating new infrastructure, you choose OVHcloud as the cloud provider. Mos
     | | Gateway Name             | The name of the network gateway                          |
     | | Gateway Model            | The model of the network gateway                         |
     | | Private Network Name     | The name of the network private network                  |
+    | | VLAN ID                  | VLAN ID assigned to the private network EasyLab creates  |
     | | Region                   | The region of the network                                |
     | | Mask                     | The mask of the network                                  |
     | Node Pool | | |
@@ -131,7 +134,7 @@ Under **Advanced options** (all optional):
 * **Environment Variables** — passed to the workspace container.
 * **Sidecars** — extra containers in the workspace pod (name / image / ports / env), reachable from the IDE at `localhost:<port>` — e.g. a `postgres:16` database. Each sidecar can also be marked **privileged** and given extra **capabilities** (e.g. `SYS_ADMIN`) — needed to run **docker-in-docker** (see below).
 * **Mounts** — mount an existing **ConfigMap** or **Secret** into the workspace container. The referenced object **must already exist** in the workspace namespace, or the pod won't start.
-* **Node Selector** (optional, [Use Existing Cluster](#use-existing-cluster) only) — pin this template's workspace pods to nodes carrying specific labels, e.g. a dedicated `pool: workspaces` node pool. Useful when you want student workspaces scheduled onto different nodes than the EasyLab server itself — see [Splitting EasyLab and workspaces across node pools](#splitting-easylab-and-workspaces-across-node-pools).
+* **Node Selector** (optional) — pin this template's workspace pods to nodes carrying specific labels, e.g. a dedicated `pool: workspaces` node pool. Useful when you want student workspaces scheduled onto different nodes than the EasyLab server itself — see [Splitting EasyLab and workspaces across node pools](#splitting-easylab-and-workspaces-across-node-pools). The field appears only on [Use Existing Cluster](#use-existing-cluster) labs: **Create New Infrastructure** provisions a single node pool, so there is no second pool to pin anything to.
 
 If no template is defined, a `default` code-server workspace is used.
 Students can request **one workspace per template** within a lab, so multiple
@@ -356,42 +359,15 @@ Picking either custom-domain option reveals:
 
 ![DNS configuration](screens/dns-config.png)
 
-Two infrastructure toggles sit in the main flow, not tucked behind a click, so you
-can find them even if you're just skimming: **Ingress Controller** (always shown) and
-**cert-manager** (shown once a custom domain is selected — it has nothing to do in
-Quick start mode). Both default to "install a new one"; switch to "use existing" if
-your cluster already has one, and a namespace/service-name override appears.
-
-When installing (not reusing) either component, a **Node Selector** field appears
-underneath it — **Traefik Node Selector** and **cert-manager Node Selector**. Add
-key/value label pairs to pin that component's pod to nodes carrying those labels,
-the same mechanism used for [workspace template node
-selectors](#splitting-easylab-and-workspaces-across-node-pools), applied here to the
-ingress controller and cert-manager themselves rather than to student workspaces.
-Useful for keeping shared infrastructure pods off a tainted or GPU-flavored node
-pool, or for co-locating them with a specific pool for cost or locality reasons.
-
-!!! note "Reusing cert-manager across labs on the same cluster"
-    Picking **Use existing cert-manager** together with **Custom domain — automatic**
-    reveals **Is DNS-01 already set up on this cert-manager?**. Choose **Already
-    configured** if an earlier lab on this same cluster already created the
-    ClusterIssuer, DNS-01 webhook, and credential secret — EasyLab then skips
-    recreating them (which would otherwise conflict) and reuses them as-is. You still
-    fill in the DNS provider, zone, and credentials below: this lab still needs its
-    own DNS A-record created, since every lab has its own domain and ingress IP.
-    Leave it on **Set it up for me** (the default) for the first lab on a cluster, or
-    if you're not sure.
-
-    Choosing **Already configured** also reveals **Existing ClusterIssuer Name**.
-    EasyLab requests certificates from a ClusterIssuer named `letsencrypt-prod` by
-    default and, on a fresh cert-manager, creates one under that name itself — but
-    here it is skipping that creation and reusing whatever already exists. If the
-    existing ClusterIssuer was created under a different name (for example, by a
-    Helm-based install that names it after its DNS provider), set this field to that
-    exact name. A mismatch here doesn't fail loudly: cert-manager's
-    `CertificateRequest` just stalls waiting for an issuer that doesn't exist, no
-    certificate is ever issued, and the ingress controller falls back to serving its
-    own self-signed default certificate instead.
+On **Create New Infrastructure**, that question and the domain fields under it are all
+the step asks. EasyLab is building the cluster, so nothing can already be installed on
+it: there is no ingress controller or cert-manager to reuse, and the single node pool it
+provisions leaves node selectors with nothing to pin to. Rather than ask, the step states
+what it will install — Traefik for ingress, and cert-manager for TLS once a domain is set.
+In Quick start mode there are no certificates to issue, so cert-manager is skipped
+entirely. On a [Use Existing Cluster](#use-existing-cluster) lab you get those choices
+instead; see [Reusing components already on the
+cluster](#reusing-components-already-on-the-cluster) below.
 
 An **Advanced options** section holds the **Wildcard Domain** override. It only
 appears for **Custom domain — automatic** with the **Wildcard record** DNS strategy
@@ -444,6 +420,51 @@ After `pulumi up` completes, the stack output `ingressIP` is printed. **You must
     A workspace only shows the **Open** button once its IDE is actually serving (a
     readiness probe gates it), so a workspace running a long startup script stays in
     the "starting" state until setup finishes — avoiding a connection-refused click.
+
+#### Reusing components already on the cluster
+
+These controls appear on [Use Existing Cluster](#use-existing-cluster) labs only, where
+your cluster may already be running Traefik or cert-manager and may have more than one
+node pool.
+
+![Ingress and cert-manager toggles on an existing cluster](screens/dns-config-byok.png)
+
+Two infrastructure toggles sit in the main flow, not tucked behind a click, so you
+can find them even if you're just skimming: **Ingress Controller** (always shown) and
+**cert-manager** (shown once a custom domain is selected — it has nothing to do in
+Quick start mode). Both default to "install a new one"; switch to "use existing" if
+your cluster already has one, and a namespace/service-name override appears.
+
+When installing (not reusing) either component, a **Node Selector** field appears
+underneath it — **Traefik Node Selector** and **cert-manager Node Selector**. Add
+key/value label pairs to pin that component's pod to nodes carrying those labels,
+the same mechanism used for [workspace template node
+selectors](#splitting-easylab-and-workspaces-across-node-pools), applied here to the
+ingress controller and cert-manager themselves rather than to student workspaces.
+Useful for keeping shared infrastructure pods off a tainted or GPU-flavored node
+pool, or for co-locating them with a specific pool for cost or locality reasons.
+
+!!! note "Reusing cert-manager across labs on the same cluster"
+    Picking **Use existing cert-manager** together with **Custom domain — automatic**
+    reveals **Is DNS-01 already set up on this cert-manager?**. Choose **Already
+    configured** if an earlier lab on this same cluster already created the
+    ClusterIssuer, DNS-01 webhook, and credential secret — EasyLab then skips
+    recreating them (which would otherwise conflict) and reuses them as-is. You still
+    fill in the DNS provider, zone, and credentials below: this lab still needs its
+    own DNS A-record created, since every lab has its own domain and ingress IP.
+    Leave it on **Set it up for me** (the default) for the first lab on a cluster, or
+    if you're not sure.
+
+    Choosing **Already configured** also reveals **Existing ClusterIssuer Name**.
+    EasyLab requests certificates from a ClusterIssuer named `letsencrypt-prod` by
+    default and, on a fresh cert-manager, creates one under that name itself — but
+    here it is skipping that creation and reusing whatever already exists. If the
+    existing ClusterIssuer was created under a different name (for example, by a
+    Helm-based install that names it after its DNS provider), set this field to that
+    exact name. A mismatch here doesn't fail loudly: cert-manager's
+    `CertificateRequest` just stalls waiting for an issuer that doesn't exist, no
+    certificate is ever issued, and the ingress controller falls back to serving its
+    own self-signed default certificate instead.
 
 #### DNS Provider (Optional)
 

@@ -202,6 +202,7 @@ const wizard = {
         if (typeof updateDNSManualWarning === 'function') updateDNSManualWarning();
         this.updateWildcardOverrideVisibility();
         this.updateDNSAlreadyConfiguredVisibility();
+        this.updateInstallNote();
     },
 
     // The Wildcard Domain override only ever takes effect for "Custom domain —
@@ -233,6 +234,24 @@ const wizard = {
         const relevant = certExisting && isAuto;
         group.style.display = relevant ? '' : 'none';
         if (!relevant) this.setDNSAlreadyConfigured(false);
+    },
+
+    // On "Create New Infrastructure" the ingress/cert-manager reuse toggles are
+    // hidden (nothing can already be installed on a cluster that does not exist
+    // yet), so state what gets installed instead. cert-manager is only part of it
+    // once a domain is set — coder/https.go skips it entirely in quick start mode.
+    updateInstallNote() {
+        const note = document.getElementById('new-infra-install-note');
+        const ingressOnly = document.getElementById('install-note-ingress-only');
+        const withTLS = document.getElementById('install-note-with-tls');
+        const quickstartBtn = document.getElementById('domain-mode-quickstart-btn');
+        if (!note || !ingressOnly || !withTLS) return;
+
+        note.style.display = this.clusterModeSelected && !this.useExistingCluster ? '' : 'none';
+
+        const isQuickstart = !!quickstartBtn && quickstartBtn.classList.contains('selected');
+        ingressOnly.style.display = isQuickstart ? '' : 'none';
+        withTLS.style.display = isQuickstart ? 'none' : '';
     },
 
     bindDNSAlreadyConfiguredEvents() {
@@ -309,6 +328,18 @@ const wizard = {
 
         document.getElementById('provider-section').style.display = useExisting ? 'none' : '';
         document.getElementById('kubeconfig-section').style.display = useExisting ? '' : 'none';
+
+        // Gates every .byok-only block plus the per-template node selectors.
+        const form = document.getElementById('lab-form');
+        if (form) form.classList.toggle('new-infra', !useExisting);
+
+        // A brand-new cluster has neither, so reusing one is not an option here.
+        // Re-assert it in case the admin picked "existing" while in BYOK mode.
+        if (!useExisting) {
+            this.setIngressMode('install');
+            this.setCertManagerMode('install');
+        }
+        this.updateInstallNote();
 
         // Toggle required on infrastructure-only fields (steps 3, 4, 5)
         // These steps are skipped in BYOK mode, so validation would block submission
@@ -1994,12 +2025,16 @@ async function applyPrefill(config, templatesYaml, jobId, action) {
         setFieldValue('nodepool_max_node_count', config.nodepool_max_node_count);
     }
 
-    // Step 4: DNS & HTTPS
-    wizard.setIngressMode(config.install_nginx_ingress === false ? 'existing' : 'install');
+    // Step 4: DNS & HTTPS. Reusing an ingress controller or cert-manager is only
+    // possible on a cluster EasyLab did not create, so a new-infra lab is always
+    // restored to "install" regardless of what its stored config says.
+    const canReuseComponents = !!config.use_existing_cluster;
+
+    wizard.setIngressMode(canReuseComponents && config.install_nginx_ingress === false ? 'existing' : 'install');
     setFieldValue('nginx_ingress_namespace', config.nginx_ingress_namespace);
     setFieldValue('nginx_ingress_service_name', config.nginx_ingress_service_name);
 
-    wizard.setCertManagerMode(config.install_cert_manager === false ? 'existing' : 'install');
+    wizard.setCertManagerMode(canReuseComponents && config.install_cert_manager === false ? 'existing' : 'install');
     setFieldValue('cert_manager_namespace', config.cert_manager_namespace);
 
     const domainMode = !config.domain ? 'quickstart' : (config.dns_provider ? 'auto' : 'manual');
@@ -2027,7 +2062,7 @@ async function applyPrefill(config, templatesYaml, jobId, action) {
     // Only meaningful when reusing an existing cert-manager with a DNS provider
     // selected; updateDNSAlreadyConfiguredVisibility() (called from the mode
     // setters above) already forces this false everywhere else.
-    if (config.install_cert_manager === false && domainMode === 'auto') {
+    if (canReuseComponents && config.install_cert_manager === false && domainMode === 'auto') {
         wizard.setDNSAlreadyConfigured(!!config.dns_already_configured);
         setFieldValue('cluster_issuer_name', config.cluster_issuer_name);
     }
