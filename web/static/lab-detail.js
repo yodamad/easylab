@@ -31,6 +31,75 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 });
 
+// ---------------------------------------------------------------------------
+// Progress tab (the shared job-status fragment rendered by GetJobStatus)
+// ---------------------------------------------------------------------------
+
+// The fragment's "Retry Job" button calls retryJob(); on this page retrying
+// goes through the same as-is/edit choice modal as the Danger Zone button
+// (admin.js defines its own retryJob for the creation wizard, and the two pages
+// never load each other's script).
+function retryJob(labId) {
+    openRetryChoiceModal(labId);
+}
+
+(function () {
+    // The fragment re-renders in full on every poll, so the deployment log would
+    // snap back to its first line every 10s. Remember the reading position
+    // before each swap and restore it after, following the tail when the admin
+    // was already at the bottom.
+    var STICK_THRESHOLD_PX = 40;
+    var savedScrollTop = 0;
+    var stuckToBottom = true;
+    var wasInFlight = false;
+
+    function progressLog() {
+        return document.querySelector('#progress .output');
+    }
+
+    function progressStatus() {
+        var badge = document.querySelector('#progress .status-badge');
+        return badge ? badge.textContent.trim() : '';
+    }
+
+    // htmx reports the swapped element on evt.target, except for outerHTML swaps
+    // where the detached element is replaced and the event carries the parent —
+    // check both so the panel's self-refresh is recognized either way.
+    function touchesProgress(evt) {
+        var el = evt.target;
+        if (el && el.closest && el.closest('#progress')) return true;
+        var detailTarget = evt.detail && evt.detail.target;
+        return !!(detailTarget && detailTarget.closest && detailTarget.closest('#progress'));
+    }
+
+    document.body.addEventListener('htmx:beforeSwap', function (evt) {
+        if (!touchesProgress(evt)) return;
+        var log = progressLog();
+        if (!log) return;
+        savedScrollTop = log.scrollTop;
+        stuckToBottom = log.scrollHeight - log.scrollTop - log.clientHeight < STICK_THRESHOLD_PX;
+        var status = progressStatus();
+        wasInFlight = status === 'pending' || status === 'running';
+    });
+
+    document.body.addEventListener('htmx:afterSwap', function (evt) {
+        if (!touchesProgress(evt)) return;
+        var log = progressLog();
+        if (log) {
+            log.scrollTop = stuckToBottom ? log.scrollHeight : savedScrollTop;
+        }
+        // Tabs are rendered server-side from the lab's status, so Workspaces &
+        // Templates only shows up after a reload. Reload for the admin watching
+        // the deployment finish, but never under one working in another tab.
+        var progress = document.getElementById('progress');
+        var watching = progress && !progress.classList.contains('is-hidden');
+        if (wasInFlight && watching && progressStatus() === 'completed') {
+            wasInFlight = false;
+            window.location.reload();
+        }
+    });
+})();
+
 function destroyStack(labId) {
     fetch('/api/stacks/destroy', {
         method: 'POST',

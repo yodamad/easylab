@@ -1001,6 +1001,12 @@ a.btn {
     padding: 1rem;
 }
 
+/* Actions rendered next to the status badge (launch, retry, kubeconfig). */
+.job-status-action {
+    display: inline-block;
+    margin-left: 1rem;
+}
+
 .status-badge {
     display: inline-block;
     padding: 0.5rem 1rem;
@@ -3752,6 +3758,22 @@ select.loading {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+}
+
+/* The workspace template editor renders these inside a .form-group, whose
+   `label { display: block }` and `input { width: 100% }` both out-specify the
+   base .checkbox-label rule — stacking the box above its text and stretching it
+   across the row. Re-assert the inline layout at a specificity that survives it. */
+.form-checkboxes .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.form-checkboxes .checkbox-label input[type="checkbox"] {
+    width: auto;
+    flex: none;
+    margin: 0;
 }
 
 .form-checkboxes small {
