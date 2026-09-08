@@ -203,9 +203,9 @@
     </div>
 </div>
 
-    <script src="/static/header-provider.js"></script>
-    <script src="/static/credentials.js"></script>
-    <script src="/static/ovh-options.js"></script>
+    <script src="{{asset "/static/header-provider.js"}}"></script>
+    <script src="{{asset "/static/credentials.js"}}"></script>
+    <script src="{{asset "/static/ovh-options.js"}}"></script>
     <script>
     function toggleVMSizes(region) {
         var body = document.getElementById('vmsizes-' + region);

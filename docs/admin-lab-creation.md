@@ -392,6 +392,13 @@ The following components are deployed into the cluster:
 * **Traefik** — Kubernetes ingress controller (gets its own LoadBalancer IP, exported as `ingressIP`). Installed whether or not a domain is set, since the nip.io fallback routes through it too.
 * **cert-manager** — automates TLS certificate issuance from Let's Encrypt. Installed only when a domain is set; the nip.io fallback has no certificates to issue.
 
+!!! tip "Changing these settings later also fixes workspaces that already exist"
+    Adding a DNS provider, or correcting a `ClusterIssuer` name, used to help only
+    workspaces created afterwards — existing ones kept the certificate configuration
+    they were born with. They are now reconciled against the lab's current settings
+    whenever a student opens their workspace, without changing the workspace URL. See
+    [Certificates repair themselves](admin-lab-management.md#certificates-repair-themselves).
+
 !!! note "Destroying a lab never removes shared Traefik, cert-manager, or DNS-01 infrastructure"
     Whether triggered manually or by [scheduled lab deletion](#lab-deletion),
     destroying a lab always leaves its Traefik and cert-manager installations (and

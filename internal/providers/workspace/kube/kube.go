@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"path"
 	"regexp"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -84,6 +86,15 @@ const (
 
 	schemeHTTPS = "https"
 	schemeHTTP  = "http"
+
+	// workspaceIngressClass is the ingress controller workspaces are routed through.
+	// Labs provisioned before the move off ingress-nginx still carry the old class
+	// on their Ingress; reconcileIngressTLS corrects that.
+	workspaceIngressClass = "traefik"
+
+	// clusterIssuerAnnotation asks cert-manager for a per-host certificate. Absent
+	// when the lab has a shared wildcard secret to use instead.
+	clusterIssuerAnnotation = "cert-manager.io/cluster-issuer"
 
 	// envbuilderImage builds a devcontainer inside the student's own pod: it
 	// clones the repo, builds devcontainer.json (image, Dockerfile, features) and
@@ -310,6 +321,13 @@ func (b *Backend) EnsureWorkspace(ctx context.Context, spec workspace.Spec) (wor
 
 	existing, err := b.client.AppsV1().Deployments(b.namespace).Get(ctx, name, metav1.GetOptions{})
 	if err == nil {
+		// The workspace's Ingress was created once and never revisited, so its
+		// certificate configuration can be stale (see reconcileIngressTLS). Fix it
+		// on the way past — best-effort: a student must still reach their IDE even
+		// if the cluster refuses the update.
+		if reconcileErr := b.reconcileIngressTLS(ctx, name, spec); reconcileErr != nil {
+			log.Printf("Failed to reconcile TLS for workspace %s: %v", name, reconcileErr)
+		}
 		// Workspace already exists — return its actual access token (a freshly
 		// generated spec.Token would not match the running pod, which keeps its
 		// original token/password) and the routing recorded at create time, which
@@ -1174,10 +1192,26 @@ func (b *Backend) createService(ctx context.Context, name string, labels map[str
 	return nil
 }
 
+// workspaceTLS resolves the certificate source for a workspace Ingress: the shared
+// wildcard secret when the lab has one, otherwise a per-host certificate requested
+// from cert-manager via the issuer annotation. An empty secret means "no certificate
+// source at all" (the nip.io fallback), in which case the Ingress must not advertise
+// TLS. It is the single definition of desired TLS state, shared by create and
+// reconcile so the two cannot drift.
+func workspaceTLS(name string, spec workspace.Spec) (tlsSecret, clusterIssuer string) {
+	if spec.WildcardTLSSecret != "" {
+		return spec.WildcardTLSSecret, ""
+	}
+	if spec.ClusterIssuer != "" {
+		return name + "-tls", spec.ClusterIssuer
+	}
+	return "", ""
+}
+
 func (b *Backend) createIngress(ctx context.Context, name string, labels map[string]string, spec workspace.Spec) error {
 	host := workspaceHost(name, spec.Domain)
 	pathType := netv1.PathTypePrefix
-	ingressClass := "traefik"
+	ingressClass := workspaceIngressClass
 
 	// Websocket / long-lived IDE connections and unbounded request bodies need no
 	// per-Ingress annotation under Traefik (unlike nginx): it streams bodies
@@ -1185,11 +1219,9 @@ func (b *Backend) createIngress(ctx context.Context, name string, labels map[str
 	// chart-wide in coder.SetupHTTPS's Traefik install instead.
 	annotations := map[string]string{}
 
-	tlsSecret := spec.WildcardTLSSecret
-	if tlsSecret == "" && spec.ClusterIssuer != "" {
-		// No shared wildcard cert — request a per-host certificate from cert-manager.
-		tlsSecret = name + "-tls"
-		annotations["cert-manager.io/cluster-issuer"] = spec.ClusterIssuer
+	tlsSecret, clusterIssuer := workspaceTLS(name, spec)
+	if clusterIssuer != "" {
+		annotations[clusterIssuerAnnotation] = clusterIssuer
 	}
 
 	ing := &netv1.Ingress{
@@ -1224,6 +1256,84 @@ func (b *Backend) createIngress(ctx context.Context, name string, labels map[str
 	if _, err := b.client.NetworkingV1().Ingresses(b.namespace).Create(ctx, ing, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("failed to create ingress %s: %w", name, err)
 	}
+	return nil
+}
+
+// reconcileIngressTLS brings an existing workspace Ingress' certificate configuration
+// back in line with the lab's current settings.
+//
+// Every workspace resource is created once and never touched again (EnsureWorkspace
+// returns early as soon as the Deployment exists), so an Ingress created before the
+// lab had a DNS provider — or under a ClusterIssuer that has since been renamed —
+// keeps pointing at a secret nothing issues, and Traefik serves its default
+// self-signed certificate for the rest of the lab's life. Certificates are the one
+// piece of that state we can safely re-derive, so this reconciles them alone.
+//
+// It deliberately does not touch the host: the student's URL is recorded on the
+// Deployment at create time and may already be bookmarked or handed out, and a
+// workspace on the nip.io fallback has no certificate source to move to anyway.
+// Anything not served under the lab's current domain is therefore left alone.
+func (b *Backend) reconcileIngressTLS(ctx context.Context, name string, spec workspace.Spec) error {
+	if strings.TrimSpace(spec.Domain) == "" {
+		return nil
+	}
+
+	ing, err := b.client.NetworkingV1().Ingresses(b.namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to look up ingress %s: %w", name, err)
+	}
+
+	host := workspaceHost(name, spec.Domain)
+	if len(ing.Spec.Rules) == 0 || ing.Spec.Rules[0].Host != host {
+		// Created under a different domain (nip.io fallback, or a domain the lab has
+		// since changed): re-pointing it would change the student's URL.
+		return nil
+	}
+
+	tlsSecret, clusterIssuer := workspaceTLS(name, spec)
+	if tlsSecret == "" {
+		return nil
+	}
+
+	desiredTLS := []netv1.IngressTLS{{Hosts: []string{host}, SecretName: tlsSecret}}
+	changed := false
+
+	if !equality.Semantic.DeepEqual(ing.Spec.TLS, desiredTLS) {
+		ing.Spec.TLS = desiredTLS
+		changed = true
+	}
+	if ing.Annotations[clusterIssuerAnnotation] != clusterIssuer {
+		if clusterIssuer == "" {
+			// Switched to the shared wildcard: the per-host Certificate request must
+			// go, or cert-manager keeps renewing a certificate nothing serves.
+			delete(ing.Annotations, clusterIssuerAnnotation)
+		} else {
+			if ing.Annotations == nil {
+				ing.Annotations = map[string]string{}
+			}
+			ing.Annotations[clusterIssuerAnnotation] = clusterIssuer
+		}
+		changed = true
+	}
+	// Workspaces provisioned before the switch from ingress-nginx to Traefik still
+	// name the old class, so nothing routes to them and no ACME challenge resolves.
+	if ing.Spec.IngressClassName == nil || *ing.Spec.IngressClassName != workspaceIngressClass {
+		class := workspaceIngressClass
+		ing.Spec.IngressClassName = &class
+		changed = true
+	}
+
+	if !changed {
+		return nil
+	}
+
+	if _, err := b.client.NetworkingV1().Ingresses(b.namespace).Update(ctx, ing, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("failed to reconcile ingress %s: %w", name, err)
+	}
+	log.Printf("Reconciled TLS on workspace ingress %s (secret %q, issuer %q)", name, tlsSecret, clusterIssuer)
 	return nil
 }
 

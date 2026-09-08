@@ -5,16 +5,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>EasyLab - {{template "title" .}}</title>
-    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="icon" type="image/png" href="{{asset "/static/favicon.png"}}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="{{asset "/static/style.css"}}">
     {{block "head-extra" .}}{{end}}
 </head>
 <body class="{{block "body-class" .}}{{end}}">
     {{template "body" .}}
-    <script src="/static/csrf.js"></script>
+    <script src="{{asset "/static/csrf.js"}}"></script>
 </body>
 </html>
 {{end}}
@@ -22,7 +22,7 @@
 {{define "admin-sidebar"}}
 <aside class="admin-sidebar">
     <a href="/labs" class="admin-sidebar-brand">
-        <img src="/static/logo.png" alt="EasyLab" class="admin-sidebar-logo">
+        <img src="{{asset "/static/logo.png"}}" alt="EasyLab" class="admin-sidebar-logo">
         <span class="admin-sidebar-name">EasyLab</span>
     </a>
     <nav class="admin-sidebar-nav">

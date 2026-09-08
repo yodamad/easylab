@@ -364,11 +364,24 @@ poll:
 		return
 	}
 
+	// Record the image by digest rather than by the :latest tag it was pushed under.
+	// Workspace pods run ImagePullPolicy: PullIfNotPresent, so a node that already
+	// cached the previous :latest would go on serving the pre-rebuild image; a digest
+	// is a different reference every time the content changes, which is what makes a
+	// Rebuild actually reach students. A registry that will not report the digest is
+	// not a reason to fail an otherwise-good bake — fall back to the tag.
+	pinnedRepo := pullRepo
+	if digestRef, digestErr := bp.BakedImageDigest(context.Background(), pullRepo, pullInsecure, pullRegistryAuthSecret); digestErr != nil {
+		log.Printf("Could not pin baked image by digest for lab %s template %s, falling back to %s: %v", jobID, templateName, pullRepo, digestErr)
+	} else {
+		pinnedRepo = digestRef
+	}
+
 	h.updateJobConfig(jobID, func(config *LabConfig) {
 		if config.BakedImages == nil {
 			config.BakedImages = make(map[string]BakedImage)
 		}
-		config.BakedImages[templateName] = BakedImage{Image: pullRepo, RemoteUser: remoteUser, At: time.Now()}
+		config.BakedImages[templateName] = BakedImage{Image: pinnedRepo, RemoteUser: remoteUser, At: time.Now()}
 	})
 	go func() {
 		if err := h.jobManager.SaveJob(jobID); err != nil {

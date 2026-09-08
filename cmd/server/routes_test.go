@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -210,4 +211,42 @@ func TestResolveLabRoute_RetryWithConfigIsNotShadowedByRetry(t *testing.T) {
 	assert.NotEqual(t, routeRetryJob, got,
 		"an edited retry must not resolve to the plain retry route")
 	assert.Equal(t, routeRetryJobWithConfig, got)
+}
+
+// noStoreByDefault makes "not cacheable" the default for every response, so an
+// endpoint that forgets its own cache headers cannot be heuristically cached by a
+// browser — the trap that kept fixed bugs alive in users' sessions.
+func TestNoStoreByDefault(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		handler http.HandlerFunc
+		want    string
+	}{
+		{
+			name:    "handler that sets nothing gets no-store",
+			handler: func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) },
+			want:    "no-store",
+		},
+		{
+			name: "handler keeps its own directive",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				w.WriteHeader(http.StatusOK)
+			},
+			want: "public, max-age=31536000, immutable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			rec := httptest.NewRecorder()
+			noStoreByDefault(tt.handler).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+			assert.Equal(t, tt.want, rec.Header().Get("Cache-Control"))
+		})
+	}
 }

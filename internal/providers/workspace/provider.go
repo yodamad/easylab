@@ -320,6 +320,13 @@ type BakeProvider interface {
 	// meaningful once BakeJobStatus reports BakeStateComplete. "" with a nil error
 	// means the devcontainer declared no remoteUser.
 	BakeRemoteUser(ctx context.Context, repoRef string, insecure bool, registryAuthSecret string) (string, error)
+	// BakedImageDigest resolves repoRef to an immutable "repo@sha256:..." reference.
+	// Baked images are pushed under a fixed :latest tag while workspace pods run with
+	// ImagePullPolicy: PullIfNotPresent, so a node that cached the previous :latest
+	// would keep serving it after a rebuild. Handing pods the digest instead makes a
+	// rebuild a genuinely different reference. Same reachability and auth contract as
+	// BakeRemoteUser above.
+	BakedImageDigest(ctx context.Context, repoRef string, insecure bool, registryAuthSecret string) (string, error)
 }
 
 // SecretManager materializes the credential Secrets that templates reference by

@@ -661,6 +661,17 @@ The tradeoff: a bake is a snapshot. It does not track the workshop repository, s
 a `devcontainer.json` change after baking needs an explicit **Rebuild** — until
 then, students keep getting the previously baked image rather than the live one.
 
+A **Rebuild** always reaches students. Baked images are pushed to a fixed `:latest`
+tag, but EasyLab records the image by its digest (`…/baked/<lab>/<template>@sha256:…`)
+rather than by that tag, and hands the digest to student pods. That matters because
+workspace pods pull with `imagePullPolicy: IfNotPresent` — deliberately, so a burst
+of students starting at once reuses a node's cached layers instead of all hitting the
+registry. Under a plain `:latest` a node that had already cached the pre-rebuild image
+would have gone on serving it; a digest changes whenever the content does, so the
+kubelet fetches the new image while an unchanged one still hits the node cache.
+(If the registry does not report a digest, EasyLab falls back to the tag and logs it —
+the bake still works, without that guarantee.)
+
 ## Reusing a lab's templates
 
 Use **Export Templates YAML** on the [labs list](admin-lab-management.md#manage-your-labs) to
@@ -697,4 +708,4 @@ workshop edition to the next.
 | Every student's workspace takes minutes to start | The cache registry is unreachable or unwritable, so each build starts cold. Check `registry_auth_secret`. If the cache *is* warm and it's still slow at scale, it's likely layer extraction contending for CPU/disk across many concurrent pods — see [A warm cache skips the build, not the extraction](#devcontainer-workshops) and size `cpu`/`memory` explicitly. |
 | "Bake image" is rejected for a template using the in-cluster registry | Baking to the in-cluster registry needs the lab to have a domain configured, so a student's pull can trust the registry over HTTPS — see [Pre-baking: skipping the build entirely](#pre-baking-skipping-the-build-entirely). Configure a domain for the lab, or set an external `cache_repo` on the template instead. |
 | A bake fails with "image was built, but never became pullable" | The image built and pushed fine, but nothing could fetch it back over a trusted connection. For the in-cluster registry this almost always means its TLS certificate never finished issuing. Check `kubectl get certificate,certificaterequest -n <workspace namespace>` in the lab's cluster; a stuck `CertificateRequest` usually means the lab's `ClusterIssuer` name doesn't match one that actually exists on that cluster (`kubectl get clusterissuer`). For an external `cache_repo`, verification authenticates with the same `registry_auth_secret` the push used, so a persistent (not just transient) failure there means those credentials cannot read the pushed tag back — check they have pull, not just push, permission on the registry. Click **Rebuild** once fixed — EasyLab only records a bake as ready after confirming it. |
-| A workspace pod's pull error names a `*.traefik.default` (or similar auto-generated) certificate, not the registry's own hostname | Traefik never received a real certificate for that host and fell back to serving its own internal default one — the `ClusterIssuer`/`CertificateRequest` never actually completed. This is the same failure as the row above, just observed from the workspace pod's own pull error instead of the bake status; the fix is the same (fix the certificate, then **Rebuild** — a stale pre-fix bake record is cleared automatically once a rebuild confirms the pull path is still broken). |
+| A workspace pod's pull error names a `*.traefik.default` (or similar auto-generated) certificate, not the registry's own hostname | Traefik never received a real certificate for that host and fell back to serving its own internal default one — the `ClusterIssuer`/`CertificateRequest` never actually completed. This is the same failure as the row above, just observed from the workspace pod's own pull error instead of the bake status; the fix is the same (fix the certificate, then **Rebuild** — a stale pre-fix bake record is cleared automatically once a rebuild confirms the pull path is still broken). Note that the registry's Ingress no longer needs to be recreated to pick up corrected HTTPS settings: it is reconciled on the next bake, as workspace Ingresses are — see [Certificates repair themselves](admin-lab-management.md#certificates-repair-themselves). |

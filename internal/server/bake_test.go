@@ -23,6 +23,7 @@ type fakeBakeProvider struct {
 	remoteUserErrs  int32 // number of leading BakeRemoteUser calls that return an error
 	remoteUserCalls int32
 	remoteUser      string
+	digest          string // "" makes BakedImageDigest fail, exercising the tag fallback
 }
 
 func (f *fakeBakeProvider) EnsureBakeJob(context.Context, workspace.BakeRequest) error { return nil }
@@ -35,6 +36,27 @@ func (f *fakeBakeProvider) BakeRemoteUser(context.Context, string, bool, string)
 		return "", errors.New("tls: failed to verify certificate")
 	}
 	return f.remoteUser, nil
+}
+func (f *fakeBakeProvider) BakedImageDigest(_ context.Context, repoRef string, _ bool, _ string) (string, error) {
+	if f.digest == "" {
+		return "", errors.New("registry did not report a digest")
+	}
+	host, repo, _ := splitBakeRefForTest(repoRef)
+	return host + "/" + repo + "@" + f.digest, nil
+}
+
+// splitBakeRefForTest mirrors the kube backend's reference splitting closely enough to
+// build a digest reference in tests, without importing that package.
+func splitBakeRefForTest(ref string) (host, repo, tag string) {
+	slash := strings.Index(ref, "/")
+	if slash < 0 {
+		return "", "", ""
+	}
+	host, rest := ref[:slash], ref[slash+1:]
+	if i := strings.LastIndex(rest, ":"); i >= 0 {
+		return host, rest[:i], rest[i+1:]
+	}
+	return host, rest, "latest"
 }
 
 // bakeLab creates a completed lab with a kubeconfig set (BakeTemplate rejects a lab

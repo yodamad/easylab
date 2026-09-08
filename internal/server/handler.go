@@ -1476,8 +1476,27 @@ func (h *Handler) ServeStatic(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 	}
 
-	// http.ServeContent adds conditional GET (ETag/Last-Modified) and Range
-	// support, so unchanged assets get a 304 instead of a full re-send.
+	// http.ServeContent honours an Etag we set but never generates one, and on its
+	// own it emits no Cache-Control at all. A Last-Modified-only response is
+	// heuristically cacheable (RFC 9111 4.2.2, commonly 10% of the file's age), so
+	// browsers used to hold a months-old style.css for days without revalidating —
+	// which is why fixes shipped in a new build did not reach users. Setting both
+	// headers explicitly is what closes that.
+	if fingerprint := assetFingerprint(path); fingerprint != "" {
+		w.Header().Set("ETag", `"`+fingerprint+`"`)
+	}
+	if r.URL.Query().Get("v") != "" {
+		// Fingerprinted URL (see assetURL): the path changes whenever the bytes do,
+		// so this exact URL can be cached forever.
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		// Un-fingerprinted request — cacheable, but revalidate every time. The ETag
+		// above keeps that a cheap 304 rather than a full re-send.
+		w.Header().Set("Cache-Control", "no-cache")
+	}
+
+	// ServeContent handles the conditional GET (If-None-Match / If-Modified-Since ->
+	// 304) and Range support from here.
 	http.ServeContent(w, r, filePath, info.ModTime(), file)
 }
 

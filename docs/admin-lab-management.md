@@ -346,3 +346,25 @@ configured) at `https://{workspace}.{domain}/`. Access is gated by a per-student
 **password** that EasyLab generates and shows to the student on the portal. The
 student enters it on code-server's own login page when they open their
 workspace, and EasyLab's own student authentication protects the portal itself.
+
+### Certificates repair themselves
+
+A workspace's Ingress used to be written once, at creation, and never revisited.
+If the lab's HTTPS settings changed afterwards — a DNS provider was added, so a
+shared wildcard certificate replaced the per-host ones, or the `ClusterIssuer`
+was renamed — workspaces created before the change kept pointing at a certificate
+nothing issues, and Traefik served its own self-signed default instead. The
+browser then warned on every workspace for the rest of the workshop.
+
+EasyLab now reconciles that automatically: each time a workspace is opened or its
+status is refreshed, its Ingress' TLS secret, `cert-manager.io/cluster-issuer`
+annotation and ingress class are compared against the lab's current settings and
+corrected if they differ. Nothing else is touched — in particular **the
+workspace's URL never changes**, so links already handed to students keep working.
+Workspaces served over the `nip.io` fallback have no certificate source to move
+to and are left exactly as they are.
+
+You do not need to recreate or destroy anything: fix the lab's DNS/HTTPS settings,
+have the students reload their workspace, and the certificate follows. The same
+reconciliation applies to the in-cluster registry's own Ingress, which is what a
+devcontainer image pull has to trust.

@@ -3,10 +3,12 @@ package kube
 import (
 	"context"
 	"fmt"
+	"log"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -152,13 +154,13 @@ func (b *Backend) EnsureRegistryIngress(ctx context.Context, domain, wildcardTLS
 	}
 
 	pathType := netv1.PathTypePrefix
-	ingressClass := "traefik"
+	ingressClass := workspaceIngressClass
 	annotations := map[string]string{}
 
 	tlsSecret := wildcardTLSSecret
 	if tlsSecret == "" && clusterIssuer != "" {
 		tlsSecret = registryCacheName + "-tls"
-		annotations["cert-manager.io/cluster-issuer"] = clusterIssuer
+		annotations[clusterIssuerAnnotation] = clusterIssuer
 	}
 
 	ing := &netv1.Ingress{
@@ -187,15 +189,83 @@ func (b *Backend) EnsureRegistryIngress(ctx context.Context, domain, wildcardTLS
 	if tlsSecret != "" {
 		ing.Spec.TLS = []netv1.IngressTLS{{Hosts: []string{host}, SecretName: tlsSecret}}
 	}
-	if _, err := b.client.NetworkingV1().Ingresses(b.namespace).Create(ctx, ing, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+	_, err := b.client.NetworkingV1().Ingresses(b.namespace).Create(ctx, ing, metav1.CreateOptions{})
+	if err == nil {
+		return host, nil
+	}
+	if !apierrors.IsAlreadyExists(err) {
 		return "", fmt.Errorf("failed to create registry ingress: %w", err)
 	}
+	// An existing Ingress is the case this function was named for, and until now it
+	// was the case it did not handle: a registry exposed before the lab had a
+	// wildcard certificate keeps a TLS config nothing issues, the kubelet refuses to
+	// pull over it, and every bake ends in "image was built, but never became
+	// pullable". Every field below is re-derived from the caller's current arguments,
+	// so reconciling them is what actually makes this idempotent.
+	if err := b.reconcileRegistryIngress(ctx, host, tlsSecret, clusterIssuer, ingressClass); err != nil {
+		return "", err
+	}
 	return host, nil
+}
+
+// reconcileRegistryIngress aligns an existing registry Ingress' routing and
+// certificate configuration with the values EnsureRegistryIngress just computed.
+func (b *Backend) reconcileRegistryIngress(ctx context.Context, host, tlsSecret, clusterIssuer, ingressClass string) error {
+	existing, err := b.client.NetworkingV1().Ingresses(b.namespace).Get(ctx, registryCacheName, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to look up registry ingress: %w", err)
+	}
+
+	var desiredTLS []netv1.IngressTLS
+	if tlsSecret != "" {
+		desiredTLS = []netv1.IngressTLS{{Hosts: []string{host}, SecretName: tlsSecret}}
+	}
+
+	changed := false
+	if !equality.Semantic.DeepEqual(existing.Spec.TLS, desiredTLS) {
+		existing.Spec.TLS = desiredTLS
+		changed = true
+	}
+	if existing.Annotations[clusterIssuerAnnotation] != clusterIssuer {
+		if clusterIssuer == "" {
+			delete(existing.Annotations, clusterIssuerAnnotation)
+		} else {
+			if existing.Annotations == nil {
+				existing.Annotations = map[string]string{}
+			}
+			existing.Annotations[clusterIssuerAnnotation] = clusterIssuer
+		}
+		changed = true
+	}
+	if existing.Spec.IngressClassName == nil || *existing.Spec.IngressClassName != ingressClass {
+		existing.Spec.IngressClassName = &ingressClass
+		changed = true
+	}
+	if len(existing.Spec.Rules) > 0 && existing.Spec.Rules[0].Host != host {
+		existing.Spec.Rules[0].Host = host
+		changed = true
+	}
+
+	if !changed {
+		return nil
+	}
+	if _, err := b.client.NetworkingV1().Ingresses(b.namespace).Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("failed to reconcile registry ingress: %w", err)
+	}
+	log.Printf("Reconciled TLS on registry ingress %s (secret %q, issuer %q)", registryCacheName, tlsSecret, clusterIssuer)
+	return nil
 }
 
 // BakedImageRepo returns the internal (push, used by the bake Job) and external (pull,
 // handed to student pods) repository references for a template's baked image, both
 // under a fixed :latest tag — a rebuild overwrites it, no rollback/history in v1.
+// The externalRepo returned here is only the starting point for the pull side: the
+// server resolves it through BakedImageDigest and stores the resulting immutable
+// "repo@sha256:..." reference, because :latest plus PullIfNotPresent would otherwise
+// let a node keep serving the pre-rebuild image.
 // Pure string building: it does not provision anything, and does not require the
 // Ingress from EnsureRegistryIngress to already exist (callers ensure that separately
 // when the pull path needs it).

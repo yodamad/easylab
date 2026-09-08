@@ -3,10 +3,12 @@ package kube
 import (
 	"context"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"path"
 	"strings"
@@ -295,6 +297,76 @@ func splitImageRef(ref string) (host, repo, tag string) {
 		return host, rest[:i], rest[i+1:]
 	}
 	return host, rest, "latest"
+}
+
+// BakedImageDigest resolves repoRef to an immutable "repo@sha256:..." pull reference.
+//
+// Baked images are pushed under a fixed :latest tag (see BakedImageRepo), while every
+// workspace container runs with ImagePullPolicy: PullIfNotPresent — deliberately, so a
+// burst of student pods reuses a node's cached layers instead of all hitting the
+// registry at once. The two combined mean a node that already pulled the old :latest
+// keeps running it after a rebuild. Handing pods a digest instead removes the
+// ambiguity without giving up the pull-policy optimization: a rebuilt image is a
+// different reference, so the kubelet fetches it, and an unchanged one still hits the
+// node cache.
+//
+// Same reachability contract as BakeRemoteUser: repoRef must be the EXTERNAL
+// reference, and registryAuthSecret names the same dockerconfigjson Secret used to push.
+func (b *Backend) BakedImageDigest(ctx context.Context, repoRef string, insecure bool, registryAuthSecret string) (string, error) {
+	host, repo, tag := splitImageRef(repoRef)
+	if host == "" || repo == "" {
+		return "", fmt.Errorf("invalid image reference %q", repoRef)
+	}
+	scheme := "https"
+	if insecure {
+		scheme = "http"
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+
+	authHeader, err := b.registryPullAuthHeader(ctx, registryAuthSecret, host)
+	if err != nil {
+		return "", err
+	}
+
+	digest, err := fetchManifestDigest(ctx, client, scheme, host, repo, tag, authHeader)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s/%s@%s", host, repo, digest), nil
+}
+
+// fetchManifestDigest returns the manifest digest for repo:tag — the value a
+// "repo@sha256:..." pull reference needs. Note this is NOT the config digest
+// fetchConfigDigest returns: that one identifies the image config blob and is not a
+// valid pull reference. Registries report it in Docker-Content-Digest; when a registry
+// omits the header, hashing the manifest bytes yields the same value by definition.
+func fetchManifestDigest(ctx context.Context, client *http.Client, scheme, host, repo, tag, authHeader string) (string, error) {
+	url := fmt.Sprintf("%s://%s/v2/%s/manifests/%s", scheme, host, repo, tag)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json")
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch image manifest: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to fetch image manifest: unexpected status %s", resp.Status)
+	}
+	if digest := strings.TrimSpace(resp.Header.Get("Docker-Content-Digest")); digest != "" {
+		return digest, nil
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read image manifest: %w", err)
+	}
+	sum := sha256.Sum256(body)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
 func fetchConfigDigest(ctx context.Context, client *http.Client, scheme, host, repo, tag, authHeader string) (string, error) {

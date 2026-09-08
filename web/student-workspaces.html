@@ -7,7 +7,7 @@
         <header class="student-dashboard-header">
             <div class="header-content">
                 <div class="header-brand">
-                    <img src="/static/logo.png" alt="EasyLab Logo" class="header-logo">
+                    <img src="{{asset "/static/logo.png"}}" alt="EasyLab Logo" class="header-logo">
                     <span class="header-app-name">Student Portal</span>
                 </div>
                 <div class="header-user-actions">
@@ -55,6 +55,6 @@
         {{template "student-footer" .}}
     </div>
 
-    <script src="/static/student-common.js"></script>
-    <script src="/static/student-workspaces.js"></script>
+    <script src="{{asset "/static/student-common.js"}}"></script>
+    <script src="{{asset "/static/student-workspaces.js"}}"></script>
 {{end}}

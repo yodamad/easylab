@@ -2,6 +2,8 @@ package kube
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -281,6 +283,79 @@ func TestSplitImageRef(t *testing.T) {
 			assert.Equal(t, tt.wantHost, host)
 			assert.Equal(t, tt.wantRepo, repo)
 			assert.Equal(t, tt.wantTag, tag)
+		})
+	}
+}
+
+func TestBakedImageDigest(t *testing.T) {
+	const manifestDigest = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	manifest := map[string]any{"config": map[string]string{"digest": "sha256:cafe"}}
+
+	tests := []struct {
+		name       string
+		sendHeader bool
+	}{
+		{name: "uses the registry-reported digest", sendHeader: true},
+		// Not every registry sets Docker-Content-Digest; hashing the manifest bytes
+		// yields the same value by definition, so the pin must still work.
+		{name: "falls back to hashing the manifest", sendHeader: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, err := json.Marshal(manifest)
+			require.NoError(t, err)
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if !strings.HasSuffix(r.URL.Path, "/manifests/latest") {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				if tt.sendHeader {
+					w.Header().Set("Docker-Content-Digest", manifestDigest)
+				}
+				_, _ = w.Write(body)
+			}))
+			defer srv.Close()
+
+			b, _ := newTestBackend()
+			host := strings.TrimPrefix(srv.URL, "http://")
+
+			ref, err := b.BakedImageDigest(context.Background(), host+"/baked/job-1/go-workshop:latest", true, "")
+			require.NoError(t, err)
+
+			assert.NotContains(t, ref, ":latest", "the pinned reference must not carry the mutable tag")
+			assert.True(t, strings.HasPrefix(ref, host+"/baked/job-1/go-workshop@sha256:"), "unexpected reference %q", ref)
+			if tt.sendHeader {
+				assert.Equal(t, host+"/baked/job-1/go-workshop@"+manifestDigest, ref)
+			} else {
+				sum := sha256.Sum256(body)
+				assert.Equal(t, host+"/baked/job-1/go-workshop@sha256:"+hex.EncodeToString(sum[:]), ref)
+			}
+		})
+	}
+}
+
+func TestBakedImageDigest_Errors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	host := strings.TrimPrefix(srv.URL, "http://")
+
+	tests := []struct {
+		name string
+		ref  string
+	}{
+		{name: "reference without a host", ref: "go-workshop:latest"},
+		{name: "manifest not found", ref: host + "/baked/job-1/go-workshop:latest"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, _ := newTestBackend()
+			_, err := b.BakedImageDigest(context.Background(), tt.ref, true, "")
+			assert.Error(t, err)
 		})
 	}
 }

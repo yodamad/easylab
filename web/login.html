@@ -13,7 +13,7 @@
 
 <div class="login-scene">
     <div class="home-brand">
-        <img src="/static/logo.png" alt="EasyLab" class="home-brand-logo">
+        <img src="{{asset "/static/logo.png"}}" alt="EasyLab" class="home-brand-logo">
         <div class="home-brand-text">
             <span class="home-wordmark">EasyLab</span>
             <span class="home-tagline">Cloud Lab Infrastructure Platform</span>
@@ -63,7 +63,7 @@
     </div>
 </div>
 
-<script src="/static/login.js"></script>
+<script src="{{asset "/static/login.js"}}"></script>
 <script>
 (function() {
     var canvas = document.getElementById('nodeCanvas');

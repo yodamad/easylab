@@ -446,7 +446,7 @@ func main() {
 	addr := fmt.Sprintf(":%s", *port)
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      mux,
+		Handler:      noStoreByDefault(mux),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 5 * time.Minute, // long enough for log-streaming and kubeconfig responses
 		IdleTimeout:  60 * time.Second,
@@ -640,4 +640,17 @@ func labRequestRouter(h *server.Handler) http.HandlerFunc {
 			h.GetJobStatus(w, r)
 		}
 	}
+}
+
+// noStoreByDefault makes "not cacheable" the default for every response, so a
+// handler has to opt in to caching rather than opt out. Without it the HTMX
+// fragment and JSON endpoints send no cache headers at all, which leaves them
+// heuristically cacheable — the same trap that made stale static assets survive a
+// deploy. Handlers that set their own Cache-Control (serveTemplate, the login
+// pages, ServeStatic) overwrite this via Header().Set and are unaffected.
+func noStoreByDefault(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
 }
