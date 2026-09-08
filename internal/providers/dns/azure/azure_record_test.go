@@ -49,9 +49,19 @@ func (m *recordingMocks) find(typ string) (pulumi.MockResourceArgs, bool) {
 }
 
 const (
-	recordSetType = "azure-native:network:RecordSet"
+	recordSetType = "azure-native:dns:RecordSet"
 	providerType  = "pulumi:providers:azure-native"
 )
+
+// pluginVersion is the azure-native plugin version a registration asks for. An
+// empty version makes the engine fall back to the newest installed plugin, which
+// is how the record used to end up on a plugin that no longer served its token.
+func pluginVersion(args pulumi.MockResourceArgs) string {
+	if args.RegisterRPC == nil {
+		return ""
+	}
+	return args.RegisterRPC.Version
+}
 
 // plainString unwraps a property value that the engine may have marked secret.
 func plainString(pv resource.PropertyValue) string {
@@ -133,6 +143,13 @@ func TestAzureDNSProvider_CreateARecord(t *testing.T) {
 			assert.Equal(t, "client-id", plainString(prov.Inputs["clientId"]))
 			assert.Equal(t, "tenant-id", plainString(prov.Inputs["tenantId"]))
 			assert.Equal(t, "subscription-id", plainString(prov.Inputs["subscriptionId"]))
+
+			// Both must pin the same azure-native plugin version, otherwise the
+			// engine serves the record from the newest installed plugin, which may
+			// not know its token.
+			assert.NotEmpty(t, pluginVersion(prov), "provider must pin a plugin version")
+			assert.Equal(t, pluginVersion(record), pluginVersion(prov),
+				"record and provider must resolve to the same azure-native plugin")
 		})
 	}
 }

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	azurenative "github.com/pulumi/pulumi-azure-native-sdk"
-	azurenetwork "github.com/pulumi/pulumi-azure-native-sdk/network"
+	azuredns "github.com/pulumi/pulumi-azure-native-sdk/dns/v3"
+	azurenative "github.com/pulumi/pulumi-azure-native-sdk/v3"
 	k8s "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes"
 	helmv3 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/helm/v3"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
@@ -103,14 +103,19 @@ func (p *AzureDNSProvider) CreateARecord(
 		opts = append(opts, pulumi.Provider(azureProvider))
 	}
 
+	// azure-native 3.x serves DNS record sets from its `dns` module
+	// (`azure-native:dns:RecordSet`). The v1 SDK's `network:RecordSet` token no
+	// longer exists in the plugin version pinned by the server, so keep this on
+	// the v3 SDKs — they also stamp the plugin version on every registration
+	// instead of letting the engine pick the newest installed plugin.
 	ttl := 300.0
-	_, err := azurenetwork.NewRecordSet(ctx, "coder-dns-a-record-"+safe, &azurenetwork.RecordSetArgs{
+	_, err := azuredns.NewRecordSet(ctx, "coder-dns-a-record-"+safe, &azuredns.RecordSetArgs{
 		ZoneName:              pulumi.String(zone),
 		ResourceGroupName:     pulumi.String(resourceGroup),
 		RelativeRecordSetName: pulumi.String(subdomain),
 		RecordType:            pulumi.String("A"),
-		ARecords: azurenetwork.ARecordArray{
-			azurenetwork.ARecordArgs{Ipv4Address: ip.ToStringPtrOutput()},
+		ARecords: azuredns.ARecordArray{
+			azuredns.ARecordArgs{Ipv4Address: ip.ToStringPtrOutput()},
 		},
 		Ttl: pulumi.Float64Ptr(ttl),
 	}, opts...)
