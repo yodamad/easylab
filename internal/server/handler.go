@@ -459,8 +459,9 @@ func parseNodeSelectorFromForm(r *http.Request, keyField, valueField string) map
 // parseWorkspaceTemplatesFromForm extracts workspace template entries from the form.
 // Expects template_N_name, template_N_image, template_N_git_repo, template_N_cpu,
 // template_N_memory, template_N_cpu_limit, template_N_memory_limit,
-// template_N_disk_size, repeated template_N_env_name / template_N_env_value pairs,
-// and repeated template_N_nodeselector_key / template_N_nodeselector_value pairs.
+// template_N_disk_size, template_N_ephemeral, template_N_storage_class, repeated
+// template_N_env_name / template_N_env_value pairs, and repeated
+// template_N_nodeselector_key / template_N_nodeselector_value pairs.
 func parseWorkspaceTemplatesFromForm(r *http.Request) []WorkspaceTemplate {
 	var templates []WorkspaceTemplate
 	for i := 0; ; i++ {
@@ -481,6 +482,8 @@ func parseWorkspaceTemplatesFromForm(r *http.Request) []WorkspaceTemplate {
 			CPULimit:      getFormValue(r, fmt.Sprintf("template_%d_cpu_limit", i)),
 			MemoryLimit:   getFormValue(r, fmt.Sprintf("template_%d_memory_limit", i)),
 			DiskSize:      getFormValue(r, fmt.Sprintf("template_%d_disk_size", i)),
+			Ephemeral:     getFormValue(r, fmt.Sprintf("template_%d_ephemeral", i)) != "",
+			StorageClass:  getFormValue(r, fmt.Sprintf("template_%d_storage_class", i)),
 			StartupScript: getFormValue(r, fmt.Sprintf("template_%d_startup_script", i)),
 			DotfilesRepo:  getFormValue(r, fmt.Sprintf("template_%d_dotfiles_repo", i)),
 			Extensions:    splitList(getFormValue(r, fmt.Sprintf("template_%d_extensions", i))),
@@ -895,7 +898,7 @@ func (h *Handler) executeLabJobWithID(config *LabConfig, isDryRun bool, jobID st
 	html := fmt.Sprintf(`
 		<div class="job-created">
 			<h3>%s</h3>
-			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load, every 10s" hx-swap="innerHTML">
+			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load" hx-swap="innerHTML">
 				<p>Loading status...</p>
 			</div>
 		</div>`, title, template.HTMLEscapeString(jobID))
@@ -1306,7 +1309,7 @@ func (h *Handler) LaunchLab(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `
 		<div class="job-created">
 			<h3>Deployment Launched: %s</h3>
-			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load, every 10s" hx-swap="innerHTML">
+			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load" hx-swap="innerHTML">
 				<p>Loading status...</p>
 			</div>
 		</div>`, jobID, jobID)
@@ -1346,14 +1349,25 @@ func (h *Handler) GetJobStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html")
 
+	escapedJobID := template.HTMLEscapeString(jobID)
+
 	var statusHTML strings.Builder
-	statusHTML.WriteString(`<div class="job-status">`)
+	// While the job is still moving, the panel refreshes itself: the polling
+	// attributes go on the root element with an outerHTML swap so each poll
+	// replaces the whole panel. Polling from a nested element instead (with the
+	// root left in place) made every refresh append a second copy of the badge
+	// and log inside the previous one.
+	if status == JobStatusPending || status == JobStatusRunning {
+		statusHTML.WriteString(fmt.Sprintf(`<div class="job-status" hx-get="/api/jobs/%s/status" hx-trigger="every 10s" hx-swap="outerHTML">`, escapedJobID))
+	} else {
+		statusHTML.WriteString(`<div class="job-status">`)
+	}
 	statusHTML.WriteString(fmt.Sprintf(`<div class="status-badge status-%s">%s</div>`, status, status))
 
 	// Show launch button if dry run completed successfully
 	if status == JobStatusDryRunCompleted {
-		statusHTML.WriteString(`<form hx-post="/api/labs/launch" hx-target="#job-status" hx-swap="outerHTML" style="display: inline-block; margin-left: 1rem;">`)
-		statusHTML.WriteString(fmt.Sprintf(`<input type="hidden" name="job_id" value="%s">`, template.HTMLEscapeString(jobID)))
+		statusHTML.WriteString(`<form class="job-status-action" hx-post="/api/labs/launch" hx-target="#job-status" hx-swap="outerHTML">`)
+		statusHTML.WriteString(fmt.Sprintf(`<input type="hidden" name="job_id" value="%s">`, escapedJobID))
 		statusHTML.WriteString(`<button type="submit" class="btn btn-success">`)
 		statusHTML.WriteString(`<span class="btn-icon">🚀</span> Launch Real Deployment`)
 		statusHTML.WriteString(`</button>`)
@@ -1362,16 +1376,13 @@ func (h *Handler) GetJobStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Show retry button if job failed
 	if status == JobStatusFailed {
-		statusHTML.WriteString(`<form style="display: inline-block; margin-left: 1rem;">`)
-		statusHTML.WriteString(`<button type="button" class="btn btn-primary" onclick="retryJob('` + template.JSEscapeString(jobID) + `')">`)
+		statusHTML.WriteString(`<button type="button" class="btn btn-primary job-status-action" onclick="retryJob('` + template.JSEscapeString(jobID) + `')">`)
 		statusHTML.WriteString(`<span class="btn-icon">🔄</span> Retry Job`)
 		statusHTML.WriteString(`</button>`)
-		statusHTML.WriteString(`</form>`)
 	}
 
 	// Show download button if kubeconfig is available (for both completed and failed jobs)
 	if kubeconfig != "" && (status == JobStatusCompleted || status == JobStatusFailed) {
-		escapedJobID := template.HTMLEscapeString(jobID)
 		statusHTML.WriteString(fmt.Sprintf(`<a href="/api/jobs/%s/kubeconfig" class="btn btn-download" download="kubeconfig-%s.yaml">`, escapedJobID, escapedJobID))
 		statusHTML.WriteString(`<span class="btn-icon">⬇</span> Download Kubeconfig`)
 		statusHTML.WriteString(`</a>`)
@@ -1389,11 +1400,6 @@ func (h *Handler) GetJobStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	statusHTML.WriteString(`</pre>`)
 	statusHTML.WriteString(`</div>`)
-
-	// Continue polling if job is still running
-	if status == JobStatusPending || status == JobStatusRunning {
-		statusHTML.WriteString(fmt.Sprintf(`<div hx-get="/api/jobs/%s/status" hx-trigger="every 10s" hx-swap="outerHTML"></div>`, template.HTMLEscapeString(jobID)))
-	}
 
 	statusHTML.WriteString(`</div>`)
 
@@ -1834,6 +1840,8 @@ func templatesFromUploadRequest(r *http.Request) ([]WorkspaceTemplate, error) {
 		CPULimit:      strings.TrimSpace(r.FormValue("template_cpu_limit")),
 		MemoryLimit:   strings.TrimSpace(r.FormValue("template_memory_limit")),
 		DiskSize:      strings.TrimSpace(r.FormValue("template_disk_size")),
+		Ephemeral:     strings.TrimSpace(r.FormValue("template_ephemeral")) != "",
+		StorageClass:  strings.TrimSpace(r.FormValue("template_storage_class")),
 		StartupScript: r.FormValue("template_startup_script"),
 		DotfilesRepo:  strings.TrimSpace(r.FormValue("template_dotfiles_repo")),
 		Extensions:    splitList(r.FormValue("template_extensions")),
@@ -2013,11 +2021,10 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A git-backed workspace still needs somewhere to clone into even without a
-	// PVC: kube.go mounts an EmptyDir at the workspace directory whenever
-	// GitRepo is set and DiskSize is empty, so no fallback size is forced here.
-	// A persistent (Azure-Disk-backed) volume is opt-in — set DiskSize on the
-	// template to request one.
+	// DiskSize is passed through as-is: it sizes the volume but no longer decides
+	// whether there is one. The backend provisions a PVC of its default size when
+	// this is empty, and only an Ephemeral template opts out — see workspaceDisk
+	// in the kube backend.
 	diskSize := selected.DiskSize
 
 	spec := workspace.Spec{
@@ -2035,6 +2042,8 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		CPULimit:         selected.CPULimit,
 		MemoryLimit:      selected.MemoryLimit,
 		DiskSize:         diskSize,
+		Ephemeral:        selected.Ephemeral,
+		StorageClass:     selected.StorageClass,
 		Env:              selected.Env,
 		NodeSelector:     selected.NodeSelector,
 		StartupScript:    selected.StartupScript,
@@ -4367,7 +4376,7 @@ func (h *Handler) RetryJob(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `
 		<div class="job-created">
 			<h3>Job Retried: %s</h3>
-			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load, every 10s" hx-swap="innerHTML">
+			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load" hx-swap="innerHTML">
 				<p>Loading status...</p>
 			</div>
 		</div>`, jobID, jobID)
@@ -4554,7 +4563,7 @@ func (h *Handler) RetryJobWithConfig(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `
 		<div class="job-created">
 			<h3>Job Retried: %s</h3>
-			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load, every 10s" hx-swap="innerHTML">
+			<div id="job-status" hx-get="/api/jobs/%s/status" hx-trigger="load" hx-swap="innerHTML">
 				<p>Loading status...</p>
 			</div>
 		</div>`, jobID, jobID)

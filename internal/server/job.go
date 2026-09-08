@@ -111,6 +111,19 @@ type WorkspaceTemplate struct {
 	DiskSize    string            `json:"disk_size,omitempty"`
 	Env         map[string]string `json:"env,omitempty"`
 
+	// Ephemeral opts the workspace out of its persistent volume: the student's
+	// files live in an EmptyDir and are lost whenever the pod is rescheduled.
+	// Persistence is the default, so this is the only way to get the old
+	// throwaway behaviour — worth it for demo labs, or where a cloud's per-node
+	// volume attach limit matters more than the data does.
+	Ephemeral bool `json:"ephemeral,omitempty"`
+	// StorageClass overrides the cluster's default StorageClass for the workspace
+	// PVC. Left empty the default is used, which is right on OVHcloud (Cinder) and
+	// AKS (Azure Disk) — both network-attached. Set it on a BYO cluster whose
+	// default provisioner is node-local (local-path, hostPath), where the volume
+	// would otherwise be pinned to one node and lost on a reschedule anyway.
+	StorageClass string `json:"storage_class,omitempty"`
+
 	// IDE selects the workspace IDE base. Only "code-server" is supported, so this
 	// is optional and normally left empty; the retired "openvscode" value is still
 	// accepted from older labs and normalized away.

@@ -107,3 +107,15 @@ You can restrict which flavors are shown by **vCPU and RAM** so that only instan
 Filters are cumulative with region/flavor enablement: only flavors that are enabled *and* pass the vCPU/RAM bounds appear in the wizard. On the OVH Options page, set the values and click **Save Options** to persist them. In the wizard, you can adjust filters for that lab only; changing them there reloads the flavor dropdown. If no flavors match, the UI suggests adjusting filters or using 0 for no limit.
 
 Click **Save Options** to persist your configuration (including flavor filters). The settings are stored on the server and apply to all future lab creation sessions.
+
+## Workspace storage
+
+Student workspaces get a persistent volume by default. EasyLab does not name a
+StorageClass, so the cluster's default applies — on OVHcloud Managed Kubernetes
+that is a Cinder block volume, which is network-attached and follows a pod when
+it is rescheduled onto another node. Nothing needs configuring.
+
+Set `storage_class` on a workspace template only if you are running a
+[bring-your-own cluster](admin-lab-creation.md#use-existing-cluster) whose
+default provisioner is node-local (`local-path`, `hostPath`) — there the volume
+would be pinned to a single node. See [Persistence](templates.md#persistence).

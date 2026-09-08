@@ -34,7 +34,11 @@ workspace_templates:
     # memory: 1Gi                                # request; also the limit when memory_limit is unset
     # cpu_limit: "1"                             # optional — overrides the limit independently of cpu
     # memory_limit: 2Gi                          # optional — overrides the limit independently of memory
-    # disk_size: 5Gi
+    # disk_size: 5Gi                             # volume size; defaults to 5Gi
+    # ephemeral: false                           # true drops the volume — student work is
+    #                                             # then lost whenever the pod is rescheduled
+    # storage_class: csi-cinder-high-speed       # overrides the cluster default; set it on a
+    #                                             # BYO cluster whose default is node-local
     # startup_script: |                          # runs (best-effort) before the IDE starts
     #   apt-get update && apt-get install -y jq
     # dotfiles_repo: https://github.com/you/dotfiles
@@ -270,6 +274,9 @@ func validateWorkspaceTemplates(templates []WorkspaceTemplate) error {
 		if t.DotfilesRepo != "" && !validateURL(t.DotfilesRepo) {
 			return fmt.Errorf("%s: dotfiles_repo %q is not a valid URL", where, t.DotfilesRepo)
 		}
+		if err := validatePersistence(where, t); err != nil {
+			return err
+		}
 
 		if err := validateSidecars(where, t.Sidecars); err != nil {
 			return err
@@ -283,6 +290,22 @@ func validateWorkspaceTemplates(templates []WorkspaceTemplate) error {
 		if err := validateDevcontainer(where, t); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// validatePersistence rejects a template that both opts out of its volume and
+// configures one. Silently ignoring the size (or the storage class) is exactly
+// how a lab ends up losing student work without anyone noticing.
+func validatePersistence(where string, t WorkspaceTemplate) error {
+	if !t.Ephemeral {
+		return nil
+	}
+	if strings.TrimSpace(t.DiskSize) != "" {
+		return fmt.Errorf("%s: ephemeral conflicts with disk_size — an ephemeral workspace has no volume to size", where)
+	}
+	if strings.TrimSpace(t.StorageClass) != "" {
+		return fmt.Errorf("%s: ephemeral conflicts with storage_class — an ephemeral workspace has no volume to place", where)
 	}
 	return nil
 }

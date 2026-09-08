@@ -45,6 +45,14 @@ When you choose **Use Existing Cluster**, EasyLab skips cloud provider provision
 
 The kubeconfig must have sufficient permissions to create namespaces, Deployments, Services, Ingresses and PersistentVolumeClaims, and (when a domain is set) to install the Traefik ingress controller and cert-manager Helm releases.
 
+!!! warning "The default StorageClass must be network-attached"
+    Every workspace gets a persistent volume, and that volume is only as durable
+    as the StorageClass behind it. If the cluster's default provisioner is
+    node-local (`local-path`, `hostPath`), a workspace rescheduled onto another
+    node comes back empty. Check with `kubectl get storageclass` and, if needed,
+    set `storage_class` on the workspace template — see
+    [Persistence](templates.md#persistence).
+
 #### Splitting EasyLab and workspaces across node pools
 
 If your existing cluster has more than one node pool, you can run the EasyLab
@@ -120,13 +128,18 @@ The **essentials**:
 
 * **Template name** — Name shown in the student template selector.
 * **Description** (optional) — a free-text summary of what the template provides (e.g. *Go 1.26 + Postgres*). Shown next to the template name in the lab's **Templates** panel.
-* **Git Repository** (optional) — a repo cloned into the workspace on first start (a persistent volume is provisioned automatically). The **branch** field clones a specific branch; **subfolder** opens a subdirectory of the repo.
+* **Git Repository** (optional) — a repo cloned into the workspace on first start, into an empty workspace only. The **branch** field clones a specific branch; **subfolder** opens a subdirectory of the repo.
 
 Under **Advanced options** (all optional):
 
 * **Git credential** — the credential (from the **Credentials** section at the top of the step) that unlocks a **private** Git Repository. Define a single git credential and it is wired into every template with a private repo automatically; add more than one and pick the right one per template here.
 * **Image** — a container image override. Defaults to `codercom/code-server:latest`.
-* **CPU / Memory / Disk Size** — resource requests for the workspace pod (e.g. `500m`, `1Gi`, `5Gi`).
+* **CPU / Memory / Disk Size** — resource requests for the workspace pod (e.g. `500m`, `1Gi`, `5Gi`). Disk Size sizes the workspace's persistent volume and defaults to 5Gi.
+* **Storage Class** (optional) — the StorageClass backing that volume. Leave it empty to use the cluster's default, which is correct on OVHcloud and Azure; set it on a bring-your-own cluster whose default provisioner is node-local. See [Persistence](templates.md#persistence).
+* **Ephemeral** (checkbox) — drop the persistent volume entirely. Student work then lives on the node and is **lost whenever the pod is rescheduled**, so reserve it for throwaway labs and very large Azure cohorts (see [Persistence](templates.md#persistence)). It cannot be combined with Disk Size or Storage Class.
+
+![Workspace storage options](screens/template-storage-options.png){width=700}
+
 * **CPU Limit / Memory Limit** (optional) — override the pod's resource limit independently of the request above. Left blank, the limit matches the request, as it always has. See [Workshops with a devcontainer](#workshops-with-a-devcontainer) for why a devcontainer template in particular benefits from setting these explicitly.
 * **Startup Script** — shell commands run (best-effort) on start, *before* the IDE opens: install tools, configure the shell, run a bootstrap. Failures are shown in `kubectl logs` but never block the workspace from opening.
 * **Dotfiles Repository** — cloned to `~/.dotfiles`; its `install.sh` / `setup.sh` / `bootstrap.sh` is run if present.

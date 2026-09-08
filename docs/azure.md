@@ -129,6 +129,27 @@ EasyLab will:
 - Provision an AKS cluster with the configured node pool
 - Prepare the cluster so student workspaces can be created on demand
 
+## Workspace storage on AKS
+
+Student workspaces get a persistent volume by default, backed by the cluster's
+default StorageClass — Azure Disk on AKS. Two Azure-specific things are worth
+knowing.
+
+**Attach limits on large cohorts.** Each Azure Disk is attached to the node
+running its pod, and every VM size has a limit on how many disks it can hold.
+A workshop that starts several hundred workspaces at once can exceed those
+limits, leaving pods stuck waiting to attach. If you are running a very large
+cohort, either pick a VM size with a higher disk-attach limit and enough nodes to
+spread the load, or set `ephemeral: true` on the template to trade the students'
+data for a reliable mass start — see
+[Persistence](templates.md#persistence).
+
+**Azure Disks are zone-pinned.** EasyLab enables the AKS cluster autoscaler
+whenever node counts are configured, so pods can be rescheduled onto a node in a
+different availability zone — where a zonal disk cannot follow, leaving the pod
+unschedulable. Setting `storage_class` on the template to a zone-redundant class
+avoids this.
+
 ## Cleanup
 
 Destroying a lab via the EasyLab UI runs `pulumi destroy`, which removes:

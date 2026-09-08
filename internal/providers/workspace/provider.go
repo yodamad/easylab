@@ -164,8 +164,17 @@ type Spec struct {
 	Memory      string            // optional memory request (e.g. "1Gi"); also the limit when MemoryLimit is empty
 	CPULimit    string            // optional CPU limit override; empty means limit == CPU
 	MemoryLimit string            // optional memory limit override; empty means limit == Memory
-	DiskSize    string            // PVC size (e.g. "5Gi"); empty means no persistent volume
+	DiskSize    string            // PVC size (e.g. "5Gi"); empty means the default size
 	Env         map[string]string // extra environment variables for the IDE container
+
+	// Ephemeral opts out of the persistent volume entirely: the student's files
+	// live in an EmptyDir and are lost when the pod is rescheduled. Persistence
+	// is the default, so DiskSize only sizes the volume — it no longer decides
+	// whether there is one.
+	Ephemeral bool
+	// StorageClass overrides the cluster's default StorageClass for the PVC.
+	// Empty leaves the field unset, i.e. the cluster default.
+	StorageClass string
 
 	StartupScript string   // best-effort setup run before the IDE starts
 	DotfilesRepo  string   // dotfiles repo cloned + install script run

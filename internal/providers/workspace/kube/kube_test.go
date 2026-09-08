@@ -502,12 +502,11 @@ func workspaceVolume(t *testing.T, cs *fake.Clientset, name string) (corev1.Volu
 	return corev1.Volume{}, false
 }
 
-// TestEnsureWorkspace_GitBackedWithoutDiskSizeUsesEmptyDir guards the fix for the
-// Azure Disk attach-storm incident: a git-backed workspace with no explicit
-// DiskSize must not get a PVC (every one of 200 concurrent creates hammering a
-// cluster's disk-attach limits at once caused 82/200 pods to get stuck). It
-// still needs somewhere to clone into, so that becomes a size-bounded EmptyDir.
-func TestEnsureWorkspace_GitBackedWithoutDiskSizeUsesEmptyDir(t *testing.T) {
+// TestEnsureWorkspace_GitBackedWithoutDiskSizeUsesDefaultPVC pins the default:
+// persistence is not opt-in. A git-backed workspace with no explicit DiskSize
+// gets a PVC of the default size, so a rescheduled pod keeps the student's work
+// instead of silently re-cloning a fresh repo over it.
+func TestEnsureWorkspace_GitBackedWithoutDiskSizeUsesDefaultPVC(t *testing.T) {
 	b, cs := newTestBackend()
 	ctx := context.Background()
 
@@ -520,8 +519,42 @@ func TestEnsureWorkspace_GitBackedWithoutDiskSizeUsesEmptyDir(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	pvc, err := cs.CoreV1().PersistentVolumeClaims("workshops").Get(ctx, ws.ID, metav1.GetOptions{})
+	require.NoError(t, err, "a workspace must be persistent unless it opts out")
+	assert.Equal(t, resource.MustParse(defaultWorkspaceDiskSize), pvc.Spec.Resources.Requests[corev1.ResourceStorage])
+	assert.Nil(t, pvc.Spec.StorageClassName, "no storage class means the cluster default applies")
+
+	vol, ok := workspaceVolume(t, cs, ws.ID)
+	require.True(t, ok, "a workspace volume must exist as the clone target")
+	require.NotNil(t, vol.PersistentVolumeClaim, "expected a PVC volume, got %+v", vol.VolumeSource)
+	assert.Nil(t, vol.EmptyDir)
+
+	_, ok = initContainerNamed(t, cs, ws.ID, "git-clone")
+	assert.True(t, ok, "cloning must still happen")
+}
+
+// TestEnsureWorkspace_EphemeralOptsOutOfPVC guards the escape hatch, and with it
+// the fix for the Azure Disk attach-storm incident: 200 concurrent creates
+// hammering a cluster's disk-attach limits at once left 82/200 pods stuck. That
+// is now opt-in rather than the default, so a large Azure cohort can still trade
+// the student's data for a reliable mass start. The workspace keeps a
+// size-bounded EmptyDir as its clone target.
+func TestEnsureWorkspace_EphemeralOptsOutOfPVC(t *testing.T) {
+	b, cs := newTestBackend()
+	ctx := context.Background()
+
+	ws, err := b.EnsureWorkspace(ctx, workspace.Spec{
+		LabID:     "job-1",
+		Owner:     "alice",
+		GitRepo:   "https://gitlab.com/org/workshop.git",
+		Ephemeral: true,
+		Domain:    "lab.example.com",
+		Token:     "secret-token",
+	})
+	require.NoError(t, err)
+
 	_, err = cs.CoreV1().PersistentVolumeClaims("workshops").Get(ctx, ws.ID, metav1.GetOptions{})
-	assert.True(t, apierrors.IsNotFound(err), "no DiskSize must mean no PVC is created, got err=%v", err)
+	assert.True(t, apierrors.IsNotFound(err), "ephemeral must mean no PVC is created, got err=%v", err)
 
 	vol, ok := workspaceVolume(t, cs, ws.ID)
 	require.True(t, ok, "a workspace volume must still exist as the clone target")
@@ -529,14 +562,16 @@ func TestEnsureWorkspace_GitBackedWithoutDiskSizeUsesEmptyDir(t *testing.T) {
 	require.NotNil(t, vol.EmptyDir.SizeLimit, "the EmptyDir must be size-bounded")
 	assert.Nil(t, vol.PersistentVolumeClaim)
 
-	_, ok = initContainerNamed(t, cs, ws.ID, "git-clone")
-	assert.True(t, ok, "cloning must still happen even without a PVC")
+	// Nothing to seed: the volume is thrown away with the pod, and the mount stays
+	// on the project folder rather than swallowing the image's home.
+	_, ok = initContainerNamed(t, cs, ws.ID, "seed-home")
+	assert.False(t, ok, "an ephemeral workspace has no home volume to seed")
 }
 
-// TestEnsureWorkspace_DevcontainerWithoutDiskSizeUsesEmptyDir is the exact
-// scenario from the incident: a devcontainer template (which always implies a
-// GitRepo) with no explicit DiskSize.
-func TestEnsureWorkspace_DevcontainerWithoutDiskSizeUsesEmptyDir(t *testing.T) {
+// TestEnsureWorkspace_DevcontainerWithoutDiskSizeUsesDefaultPVC covers a
+// devcontainer template (which always implies a GitRepo) with no explicit
+// DiskSize — persistent by default like any other.
+func TestEnsureWorkspace_DevcontainerWithoutDiskSizeUsesDefaultPVC(t *testing.T) {
 	b, cs := newTestBackend()
 	ctx := context.Background()
 
@@ -547,12 +582,12 @@ func TestEnsureWorkspace_DevcontainerWithoutDiskSizeUsesEmptyDir(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = cs.CoreV1().PersistentVolumeClaims("workshops").Get(ctx, ws.ID, metav1.GetOptions{})
-	assert.True(t, apierrors.IsNotFound(err), "no DiskSize must mean no PVC is created, got err=%v", err)
+	require.NoError(t, err, "a devcontainer workspace must be persistent by default")
 
 	vol, ok := workspaceVolume(t, cs, ws.ID)
 	require.True(t, ok)
-	assert.NotNil(t, vol.EmptyDir)
-	assert.Nil(t, vol.PersistentVolumeClaim)
+	assert.NotNil(t, vol.PersistentVolumeClaim)
+	assert.Nil(t, vol.EmptyDir)
 }
 
 // TestEnsureWorkspace_GitBackedWithDiskSizeStillUsesPVC is the regression guard
@@ -582,10 +617,10 @@ func TestEnsureWorkspace_GitBackedWithDiskSizeStillUsesPVC(t *testing.T) {
 	assert.Nil(t, vol.EmptyDir)
 }
 
-// TestEnsureWorkspace_ImageOnlyHasNoWorkspaceVolume pins the unchanged case: a
-// plain image template with no git repo and no DiskSize needs nowhere to clone
-// into, so it gets neither a PVC nor an EmptyDir workspace volume.
-func TestEnsureWorkspace_ImageOnlyHasNoWorkspaceVolume(t *testing.T) {
+// TestEnsureWorkspace_ImageOnlyIsStillPersistent covers a plain image template
+// with no git repo: there is nothing to clone, but the student still writes
+// files, so it gets the default PVC like everything else.
+func TestEnsureWorkspace_ImageOnlyIsStillPersistent(t *testing.T) {
 	b, cs := newTestBackend()
 	ctx := context.Background()
 
@@ -594,8 +629,27 @@ func TestEnsureWorkspace_ImageOnlyHasNoWorkspaceVolume(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	vol, ok := workspaceVolume(t, cs, ws.ID)
+	require.True(t, ok, "a workspace without a repo still holds work worth keeping")
+	require.NotNil(t, vol.PersistentVolumeClaim)
+
+	_, ok = initContainerNamed(t, cs, ws.ID, "git-clone")
+	assert.False(t, ok, "there is no repo to clone")
+}
+
+// TestEnsureWorkspace_EphemeralImageOnlyHasNoWorkspaceVolume pins the one case
+// left with no workspace volume at all: nothing to clone and nothing to keep.
+func TestEnsureWorkspace_EphemeralImageOnlyHasNoWorkspaceVolume(t *testing.T) {
+	b, cs := newTestBackend()
+	ctx := context.Background()
+
+	ws, err := b.EnsureWorkspace(ctx, workspace.Spec{
+		LabID: "job-1", Owner: "alice", Ephemeral: true, Domain: "lab.example.com", Token: "secret-token",
+	})
+	require.NoError(t, err)
+
 	_, ok := workspaceVolume(t, cs, ws.ID)
-	assert.False(t, ok, "an image-only workspace with nothing to clone must not get a workspace volume")
+	assert.False(t, ok, "an ephemeral image-only workspace needs no volume at all")
 }
 
 // TestEnsureWorkspace_AttributesTemplate pins that the template a workspace was
@@ -1045,11 +1099,13 @@ func TestEnsureWorkspace_FSGroupAndGitBranch(t *testing.T) {
 		*dep.Spec.Template.Spec.SecurityContext.FSGroup != 1000 {
 		t.Errorf("expected pod fsGroup=1000, got %+v", dep.Spec.Template.Spec.SecurityContext)
 	}
-	// git-clone init container clones the requested branch.
-	if len(dep.Spec.Template.Spec.InitContainers) == 0 {
+	// git-clone init container clones the requested branch. Looked up by name
+	// rather than by position: a persistent workspace seeds its home first.
+	clone, ok := initContainerNamed(t, cs, ws.ID, "git-clone")
+	if !ok {
 		t.Fatal("expected a git-clone init container")
 	}
-	script := strings.Join(dep.Spec.Template.Spec.InitContainers[0].Command, " ")
+	script := strings.Join(clone.Command, " ")
 	if !strings.Contains(script, "--branch 'dev'") {
 		t.Errorf("expected --branch 'dev' in clone command: %q", script)
 	}
@@ -1137,4 +1193,178 @@ func TestEnsureWorkspace_TwoTemplatesTwoWorkspaces(t *testing.T) {
 	if len(list.Items) != 2 {
 		t.Fatalf("expected 2 deployments, got %d", len(list.Items))
 	}
+}
+
+// workspaceMountPath returns where the workspace volume is mounted in the IDE
+// container, which is what decides how much of the student's environment
+// survives a reschedule: the project folder alone, or the whole home directory.
+func workspaceMountPath(t *testing.T, cs *fake.Clientset, name string) (string, bool) {
+	t.Helper()
+	dep, err := cs.AppsV1().Deployments("workshops").Get(context.Background(), name, metav1.GetOptions{})
+	require.NoError(t, err)
+	for _, c := range dep.Spec.Template.Spec.Containers {
+		if c.Name != workspaceContainerName {
+			continue
+		}
+		for _, m := range c.VolumeMounts {
+			if m.Name == workspaceVolumeName {
+				return m.MountPath, true
+			}
+		}
+	}
+	return "", false
+}
+
+// TestWorkspaceDisk covers the rule that replaced "a PVC only if DiskSize is
+// set": persistence is the default and DiskSize only sizes the volume.
+func TestWorkspaceDisk(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		spec           workspace.Spec
+		wantSize       string
+		wantPersistent bool
+	}{
+		{"empty disk size defaults to the standard volume", workspace.Spec{}, defaultWorkspaceDiskSize, true},
+		{"explicit disk size is honoured", workspace.Spec{DiskSize: "20Gi"}, "20Gi", true},
+		{"whitespace disk size falls back to the default", workspace.Spec{DiskSize: "  "}, defaultWorkspaceDiskSize, true},
+		{"ephemeral opts out", workspace.Spec{Ephemeral: true}, defaultWorkspaceDiskSize, false},
+		{"ephemeral wins over a disk size", workspace.Spec{Ephemeral: true, DiskSize: "20Gi"}, "20Gi", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			size, persistent := workspaceDisk(tt.spec)
+			assert.Equal(t, tt.wantSize, size)
+			assert.Equal(t, tt.wantPersistent, persistent)
+		})
+	}
+}
+
+// TestEnsureWorkspace_StorageClass pins that the PVC leaves storageClassName
+// unset unless a template asks for one. Unset means the cluster default, which
+// is right on every EasyLab-provisioned cluster; the override exists for a BYO
+// cluster whose default provisioner is node-local.
+func TestEnsureWorkspace_StorageClass(t *testing.T) {
+	tests := []struct {
+		name  string
+		given string
+		want  *string
+	}{
+		{"unset leaves the cluster default", "", nil},
+		{"whitespace is treated as unset", "   ", nil},
+		{"an explicit class is applied", "csi-cinder-high-speed", strPtr("csi-cinder-high-speed")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, cs := newTestBackend()
+			ctx := context.Background()
+
+			ws, err := b.EnsureWorkspace(ctx, workspace.Spec{
+				LabID: "job-1", Owner: "alice", Domain: "lab.example.com", Token: "t",
+				StorageClass: tt.given,
+			})
+			require.NoError(t, err)
+
+			pvc, err := cs.CoreV1().PersistentVolumeClaims("workshops").Get(ctx, ws.ID, metav1.GetOptions{})
+			require.NoError(t, err)
+			if tt.want == nil {
+				assert.Nil(t, pvc.Spec.StorageClassName)
+				return
+			}
+			require.NotNil(t, pvc.Spec.StorageClassName)
+			assert.Equal(t, *tt.want, *pvc.Spec.StorageClassName)
+		})
+	}
+}
+
+func strPtr(s string) *string { return &s }
+
+// TestEnsureWorkspace_PersistsWholeHome is the point of the whole change: a
+// persistent plain workspace mounts its volume over the home directory, not
+// just the project folder, so the student's IDE settings and installed
+// extensions come back with their files after a reschedule. The seeding init
+// container is what stops that mount hiding everything the image ships in
+// $HOME, and it must run before the clone that creates project/ inside it.
+func TestEnsureWorkspace_PersistsWholeHome(t *testing.T) {
+	b, cs := newTestBackend()
+	ctx := context.Background()
+
+	ws, err := b.EnsureWorkspace(ctx, workspace.Spec{
+		LabID: "job-1", Owner: "alice", Domain: "lab.example.com", Token: "t",
+		GitRepo: "https://gitlab.com/org/workshop.git",
+	})
+	require.NoError(t, err)
+
+	path, ok := workspaceMountPath(t, cs, ws.ID)
+	require.True(t, ok)
+	assert.Equal(t, codeServerProfile.homeDir, path, "a persistent workspace must persist the whole home")
+
+	seed, ok := initContainerNamed(t, cs, ws.ID, "seed-home")
+	require.True(t, ok, "mounting over $HOME without seeding it would leave a bare home")
+	require.Len(t, seed.Command, 3)
+	assert.Contains(t, seed.Command[2], codeServerProfile.homeDir+"/.")
+	assert.Contains(t, seed.Command[2], homeSeedMountPath)
+	require.NotNil(t, seed.SecurityContext)
+	require.NotNil(t, seed.SecurityContext.RunAsUser)
+	assert.Equal(t, int64(1000), *seed.SecurityContext.RunAsUser)
+	require.Len(t, seed.VolumeMounts, 1)
+	assert.Equal(t, homeSeedMountPath, seed.VolumeMounts[0].MountPath,
+		"the seed must not mount over the image home it copies from")
+
+	dep, err := cs.AppsV1().Deployments("workshops").Get(ctx, ws.ID, metav1.GetOptions{})
+	require.NoError(t, err)
+	var order []string
+	for _, c := range dep.Spec.Template.Spec.InitContainers {
+		order = append(order, c.Name)
+	}
+	require.Equal(t, []string{"seed-home", "git-clone"}, order, "seeding must precede the clone")
+
+	// The clone still targets the project folder, now nested inside the mount.
+	clone, ok := initContainerNamed(t, cs, ws.ID, "git-clone")
+	require.True(t, ok)
+	require.Len(t, clone.VolumeMounts, 1)
+	assert.Equal(t, codeServerProfile.homeDir, clone.VolumeMounts[0].MountPath)
+	assert.Contains(t, clone.Command[2], "mkdir -p "+codeServerProfile.workspaceDir)
+}
+
+// TestEnsureWorkspace_DevcontainerKeepsProjectOnlyMount guards the carve-out:
+// envbuilder replaces the whole root filesystem and preserves only
+// ENVBUILDER_IGNORE_PATHS, and a devcontainer image's user home is frequently
+// not /home/coder — so devcontainer workspaces must keep the narrower mount.
+func TestEnsureWorkspace_DevcontainerKeepsProjectOnlyMount(t *testing.T) {
+	b, cs := newTestBackend()
+
+	ws, err := b.EnsureWorkspace(context.Background(), devcontainerSpec())
+	require.NoError(t, err)
+
+	path, ok := workspaceMountPath(t, cs, ws.ID)
+	require.True(t, ok)
+	assert.Equal(t, codeServerProfile.workspaceDir, path)
+
+	_, ok = initContainerNamed(t, cs, ws.ID, "seed-home")
+	assert.False(t, ok, "a devcontainer workspace has no home volume to seed")
+}
+
+// TestEnsureWorkspace_RecreateStrategyAndEvictionGuard pins two properties that
+// keep a workspace's single ReadWriteOnce volume workable: a rollout must not
+// surge a second pod that can never attach it, and the cluster autoscaler must
+// not drain a live student session to consolidate nodes.
+func TestEnsureWorkspace_RecreateStrategyAndEvictionGuard(t *testing.T) {
+	b, cs := newTestBackend()
+	ctx := context.Background()
+
+	ws, err := b.EnsureWorkspace(ctx, workspace.Spec{
+		LabID: "job-1", Owner: "alice", Domain: "lab.example.com", Token: "t",
+	})
+	require.NoError(t, err)
+
+	dep, err := cs.AppsV1().Deployments("workshops").Get(ctx, ws.ID, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, appsv1.RecreateDeploymentStrategyType, dep.Spec.Strategy.Type)
+	assert.Equal(t, "false",
+		dep.Spec.Template.Annotations["cluster-autoscaler.kubernetes.io/safe-to-evict"])
 }

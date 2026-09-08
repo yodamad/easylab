@@ -75,6 +75,8 @@ var formBuilderFields = []string{
 	"template_0_memory",
 	"template_0_memory_limit",
 	"template_0_disk_size",
+	"template_0_ephemeral",
+	"template_0_storage_class",
 	"template_0_startup_script",
 	"template_0_dotfiles_repo",
 	"template_0_extensions",

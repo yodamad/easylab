@@ -269,6 +269,64 @@ func TestHandler_GetJobStatus_LabsPrefix(t *testing.T) {
 	}
 }
 
+// The status fragment must poll from its own root element with an outerHTML
+// swap: an in-flight job polled from a nested element instead, so every refresh
+// swapped a whole new panel *inside* the previous one and the deployment log
+// appeared duplicated (then tripled, ...) on the lab detail Progress tab.
+func TestHandler_GetJobStatus_PollsFromRootWithoutNesting(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    JobStatus
+		wantPoll  bool
+		wantBadge string
+	}{
+		{name: "pending job keeps polling", status: JobStatusPending, wantPoll: true, wantBadge: "status-pending"},
+		{name: "running job keeps polling", status: JobStatusRunning, wantPoll: true, wantBadge: "status-running"},
+		{name: "completed job stops polling", status: JobStatusCompleted, wantPoll: false, wantBadge: "status-completed"},
+		{name: "failed job stops polling", status: JobStatusFailed, wantPoll: false, wantBadge: "status-failed"},
+		{name: "dry run stops polling", status: JobStatusDryRunCompleted, wantPoll: false, wantBadge: "status-dry-run-completed"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			jm := NewJobManager("")
+			jobID := jm.CreateJob(&LabConfig{StackName: "test"})
+			require.NoError(t, jm.UpdateJobStatus(jobID, tt.status))
+			jm.AppendOutput(jobID, "deploying...")
+
+			h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+			w := httptest.NewRecorder()
+			h.GetJobStatus(w, httptest.NewRequest("GET", "/api/labs/"+jobID+"/status", nil))
+
+			require.Equal(t, http.StatusOK, w.Code)
+			body := w.Body.String()
+
+			// One panel, one badge and one log per response — nothing that could
+			// stack up a second copy inside the first.
+			assert.Equal(t, 1, strings.Count(body, `class="job-status"`), "exactly one status panel")
+			assert.Equal(t, 1, strings.Count(body, tt.wantBadge), "exactly one status badge")
+			assert.Equal(t, 1, strings.Count(body, `class="output"`), "exactly one log panel")
+			wantPollers := 0
+			if tt.wantPoll {
+				wantPollers = 1
+			}
+			assert.Equal(t, wantPollers, strings.Count(body, "hx-get"), "at most one polling element")
+
+			if tt.wantPoll {
+				assert.Contains(t, body, `<div class="job-status" hx-get="/api/jobs/`+jobID+`/status" hx-trigger="every 10s" hx-swap="outerHTML">`,
+					"the root element itself must poll and replace itself")
+			} else {
+				assert.Contains(t, body, `<div class="job-status">`)
+				assert.NotContains(t, body, "hx-trigger=\"every 10s\"", "a settled job must stop polling")
+			}
+		})
+	}
+}
+
 func TestHandler_GetJobStatusJSON_InvalidPath(t *testing.T) {
 	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
 
@@ -3230,4 +3288,49 @@ func TestHandler_RetryJobWithConfig_CapturesPendingSecrets(t *testing.T) {
 	h.RetryJobWithConfig(w, retryWithConfigRequest(id, form))
 
 	assert.True(t, h.pendingSecrets.Has(id))
+}
+
+// TestParseWorkspaceTemplatesFromForm_Persistence pins how the storage controls
+// come off the form. The ephemeral checkbox is the interesting one: an unchecked
+// box submits nothing at all, which must read as "persistent" — the default —
+// rather than as a missing value.
+func TestParseWorkspaceTemplatesFromForm_Persistence(t *testing.T) {
+	tests := []struct {
+		name             string
+		form             map[string][]string
+		wantEphemeral    bool
+		wantStorageClass string
+	}{
+		{
+			name: "checkbox absent means persistent",
+			form: map[string][]string{"template_0_name": {"a"}},
+		},
+		{
+			name: "checked box opts out",
+			form: map[string][]string{
+				"template_0_name":      {"a"},
+				"template_0_ephemeral": {"true"},
+			},
+			wantEphemeral: true,
+		},
+		{
+			name: "storage class is carried through",
+			form: map[string][]string{
+				"template_0_name":          {"a"},
+				"template_0_storage_class": {"csi-cinder-high-speed"},
+			},
+			wantStorageClass: "csi-cinder-high-speed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/", nil)
+			req.Form = tt.form
+			templates := parseWorkspaceTemplatesFromForm(req)
+			require.Len(t, templates, 1)
+			assert.Equal(t, tt.wantEphemeral, templates[0].Ephemeral)
+			assert.Equal(t, tt.wantStorageClass, templates[0].StorageClass)
+		})
+	}
 }

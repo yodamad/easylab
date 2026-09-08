@@ -36,14 +36,16 @@ validation instead of silently shipping a lab without its image.
 | `name` | string | **Required.** Shown in the student template selector; unique per lab. |
 | `ide` | string | **Legacy — omit it.** Workspaces always run code-server. Older labs carrying `openvscode` still load; the value is rewritten to `code-server`. |
 | `image` | string | Container image override. Defaults to `codercom/code-server:latest`. |
-| `git_repo` | string | Cloned into the workspace on first start. **Implies a 5Gi volume** when `disk_size` is unset. |
+| `git_repo` | string | Cloned into the workspace on first start, into an empty workspace only. |
 | `git_branch` | string | Clones a single branch. Default branch when unset. |
 | `git_folder` | string | Subfolder of the repo the IDE opens. Repo root when unset. |
 | `cpu` | string | Resource request, e.g. `500m`. **Quote plain numbers**: `"2"`. |
 | `memory` | string | Resource request, e.g. `4Gi`. |
 | `cpu_limit` | string | Resource limit override. **Empty means it matches `cpu`** (the request). |
 | `memory_limit` | string | Resource limit override. **Empty means it matches `memory`** (the request). |
-| `disk_size` | string | Volume size, e.g. `10Gi`. **Empty means no volume** — the workspace is ephemeral. |
+| `disk_size` | string | Volume size, e.g. `10Gi`. Defaults to `5Gi` — it sizes the volume, it does not decide whether there is one. |
+| `ephemeral` | bool | `true` drops the persistent volume: student work is lost whenever the pod is rescheduled. See [Persistence](#persistence). |
+| `storage_class` | string | StorageClass for the volume. Empty uses the cluster default, which is correct on OVHcloud and Azure. |
 | `startup_script` | string | Shell commands run before the IDE starts. Best-effort. |
 | `dotfiles_repo` | string | Cloned to `~/.dotfiles`; its `install.sh` / `setup.sh` / `bootstrap.sh` runs if present. |
 | `extensions` | list | VS Code extension IDs installed on start. |
@@ -57,23 +59,44 @@ validation instead of silently shipping a lab without its image.
 ## Minimal
 
 The smallest valid document. Students get a code-server workspace on the
-default image, with no persistent volume.
+default image with a 5Gi persistent volume.
 
 ```yaml
 workspace_templates:
   - name: default
 ```
 
-!!! info "No `disk_size` means nothing is kept"
-    Without `disk_size` (and without `git_repo`, which implies one), the workspace
-    has no volume: anything the student writes is lost if the pod restarts. Set a
-    `disk_size` for any workshop where students build up work over a session.
+## Persistence
+
+Every workspace gets a persistent volume unless the template opts out. The volume
+is mounted over the student's **whole home directory**, so their files, their IDE
+settings and the extensions they install all come back when the pod is
+rescheduled onto another node — which happens routinely, on cluster upgrades,
+node failures and autoscaler consolidation.
+
+`disk_size` sizes that volume (5Gi by default). `storage_class` places it; left
+empty the cluster's default StorageClass is used, which is what you want on an
+EasyLab-provisioned OVHcloud or Azure cluster.
+
+!!! warning "`ephemeral: true` throws the student's work away"
+    Setting `ephemeral: true` replaces the volume with an EmptyDir tied to the
+    node. Anything the student writes — including their cloned repo, which is
+    silently re-cloned from scratch — is lost whenever the pod moves. It exists
+    for two cases: throwaway demo labs, and very large cohorts on Azure, where
+    hundreds of simultaneous disk attachments can exceed the cluster's attach
+    limits and leave pods stuck (see [Azure](azure.md)). It cannot be combined
+    with `disk_size` or `storage_class`; that is rejected when the lab is saved.
+
+!!! note "Bring-your-own clusters"
+    A workspace volume is only as durable as the StorageClass behind it. If your
+    cluster's default provisioner is node-local (`local-path`, `hostPath`), the
+    volume is pinned to one node and the data is lost on a reschedule regardless
+    of `disk_size`. Set `storage_class` to a network-attached class in that case.
 
 ## A git-backed workshop
 
 The most common setup: clone the exercises repo, open a subfolder, install the
-language extension. `git_repo` provisions a 5Gi volume automatically, so student
-work survives a pod restart.
+language extension.
 
 ```yaml
 workspace_templates:
@@ -449,10 +472,16 @@ does impose three constraints:
   devcontainer runs as. When that is unwritable, extension installs are skipped
   quietly and the IDE then fails to start — so an unexplained "my extensions
   are missing" is worth checking here first.
-- **Set `disk_size`.** It provisions the volume holding the student's files,
-  which is what makes the workspace folder writable by the usual uid-1000
-  devcontainer users (`vscode`, `node`, `coder`). Without it, the folder can end
-  up owned by root and the student cannot save.
+- **Do not set `ephemeral`.** The volume holding the student's files is also what
+  makes the workspace folder writable by the usual uid-1000 devcontainer users
+  (`vscode`, `node`, `coder`). Opting out of it can leave the folder owned by
+  root, with the student unable to save. Use `disk_size` to size it instead.
+- **`$HOME` is not persisted in devcontainer mode.** A plain workspace mounts its
+  volume over the whole home directory; a devcontainer one covers only the
+  project folder, because envbuilder replaces the entire root filesystem during
+  the build and a devcontainer image's user home is often not `/home/coder` at
+  all. Extensions and IDE settings are therefore reinstalled on each start —
+  declare them in `extensions` rather than relying on them persisting.
 
 Authentication is the same as outside devcontainer mode: code-server presents a
 login page taking the workspace password.
@@ -649,7 +678,7 @@ workshop edition to the next.
 | `cannot unmarshal number ... into ... of type string` | A bare number where a string is expected — quote it (`cpu: "2"`). |
 | `unknown field "imagee"` | A typo'd key. Unknown keys are rejected on purpose. |
 | `duplicate template name "go"` | Two templates share a `name`; names must be unique within a lab. |
-| Student work disappears after a restart | No `disk_size` — the workspace has no volume. |
+| Student work disappears after a restart | `ephemeral: true` on the template, or a bring-your-own cluster whose default StorageClass is node-local — see [Persistence](#persistence). |
 | The repo isn't cloned | `git_repo` clones only into an **empty** volume; an existing workspace keeps its contents. |
 | Workspace never opens | Often a `mounts` entry pointing at a ConfigMap/Secret that doesn't exist in the namespace. |
 | `apt-get` fails in the startup script | Prefix it with `sudo`; the workspace user has passwordless sudo but is not root. |

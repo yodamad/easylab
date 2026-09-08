@@ -1080,3 +1080,95 @@ func TestMarshalWorkspaceTemplatesYAML_EmitsAuthSecretNamesOnly(t *testing.T) {
 	assert.NotContains(t, rendered, "glpat-")
 	assert.NotContains(t, rendered, "password")
 }
+
+func TestValidatePersistence(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		template WorkspaceTemplate
+		wantErr  string
+	}{
+		{
+			name:     "persistent by default, nothing configured",
+			template: WorkspaceTemplate{Name: "a"},
+		},
+		{
+			name:     "a sized persistent volume",
+			template: WorkspaceTemplate{Name: "a", DiskSize: "20Gi"},
+		},
+		{
+			name:     "a placed persistent volume",
+			template: WorkspaceTemplate{Name: "a", StorageClass: "csi-cinder-high-speed"},
+		},
+		{
+			name:     "opting out on its own",
+			template: WorkspaceTemplate{Name: "a", Ephemeral: true},
+		},
+		{
+			// Accepting this would silently drop the size, which is exactly how a lab
+			// ends up losing student work without anyone noticing.
+			name:     "opting out while sizing a volume",
+			template: WorkspaceTemplate{Name: "a", Ephemeral: true, DiskSize: "20Gi"},
+			wantErr:  "ephemeral conflicts with disk_size",
+		},
+		{
+			name:     "opting out while placing a volume",
+			template: WorkspaceTemplate{Name: "a", Ephemeral: true, StorageClass: "longhorn"},
+			wantErr:  "ephemeral conflicts with storage_class",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validatePersistence("template \"a\"", tt.template)
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+// TestParseWorkspaceTemplatesYAML_PersistenceKeys pins that the two persistence
+// keys reach the template through the YAML editor — they carry no yaml tags of
+// their own, so this is what proves the json-tag bridge covers them.
+func TestParseWorkspaceTemplatesYAML_PersistenceKeys(t *testing.T) {
+	t.Parallel()
+
+	got, err := parseWorkspaceTemplatesYAML(`
+workspace_templates:
+  - name: persistent
+    disk_size: 20Gi
+    storage_class: csi-cinder-high-speed
+  - name: throwaway
+    ephemeral: true
+`)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+
+	assert.Equal(t, "20Gi", got[0].DiskSize)
+	assert.Equal(t, "csi-cinder-high-speed", got[0].StorageClass)
+	assert.False(t, got[0].Ephemeral, "persistence is the default")
+
+	assert.True(t, got[1].Ephemeral)
+	assert.Empty(t, got[1].DiskSize)
+}
+
+// TestParseWorkspaceTemplatesYAML_EphemeralConflictRejected checks the conflict
+// surfaces in the editor rather than at the student's pod.
+func TestParseWorkspaceTemplatesYAML_EphemeralConflictRejected(t *testing.T) {
+	t.Parallel()
+
+	_, err := parseWorkspaceTemplatesYAML(`
+workspace_templates:
+  - name: confused
+    ephemeral: true
+    disk_size: 20Gi
+`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ephemeral conflicts with disk_size")
+}

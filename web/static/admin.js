@@ -1467,7 +1467,9 @@ document.addEventListener('DOMContentLoaded', function() {
         hideWizardShowStatus();
 
         const container = document.getElementById('job-status-container');
-        container.innerHTML = `<div id="job-status" hx-get="/api/jobs/${jobId}/status" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>`;
+        // The fragment polls itself while the job is in flight (see GetJobStatus),
+        // so the container only has to fetch it once.
+        container.innerHTML = `<div id="job-status" hx-get="/api/jobs/${jobId}/status" hx-trigger="load" hx-swap="innerHTML"></div>`;
         if (typeof htmx !== 'undefined') {
             htmx.process(container);
         } else {

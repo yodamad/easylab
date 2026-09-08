@@ -63,7 +63,10 @@ lab, organized into tabs at the top:
   the same data as the Lifecycle & Cleanup section below.
 * **Progress** — shown only while a lab is pending, running, failed, or a completed dry
   run; this is the same live-updating deployment log the creation wizard shows, embedded
-  here instead of on a separate page.
+  here instead of on a separate page. The panel refreshes every 10 seconds while the
+  deployment is in flight and follows the newest log lines, unless you scroll up — then
+  it stays where you left it so you can read. When a deployment you are watching
+  finishes, the page reloads itself so the **Workspaces & Templates** tab appears.
 * **Workspaces & Templates** — shown once the lab is completed; this absorbs everything
   that used to live on the standalone **View Workspaces** page: the **Credentials**
   panel, the **Templates on this lab** panel (with **Bake image**/**Rebuild**), the

@@ -129,7 +129,7 @@ func TestEnsureWorkspace_NoImagePullSecretsByDefault(t *testing.T) {
 func TestGitCloneInit_WithoutAuth(t *testing.T) {
 	t.Parallel()
 
-	c := gitCloneInit("https://gitlab.com/org/public.git", "main", "/home/workspace", "")
+	c := gitCloneInit("https://gitlab.com/org/public.git", "main", "/home/workspace", "/home/workspace", "")
 
 	assert.Empty(t, c.Env, "an anonymous clone needs no credentials in its environment")
 	require.Len(t, c.Command, 3)
@@ -140,7 +140,7 @@ func TestGitCloneInit_WithoutAuth(t *testing.T) {
 func TestGitCloneInit_WithAuth(t *testing.T) {
 	t.Parallel()
 
-	c := gitCloneInit("https://gitlab.com/org/private.git", "main", "/home/workspace", "gitcred")
+	c := gitCloneInit("https://gitlab.com/org/private.git", "main", "/home/workspace", "/home/workspace", "gitcred")
 
 	refs := envRefOf(c)
 	require.Contains(t, refs, "GIT_USERNAME")
@@ -190,7 +190,7 @@ func TestGitCloneInit_ScriptIsValidSh(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := gitCloneInit(tt.repo, tt.branch, "/home/workspace", tt.authSecret)
+			c := gitCloneInit(tt.repo, tt.branch, "/home/workspace", "/home/workspace", tt.authSecret)
 			require.Len(t, c.Command, 3)
 
 			cmd := exec.Command(sh, "-n", "-c", c.Command[2])

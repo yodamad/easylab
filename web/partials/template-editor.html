@@ -427,6 +427,20 @@
                     <small>CPU/Memory are the request; CPU Limit/Memory Limit override the limit independently — left blank, the limit matches the request. For a devcontainer-enabled template, layer extraction is CPU/disk-heavy under concurrent load: when all four are left blank, EasyLab defaults to 500m CPU (limit 2) / 2Gi memory / 5Gi ephemeral storage, but set them explicitly to size for your base image and expected class size.</small>
                 </div>
                 <div class="form-group">
+                    <label>Storage Class (Optional)</label>
+                    <input type="text" name="template_0_storage_class" data-field="storage_class" placeholder="cluster default">
+                </div>
+                <div class="form-checkboxes">
+                    <span>Storage</span>
+                    <div class="checkbox-stack">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="template_0_ephemeral" data-field="ephemeral" value="true">
+                            Ephemeral — no persistent volume
+                        </label>
+                    </div>
+                    <small>Every workspace gets a persistent volume by default (5Gi unless Disk Size says otherwise), covering the student's whole home directory so their files, IDE settings and installed extensions survive the pod being rescheduled. Check Ephemeral only for throwaway labs: student work is then lost whenever the pod moves. Storage Class overrides the cluster default — needed on a bring-your-own cluster whose default provisioner is node-local (local-path, hostPath), which would pin the volume to one node.</small>
+                </div>
+                <div class="form-group">
                     <label>Startup Script (Optional)</label>
                     <textarea name="template_0_startup_script" data-field="startup_script" rows="4" class="monospace" placeholder="# runs before the IDE starts"></textarea>
                     <small>Runs (best-effort) on start. code-server has passwordless sudo, so the script can install system packages with apt.</small>

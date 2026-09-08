@@ -96,16 +96,21 @@ const (
 	ideMountPath  = "/ide"
 	ideVolumeName = "ide"
 
-	// workspaceVolumeName holds the student's files: a PVC when the template sets
-	// an explicit DiskSize, otherwise an EmptyDir sized to
-	// defaultEphemeralWorkspaceSize (see createDeployment).
+	// workspaceVolumeName holds the student's files: a PVC unless the template
+	// opts out with Ephemeral, in which case an EmptyDir of the same size (see
+	// createDeployment and workspaceDisk).
 	workspaceVolumeName = "workspace"
-	// defaultEphemeralWorkspaceSize bounds the EmptyDir used in place of a PVC
-	// for a git-backed workspace with no explicit DiskSize, so a runaway
-	// clone/build can't consume unbounded node ephemeral storage. Matches the
-	// old forced-PVC default size — this only changes the volume type, not the
-	// capacity a workspace can expect.
-	defaultEphemeralWorkspaceSize = "5Gi"
+	// defaultWorkspaceDiskSize is the volume size when a template names none. As
+	// a PVC it is what the student's work survives on; as the Ephemeral opt-out's
+	// EmptyDir it also bounds the pod so a runaway clone/build can't consume
+	// unbounded node ephemeral storage.
+	defaultWorkspaceDiskSize = "5Gi"
+
+	// homeSeedMountPath is where the pristine-home seeding init container mounts
+	// the workspace volume. It deliberately is not the home directory: the
+	// container's own /home/coder must stay the image's copy, since that is what
+	// gets copied onto an empty volume. See homeSeedInit.
+	homeSeedMountPath = "/mnt/home"
 
 	// defaultDevcontainerCPURequest/Limit, Memory, and EphemeralStorage are
 	// applied (see buildResources) when a devcontainer-enabled template leaves
@@ -151,6 +156,7 @@ type ideProfile struct {
 	defaultImage string
 	port         int32
 	workspaceDir string // folder the IDE opens / git repo clones into
+	homeDir      string // the IDE user's home; workspaceDir lives under it
 	serverBin    string // path to the IDE binary (for exec + extension install)
 
 	// bundleRoot is the self-contained IDE install inside defaultImage, written as
@@ -169,6 +175,7 @@ var codeServerProfile = ideProfile{
 	defaultImage: DefaultImage,
 	port:         13337,
 	workspaceDir: "/home/coder/project",
+	homeDir:      "/home/coder",
 	serverBin:    "code-server",
 	// The .deb installs the self-contained bundle here; /usr/bin/code-server is
 	// a small wrapper around bin/code-server inside it, which is what serverBin
@@ -380,10 +387,10 @@ func (b *Backend) Reachable(ctx context.Context) bool {
 func (b *Backend) createResources(ctx context.Context, name string, spec workspace.Spec, scheme string) error {
 	labels := b.labels(spec.LabID, spec.Owner, name)
 	p := profileFor(spec.IDE)
-	hasPVC := strings.TrimSpace(spec.DiskSize) != ""
+	size, hasPVC := workspaceDisk(spec)
 
 	if hasPVC {
-		if err := b.createPVC(ctx, name, labels, spec.DiskSize); err != nil {
+		if err := b.createPVC(ctx, name, labels, size, spec.StorageClass); err != nil {
 			return err
 		}
 	}
@@ -403,7 +410,17 @@ func (b *Backend) createResources(ctx context.Context, name string, spec workspa
 	return nil
 }
 
-func (b *Backend) createPVC(ctx context.Context, name string, labels map[string]string, size string) error {
+// workspaceDisk reports the volume size for a workspace and whether it is backed
+// by a PVC. Persistence is the default — a template opts out with Ephemeral —
+// so DiskSize only sizes the volume rather than deciding whether there is one.
+func workspaceDisk(spec workspace.Spec) (size string, persistent bool) {
+	if s := strings.TrimSpace(spec.DiskSize); s != "" {
+		return s, !spec.Ephemeral
+	}
+	return defaultWorkspaceDiskSize, !spec.Ephemeral
+}
+
+func (b *Backend) createPVC(ctx context.Context, name string, labels map[string]string, size, storageClass string) error {
 	qty, err := resource.ParseQuantity(size)
 	if err != nil {
 		return fmt.Errorf("invalid disk size %q: %w", size, err)
@@ -416,6 +433,12 @@ func (b *Backend) createPVC(ctx context.Context, name string, labels map[string]
 				Requests: corev1.ResourceList{corev1.ResourceStorage: qty},
 			},
 		},
+	}
+	// Left unset the cluster's default StorageClass applies, which is what every
+	// EasyLab-provisioned cluster wants; an explicit class is for BYO clusters
+	// whose default would pin the volume to a single node.
+	if sc := strings.TrimSpace(storageClass); sc != "" {
+		pvc.Spec.StorageClassName = &sc
 	}
 	if _, err := b.client.CoreV1().PersistentVolumeClaims(b.namespace).Create(ctx, pvc, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("failed to create PVC %s: %w", name, err)
@@ -503,32 +526,52 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 		container.Args = args
 	}
 
-	// A workspace directory is needed whenever there's a git repo to clone into
-	// (a plain clone below, or envbuilder's own clone in devcontainer mode) —
-	// not only when the template asked for a persistent disk. Without an
-	// explicit DiskSize this is an EmptyDir instead of a PVC: ephemeral, but it
-	// avoids forcing an Azure-Disk-backed PVC — and its per-node attach limits —
-	// on every git-backed workspace by default.
+	// A workspace directory is needed whenever the workspace is persistent or
+	// there's a git repo to clone into (a plain clone below, or envbuilder's own
+	// clone in devcontainer mode). Only an Ephemeral template with no repo goes
+	// without one.
 	if hasPVC || strings.TrimSpace(spec.GitRepo) != "" {
-		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{Name: workspaceVolumeName, MountPath: p.workspaceDir})
+		// A persistent plain workspace mounts the volume over the whole home
+		// directory rather than just the project folder, so the student keeps their
+		// installed extensions, IDE settings and dotfiles across a reschedule and
+		// not only the files under project/. workspaceDir lives inside homeDir, so
+		// every path the IDE, the clone and envbuilder reference is unchanged.
+		//
+		// Devcontainer mode is excluded on purpose: envbuilder replaces the entire
+		// root filesystem and preserves only ENVBUILDER_IGNORE_PATHS (see
+		// devcontainerEnv), and a devcontainer image's user home is frequently not
+		// homeDir at all — so those keep the project-only mount.
+		mountPath := p.workspaceDir
+		seedHome := hasPVC && spec.Devcontainer == nil
+		if seedHome {
+			mountPath = p.homeDir
+		}
+
+		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{Name: workspaceVolumeName, MountPath: mountPath})
 		vol := corev1.Volume{Name: workspaceVolumeName}
 		if hasPVC {
 			vol.VolumeSource = corev1.VolumeSource{
 				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: name},
 			}
 		} else {
-			sizeLimit := resource.MustParse(defaultEphemeralWorkspaceSize)
+			sizeLimit := resource.MustParse(defaultWorkspaceDiskSize)
 			vol.VolumeSource = corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: &sizeLimit},
 			}
 		}
 		volumes = append(volumes, vol)
+
+		// Ordered before the clone, which creates the project directory inside the
+		// home the seeding is there to populate.
+		if seedHome {
+			initContainers = append(initContainers, homeSeedInit(image, p.homeDir))
+		}
 		// In devcontainer mode envbuilder does its own clone, so a git-clone init
 		// container would only race it for the same directory — unless the workspace
 		// is running a baked (PrebuiltImage) image, which has no envbuilder to do it
 		// and needs the ordinary clone, same as a plain image: + git_repo template.
 		if strings.TrimSpace(spec.GitRepo) != "" && (spec.Devcontainer == nil || spec.Devcontainer.PrebuiltImage != "") {
-			initContainers = append(initContainers, gitCloneInit(spec.GitRepo, spec.GitBranch, p.workspaceDir, spec.GitAuthSecret))
+			initContainers = append(initContainers, gitCloneInit(spec.GitRepo, spec.GitBranch, p.workspaceDir, mountPath, spec.GitAuthSecret))
 		}
 	}
 
@@ -567,12 +610,26 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
+			// The workspace volume is ReadWriteOnce, so the default RollingUpdate
+			// (which for a single replica surges a second pod before removing the
+			// first) would deadlock the replacement on a Multi-Attach error. A
+			// workspace has one user and no availability to preserve anyway.
+			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType},
 			// Generous deadline so a long image pull or apt-get startup script does
 			// not get marked ProgressDeadlineExceeded (→ failed) prematurely.
 			ProgressDeadlineSeconds: int32Ptr(1800),
 			Selector:                &metav1.LabelSelector{MatchLabels: map[string]string{labelName: name}},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+					// A workspace holds a student's live session for the length of a
+					// workshop. On clusters running the autoscaler (AKS enables it
+					// whenever min/max node counts are set) it would otherwise be fair
+					// game for a consolidation drain mid-session — survivable now that
+					// the volume persists, but still a lost IDE connection and a
+					// restarted environment for no gain.
+					Annotations: map[string]string{"cluster-autoscaler.kubernetes.io/safe-to-evict": "false"},
+				},
 				Spec: corev1.PodSpec{
 					// Both IDE images run as uid/gid 1000; fsGroup makes freshly
 					// provisioned PVCs group-writable so the IDE can write.
@@ -997,12 +1054,46 @@ func imagePullSecrets(names []string) []corev1.LocalObjectReference {
 	return out
 }
 
+// homeSeedInit returns an init container that copies the workspace image's own
+// home directory onto the volume mounted over it. Without this, mounting a PVC
+// at homeDir hides everything the image ships there — the shell rc files, and
+// for code-server the state directory its settings and installed extensions
+// live in — leaving the student with a bare home.
+//
+// The copy is guarded by a marker file rather than by the directory being
+// empty: a marker is only written once the copy has actually succeeded, so a
+// half-finished seed is retried (cp -a overwrites) instead of leaving a broken
+// home behind forever, while a returning student's populated volume is never
+// touched. An image with no homeDir of its own just gets the marker, which
+// leaves the volume as the empty home it would have had anyway.
+func homeSeedInit(image, homeDir string) corev1.Container {
+	marker := homeSeedMountPath + "/.easylab-home-seeded"
+	script := fmt.Sprintf(`if [ ! -e %s ]; then if [ -d %s ]; then cp -a %s/. %s/; fi; touch %s; fi`,
+		marker, homeDir, homeDir, homeSeedMountPath, marker)
+	return corev1.Container{
+		Name:  "seed-home",
+		Image: image,
+		// The workspace image is pulled for the main container anyway, so this
+		// never costs an extra pull. Same reuse rationale as the container above.
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Command:         []string{"sh", "-c", script},
+		// uid 1000 is the IDE user; the pod's fsGroup (see createDeployment) makes
+		// a freshly provisioned volume group-writable for it.
+		SecurityContext: &corev1.SecurityContext{RunAsUser: int64Ptr(1000)},
+		VolumeMounts:    []corev1.VolumeMount{{Name: workspaceVolumeName, MountPath: homeSeedMountPath}},
+	}
+}
+
 // gitCloneInit returns an init container that clones repo into the workspace
 // volume on first start (skipped if the volume already has contents) and chowns
 // it to uid/gid 1000 (both IDE users) so the IDE can write. An optional branch
 // selects a single branch to clone. A non-empty authSecret names a basic-auth
 // Secret whose credentials are fed to git through a credential helper.
-func gitCloneInit(repo, branch, dir, authSecret string) corev1.Container {
+//
+// mountPath is where the workspace volume is mounted, which is dir itself for a
+// project-only mount and the home directory above it when the whole home is
+// persisted — dir is created either way before the clone.
+func gitCloneInit(repo, branch, dir, mountPath, authSecret string) corev1.Container {
 	branchFlag := ""
 	if b := strings.TrimSpace(branch); b != "" {
 		branchFlag = fmt.Sprintf("--branch %s --single-branch ", shellQuote(b))
@@ -1018,8 +1109,8 @@ func gitCloneInit(repo, branch, dir, authSecret string) corev1.Container {
 		env = basicAuthEnv(s, "GIT_USERNAME", "GIT_PASSWORD")
 	}
 
-	script := fmt.Sprintf(`if [ -z "$(ls -A %s 2>/dev/null)" ]; then %s clone %s%s %s && chown -R 1000:1000 %s; fi`,
-		dir, gitCmd, branchFlag, shellQuote(repo), dir, dir)
+	script := fmt.Sprintf(`mkdir -p %s; if [ -z "$(ls -A %s 2>/dev/null)" ]; then %s clone %s%s %s && chown -R 1000:1000 %s; fi`,
+		dir, dir, gitCmd, branchFlag, shellQuote(repo), dir, dir)
 	return corev1.Container{
 		Name:  "git-clone",
 		Image: "alpine/git:latest",
@@ -1028,7 +1119,7 @@ func gitCloneInit(repo, branch, dir, authSecret string) corev1.Container {
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Command:         []string{"sh", "-c", script},
 		Env:             env,
-		VolumeMounts:    []corev1.VolumeMount{{Name: workspaceVolumeName, MountPath: dir}},
+		VolumeMounts:    []corev1.VolumeMount{{Name: workspaceVolumeName, MountPath: mountPath}},
 	}
 }
 
