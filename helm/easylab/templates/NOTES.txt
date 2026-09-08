@@ -6,6 +6,13 @@ Image:     {{ .Values.image.repository }}:{{ include "easylab.imageTag" . }}
 {{- if .Values.ingress.enabled }}
 
 Access EasyLab at: http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}
+{{- if include "easylab.httpsRedirectEnabled" . }}
+
+Plain HTTP is redirected to HTTPS by the Traefik middleware
+{{ include "easylab.httpsRedirectMiddlewareRef" . }}.
+This is required for login to work at all: the login page hashes the password
+with crypto.subtle, which browsers only expose over HTTPS.
+{{- end }}
 {{- else }}
 
 To access EasyLab, run:

@@ -1165,8 +1165,9 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 	// utils.CoderClusterIssuerName, so this URN is correct even when that name is
 	// overridden. The OVH solver webhook (cert-manager-webhook-ovh-ns/-webhook) is
 	// only present with the OVH DNS provider; Azure uses cert-manager's native
-	// solver and creates no webhook, so those two URNs simply won't match on an
-	// Azure-DNS or HTTP-01 stack.
+	// solver and creates no webhook, so those two URNs are absent from an
+	// Azure-DNS or HTTP-01 stack — which is why the filtering below is required
+	// rather than optional.
 	sharedDNS01URNs := []string{
 		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:cert-manager.io/v1:ClusterIssuer::letsencrypt-prod-issuer", stackName),
 		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:core/v1:Secret::dns-credentials-secret", stackName),
@@ -1176,12 +1177,35 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:helm.sh/v3:Release::cert-manager-webhook-ovh", stackName),
 	}
 
+	// Pulumi validates every --exclude URN against the stack's state and aborts
+	// the entire destroy with "no resource named '<urn>' found" as soon as one
+	// does not match, so the lists above cannot be passed as-is: a lab that
+	// reuses pre-installed shared infrastructure (installCertManager /
+	// installIngressController = false on a BYO cluster, or no domain at all)
+	// never created most of these resources, and excluding what it does not own
+	// would make exactly those labs impossible to destroy. Keep only the URNs
+	// this stack actually holds.
+	sharedURNs := append(sharedIngressTLSURNs, sharedDNS01URNs...)
+	knownURNs, urnErr := stackResourceURNs(prep.Context, prep.Stack)
+	if urnErr != nil {
+		// Keep the full exclusion list rather than dropping the protection: a
+		// failed destroy is retryable, tearing down cert-manager/traefik for
+		// every other lab sharing the cluster is not.
+		log.Printf("Warning: failed to read stack state for job %s, keeping full exclusion list: %v", jobID, urnErr)
+		pe.jobManager.AppendOutput(jobID, "Warning: could not read stack state to identify shared infrastructure resources.")
+	} else {
+		sharedURNs = filterKnownURNs(sharedURNs, knownURNs)
+	}
+
 	// Run pulumi destroy with streaming output
-	pe.jobManager.AppendOutput(jobID, "Running pulumi destroy (preserving shared cert-manager, traefik, and DNS-01 infrastructure)...")
-	destroyResult, err := prep.Stack.Destroy(prep.Context,
-		optdestroy.ProgressStreams(prep.Writer),
-		optdestroy.Exclude(append(sharedIngressTLSURNs, sharedDNS01URNs...)),
-	)
+	destroyOpts := []optdestroy.Option{optdestroy.ProgressStreams(prep.Writer)}
+	if len(sharedURNs) > 0 {
+		destroyOpts = append(destroyOpts, optdestroy.Exclude(sharedURNs))
+		pe.jobManager.AppendOutput(jobID, "Running pulumi destroy (preserving shared cert-manager, traefik, and DNS-01 infrastructure)...")
+	} else {
+		pe.jobManager.AppendOutput(jobID, "Running pulumi destroy (this stack owns no shared cert-manager, traefik, or DNS-01 resources)...")
+	}
+	destroyResult, err := prep.Stack.Destroy(prep.Context, destroyOpts...)
 	if err != nil {
 		// Destroy failed - don't continue with stack removal or mark as destroyed
 		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("ERROR: pulumi destroy failed: %v", err))
@@ -1229,9 +1253,10 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 		pe.jobManager.AppendOutput(jobID, "Stack resources were destroyed, but stack metadata removal failed.")
 		// Don't fail the job - resources are destroyed, just metadata cleanup failed
 	} else {
-		// Force: cert-manager/traefik are deliberately excluded from the destroy
-		// above, so the stack's state is not empty even on a fully successful
-		// destroy — a plain RemoveStack would refuse to remove it.
+		// Force: when this stack owns shared cert-manager/traefik/DNS-01
+		// resources they are deliberately excluded from the destroy above, so
+		// its state is not empty even on a fully successful destroy — a plain
+		// RemoveStack would refuse to remove it.
 		if removeErr := workspace.RemoveStack(prep.Context, stackName, optremove.Force()); removeErr != nil {
 			pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to remove stack from workspace: %v", removeErr))
 			pe.jobManager.AppendOutput(jobID, "Stack resources were destroyed, but stack metadata removal failed.")
@@ -1249,6 +1274,53 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 	}
 
 	return nil
+}
+
+// stackResourceURNs returns the set of resource URNs currently recorded in the
+// stack's state, used to check which shared-infrastructure resources a stack
+// actually owns before excluding them from a destroy.
+func stackResourceURNs(ctx context.Context, stack auto.Stack) (map[string]bool, error) {
+	deployment, err := stack.Export(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to export stack state: %w", err)
+	}
+	return parseStateURNs(deployment.Deployment)
+}
+
+// parseStateURNs extracts the resource URNs from an exported Pulumi deployment.
+// Only the URNs are needed, so it decodes the minimum rather than pulling in the
+// full apitype deployment schema (which also carries resource inputs/outputs and
+// encrypted secrets). An empty deployment means a stack with no resources.
+func parseStateURNs(raw json.RawMessage) (map[string]bool, error) {
+	var state struct {
+		Resources []struct {
+			URN string `json:"urn"`
+		} `json:"resources"`
+	}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &state); err != nil {
+			return nil, fmt.Errorf("failed to parse stack state: %w", err)
+		}
+	}
+
+	urns := make(map[string]bool, len(state.Resources))
+	for _, resource := range state.Resources {
+		if resource.URN != "" {
+			urns[resource.URN] = true
+		}
+	}
+	return urns, nil
+}
+
+// filterKnownURNs keeps only the candidate URNs present in known, preserving order.
+func filterKnownURNs(candidates []string, known map[string]bool) []string {
+	filtered := make([]string, 0, len(candidates))
+	for _, urn := range candidates {
+		if known[urn] {
+			filtered = append(filtered, urn)
+		}
+	}
+	return filtered
 }
 
 // cleanupJobDirectory removes the job's working directory after successful completion

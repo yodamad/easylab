@@ -99,6 +99,9 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 | `ingress.host` | Ingress hostname | `easylab.example.com` |
 | `ingress.tls.enabled` | Enable TLS | `false` |
 | `ingress.tls.secretName` | TLS secret name | `easylab-tls` |
+| `ingress.httpsRedirect.enabled` | Redirect HTTP to HTTPS with a Traefik `redirectScheme` Middleware — created only when `ingress.className` is `traefik` and `ingress.tls.enabled=true`, see [Redirecting HTTP to HTTPS](#redirecting-http-to-https) | `true` |
+| `ingress.httpsRedirect.permanent` | `true` issues a 301 (remembered by browsers), `false` a 302 | `true` |
+| `ingress.httpsRedirect.apiVersion` | Middleware CRD API group — Traefik v3 uses `traefik.io/v1alpha1`, Traefik v2 `traefik.containo.us/v1alpha1` | `traefik.io/v1alpha1` |
 | `traefik.enabled` | Install Traefik as part of this chart (IngressClass name pinned to `traefik`, matching `ingress.className`'s default) | `false` |
 | `cert-manager.enabled` | Install cert-manager as part of this chart | `false` |
 | `cert-manager.crds.enabled` | Install cert-manager CRDs (required on first install) | `true` |
@@ -227,6 +230,8 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
   --set ingress.tls.enabled=true \
   --wait --timeout 5m
 ```
+
+A ready-to-edit values file for this scenario (AKS + Azure DNS-01 + ExternalDNS, with every value you must fill in marked `xxx`) ships with the chart as `helm/easylab/values-azure-example.yaml`.
 
 **OVH DNS-01**
 
@@ -409,6 +414,41 @@ The chart creates a standard **Kubernetes Ingress** and defaults `ingress.classN
 
 TLS can be enabled with `ingress.tls` and a TLS secret in the same namespace, or with cert-manager annotations on the Ingress (same pattern as other ingress controllers).
 
+### Redirecting HTTP to HTTPS
+
+When `ingress.className` is `traefik` and `ingress.tls.enabled=true`, the chart creates a Traefik `redirectScheme` **Middleware** and references it from the Ingress automatically. Nothing extra to set:
+
+```yaml
+ingress:
+  enabled: true
+  host: easylab.example.com
+  className: traefik
+  tls:
+    enabled: true
+```
+
+renders a `<release>-https-redirect` Middleware plus this annotation on the Ingress:
+
+```yaml
+traefik.ingress.kubernetes.io/router.middlewares: easylab-easylab-https-redirect@kubernetescrd
+```
+
+!!! warning "Serving EasyLab over plain HTTP breaks login"
+    This is not cosmetic. The login page hashes the password with [`crypto.subtle`](https://developer.mozilla.org/en-US/docs/Web/API/Crypto/subtle) (Web Crypto), which browsers expose **only in a secure context**. Over `http://`, `crypto.subtle` is `undefined` and the login form fails with `TypeError: Cannot read properties of undefined (reading 'digest')` in the browser console, showing only a generic "An error occurred. Please try again." to the user. If port 80 answers without redirecting, any client that reaches the `http://` URL — from a bookmark, a history entry, or a typed hostname — cannot log in at all. The default `permanent: true` (301) means the browser remembers the redirect, which is what repairs a client already stuck on such a URL.
+
+The Middleware is deliberately **not** created when `ingress.tls.enabled=false`, since redirecting to HTTPS with no certificate configured only breaks the site a different way. Turn the redirect off with `ingress.httpsRedirect.enabled=false`.
+
+If you set `traefik.ingress.kubernetes.io/router.middlewares` yourself under `ingress.annotations`, your value **replaces** the chart's rather than adding to it — include `<namespace>-<release>-https-redirect@kubernetescrd` in your own comma-separated chain to keep the redirect.
+
+**Other ingress controllers** express this as their own annotation instead — the chart does not manage it for them. For NGINX:
+
+```yaml
+ingress:
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+```
+
 ## Examples
 
 ### Minimal install
@@ -421,7 +461,7 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 
 ### With Traefik ingress and TLS (cert-manager)
 
-`ingress.className` defaults to `traefik`; set it explicitly here only if your IngressClass name differs.
+`ingress.className` defaults to `traefik`; set it explicitly here only if your IngressClass name differs. HTTP is redirected to HTTPS automatically — see [Redirecting HTTP to HTTPS](#redirecting-http-to-https).
 
 ```bash
 helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \

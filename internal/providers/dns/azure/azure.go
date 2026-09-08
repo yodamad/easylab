@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	azurenative "github.com/pulumi/pulumi-azure-native-sdk"
 	azurenetwork "github.com/pulumi/pulumi-azure-native-sdk/network"
 	k8s "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes"
 	helmv3 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/helm/v3"
@@ -76,6 +77,32 @@ func (p *AzureDNSProvider) CreateARecord(
 	safe := strings.NewReplacer(".", "-", "*", "wildcard").Replace(subdomain)
 	resourceGroup := utils.DNSConfigOptional(ctx, utils.DNSAzureResourceGroup)
 
+	opts := []pulumi.ResourceOption{pulumi.DependsOn(deps)}
+
+	// Build an explicit provider from the DNS service principal credentials. The
+	// default azure-native provider is only configured when the *cloud* provider
+	// is Azure; otherwise it falls back to Azure CLI auth and fails with
+	// `exec: "az": executable file not found in $PATH`. Using the dns: credentials
+	// also lets the DNS zone live in a different subscription than the cluster.
+	clientID := utils.DNSConfigOptional(ctx, utils.DNSAzureClientId)
+	clientSecret := utils.DNSConfigOptional(ctx, utils.DNSAzureClientSecret)
+	tenantID := utils.DNSConfigOptional(ctx, utils.DNSAzureTenantId)
+	subscriptionID := utils.DNSConfigOptional(ctx, utils.DNSAzureSubscriptionId)
+	if clientID != "" && clientSecret != "" && tenantID != "" && subscriptionID != "" {
+		// Each call gets a uniquely named provider to avoid duplicate URN errors when
+		// CreateARecord is called for both the main record and the wildcard.
+		azureProvider, err := azurenative.NewProvider(ctx, "azure-dns-provider-"+safe, &azurenative.ProviderArgs{
+			ClientId:       pulumi.StringPtr(clientID),
+			ClientSecret:   pulumi.StringPtr(clientSecret),
+			TenantId:       pulumi.StringPtr(tenantID),
+			SubscriptionId: pulumi.StringPtr(subscriptionID),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create Azure DNS provider: %w", err)
+		}
+		opts = append(opts, pulumi.Provider(azureProvider))
+	}
+
 	ttl := 300.0
 	_, err := azurenetwork.NewRecordSet(ctx, "coder-dns-a-record-"+safe, &azurenetwork.RecordSetArgs{
 		ZoneName:              pulumi.String(zone),
@@ -86,7 +113,7 @@ func (p *AzureDNSProvider) CreateARecord(
 			azurenetwork.ARecordArgs{Ipv4Address: ip.ToStringPtrOutput()},
 		},
 		Ttl: pulumi.Float64Ptr(ttl),
-	}, pulumi.DependsOn(deps))
+	}, opts...)
 	if err != nil {
 		return fmt.Errorf("failed to create Azure DNS A record: %w", err)
 	}

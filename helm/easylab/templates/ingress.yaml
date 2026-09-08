@@ -10,6 +10,12 @@ metadata:
   {{- if and .Values.certManager.clusterIssuer.create .Values.ingress.tls.enabled }}
   {{- $auto = dict "cert-manager.io/cluster-issuer" .Values.certManager.clusterIssuer.name }}
   {{- end }}
+  {{- if include "easylab.httpsRedirectEnabled" . }}
+  {{- $_ := set $auto "traefik.ingress.kubernetes.io/router.middlewares" (include "easylab.httpsRedirectMiddlewareRef" .) }}
+  {{- end }}
+  {{- /* User-supplied annotations win on conflict: setting router.middlewares
+         yourself replaces the redirect reference rather than adding to it, so
+         include the chart's middleware in your own chain if you do. */}}
   {{- $annotations := merge (dict) .Values.ingress.annotations $auto }}
   {{- if $annotations }}
   annotations:

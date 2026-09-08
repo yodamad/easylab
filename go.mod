@@ -8,6 +8,7 @@ require (
 	github.com/hashicorp/hcl/v2 v2.24.0
 	github.com/ovh/go-ovh v1.9.0
 	github.com/ovh/pulumi-ovh/sdk/v2 v2.11.0
+	github.com/pulumi/pulumi-azure-native-sdk v1.104.0
 	github.com/pulumi/pulumi-azure-native-sdk/containerservice/v3 v3.18.0
 	github.com/pulumi/pulumi-azure-native-sdk/network v1.104.0
 	github.com/pulumi/pulumi-azure-native-sdk/resources/v3 v3.18.0
@@ -106,7 +107,6 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/pulumi/appdash v0.0.0-20231130102222-75f619a67231 // indirect
 	github.com/pulumi/esc v0.24.0 // indirect
-	github.com/pulumi/pulumi-azure-native-sdk v1.104.0 // indirect
 	github.com/pulumi/pulumi-azure-native-sdk/v3 v3.19.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect

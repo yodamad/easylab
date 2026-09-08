@@ -1,0 +1,13 @@
+{{- if include "easylab.httpsRedirectEnabled" . }}
+apiVersion: {{ .Values.ingress.httpsRedirect.apiVersion }}
+kind: Middleware
+metadata:
+  name: {{ include "easylab.httpsRedirectMiddlewareName" . }}
+  namespace: {{ include "easylab.namespace" . }}
+  labels:
+    {{- include "easylab.labels" . | nindent 4 }}
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: {{ .Values.ingress.httpsRedirect.permanent }}
+{{- end }}

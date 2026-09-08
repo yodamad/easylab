@@ -52,6 +52,31 @@ ingress:
   tls:
     enabled: false
     secretName: easylab-tls
+  # Redirect plain HTTP to HTTPS, via a Traefik redirectScheme Middleware the
+  # chart creates and references from the Ingress. On by default, but only
+  # materialises when className is "traefik" AND tls.enabled is true —
+  # redirecting to HTTPS without a certificate would only break the site
+  # differently.
+  #
+  # This is a correctness fix, not just tidiness: the login page hashes the
+  # password with crypto.subtle (Web Crypto), which browsers expose only in a
+  # secure context. Served over plain HTTP, crypto.subtle is undefined and
+  # login fails with "Cannot read properties of undefined (reading 'digest')".
+  # Serving port 80 with no redirect leaves any client that reaches the http://
+  # URL permanently unable to log in.
+  #
+  # Other ingress controllers express this as their own annotation instead —
+  # e.g. nginx.ingress.kubernetes.io/ssl-redirect: "true" under annotations.
+  httpsRedirect:
+    enabled: true
+    # true issues a 301, which browsers remember — that is what repairs a
+    # client already stuck on an http:// bookmark or history entry.
+    # false issues a 302 instead.
+    permanent: true
+    # Traefik v3 (the version vendored in Chart.yaml) serves Middleware under
+    # traefik.io; Traefik v2 uses traefik.containo.us/v1alpha1. Override this
+    # if you bring your own older Traefik.
+    apiVersion: traefik.io/v1alpha1
 
 resources:
   requests:

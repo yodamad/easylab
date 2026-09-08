@@ -408,8 +408,11 @@ The following components are deployed into the cluster:
     [Use Existing Cluster](#use-existing-cluster) setups, where other labs on the
     same cluster keep reusing all of it exactly as described above — destroying
     one lab, including whichever lab originally set DNS-01 up, can never take
-    down ingress, TLS, or certificate issuance for the others. On a dedicated
-    **Create New Infrastructure** cluster this has no visible effect, since the
+    down ingress, TLS, or certificate issuance for the others. A lab that reuses
+    infrastructure it never installed itself — because Traefik or cert-manager
+    were already on the cluster, or because it runs without a domain — is
+    unaffected by this and destroys normally. On a dedicated **Create New
+    Infrastructure** cluster this has no visible effect either, since the
     underlying Kubernetes cluster is destroyed anyway.
 
 !!! note "The nip.io fallback needs a routable LoadBalancer IP"
@@ -532,6 +535,8 @@ records written by cert-manager, independently of what creates the A records.
 
 !!! note "Azure DNS credentials"
     Create a service principal (`az ad sp create-for-rbac`) and assign it the `DNS Zone Contributor` role on the resource group that contains your Azure DNS zone. Azure DNS uses cert-manager's native solver — no additional webhook is required. If you also enable ExternalDNS, the same service principal needs `Reader` on that resource group on top of `DNS Zone Contributor`.
+
+    Fill in **all five fields** (tenant ID, subscription ID, resource group, client ID, client secret): EasyLab authenticates to Azure DNS with that service principal, and the server has no Azure CLI to fall back on. This also means the DNS zone can live in a different subscription than the lab cluster.
 
 ### Environment Variables
 

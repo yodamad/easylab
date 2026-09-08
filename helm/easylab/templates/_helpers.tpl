@@ -58,6 +58,37 @@ app.kubernetes.io/component: externaldns
 {{- end }}
 
 {{/*
+Name of the Traefik Middleware redirecting HTTP to HTTPS.
+*/}}
+{{- define "easylab.httpsRedirectMiddlewareName" -}}
+{{- printf "%s-https-redirect" (include "easylab.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Whether to create the HTTP->HTTPS redirect Middleware and reference it from the
+Ingress. Emits "true" (truthy) or "" (falsy), so callers can use it directly in
+an if.
+
+Gated on className being traefik, since Middleware is a Traefik CRD and every
+other controller expresses this as its own annotation, and on tls.enabled,
+since redirecting to HTTPS with no certificate configured only breaks the site
+a different way.
+*/}}
+{{- define "easylab.httpsRedirectEnabled" -}}
+{{- if and .Values.ingress.enabled .Values.ingress.tls.enabled .Values.ingress.httpsRedirect.enabled (eq .Values.ingress.className "traefik") -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+The cross-provider reference Traefik expects in a router.middlewares annotation:
+<namespace>-<name>@kubernetescrd.
+*/}}
+{{- define "easylab.httpsRedirectMiddlewareRef" -}}
+{{- printf "%s-%s@kubernetescrd" (include "easylab.namespace" .) (include "easylab.httpsRedirectMiddlewareName" .) }}
+{{- end }}
+
+{{/*
 Namespace to use.
 */}}
 {{- define "easylab.namespace" -}}

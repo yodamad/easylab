@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPulumiExecutor_outputValueToString(t *testing.T) {
@@ -696,5 +698,119 @@ func TestCheckLocalKubeconfigFile_ValidKubeconfig(t *testing.T) {
 	job.mu.RUnlock()
 	if kc != kubeconfig {
 		t.Errorf("checkLocalKubeconfigFile() set kubeconfig = %q, want %q", kc, kubeconfig)
+	}
+}
+
+func TestParseStateURNs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		raw      string
+		expected []string
+		wantErr  bool
+	}{
+		{
+			name:     "empty deployment",
+			raw:      "",
+			expected: nil,
+		},
+		{
+			name:     "stack with no resources",
+			raw:      `{"manifest":{},"resources":[]}`,
+			expected: nil,
+		},
+		{
+			name: "collects resource urns",
+			raw: `{"resources":[
+				{"urn":"urn:pulumi:dev::easylab::pulumi:pulumi:Stack::easylab-dev","type":"pulumi:pulumi:Stack"},
+				{"urn":"urn:pulumi:dev::easylab::kubernetes:core/v1:Namespace::cert-manager-ns","type":"kubernetes:core/v1:Namespace"}
+			]}`,
+			expected: []string{
+				"urn:pulumi:dev::easylab::pulumi:pulumi:Stack::easylab-dev",
+				"urn:pulumi:dev::easylab::kubernetes:core/v1:Namespace::cert-manager-ns",
+			},
+		},
+		{
+			name:     "skips resources without a urn",
+			raw:      `{"resources":[{"type":"kubernetes:core/v1:Namespace"},{"urn":"urn:pulumi:dev::easylab::kubernetes:core/v1:Namespace::traefik-ns"}]}`,
+			expected: []string{"urn:pulumi:dev::easylab::kubernetes:core/v1:Namespace::traefik-ns"},
+		},
+		{
+			name:    "invalid json",
+			raw:     `{"resources":`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			urns, err := parseStateURNs(json.RawMessage(tt.raw))
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Len(t, urns, len(tt.expected))
+			for _, urn := range tt.expected {
+				assert.True(t, urns[urn], "expected URN %q to be present", urn)
+			}
+		})
+	}
+}
+
+func TestFilterKnownURNs(t *testing.T) {
+	t.Parallel()
+
+	certManagerNs := "urn:pulumi:dev::easylab::kubernetes:core/v1:Namespace::cert-manager-ns"
+	traefikNs := "urn:pulumi:dev::easylab::kubernetes:core/v1:Namespace::traefik-ns"
+	webhookNs := "urn:pulumi:dev::easylab::kubernetes:core/v1:Namespace::cert-manager-webhook-ovh-ns"
+
+	tests := []struct {
+		name       string
+		candidates []string
+		known      map[string]bool
+		expected   []string
+	}{
+		{
+			name:       "keeps only urns present in state",
+			candidates: []string{certManagerNs, traefikNs, webhookNs},
+			known:      map[string]bool{traefikNs: true},
+			expected:   []string{traefikNs},
+		},
+		{
+			name:       "keeps all when the stack owns everything",
+			candidates: []string{certManagerNs, traefikNs},
+			known:      map[string]bool{certManagerNs: true, traefikNs: true},
+			expected:   []string{certManagerNs, traefikNs},
+		},
+		{
+			name:       "returns empty when the stack owns nothing shared",
+			candidates: []string{certManagerNs, traefikNs},
+			known:      map[string]bool{"urn:pulumi:dev::easylab::ovh:index/kube:Kube::cluster": true},
+			expected:   []string{},
+		},
+		{
+			name:       "empty state drops every candidate",
+			candidates: []string{certManagerNs},
+			known:      map[string]bool{},
+			expected:   []string{},
+		},
+		{
+			name:       "no candidates",
+			candidates: nil,
+			known:      map[string]bool{certManagerNs: true},
+			expected:   []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.expected, filterKnownURNs(tt.candidates, tt.known))
+		})
 	}
 }
