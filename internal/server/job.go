@@ -241,8 +241,12 @@ type BakedImage struct {
 	// this user itself before running the init script; a baked workspace bypasses
 	// envbuilder, so this is how that privilege drop is replicated. Empty means run
 	// as the image's own default user (often root for a devcontainer base image).
-	RemoteUser string    `json:"remote_user,omitempty"`
-	At         time.Time `json:"at"`
+	RemoteUser string `json:"remote_user,omitempty"`
+	// RepoBaked reports that Image also carries a snapshot of the template's git repo,
+	// so a workspace seeds its files from the image instead of cloning at start.
+	// False for a bake recorded before repos were baked, which keeps the clone.
+	RepoBaked bool      `json:"repo_baked,omitempty"`
+	At        time.Time `json:"at"`
 }
 
 // WorkspaceSidecar is an additional container co-located in the workspace pod.

@@ -288,8 +288,10 @@ directory`, this is why.
     turns a seconds-long start into a minutes-long one for each of them.
 
     **Host in-cluster** needs nothing further — EasyLab provisions the
-    registry in the lab's own cluster, with no external exposure or
-    authentication, and it disappears when the lab is destroyed.
+    registry in the lab's own cluster and it disappears when the lab is
+    destroyed. It requires authentication, but EasyLab generates those
+    credentials itself and supplies them wherever the registry is used, so
+    there is no credential to create or choose.
 
     **External registry** needs the credentials Secret created in the
     workspace namespace beforehand:

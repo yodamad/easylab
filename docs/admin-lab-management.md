@@ -159,6 +159,13 @@ ordinary image pull instead of running the build itself.
 This skips both the build *and* the per-pod layer extraction described in
 [A warm cache skips the build, not the extraction](templates.md#devcontainer-workshops), which is the larger cost even with a warm `cache_repo`.
 
+The template's **git repository** is baked into the image too. A student's
+workspace copies it onto their volume on first start rather than cloning it, so
+starting a workspace no longer depends on the git host at all. Private
+repositories included: the bake clones with the template's git credential, and
+the token never ends up in the image. See
+[Pre-baking: skipping the build entirely](templates.md#pre-baking-skipping-the-build-entirely).
+
 Clicking the button starts a background build and shows a **building** badge that
 updates on its own; it turns into a **baked _(date)_** badge once done, or shows the
 failure if it did not succeed. Building runs as a one-off job in the lab's cluster,
@@ -186,10 +193,22 @@ check. **Rebuild** retries the whole thing once the underlying issue is fixed.
     this lab.
 
 !!! tip "A bake does not track the repository"
-    Baking is a point-in-time snapshot: it is not re-triggered automatically if the
-    workshop repository's `devcontainer.json` changes afterward. Click **Rebuild**
-    whenever the source changes and you want students to get the update — until
-    then, students keep getting the previously baked image.
+    Baking is a point-in-time snapshot of both the devcontainer and the repository's
+    content: it is not re-triggered automatically when new commits land, including a
+    `devcontainer.json` change. Click **Rebuild** whenever the source changes and you
+    want students to get the update — until then, new workspaces keep getting the
+    previously baked content. Workspaces already started are never touched either
+    way.
+
+!!! note "Upgrading from a version without repository baking"
+    - A template baked before this version keeps cloning its repository at workspace
+      start until you click **Rebuild** once.
+    - The in-cluster registry now requires authentication. EasyLab turns it on — and
+      restarts the registry, a few seconds' interruption — the next time a bake or a
+      workspace uses it; there is nothing to configure. A baked workspace created
+      **before** that point has no credentials for it: it keeps working, but if its
+      pod is ever moved to a node that has not cached the image, the pull fails with
+      `401 Unauthorized`. Delete and recreate that workspace.
 
 ### Workspace history
 

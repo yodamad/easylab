@@ -244,6 +244,11 @@ func (h *Handler) BakeTemplate(w http.ResponseWriter, r *http.Request) {
 	dc.CacheRepo = destRepo
 	dc.Insecure = pushInsecure
 
+	// The repo is snapshotted into the image too, so a student's workspace starts
+	// without cloning it. Private repos included: the in-cluster registry requires
+	// authentication, and an external one is the admin's own to secure.
+	repoBaked := strings.TrimSpace(tmpl.GitRepo) != ""
+
 	req := workspace.BakeRequest{
 		LabID:         jobID,
 		Template:      templateName,
@@ -255,6 +260,7 @@ func (h *Handler) BakeTemplate(w http.ResponseWriter, r *http.Request) {
 		CPULimit:      tmpl.CPULimit,
 		MemoryLimit:   tmpl.MemoryLimit,
 		Devcontainer:  dc,
+		BakeRepo:      repoBaked,
 	}
 	if err := bp.EnsureBakeJob(r.Context(), req); err != nil {
 		log.Printf("BakeTemplate: failed to start bake for lab %s template %s: %v", jobID, templateName, err)
@@ -272,7 +278,7 @@ func (h *Handler) BakeTemplate(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		h.bakeExecSem <- struct{}{}
 		defer func() { <-h.bakeExecSem }()
-		h.awaitBake(jobID, templateName, bp, pullRepo, pullInsecure, pullRegistryAuthSecret)
+		h.awaitBake(jobID, templateName, bp, pullRepo, pullInsecure, pullRegistryAuthSecret, repoBaked)
 	}()
 
 	w.Header().Set("Content-Type", "text/html")
@@ -281,8 +287,10 @@ func (h *Handler) BakeTemplate(w http.ResponseWriter, r *http.Request) {
 
 // awaitBake polls the bake Job to completion (or failure/timeout), then records the
 // result: LabConfig.BakedImages on success, bakeStatuses on failure. Runs in its own
-// goroutine, bounded by bakeExecSem.
-func (h *Handler) awaitBake(jobID, templateName string, bp workspace.BakeProvider, pullRepo string, pullInsecure bool, pullRegistryAuthSecret string) {
+// goroutine, bounded by bakeExecSem. repoBaked is whether the bake was asked to
+// snapshot the template's repo (BakeRequest.BakeRepo), recorded so workspaces know
+// to seed from the image rather than clone.
+func (h *Handler) awaitBake(jobID, templateName string, bp workspace.BakeProvider, pullRepo string, pullInsecure bool, pullRegistryAuthSecret string, repoBaked bool) {
 	key := jobID + "/" + templateName
 	ctx, cancel := context.WithTimeout(context.Background(), bakeTimeout())
 	defer cancel()
@@ -381,7 +389,7 @@ poll:
 		if config.BakedImages == nil {
 			config.BakedImages = make(map[string]BakedImage)
 		}
-		config.BakedImages[templateName] = BakedImage{Image: pinnedRepo, RemoteUser: remoteUser, At: time.Now()}
+		config.BakedImages[templateName] = BakedImage{Image: pinnedRepo, RemoteUser: remoteUser, RepoBaked: repoBaked, At: time.Now()}
 	})
 	go func() {
 		if err := h.jobManager.SaveJob(jobID); err != nil {

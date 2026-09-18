@@ -3,6 +3,7 @@ package kube
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -103,6 +104,172 @@ func TestEnsureBakeJob_RebuildDeletesPreviousJob(t *testing.T) {
 		env[e.Name] = e.Value
 	}
 	assert.Contains(t, env["ENVBUILDER_GIT_URL"], "feature/rebuilt")
+}
+
+func containerNames(cs []corev1.Container) []string {
+	names := make([]string, 0, len(cs))
+	for _, c := range cs {
+		names = append(names, c.Name)
+	}
+	return names
+}
+
+// With BakeRepo the repo is appended to the image envbuilder pushed, as one layer:
+// envbuilder moves ahead of the append, unchanged, and the append is what completes
+// the Job — so BakeJobStatus's "Complete means pushed" contract still holds.
+func TestEnsureBakeJob_BakesRepo(t *testing.T) {
+	tests := []struct {
+		name      string
+		insecure  bool
+		cacheRepo string
+		wantRepo  string // "" means the internal BakedImageRepo
+	}{
+		{name: "in-cluster registry", insecure: true},
+		{name: "external registry", cacheRepo: "registry.example.com/easylab/cache/baked-job-1-go-workshop", wantRepo: "registry.example.com/easylab/cache/baked-job-1-go-workshop"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			b, cs := newTestBackend()
+			ctx := context.Background()
+
+			req := bakeRequest()
+			req.BakeRepo = true
+			req.GitAuthSecret = "gitcred"
+			req.Devcontainer.Insecure = tt.insecure
+			req.Devcontainer.CacheRepo = tt.cacheRepo
+			require.NoError(t, b.EnsureBakeJob(ctx, req))
+
+			wantRepo := tt.wantRepo
+			if wantRepo == "" {
+				wantRepo, _ = b.BakedImageRepo("job-1", "go-workshop", "")
+			}
+
+			job, err := cs.BatchV1().Jobs("workshops").Get(ctx, bakeJobName("job-1", "go-workshop"), metav1.GetOptions{})
+			require.NoError(t, err)
+			pod := job.Spec.Template.Spec
+			require.Equal(t, []string{"git-clone", "repo-layer", "bake"}, containerNames(pod.InitContainers))
+			require.Len(t, pod.Containers, 1)
+
+			clone := pod.InitContainers[0]
+			cloneScript := clone.Command[len(clone.Command)-1]
+			assert.Contains(t, cloneScript, "clone --branch 'main' --single-branch 'https://gitlab.com/org/workshop.git' "+bakeRepoStagingPath+bakedRepoPath)
+			assert.Contains(t, cloneScript, "chown -R 1000:1000", "ownership is baked into the layer, so it must already be the IDE user's")
+			assert.Equal(t, "GIT_PASSWORD", clone.Env[1].Name, "a private repo clones with the template's credential")
+
+			layer := pod.InitContainers[1]
+			assert.Contains(t, layer.Command[len(layer.Command)-1], "tar -C "+bakeRepoStagingPath+" -cf "+bakeRepoStagingPath+"/repo.tar opt")
+
+			envbuilder := pod.InitContainers[2]
+			assert.Equal(t, envbuilderImage, envbuilder.Image)
+			assert.Equal(t, wantRepo, envOf(envbuilder)["ENVBUILDER_CACHE_REPO"])
+			assert.Equal(t, "true", envOf(envbuilder)["ENVBUILDER_INIT_SCRIPT"], "an init container must exit for the next one to run")
+
+			appendLayer := pod.Containers[0]
+			assert.Equal(t, craneImage, appendLayer.Image)
+			wantArgs := []string{"append", "--base", wantRepo + ":latest", "--new_layer", bakeRepoStagingPath + "/repo.tar", "--new_tag", wantRepo + ":latest"}
+			if tt.insecure {
+				wantArgs = append(wantArgs, "--insecure")
+			}
+			assert.Equal(t, wantArgs, appendLayer.Args)
+			assert.Equal(t, bakeRepoStagingPath+"/.docker", envOf(appendLayer)["DOCKER_CONFIG"])
+
+			var staging bool
+			for _, v := range pod.Volumes {
+				if v.Name == workspaceVolumeName && v.EmptyDir != nil {
+					staging = true
+				}
+			}
+			assert.True(t, staging, "the clone, the tarball and the append share a scratch volume")
+		})
+	}
+}
+
+// Without a repo there is nothing to snapshot: the Job keeps its original shape.
+func TestEnsureBakeJob_BakeRepoWithoutGitRepo(t *testing.T) {
+	b, cs := newTestBackend()
+	ctx := context.Background()
+
+	req := bakeRequest()
+	req.BakeRepo = true
+	req.GitRepo = ""
+	require.NoError(t, b.EnsureBakeJob(ctx, req))
+
+	job, err := cs.BatchV1().Jobs("workshops").Get(ctx, bakeJobName("job-1", "go-workshop"), metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Empty(t, job.Spec.Template.Spec.InitContainers)
+	require.Len(t, job.Spec.Template.Spec.Containers, 1)
+	assert.Equal(t, envbuilderImage, job.Spec.Template.Spec.Containers[0].Image)
+}
+
+// A bake to an external cache_repo used to push to the in-cluster registry anyway —
+// EnsureBakeJob ignored the destination the server chose — so it could only ever end
+// in "never became pullable".
+func TestEnsureBakeJob_PushesToRequestedCacheRepo(t *testing.T) {
+	b, cs := newTestBackend()
+	ctx := context.Background()
+
+	req := bakeRequest()
+	req.Devcontainer.CacheRepo = "registry.example.com/easylab/cache/baked-job-1-go-workshop"
+	require.NoError(t, b.EnsureBakeJob(ctx, req))
+
+	job, err := cs.BatchV1().Jobs("workshops").Get(ctx, bakeJobName("job-1", "go-workshop"), metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "registry.example.com/easylab/cache/baked-job-1-go-workshop", envOf(job.Spec.Template.Spec.Containers[0])["ENVBUILDER_CACHE_REPO"])
+}
+
+// A bake to the in-cluster registry must authenticate to it — both envbuilder's push
+// and crane's append, which reads the same config off the scratch volume.
+func TestEnsureBakeJob_InClusterPushCarriesRegistryCredentials(t *testing.T) {
+	b, cs := newTestBackend()
+	ctx := context.Background()
+
+	_, err := b.EnsureBuildCache(ctx)
+	require.NoError(t, err)
+
+	req := bakeRequest()
+	req.BakeRepo = true
+	req.Devcontainer.CacheRepo, _ = b.BakedImageRepo("job-1", "go-workshop", "")
+	require.NoError(t, b.EnsureBakeJob(ctx, req))
+
+	job, err := cs.BatchV1().Jobs("workshops").Get(ctx, bakeJobName("job-1", "go-workshop"), metav1.GetOptions{})
+	require.NoError(t, err)
+	inits := job.Spec.Template.Spec.InitContainers
+	encoded := envOf(inits[2])["ENVBUILDER_DOCKER_CONFIG_BASE64"]
+	require.NotEmpty(t, encoded)
+	assert.Equal(t, encoded, envOf(inits[1])["DOCKER_CONFIG_BASE64"], "crane must push with the same credentials envbuilder did")
+
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	require.NoError(t, err)
+	var cfg dockerConfig
+	require.NoError(t, json.Unmarshal(raw, &cfg))
+	assert.Equal(t, registryAuthUsername, cfg.Auths[b.registryInternalHost()].Username)
+}
+
+func TestRegistryPullAuthHeader_OwnRegistryFallback(t *testing.T) {
+	b, _ := newTestBackend()
+	ctx := context.Background()
+
+	host, err := b.EnsureRegistryIngress(ctx, "lab.example.com", "easylab-wildcard-tls", "")
+	require.NoError(t, err)
+	auths, err := b.registryAuths(ctx)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name     string
+		host     string
+		expected string
+	}{
+		{name: "own registry uses its generated credentials", host: host, expected: "Basic " + auths[host].Auth},
+		{name: "any other registry stays anonymous", host: "registry.example.com", expected: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := b.registryPullAuthHeader(ctx, "", tt.host)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
 }
 
 func TestBakeJobStatus(t *testing.T) {

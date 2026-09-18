@@ -3,9 +3,12 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -201,7 +204,7 @@ func TestAwaitBake_PersistentPullFailureMarksBakeFailed(t *testing.T) {
 	id := bakeLab(t, jm, WorkspaceTemplate{Name: "go-workshop", Devcontainer: &DevcontainerConfig{Enabled: true, CacheRepo: "registry.example.com/cache"}})
 
 	fp := &fakeBakeProvider{jobStatus: workspace.BakeStateComplete, remoteUserErrs: 999}
-	h.awaitBake(id, "go-workshop", fp, "registry.example.com/cache/baked-go-workshop:latest", false, "")
+	h.awaitBake(id, "go-workshop", fp, "registry.example.com/cache/baked-go-workshop:latest", false, "", false)
 
 	job, _ := jm.GetJob(id)
 	job.mu.RLock()
@@ -242,7 +245,7 @@ func TestAwaitBake_FailedRebuildInvalidatesStaleBakedImage(t *testing.T) {
 	job.mu.Unlock()
 
 	fp := &fakeBakeProvider{jobStatus: workspace.BakeStateComplete, remoteUserErrs: 999}
-	h.awaitBake(id, "go-workshop", fp, "registry.example.com/cache/baked-go-workshop:latest", false, "")
+	h.awaitBake(id, "go-workshop", fp, "registry.example.com/cache/baked-go-workshop:latest", false, "", false)
 
 	job, _ = jm.GetJob(id)
 	job.mu.RLock()
@@ -262,7 +265,7 @@ func TestAwaitBake_TransientPullFailureRecovers(t *testing.T) {
 	id := bakeLab(t, jm, WorkspaceTemplate{Name: "go-workshop", Devcontainer: &DevcontainerConfig{Enabled: true, CacheRepo: "registry.example.com/cache"}})
 
 	fp := &fakeBakeProvider{jobStatus: workspace.BakeStateComplete, remoteUserErrs: 2, remoteUser: "vscode"}
-	h.awaitBake(id, "go-workshop", fp, "registry.example.com/cache/baked-go-workshop:latest", false, "")
+	h.awaitBake(id, "go-workshop", fp, "registry.example.com/cache/baked-go-workshop:latest", false, "", false)
 
 	job, _ := jm.GetJob(id)
 	job.mu.RLock()
@@ -275,6 +278,127 @@ func TestAwaitBake_TransientPullFailureRecovers(t *testing.T) {
 	_, stillTracked := h.bakeStatuses[id+"/go-workshop"]
 	h.bakeStatusesMu.RUnlock()
 	assert.False(t, stillTracked, "a successful bake must clear the in-flight status")
+}
+
+// A successful bake records whether the repo was snapshotted into the image, since
+// that is what tells RequestWorkspace to seed from the image instead of cloning.
+func TestAwaitBake_RecordsRepoBaked(t *testing.T) {
+	t.Parallel()
+	for _, repoBaked := range []bool{true, false} {
+		t.Run(fmt.Sprintf("repoBaked=%v", repoBaked), func(t *testing.T) {
+			t.Parallel()
+			h, jm := newUploadTestHandler(t)
+			id := bakeLab(t, jm, WorkspaceTemplate{Name: "go-workshop", Devcontainer: &DevcontainerConfig{Enabled: true, CacheRepo: "registry.example.com/cache"}})
+
+			fp := &fakeBakeProvider{jobStatus: workspace.BakeStateComplete, digest: "sha256:abc"}
+			h.awaitBake(id, "go-workshop", fp, "registry.example.com/cache/baked-go-workshop:latest", false, "", repoBaked)
+
+			job, _ := jm.GetJob(id)
+			job.mu.RLock()
+			baked, ok := job.Config.BakedImages["go-workshop"]
+			job.mu.RUnlock()
+			require.True(t, ok)
+			assert.Equal(t, repoBaked, baked.RepoBaked)
+		})
+	}
+}
+
+// capturingBakeBackend is a workspace.Backend that is also a BakeProvider, recording
+// the BakeRequests BakeTemplate sends it.
+type capturingBakeBackend struct {
+	*fakeBackend
+	*fakeBakeProvider
+
+	mu       sync.Mutex
+	requests []workspace.BakeRequest
+}
+
+func (c *capturingBakeBackend) EnsureBakeJob(_ context.Context, req workspace.BakeRequest) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.requests = append(c.requests, req)
+	return nil
+}
+
+func TestBakeTemplate_BakesRepoWhenTemplateHasOne(t *testing.T) {
+	tests := []struct {
+		name     string
+		gitRepo  string
+		expected bool
+	}{
+		{name: "template with a repo", gitRepo: "https://gitlab.com/org/private-workshop.git", expected: true},
+		{name: "template without a repo", gitRepo: "", expected: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, jm := newUploadTestHandler(t)
+			id := bakeLab(t, jm, WorkspaceTemplate{
+				Name:          "go-workshop",
+				GitRepo:       tt.gitRepo,
+				GitAuthSecret: "gitcred",
+				Devcontainer:  &DevcontainerConfig{Enabled: true, CacheRepo: "registry.example.com/cache"},
+			})
+			// A failed job ends the background awaitBake on its first poll instead of
+			// leaving it polling for the whole bake timeout.
+			cb := &capturingBakeBackend{
+				fakeBackend:      &fakeBackend{reachable: true},
+				fakeBakeProvider: &fakeBakeProvider{jobStatus: workspace.BakeStateFailed},
+			}
+			h.newWorkspaceBackend = func(_, _ string) (workspace.Backend, error) { return cb, nil }
+
+			rec := postBake(h, id, "go-workshop")
+			assert.Contains(t, rec.Body.String(), "building", "body: %s", rec.Body.String())
+
+			cb.mu.Lock()
+			defer cb.mu.Unlock()
+			require.Len(t, cb.requests, 1)
+			assert.Equal(t, tt.expected, cb.requests[0].BakeRepo)
+			assert.Equal(t, "gitcred", cb.requests[0].GitAuthSecret, "the repo clone must authenticate like a student's would")
+		})
+	}
+}
+
+// RequestWorkspace hands the backend the bake's repo snapshot flag along with the
+// image — and a bake recorded before repos were baked must keep the clone.
+func TestRequestWorkspace_PropagatesBakedRepo(t *testing.T) {
+	tests := []struct {
+		name      string
+		repoBaked bool
+	}{
+		{name: "bake includes the repo", repoBaked: true},
+		{name: "bake predates repo baking", repoBaked: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jm := NewJobManager("")
+			h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+			fb := &fakeBackend{reachable: true}
+			useFakeBackend(h, fb)
+
+			labID := completedLabWithKubeconfig(jm, 0)
+			job, _ := jm.GetJob(labID)
+			job.mu.Lock()
+			job.Config.WorkspaceTemplates = []WorkspaceTemplate{{
+				Name:         "go-workshop",
+				GitRepo:      "https://gitlab.com/org/workshop.git",
+				Devcontainer: &DevcontainerConfig{Enabled: true, CacheRepo: "registry.example.com/cache"},
+			}}
+			job.Config.BakedImages = map[string]BakedImage{
+				"go-workshop": {Image: "registry.example.com/cache/baked@sha256:abc", RepoBaked: tt.repoBaked, At: time.Now()},
+			}
+			job.mu.Unlock()
+
+			req := postForm(t, "/api/workspace/request", url.Values{"lab_id": {labID}})
+			req = req.WithContext(context.WithValue(req.Context(), studentEmailContextKey, "student@example.com"))
+			h.RequestWorkspace(httptest.NewRecorder(), req)
+
+			require.Len(t, fb.Ensured, 1)
+			dc := fb.Ensured[0].Devcontainer
+			require.NotNil(t, dc)
+			assert.Equal(t, "registry.example.com/cache/baked@sha256:abc", dc.PrebuiltImage)
+			assert.Equal(t, tt.repoBaked, dc.PrebuiltRepo)
+		})
+	}
 }
 
 func TestSanitizeRepoSegment(t *testing.T) {

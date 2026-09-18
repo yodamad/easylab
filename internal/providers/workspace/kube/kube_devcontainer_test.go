@@ -3,6 +3,7 @@ package kube
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -622,4 +623,119 @@ func TestEnsureWorkspace_PrebuiltImageNoRemoteUserRunsPlainScript(t *testing.T) 
 	c := ideContainer(t, cs, ws.ID)
 	script := c.Command[len(c.Command)-1]
 	assert.NotContains(t, script, "su -s", "no declared remoteUser means run as the image's own default user")
+}
+
+// A bake that snapshotted the repo seeds the workspace from the image; one recorded
+// before repos were baked (PrebuiltRepo false) must keep cloning, since its image
+// has nothing at bakedRepoPath.
+func TestEnsureWorkspace_PrebuiltRepoSeedsInsteadOfCloning(t *testing.T) {
+	tests := []struct {
+		name         string
+		prebuiltRepo bool
+		wantSeed     bool
+	}{
+		{name: "repo baked into the image", prebuiltRepo: true, wantSeed: true},
+		{name: "bake predates repo baking", prebuiltRepo: false, wantSeed: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			b, cs := newTestBackend()
+
+			spec := prebuiltDevcontainerSpec()
+			spec.Devcontainer.PrebuiltRepo = tt.prebuiltRepo
+			ws, err := b.EnsureWorkspace(context.Background(), spec)
+			require.NoError(t, err)
+
+			seed, hasSeed := initContainerNamed(t, cs, ws.ID, "seed-repo")
+			_, hasClone := initContainerNamed(t, cs, ws.ID, "git-clone")
+			assert.Equal(t, tt.wantSeed, hasSeed, "seed-repo")
+			assert.Equal(t, !tt.wantSeed, hasClone, "git-clone")
+			if !tt.wantSeed {
+				return
+			}
+
+			assert.Equal(t, spec.Devcontainer.PrebuiltImage, seed.Image, "the seed runs the baked image the workspace pulls anyway")
+			script := seed.Command[len(seed.Command)-1]
+			assert.Contains(t, script, "cp -a "+bakedRepoPath+"/. /home/coder/project/")
+			assert.Contains(t, script, `if [ -z "$(ls -A /home/coder/project 2>/dev/null)" ]`, "a returning student's files must never be overwritten")
+			assert.Contains(t, script, "chown -R 1000:1000 /home/coder/project")
+			require.NotNil(t, seed.SecurityContext)
+			require.NotNil(t, seed.SecurityContext.RunAsUser)
+			assert.Equal(t, int64(0), *seed.SecurityContext.RunAsUser, "the chown needs root whatever the image's default user")
+			require.Len(t, seed.VolumeMounts, 1)
+			assert.Equal(t, workspaceVolumeName, seed.VolumeMounts[0].Name)
+		})
+	}
+}
+
+// A baked image in the backend's own registry is pulled through its authenticated
+// Ingress, so the pod carries the registry's credentials alongside the template's
+// own image_pull_secrets — which must not be mutated in the caller's spec.
+func TestEnsureWorkspace_PrebuiltImagePullSecrets(t *testing.T) {
+	tests := []struct {
+		name     string
+		image    string
+		expected []string
+	}{
+		{
+			name:     "own in-cluster registry",
+			image:    "easylab-registry-cache.lab.example.com/baked/job-1/go-workshop@sha256:abc",
+			expected: []string{"regcred", registryAuthSecretName},
+		},
+		{
+			name:     "external registry",
+			image:    "registry.example.com/easylab/cache/baked-job-1-go-workshop@sha256:abc",
+			expected: []string{"regcred"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			b, cs := newTestBackend()
+
+			spec := prebuiltDevcontainerSpec()
+			spec.Devcontainer.PrebuiltImage = tt.image
+			spec.ImagePullSecrets = []string{"regcred"}
+			ws, err := b.EnsureWorkspace(context.Background(), spec)
+			require.NoError(t, err)
+
+			dep, err := cs.AppsV1().Deployments("workshops").Get(context.Background(), ws.ID, metav1.GetOptions{})
+			require.NoError(t, err)
+			var got []string
+			for _, ref := range dep.Spec.Template.Spec.ImagePullSecrets {
+				got = append(got, ref.Name)
+			}
+			assert.Equal(t, tt.expected, got)
+			assert.Equal(t, []string{"regcred"}, spec.ImagePullSecrets, "the caller's spec must be left untouched")
+		})
+	}
+}
+
+// A live build on the in-cluster cache must authenticate to it, without losing the
+// template's own registry_auth_secret (e.g. for a private base image).
+func TestEnsureWorkspace_InClusterCacheCarriesRegistryCredentials(t *testing.T) {
+	b, cs := newTestBackend()
+	ctx := context.Background()
+
+	cacheRepo, err := b.EnsureBuildCache(ctx)
+	require.NoError(t, err)
+	require.NoError(t, b.EnsureRegistrySecret(ctx, "basecred", "ghcr.io", "bot", "base-token"))
+
+	spec := devcontainerSpec()
+	spec.Devcontainer.CacheRepo = cacheRepo
+	spec.Devcontainer.Insecure = true
+	spec.Devcontainer.RegistryAuthSecret = "basecred"
+	ws, err := b.EnsureWorkspace(ctx, spec)
+	require.NoError(t, err)
+
+	raw, err := base64.StdEncoding.DecodeString(envOf(ideContainer(t, cs, ws.ID))["ENVBUILDER_DOCKER_CONFIG_BASE64"])
+	require.NoError(t, err)
+	var cfg dockerConfig
+	require.NoError(t, json.Unmarshal(raw, &cfg))
+
+	assert.Equal(t, "bot", cfg.Auths["ghcr.io"].Username, "the template's own registry credential must survive the merge")
+	own := cfg.Auths[b.registryInternalHost()]
+	assert.Equal(t, registryAuthUsername, own.Username)
+	assert.NotEmpty(t, own.Password)
 }

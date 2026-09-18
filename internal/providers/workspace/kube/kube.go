@@ -9,6 +9,7 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"path"
@@ -513,7 +514,7 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 	initContainers := []corev1.Container{}
 
 	if spec.Devcontainer != nil {
-		dockerConfig, err := b.dockerConfigFromSecret(ctx, spec.Devcontainer.RegistryAuthSecret)
+		dockerConfig, err := b.envbuilderDockerConfig(ctx, spec.Devcontainer.RegistryAuthSecret, spec.Devcontainer.CacheRepo)
 		if err != nil {
 			return err
 		}
@@ -588,8 +589,14 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 		// container would only race it for the same directory — unless the workspace
 		// is running a baked (PrebuiltImage) image, which has no envbuilder to do it
 		// and needs the ordinary clone, same as a plain image: + git_repo template.
+		// A bake that also snapshotted the repo (PrebuiltRepo) seeds from the image
+		// instead, so starting the workspace never reaches the git host at all.
 		if strings.TrimSpace(spec.GitRepo) != "" && (spec.Devcontainer == nil || spec.Devcontainer.PrebuiltImage != "") {
-			initContainers = append(initContainers, gitCloneInit(spec.GitRepo, spec.GitBranch, p.workspaceDir, mountPath, spec.GitAuthSecret))
+			if spec.Devcontainer != nil && spec.Devcontainer.PrebuiltRepo {
+				initContainers = append(initContainers, bakedRepoSeedInit(spec.Devcontainer.PrebuiltImage, p.workspaceDir, mountPath))
+			} else {
+				initContainers = append(initContainers, gitCloneInit(spec.GitRepo, spec.GitBranch, p.workspaceDir, mountPath, spec.GitAuthSecret))
+			}
 		}
 	}
 
@@ -663,7 +670,7 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 					// Pod-level, so it covers the IDE image, the sidecars and the init
 					// containers alike. The devcontainer build pulls from inside the pod
 					// with its own credentials and is unaffected by this.
-					ImagePullSecrets: imagePullSecrets(spec.ImagePullSecrets),
+					ImagePullSecrets: imagePullSecrets(workspacePullSecrets(spec)),
 					InitContainers:   initContainers,
 					Containers:       containers,
 					Volumes:          volumes,
@@ -944,6 +951,65 @@ func (b *Backend) dockerConfigFromSecret(ctx context.Context, name string) (stri
 	return "", fmt.Errorf("registry auth secret %q has no %q key", name, corev1.DockerConfigJsonKey)
 }
 
+// envbuilderDockerConfig is dockerConfigFromSecret plus, when cacheRepo is this
+// backend's own in-cluster registry, that registry's generated credentials — which
+// no template names, because the template never sees them. They are merged into
+// rather than substituted for the named Secret's config: a template can still need
+// its own registry_auth_secret alongside, e.g. for a private base image.
+func (b *Backend) envbuilderDockerConfig(ctx context.Context, secretName, cacheRepo string) (string, error) {
+	encoded, err := b.dockerConfigFromSecret(ctx, secretName)
+	if err != nil {
+		return "", err
+	}
+	host, _, _ := splitImageRef(strings.TrimSpace(cacheRepo))
+	if !isOwnRegistryHost(host) {
+		return encoded, nil
+	}
+	own, err := b.registryAuths(ctx)
+	if err != nil {
+		return "", err
+	}
+	if len(own) == 0 {
+		return encoded, nil
+	}
+
+	// Decoded loosely so anything else the named Secret's config carries (credHelpers,
+	// other top-level keys) survives the merge untouched.
+	cfg := map[string]json.RawMessage{}
+	auths := map[string]json.RawMessage{}
+	if encoded != "" {
+		raw, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			return "", fmt.Errorf("failed to decode registry auth secret %q: %w", secretName, err)
+		}
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			return "", fmt.Errorf("failed to parse registry auth secret %q: %w", secretName, err)
+		}
+		if a, ok := cfg["auths"]; ok {
+			if err := json.Unmarshal(a, &auths); err != nil {
+				return "", fmt.Errorf("failed to parse registry auth secret %q: %w", secretName, err)
+			}
+		}
+	}
+	for h, auth := range own {
+		entry, err := json.Marshal(auth)
+		if err != nil {
+			return "", fmt.Errorf("failed to encode registry credentials: %w", err)
+		}
+		auths[h] = entry
+	}
+	mergedAuths, err := json.Marshal(auths)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode registry credentials: %w", err)
+	}
+	cfg["auths"] = mergedAuths
+	merged, err := json.Marshal(cfg)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode registry credentials: %w", err)
+	}
+	return base64.StdEncoding.EncodeToString(merged), nil
+}
+
 // verifyGitAuthSecret checks the referenced basic-auth Secret exists and carries
 // the keys the clone will read, so a typo fails here — where the admin sees it —
 // rather than as a pod stuck in CreateContainerConfigError, which only a cluster
@@ -1056,6 +1122,22 @@ func basicAuthEnv(secretName, userVar, passVar string) []corev1.EnvVar {
 	}
 }
 
+// workspacePullSecrets is the template's image_pull_secrets plus, when the workspace
+// runs an image baked into this backend's own in-cluster registry, that registry's
+// credentials — which the template cannot name, because it never sees them. The
+// template's slice is copied rather than appended to, so the caller's spec is left
+// untouched.
+func workspacePullSecrets(spec workspace.Spec) []string {
+	if spec.Devcontainer == nil {
+		return spec.ImagePullSecrets
+	}
+	host, _, _ := splitImageRef(strings.TrimSpace(spec.Devcontainer.PrebuiltImage))
+	if !isOwnRegistryHost(host) {
+		return spec.ImagePullSecrets
+	}
+	return append(append([]string{}, spec.ImagePullSecrets...), registryAuthSecretName)
+}
+
 // imagePullSecrets turns Secret names into the pod-level references the kubelet
 // pulls with. Blank entries are skipped rather than passed on as an unnamed
 // reference, which the API server would reject for the whole pod.
@@ -1137,6 +1219,30 @@ func gitCloneInit(repo, branch, dir, mountPath, authSecret string) corev1.Contai
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Command:         []string{"sh", "-c", script},
 		Env:             env,
+		VolumeMounts:    []corev1.VolumeMount{{Name: workspaceVolumeName, MountPath: mountPath}},
+	}
+}
+
+// bakedRepoSeedInit returns an init container that copies the repo snapshot a bake
+// left at bakedRepoPath (see bakeRepoSteps) onto the workspace volume — the
+// network-free counterpart of gitCloneInit, with the same guard: only an empty dir
+// is filled, so a returning student's files are never touched.
+//
+// The snapshot sits outside the workspace dir on purpose: the workspace volume is
+// mounted over dir, which hides whatever the image carried there. It runs the baked
+// image itself, which the workspace container pulls anyway, so this costs no extra
+// pull; as root, because the devcontainer's default user need not be, and the copy
+// is chowned to uid/gid 1000 exactly as a clone would be.
+func bakedRepoSeedInit(image, dir, mountPath string) corev1.Container {
+	script := fmt.Sprintf(`mkdir -p %s; if [ -z "$(ls -A %s 2>/dev/null)" ]; then cp -a %s/. %s/ && chown -R 1000:1000 %s; fi`,
+		dir, dir, bakedRepoPath, dir, dir)
+	return corev1.Container{
+		Name:  "seed-repo",
+		Image: image,
+		// Same reuse rationale as the workspace container: this is its image.
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Command:         []string{"sh", "-c", script},
+		SecurityContext: &corev1.SecurityContext{RunAsUser: int64Ptr(0)},
 		VolumeMounts:    []corev1.VolumeMount{{Name: workspaceVolumeName, MountPath: mountPath}},
 	}
 }

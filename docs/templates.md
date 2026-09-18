@@ -612,9 +612,14 @@ keys the build ignores; and some keys are honoured by neither.
       use_in_cluster_cache: true
     ```
 
-    No `registry_auth_secret` is needed — the in-cluster registry has no
-    external exposure or authentication, envbuilder pushes and pulls it
-    directly over the cluster network. It is shared by every devcontainer
+    No `registry_auth_secret` is needed. The in-cluster registry does require
+    authentication (once a template is [pre-baked](#pre-baking-skipping-the-build-entirely)
+    it is also exposed through the lab's domain, and baked images carry the
+    workshop repo), but EasyLab generates its credentials itself — stored in the
+    `easylab-registry-cache-auth` Secret of the workspace namespace — and
+    supplies them wherever the registry is used: envbuilder's pushes and pulls
+    over the cluster network, a student pod's pull of a baked image, and
+    EasyLab's own checks. It is shared by every devcontainer
     template in the lab that opts in, and disappears when the lab is
     destroyed. An external `cache_repo` remains the right choice when a cache
     needs to survive across labs (e.g. a shared base image reused by several
@@ -657,9 +662,26 @@ in the admin guide for how to trigger it, what the status badges mean, and the
 domain requirement when baking to the in-cluster registry (an external
 `cache_repo` has no such requirement).
 
+A bake also snapshots the **workshop repository** (`git_repo`, at `git_branch`)
+into the image, at `/opt/easylab/repo`. A student's workspace copies it onto
+their volume on first start instead of cloning, so starting a workspace makes no
+request to the git host at all — no clone time, and no rate limit to hit when a
+whole class starts at once. The result is the same checkout a clone would have
+produced, `.git` included, owned by the IDE user; a returning student's files are
+never overwritten. Private repositories are baked too — the clone at bake time uses
+the template's `git_auth_secret`, and the token is never written into the image.
+The in-cluster registry requires authentication for exactly this reason; an
+**external** `cache_repo` should be private if the repository is.
+
 The tradeoff: a bake is a snapshot. It does not track the workshop repository, so
-a `devcontainer.json` change after baking needs an explicit **Rebuild** — until
-then, students keep getting the previously baked image rather than the live one.
+a new commit — or a `devcontainer.json` change — after baking needs an explicit
+**Rebuild**. Until then, students keep getting the previously baked content rather
+than the live one.
+
+!!! note "Bakes made before repositories were baked"
+    A template baked by an earlier EasyLab version still clones the repository at
+    workspace start, as before — its image has no snapshot to copy from. Click
+    **Rebuild** once to include the repository.
 
 A **Rebuild** always reaches students. Baked images are pushed to a fixed `:latest`
 tag, but EasyLab records the image by its digest (`…/baked/<lab>/<template>@sha256:…`)
@@ -709,3 +731,5 @@ workshop edition to the next.
 | "Bake image" is rejected for a template using the in-cluster registry | Baking to the in-cluster registry needs the lab to have a domain configured, so a student's pull can trust the registry over HTTPS — see [Pre-baking: skipping the build entirely](#pre-baking-skipping-the-build-entirely). Configure a domain for the lab, or set an external `cache_repo` on the template instead. |
 | A bake fails with "image was built, but never became pullable" | The image built and pushed fine, but nothing could fetch it back over a trusted connection. For the in-cluster registry this almost always means its TLS certificate never finished issuing. Check `kubectl get certificate,certificaterequest -n <workspace namespace>` in the lab's cluster; a stuck `CertificateRequest` usually means the lab's `ClusterIssuer` name doesn't match one that actually exists on that cluster (`kubectl get clusterissuer`). For an external `cache_repo`, verification authenticates with the same `registry_auth_secret` the push used, so a persistent (not just transient) failure there means those credentials cannot read the pushed tag back — check they have pull, not just push, permission on the registry. Click **Rebuild** once fixed — EasyLab only records a bake as ready after confirming it. |
 | A workspace pod's pull error names a `*.traefik.default` (or similar auto-generated) certificate, not the registry's own hostname | Traefik never received a real certificate for that host and fell back to serving its own internal default one — the `ClusterIssuer`/`CertificateRequest` never actually completed. This is the same failure as the row above, just observed from the workspace pod's own pull error instead of the bake status; the fix is the same (fix the certificate, then **Rebuild** — a stale pre-fix bake record is cleared automatically once a rebuild confirms the pull path is still broken). Note that the registry's Ingress no longer needs to be recreated to pick up corrected HTTPS settings: it is reconciled on the next bake, as workspace Ingresses are — see [Certificates repair themselves](admin-lab-management.md#certificates-repair-themselves). |
+| A pull from the in-cluster registry fails with `401 Unauthorized` / `authentication required` | The registry requires authentication, and EasyLab adds its credentials to every workspace it creates — but a workspace created *before* the registry was secured has none. It keeps running while its node has the image cached; if its pod lands on a fresh node, the pull fails. Delete and recreate that workspace. If new workspaces fail too, check the `easylab-registry-cache-auth` and `easylab-registry-cache-htpasswd` Secrets exist in the workspace namespace: EasyLab recreates either one on the next bake or workspace request, and restarts the registry to pick up a new password. |
+| A bake fails and the `bake-repo` container's log shows a `crane append` error | The devcontainer built and pushed fine, but appending the repository snapshot to it did not. `kubectl logs -n <workspace namespace> -l easylab.io/bake-template=<template> -c bake-repo` has the cause — typically credentials that can push the build but not the extra layer, or an external `cache_repo` served over plain HTTP without `insecure: true`. |

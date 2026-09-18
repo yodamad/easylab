@@ -2094,6 +2094,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		// auto-provisioning below.
 		spec.Devcontainer.PrebuiltImage = baked.Image
 		spec.Devcontainer.RemoteUser = baked.RemoteUser
+		spec.Devcontainer.PrebuiltRepo = baked.RepoBaked
 	} else if spec.Devcontainer != nil && selected.Devcontainer.UseInClusterCache && spec.Devcontainer.CacheRepo == "" {
 		// An in-cluster registry can stand in for the external one a devcontainer
 		// template's cache_repo would otherwise have to name — only when the

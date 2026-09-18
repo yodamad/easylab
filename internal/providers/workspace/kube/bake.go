@@ -29,6 +29,20 @@ const (
 	// bakeTTLSecondsAfterFinished cleans up a finished bake Job automatically, so a
 	// forgotten one (or a missed delete-before-recreate) doesn't linger forever.
 	bakeTTLSecondsAfterFinished = int32(3600)
+
+	// bakedRepoPath is where a bake snapshots the workshop repo inside the image,
+	// and where bakedRepoSeedInit copies it from. Deliberately not the workspace dir:
+	// a workspace mounts its volume there, which would hide anything the image
+	// carried at that path.
+	bakedRepoPath = "/opt/easylab/repo"
+	// bakeRepoStagingPath is the bake Job's scratch volume: the repo is cloned under
+	// it at the same relative path it takes in the image, so a tarball of it is the
+	// image layer as-is.
+	bakeRepoStagingPath = "/bake-repo"
+	// craneImage appends the repo snapshot to the pushed image as one extra layer.
+	// envbuilder cannot put it there itself: it always excludes its workspace folder
+	// (the clone) from the image it builds.
+	craneImage = "gcr.io/go-containerregistry/crane:latest"
 )
 
 // bakeJobName is deterministic per (labID, template) so EnsureBakeJob/BakeJobStatus
@@ -50,8 +64,13 @@ func bakeLabels(labID, template string) map[string]string {
 }
 
 // EnsureBakeJob (re)starts a bake for req.LabID/req.Template, pushing the built image
-// to the internal (in-cluster, plain-HTTP) address of BakedImageRepo — envbuilder is a
-// userspace HTTP client, so it needs no TLS trust the way a kubelet pull would.
+// to req.Devcontainer.CacheRepo — the caller's chosen destination — or, when that is
+// empty, to the internal (in-cluster, plain-HTTP) address of BakedImageRepo.
+// envbuilder is a userspace HTTP client, so it needs no TLS trust the way a kubelet
+// pull would.
+//
+// With req.BakeRepo the workshop repo is snapshotted into the image too, as one
+// extra layer appended after envbuilder's push (see bakeRepoSteps).
 //
 // A Job's pod template is immutable, so unlike every other Ensure* in this package
 // this is delete-then-create rather than idempotent create-and-swallow-AlreadyExists.
@@ -68,17 +87,20 @@ func (b *Backend) EnsureBakeJob(ctx context.Context, req workspace.BakeRequest) 
 	}
 
 	dc := req.Devcontainer
-	dockerConfig, err := b.dockerConfigFromSecret(ctx, dc.RegistryAuthSecret)
+	pushRepo := strings.TrimSpace(dc.CacheRepo)
+	if pushRepo == "" {
+		pushRepo, _ = b.BakedImageRepo(req.LabID, req.Template, "")
+	}
+	dockerConfig, err := b.envbuilderDockerConfig(ctx, dc.RegistryAuthSecret, pushRepo)
 	if err != nil {
 		return err
 	}
-	internalRepo, _ := b.BakedImageRepo(req.LabID, req.Template, "")
 
 	container := corev1.Container{
 		Name:            "bake",
 		Image:           envbuilderImage,
 		ImagePullPolicy: corev1.PullIfNotPresent,
-		Env:             bakeEnv(req, internalRepo, dockerConfig),
+		Env:             bakeEnv(req, pushRepo, dockerConfig),
 		Resources:       buildResources(req.CPU, req.Memory, req.CPULimit, req.MemoryLimit, true),
 	}
 
@@ -93,6 +115,19 @@ func (b *Backend) EnsureBakeJob(ctx context.Context, req workspace.BakeRequest) 
 		container.VolumeMounts = []corev1.VolumeMount{{Name: devcontainerConfigVolumeName, MountPath: devcontainerConfigMountPath}}
 	}
 
+	containers := []corev1.Container{container}
+	if req.BakeRepo && strings.TrimSpace(req.GitRepo) != "" {
+		// The repo layer can only be appended once envbuilder has pushed the image
+		// it goes on top of, and init containers are the only ordering a pod has:
+		// the build moves ahead of the append, unchanged, and the append becomes the
+		// container whose completion completes the Job.
+		prepare, appendLayer, staging := bakeRepoSteps(req, pushRepo, dockerConfig)
+		initContainers = append(initContainers, prepare...)
+		initContainers = append(initContainers, container)
+		containers = []corev1.Container{appendLayer}
+		volumes = append(volumes, staging)
+	}
+
 	backoffLimit := int32(0)
 	ttl := bakeTTLSecondsAfterFinished
 	job := &batchv1.Job{
@@ -105,7 +140,7 @@ func (b *Backend) EnsureBakeJob(ctx context.Context, req workspace.BakeRequest) 
 				Spec: corev1.PodSpec{
 					RestartPolicy:  corev1.RestartPolicyNever,
 					InitContainers: initContainers,
-					Containers:     []corev1.Container{container},
+					Containers:     containers,
 					Volumes:        volumes,
 				},
 			},
@@ -117,15 +152,76 @@ func (b *Backend) EnsureBakeJob(ctx context.Context, req workspace.BakeRequest) 
 	return nil
 }
 
+// bakeRepoSteps returns what snapshots the workshop repo into the baked image: the
+// init containers that clone and package it, the container that appends it to the
+// image envbuilder pushed to pushRepo, and the scratch volume they share.
+//
+// The clone is gitCloneInit itself — the exact clone a student's workspace would
+// otherwise run, with the same credential helper (so the token never lands in
+// .git/config) and the same chown to the IDE's uid/gid, which the layer preserves.
+// It lands at bakedRepoPath under the scratch volume, so tarring the path's top
+// directory yields the layer as-is, parent directories included.
+//
+// dockerConfig is the same base64 config envbuilder pushes with; crane reads a
+// config file rather than an env var, so it is written onto the scratch volume
+// (outside what gets tarred) for crane to find through DOCKER_CONFIG.
+func bakeRepoSteps(req workspace.BakeRequest, pushRepo, dockerConfig string) (prepare []corev1.Container, appendLayer corev1.Container, staging corev1.Volume) {
+	stagingMount := corev1.VolumeMount{Name: workspaceVolumeName, MountPath: bakeRepoStagingPath}
+	layerTar := bakeRepoStagingPath + "/repo.tar"
+	dockerConfigDir := bakeRepoStagingPath + "/.docker"
+	topDir, _, _ := strings.Cut(strings.TrimPrefix(bakedRepoPath, "/"), "/")
+
+	clone := gitCloneInit(req.GitRepo, req.GitBranch, bakeRepoStagingPath+bakedRepoPath, bakeRepoStagingPath, req.GitAuthSecret)
+
+	script := fmt.Sprintf(`tar -C %s -cf %s %s && if [ -n "$DOCKER_CONFIG_BASE64" ]; then mkdir -p %s && echo "$DOCKER_CONFIG_BASE64" | base64 -d > %s/config.json; fi`,
+		bakeRepoStagingPath, layerTar, topDir, dockerConfigDir, dockerConfigDir)
+	var packageEnv []corev1.EnvVar
+	if dockerConfig != "" {
+		packageEnv = []corev1.EnvVar{{Name: "DOCKER_CONFIG_BASE64", Value: dockerConfig}}
+	}
+	pkg := corev1.Container{
+		Name: "repo-layer",
+		// Already pulled for the clone just before; it only needs a shell and tar.
+		Image:           "alpine/git:latest",
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Command:         []string{"sh", "-c", script},
+		Env:             packageEnv,
+		VolumeMounts:    []corev1.VolumeMount{stagingMount},
+	}
+
+	// envbuilder pushes the whole image under :latest (it tags pushRepo itself), so
+	// that is the base to append to — and the tag to move onto the result, which is
+	// what BakeRemoteUser/BakedImageDigest then resolve.
+	ref := pushRepo + ":latest"
+	args := []string{"append", "--base", ref, "--new_layer", layerTar, "--new_tag", ref}
+	if req.Devcontainer.Insecure {
+		args = append(args, "--insecure")
+	}
+	appendLayer = corev1.Container{
+		Name:            "bake-repo",
+		Image:           craneImage,
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Args:            args,
+		Env:             []corev1.EnvVar{{Name: "DOCKER_CONFIG", Value: dockerConfigDir}},
+		VolumeMounts:    []corev1.VolumeMount{stagingMount},
+	}
+
+	staging = corev1.Volume{
+		Name:         workspaceVolumeName,
+		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+	}
+	return []corev1.Container{clone, pkg}, appendLayer, staging
+}
+
 // bakeEnv builds the bake Job's envbuilder configuration — a narrower subset of
 // devcontainerEnv's: there is no IDE to protect and no live workspace folder, and the
 // init script is a trivial no-op rather than an IDE exec (see BakeJobStatus).
-func bakeEnv(req workspace.BakeRequest, internalRepo, dockerConfig string) []corev1.EnvVar {
+func bakeEnv(req workspace.BakeRequest, pushRepo, dockerConfig string) []corev1.EnvVar {
 	dc := req.Devcontainer
 
 	env := []corev1.EnvVar{
 		{Name: "ENVBUILDER_GIT_URL", Value: gitURLWithRef(req.GitRepo, req.GitBranch)},
-		{Name: "ENVBUILDER_CACHE_REPO", Value: internalRepo},
+		{Name: "ENVBUILDER_CACHE_REPO", Value: pushRepo},
 		{Name: "ENVBUILDER_PUSH_IMAGE", Value: "true"},
 		// envbuilder execs the init script (process replacement) once the build is
 		// done; a trivial, immediately-exiting script is what lets the Job's pod
@@ -247,13 +343,17 @@ func (b *Backend) BakeRemoteUser(ctx context.Context, repoRef string, insecure b
 
 // registryPullAuthHeader reads the same kubernetes.io/dockerconfigjson Secret used to
 // push (DevcontainerSpec.RegistryAuthSecret) and returns the "Authorization" header
-// value for host, if the secret carries credentials for it. An empty secret name, or
-// no entry for host, both return "", nil — an anonymous request, which is correct for
-// the in-cluster build cache (no auth configured at all).
+// value for host, if the secret carries credentials for it. An empty secret name for
+// this backend's own in-cluster registry means its generated credentials
+// (registryAuthSecretName) — callers never name that Secret. Otherwise an empty
+// secret name, or no entry for host, both return "", nil: an anonymous request.
 func (b *Backend) registryPullAuthHeader(ctx context.Context, secretName, host string) (string, error) {
 	secretName = strings.TrimSpace(secretName)
 	if secretName == "" {
-		return "", nil
+		if !isOwnRegistryHost(host) {
+			return "", nil
+		}
+		secretName = registryAuthSecretName
 	}
 	sec, err := b.client.CoreV1().Secrets(b.namespace).Get(ctx, secretName, metav1.GetOptions{})
 	if err != nil {

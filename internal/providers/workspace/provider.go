@@ -146,6 +146,11 @@ type DevcontainerSpec struct {
 	// this is how that privilege drop is replicated. Empty means run as the image's own
 	// default user (often root for a devcontainer base image).
 	RemoteUser string
+	// PrebuiltRepo reports that PrebuiltImage also carries a snapshot of the workshop
+	// repo (see BakeRequest.BakeRepo), so the workspace is seeded from the image
+	// instead of cloning GitRepo at start. False for a bake recorded before repos were
+	// baked, which keeps the ordinary clone. Ignored when PrebuiltImage is empty.
+	PrebuiltRepo bool
 }
 
 // Spec describes the workspace to create for a student.
@@ -254,7 +259,10 @@ type AuthSecret struct {
 type RegistryCacheProvider interface {
 	// EnsureBuildCache provisions (idempotently) an in-cluster registry for
 	// envbuilder's devcontainer layer cache and returns its repo address. The
-	// registry has no TLS, so callers must also set DevcontainerSpec.Insecure.
+	// registry has no TLS, so callers must also set DevcontainerSpec.Insecure. It
+	// does require authentication, but the backend supplies its own credentials
+	// wherever its registry is used (a build's cache, a baked image pull), so callers
+	// never name a Secret for it.
 	EnsureBuildCache(ctx context.Context) (repo string, err error)
 	// EnsureRegistryIngress provisions (idempotently) an Ingress exposing the
 	// in-cluster registry under domain, using the same TLS material a workspace
@@ -294,6 +302,10 @@ type BakeRequest struct {
 	// Insecure from the template as-is. CacheRepo/RegistryAuthSecret here name the
 	// *destination* the built image is pushed to, not a cache to pull from.
 	Devcontainer *DevcontainerSpec
+	// BakeRepo also snapshots GitRepo/GitBranch into the pushed image, so a workspace
+	// running it (DevcontainerSpec.PrebuiltRepo) starts without cloning. Ignored when
+	// GitRepo is empty.
+	BakeRepo bool
 }
 
 // BakeProvider is implemented by backends that can pre-bake a devcontainer template
