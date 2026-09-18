@@ -1209,8 +1209,8 @@ func gitCloneInit(repo, branch, dir, mountPath, authSecret string) corev1.Contai
 		env = basicAuthEnv(s, "GIT_USERNAME", "GIT_PASSWORD")
 	}
 
-	script := fmt.Sprintf(`mkdir -p %s; if [ -z "$(ls -A %s 2>/dev/null)" ]; then %s clone %s%s %s && chown -R 1000:1000 %s; fi`,
-		dir, dir, gitCmd, branchFlag, shellQuote(repo), dir, dir)
+	script := fmt.Sprintf(`mkdir -p %s; if %s; then %s clone %s%s %s && chown -R 1000:1000 %s; fi`,
+		dir, dirEmptyTest(dir), gitCmd, branchFlag, shellQuote(repo), dir, dir)
 	return corev1.Container{
 		Name:  "git-clone",
 		Image: "alpine/git:latest",
@@ -1234,8 +1234,8 @@ func gitCloneInit(repo, branch, dir, mountPath, authSecret string) corev1.Contai
 // pull; as root, because the devcontainer's default user need not be, and the copy
 // is chowned to uid/gid 1000 exactly as a clone would be.
 func bakedRepoSeedInit(image, dir, mountPath string) corev1.Container {
-	script := fmt.Sprintf(`mkdir -p %s; if [ -z "$(ls -A %s 2>/dev/null)" ]; then cp -a %s/. %s/ && chown -R 1000:1000 %s; fi`,
-		dir, dir, bakedRepoPath, dir, dir)
+	script := fmt.Sprintf(`mkdir -p %s; if %s; then cp -a %s/. %s/ && chown -R 1000:1000 %s; fi`,
+		dir, dirEmptyTest(dir), bakedRepoPath, dir, dir)
 	return corev1.Container{
 		Name:  "seed-repo",
 		Image: image,
@@ -1266,8 +1266,8 @@ func devcontainerConfigCloneInit(repo, branch, authSecret string) corev1.Contain
 		env = basicAuthEnv(s, "GIT_USERNAME", "GIT_PASSWORD")
 	}
 
-	script := fmt.Sprintf(`if [ -z "$(ls -A %s 2>/dev/null)" ]; then %s clone %s%s %s; fi`,
-		devcontainerConfigMountPath, gitCmd, branchFlag, shellQuote(repo), devcontainerConfigMountPath)
+	script := fmt.Sprintf(`if %s; then %s clone %s%s %s; fi`,
+		dirEmptyTest(devcontainerConfigMountPath), gitCmd, branchFlag, shellQuote(repo), devcontainerConfigMountPath)
 	return corev1.Container{
 		Name:  "devcontainer-config-clone",
 		Image: "alpine/git:latest",
@@ -1561,6 +1561,15 @@ func buildResources(cpu, mem, cpuLimit, memLimit string, isDevcontainer bool) co
 // shellQuote single-quotes a value for safe embedding in a sh -c script.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// dirEmptyTest returns a shell test expression that is true when dir holds no
+// user content. It ignores the lost+found directory that ext4/xfs create on a
+// freshly formatted persistent volume: a plain "ls -A" would report lost+found
+// and make an empty PVC look populated, silently skipping the clone/seed that
+// guards on it (see gitCloneInit, bakedRepoSeedInit, devcontainerConfigCloneInit).
+func dirEmptyTest(dir string) string {
+	return fmt.Sprintf(`[ -z "$(ls -A %s 2>/dev/null | grep -v '^lost+found$')" ]`, dir)
 }
 
 // domainFromDeployment reconstructs the base domain from a workspace's ingress

@@ -3,7 +3,9 @@ package kube
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -196,6 +198,51 @@ func TestGitCloneInit_ScriptIsValidSh(t *testing.T) {
 			cmd := exec.Command(sh, "-n", "-c", c.Command[2])
 			out, err := cmd.CombinedOutput()
 			assert.NoError(t, err, "generated script is not valid sh: %s\nscript: %s", out, c.Command[2])
+		})
+	}
+}
+
+// dirEmptyTest guards every clone/seed init container. A freshly formatted ext4/xfs
+// PVC ships a lost+found directory, which a naive "ls -A" would report and make the
+// volume look populated, silently skipping the clone. The test must treat a
+// lost+found-only directory as empty while still seeing real content.
+func TestDirEmptyTest(t *testing.T) {
+	t.Parallel()
+
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("sh not available")
+	}
+
+	tests := []struct {
+		name      string
+		entries   []string
+		wantEmpty bool
+	}{
+		{name: "truly empty", entries: nil, wantEmpty: true},
+		{name: "only lost+found", entries: []string{"lost+found"}, wantEmpty: true},
+		{name: "lost+found and content", entries: []string{"lost+found", "README.md"}, wantEmpty: false},
+		{name: "content only", entries: []string{"README.md"}, wantEmpty: false},
+		{name: "hidden file", entries: []string{".git"}, wantEmpty: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			for _, e := range tt.entries {
+				require.NoError(t, os.Mkdir(filepath.Join(dir, e), 0o755))
+			}
+
+			// Exit 0 when the guard is true (directory considered empty).
+			cmd := exec.Command(sh, "-c", dirEmptyTest(dir)+" && exit 0 || exit 1")
+			err := cmd.Run()
+			if tt.wantEmpty {
+				assert.NoError(t, err, "expected %v to be treated as empty", tt.entries)
+			} else {
+				assert.Error(t, err, "expected %v to be treated as non-empty", tt.entries)
+			}
 		})
 	}
 }

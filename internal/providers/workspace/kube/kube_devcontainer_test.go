@@ -658,7 +658,7 @@ func TestEnsureWorkspace_PrebuiltRepoSeedsInsteadOfCloning(t *testing.T) {
 			assert.Equal(t, spec.Devcontainer.PrebuiltImage, seed.Image, "the seed runs the baked image the workspace pulls anyway")
 			script := seed.Command[len(seed.Command)-1]
 			assert.Contains(t, script, "cp -a "+bakedRepoPath+"/. /home/coder/project/")
-			assert.Contains(t, script, `if [ -z "$(ls -A /home/coder/project 2>/dev/null)" ]`, "a returning student's files must never be overwritten")
+			assert.Contains(t, script, `if [ -z "$(ls -A /home/coder/project 2>/dev/null | grep -v '^lost+found$')" ]`, "a returning student's files must never be overwritten, but a lost+found-only PVC must still seed")
 			assert.Contains(t, script, "chown -R 1000:1000 /home/coder/project")
 			require.NotNil(t, seed.SecurityContext)
 			require.NotNil(t, seed.SecurityContext.RunAsUser)
