@@ -317,3 +317,107 @@ func warningKeys(ws []Warning) []string {
 	}
 	return out
 }
+
+func TestTranslate_Extensions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{
+			name:     "plain list",
+			input:    `{"customizations":{"vscode":{"extensions":["golang.go","ms-python.python"]}}}`,
+			expected: []string{"golang.go", "ms-python.python"},
+		},
+		{
+			name:     "removal entry is dropped",
+			input:    `{"customizations":{"vscode":{"extensions":["golang.go","-GitHub.copilot-chat"]}}}`,
+			expected: []string{"golang.go"},
+		},
+		{
+			name:     "removal also drops the matching install, case-insensitively",
+			input:    `{"customizations":{"vscode":{"extensions":["github.copilot-chat","golang.go","-GitHub.copilot-chat"]}}}`,
+			expected: []string{"golang.go"},
+		},
+		{
+			name:     "blank entries are dropped",
+			input:    `{"customizations":{"vscode":{"extensions":["", " golang.go "]}}}`,
+			expected: []string{"golang.go"},
+		},
+		{
+			name:     "only removals",
+			input:    `{"customizations":{"vscode":{"extensions":["-GitHub.copilot"]}}}`,
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, err := Parse([]byte(tt.input))
+			require.NoError(t, err)
+
+			res, err := Translate(cfg)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, res.Extensions)
+		})
+	}
+}
+
+func TestTranslate_Settings(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		input    string
+		expected map[string]any
+	}{
+		{
+			name: "settings copied, JSONC comments allowed",
+			input: `{
+				// comment
+				"customizations": {"vscode": {"settings": {
+					"chat.disableAIFeatures": true,
+					"editor.fontSize": 14,
+					"security.workspace.trust.enabled": false, // application-scoped
+				}}}
+			}`,
+			expected: map[string]any{
+				"chat.disableAIFeatures":           true,
+				"editor.fontSize":                  float64(14),
+				"security.workspace.trust.enabled": false,
+			},
+		},
+		{
+			name:     "empty settings object",
+			input:    `{"customizations":{"vscode":{"settings":{}}}}`,
+			expected: nil,
+		},
+		{
+			name:     "no customizations",
+			input:    `{}`,
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, err := Parse([]byte(tt.input))
+			require.NoError(t, err)
+
+			res, err := Translate(cfg)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, res.Settings)
+		})
+	}
+}
+
+func TestParse_SettingsMustBeObject(t *testing.T) {
+	t.Parallel()
+
+	_, err := Parse([]byte(`{"customizations":{"vscode":{"settings":["not","an","object"]}}}`))
+	require.ErrorIs(t, err, ErrParse)
+}

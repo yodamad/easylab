@@ -242,6 +242,21 @@ func TestParseWorkspaceTemplatesYAML_Errors(t *testing.T) {
 			wantInErr: `unknown field "imagee"`,
 		},
 		{
+			name: "vscode_settings must be a mapping",
+			input: `workspace_templates:
+  - name: default
+    vscode_settings: "editor.fontSize: 14"`,
+			wantInErr: "cannot unmarshal",
+		},
+		{
+			name: "vscode_settings rejects an empty key",
+			input: `workspace_templates:
+  - name: default
+    vscode_settings:
+      "": true`,
+			wantInErr: "vscode_settings has an empty key",
+		},
+		{
 			name: "wrong scalar type",
 			input: `workspace_templates:
   - name: default
@@ -426,7 +441,12 @@ func TestMarshalWorkspaceTemplatesYAML_RoundTrip(t *testing.T) {
 			MemoryLimit:   "8Gi",
 			StartupScript: "apt-get update\n",
 			Extensions:    []string{"golang.go", "ms-python.python"},
-			Env:           map[string]string{"FOO": "bar"},
+			VSCodeSettings: map[string]any{
+				"chat.disableAIFeatures": true,
+				"editor.fontSize":        float64(14),
+				"files.exclude":          map[string]any{"**/.git": true},
+			},
+			Env: map[string]string{"FOO": "bar"},
 			Sidecars: []WorkspaceSidecar{{
 				Name:  "db",
 				Image: "postgres:16",

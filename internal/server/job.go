@@ -135,6 +135,11 @@ type WorkspaceTemplate struct {
 	DotfilesRepo string `json:"dotfiles_repo,omitempty"`
 	// Extensions are VS Code extension IDs (or .vsix URLs) installed on start.
 	Extensions []string `json:"extensions,omitempty"`
+	// VSCodeSettings are VS Code settings.json entries written to the IDE's user
+	// settings on the workspace's first start (skipped once the file exists, so a
+	// student's own changes are kept). Filled from a devcontainer's
+	// customizations.vscode.settings at import, or set in the template YAML.
+	VSCodeSettings map[string]any `json:"vscode_settings,omitempty"`
 	// Sidecars are additional containers in the workspace pod (e.g. a database),
 	// reachable from the IDE at localhost:<port>.
 	Sidecars []WorkspaceSidecar `json:"sidecars,omitempty"`
@@ -178,7 +183,7 @@ type WorkspaceTemplate struct {
 // Note the division of labour: envbuilder reads image/build/features/containerEnv
 // and the lifecycle commands straight from the repo, so none of those appear
 // here. The surrounding WorkspaceTemplate covers what envbuilder ignores
-// (Extensions, CPU/Memory/DiskSize, GitFolder).
+// (Extensions, VSCodeSettings, CPU/Memory/DiskSize, GitFolder).
 //
 // By default devcontainer.json is read from the workshop repo
 // (WorkspaceTemplate.GitRepo). ConfigRepo, when set, moves that read to a

@@ -2068,6 +2068,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		StartupScript:    selected.StartupScript,
 		DotfilesRepo:     selected.DotfilesRepo,
 		Extensions:       selected.Extensions,
+		VSCodeSettings:   selected.VSCodeSettings,
 		Sidecars:         toWorkspaceSidecars(selected.Sidecars),
 		Mounts:           toWorkspaceMounts(selected.Mounts),
 		ImagePullSecrets: selected.ImagePullSecrets,

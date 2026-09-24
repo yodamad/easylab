@@ -739,6 +739,9 @@ func setupSteps(spec workspace.Spec, p ideProfile) string {
 	if repo := strings.TrimSpace(spec.DotfilesRepo); repo != "" {
 		fmt.Fprintf(&b, "if git clone %s \"$HOME/.dotfiles\"; then for s in install.sh setup.sh bootstrap.sh; do [ -x \"$HOME/.dotfiles/$s\" ] && \"$HOME/.dotfiles/$s\" && break; done; fi\n", shellQuote(repo))
 	}
+	if line := userSettingsStep(spec.VSCodeSettings); line != "" {
+		b.WriteString(line)
+	}
 	for _, ext := range spec.Extensions {
 		ext = strings.TrimSpace(ext)
 		if ext == "" {
@@ -747,6 +750,26 @@ func setupSteps(spec workspace.Spec, p ideProfile) string {
 		fmt.Fprintf(&b, "%s --install-extension %s || true\n", p.serverBin, shellQuote(ext))
 	}
 	return b.String()
+}
+
+// userSettingsStep returns the line that seeds the IDE's user settings.json, or
+// "" when there are no settings (or they cannot be encoded — validation rejects
+// those before a template is saved). The User layer rather than Machine, because
+// code-server ignores application-scoped settings such as
+// security.workspace.trust.enabled at Machine level.
+//
+// It only writes when the file does not exist: on a persistent home that is the
+// first start, so the student's own changes survive every restart after it.
+func userSettingsStep(settings map[string]any) string {
+	if len(settings) == 0 {
+		return ""
+	}
+	content, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("d=\"${XDG_DATA_HOME:-$HOME/.local/share}/code-server/User\"; [ -e \"$d/settings.json\" ] || { mkdir -p \"$d\" && printf '%%s\\n' %s > \"$d/settings.json\"; } || true\n",
+		shellQuote(string(content)))
 }
 
 // ideExecLine returns the line that execs the IDE with its start args, shell-quoted.

@@ -913,3 +913,37 @@ func TestResolveCloneAuth(t *testing.T) {
 		assert.Empty(t, token)
 	})
 }
+
+// TestDetectDevcontainer_CopiesVSCodeSettings covers customizations.vscode.settings
+// reaching the template as vscode_settings, and removal entries ("-ext") being
+// dropped rather than handed to --install-extension.
+func TestDetectDevcontainer_CopiesVSCodeSettings(t *testing.T) {
+	t.Parallel()
+
+	body := `{
+		"name": "Go Workshop",
+		"image": "golang:1.22",
+		"customizations": {"vscode": {
+			"extensions": ["golang.go", "-GitHub.copilot-chat"],
+			// JSONC: comments and trailing commas are allowed here.
+			"settings": {
+				"chat.disableAIFeatures": true,
+				"security.workspace.trust.enabled": false,
+			},
+		}}
+	}`
+
+	got := postDevcontainerUpload(t, "devcontainer.json", []byte(body), url.Values{
+		"git_repo":   {"https://gitlab.com/org/workshop.git"},
+		"cache_repo": {"registry.example.com/easylab/cache"},
+	})
+
+	templates, err := parseWorkspaceTemplatesYAML(got.TemplatesYAML)
+	require.NoError(t, err, "the seeded YAML must survive the editor's own validation")
+	require.Len(t, templates, 1)
+	assert.Equal(t, []string{"golang.go"}, templates[0].Extensions)
+	assert.Equal(t, map[string]any{
+		"chat.disableAIFeatures":           true,
+		"security.workspace.trust.enabled": false,
+	}, templates[0].VSCodeSettings)
+}

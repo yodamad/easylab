@@ -202,6 +202,9 @@ func devcontainerTemplate(res devcontainer.Result, r *http.Request) WorkspaceTem
 		MemoryLimit: strings.TrimSpace(getFormValue(r, "memory_limit")),
 		DiskSize:    res.DiskSize,
 		Extensions:  res.Extensions,
+		// Written to the IDE's user settings on first start, so a repo's
+		// customizations.vscode.settings apply as they would under Dev Containers.
+		VSCodeSettings: res.Settings,
 		// The credential the students' workspaces clone a private repo with —
 		// distinct from the request-scoped token that read the devcontainer here (see
 		// gitCloneAuth). Baked into the generated template so a private-repo workshop

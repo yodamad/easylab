@@ -50,9 +50,12 @@ type Result struct {
 	Base       Base     `json:"base"`
 	Features   []string `json:"features,omitempty"`
 	Extensions []string `json:"extensions,omitempty"`
-	CPU        string   `json:"cpu,omitempty"`
-	Memory     string   `json:"memory,omitempty"`
-	DiskSize   string   `json:"disk_size,omitempty"`
+	// Settings are the devcontainer's customizations.vscode.settings, seeded into
+	// the IDE's user settings on the workspace's first start.
+	Settings map[string]any `json:"settings,omitempty"`
+	CPU      string         `json:"cpu,omitempty"`
+	Memory   string         `json:"memory,omitempty"`
+	DiskSize string         `json:"disk_size,omitempty"`
 	// GitFolder is the subfolder the IDE should open, relative to the repo root.
 	// It is only set when the devcontainer's workspaceFolder is itself relative —
 	// see translateWorkspaceFolder.
@@ -86,7 +89,10 @@ func Translate(cfg *Config) (Result, error) {
 	}
 
 	if cfg.Customizations != nil && cfg.Customizations.VSCode != nil {
-		res.Extensions = append(res.Extensions, cfg.Customizations.VSCode.Extensions...)
+		res.Extensions = installableExtensions(cfg.Customizations.VSCode.Extensions)
+		if len(cfg.Customizations.VSCode.Settings) > 0 {
+			res.Settings = cfg.Customizations.VSCode.Settings
+		}
 	}
 
 	if hr := cfg.HostRequirements; hr != nil {
@@ -110,6 +116,28 @@ func Translate(cfg *Config) (Result, error) {
 
 	res.Warnings = append(res.Warnings, unsupportedWarnings(cfg)...)
 	return res, nil
+}
+
+// installableExtensions drops the Dev Containers "-publisher.ext" removal
+// entries, along with the extension each one removes. A removal means "do not
+// install", and handed to --install-extension it would only fail at every start.
+// Extension IDs are case-insensitive, so the match is too.
+func installableExtensions(exts []string) []string {
+	removed := make(map[string]bool)
+	for _, ext := range exts {
+		if id, ok := strings.CutPrefix(strings.TrimSpace(ext), "-"); ok {
+			removed[strings.ToLower(id)] = true
+		}
+	}
+	var out []string
+	for _, ext := range exts {
+		ext = strings.TrimSpace(ext)
+		if ext == "" || strings.HasPrefix(ext, "-") || removed[strings.ToLower(ext)] {
+			continue
+		}
+		out = append(out, ext)
+	}
+	return out
 }
 
 // translateWorkspaceFolder maps the devcontainer's workspaceFolder onto the

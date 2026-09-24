@@ -81,7 +81,7 @@ type Build struct {
 }
 
 // Customizations carries tool-specific settings; EasyLab reads the VS Code
-// extension list, which envbuilder only partially supports.
+// extension list and settings, which envbuilder only partially supports.
 type Customizations struct {
 	VSCode *VSCodeCustomizations `json:"vscode,omitempty"`
 }
@@ -89,6 +89,9 @@ type Customizations struct {
 // VSCodeCustomizations is the customizations.vscode object.
 type VSCodeCustomizations struct {
 	Extensions []string `json:"extensions,omitempty"`
+	// Settings are VS Code settings.json entries, written to the IDE's user
+	// settings on the workspace's first start.
+	Settings map[string]any `json:"settings,omitempty"`
 }
 
 // HostRequirements is the devcontainer sizing hint. envbuilder ignores it; it

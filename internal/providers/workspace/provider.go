@@ -187,6 +187,10 @@ type Spec struct {
 	Sidecars      []Sidecar
 	Mounts        []Mount
 
+	// VSCodeSettings are written to the IDE's user settings.json on first start,
+	// when that file does not exist yet.
+	VSCodeSettings map[string]any
+
 	// ImagePullSecrets name dockerconfigjson Secrets in the workspace namespace the
 	// kubelet pulls this workspace's images with (workspace image, sidecars, init
 	// containers). The devcontainer build pulls from inside the pod instead, so its

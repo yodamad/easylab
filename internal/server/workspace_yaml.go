@@ -45,6 +45,9 @@ workspace_templates:
     # extensions:                                # VS Code extension IDs or .vsix URLs
     #   - golang.go
     #   - ms-python.python
+    # vscode_settings:                           # written to the IDE's user settings.json on
+    #   editor.fontSize: 14                      # first start (kept if the student edits it)
+    #   chat.disableAIFeatures: true
     # env:                                       # passed to the workspace container
     #   FOO: bar
     # node_selector:                             # pins workspace pods to nodes with these labels
@@ -277,6 +280,9 @@ func validateWorkspaceTemplates(templates []WorkspaceTemplate) error {
 		if err := validatePersistence(where, t); err != nil {
 			return err
 		}
+		if err := validateVSCodeSettings(where, t.VSCodeSettings); err != nil {
+			return err
+		}
 
 		if err := validateSidecars(where, t.Sidecars); err != nil {
 			return err
@@ -290,6 +296,24 @@ func validateWorkspaceTemplates(templates []WorkspaceTemplate) error {
 		if err := validateDevcontainer(where, t); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// validateVSCodeSettings checks the settings encode to valid JSON, since they
+// are written verbatim as the IDE's settings.json — a file VS Code would
+// otherwise reject at startup, silently dropping every setting in it.
+func validateVSCodeSettings(where string, settings map[string]any) error {
+	if len(settings) == 0 {
+		return nil
+	}
+	for key := range settings {
+		if strings.TrimSpace(key) == "" {
+			return fmt.Errorf("%s: vscode_settings has an empty key", where)
+		}
+	}
+	if _, err := json.Marshal(settings); err != nil {
+		return fmt.Errorf("%s: vscode_settings is not valid JSON: %s", where, cleanDecodeError(err))
 	}
 	return nil
 }

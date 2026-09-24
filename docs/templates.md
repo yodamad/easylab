@@ -49,6 +49,7 @@ validation instead of silently shipping a lab without its image.
 | `startup_script` | string | Shell commands run before the IDE starts. Best-effort. |
 | `dotfiles_repo` | string | Cloned to `~/.dotfiles`; its `install.sh` / `setup.sh` / `bootstrap.sh` runs if present. |
 | `extensions` | list | VS Code extension IDs installed on start. |
+| `vscode_settings` | map | VS Code settings written to the student's user `settings.json` on first start. See [VS Code settings](#vs-code-settings). |
 | `env` | map | Environment variables for the workspace container. |
 | `sidecars` | list | Extra containers in the pod: `name`, `image`, `ports`, `env`, `privileged`, `capabilities`. |
 | `mounts` | list | Existing ConfigMaps/Secrets: `type` (`configmap` \| `secret`), `name`, `path`. Mounted **read-only**. |
@@ -282,6 +283,33 @@ workspace_templates:
 The repo is cloned to `~/.dotfiles` and the first executable of `install.sh`,
 `setup.sh` or `bootstrap.sh` runs. Like startup scripts, this is best-effort.
 
+## VS Code settings
+
+```yaml
+workspace_templates:
+  - name: focused
+    vscode_settings:
+      chat.disableAIFeatures: true
+      security.workspace.trust.enabled: false
+      editor.fontSize: 14
+      files.exclude:
+        "**/node_modules": true
+```
+
+The settings are written to code-server's user settings file
+(`~/.local/share/code-server/User/settings.json`) before the IDE starts. All
+setting scopes work there, including application-scoped ones such as
+`security.workspace.trust.enabled`.
+
+- **The file is only written when it does not exist yet.** On a persistent
+  workspace that means the first start: a student who changes a setting keeps
+  the change across restarts, and a later edit to `vscode_settings` does not
+  reach workspaces that already exist.
+- **The value must be a map.** It is validated when the YAML is saved; a key
+  with no name, or a value that is not a mapping, is rejected in the editor.
+- **Importing a devcontainer** fills `vscode_settings` from its
+  `customizations.vscode.settings` — see [Importing a devcontainer](#importing-a-devcontainer).
+
 ## Everything together
 
 A full-featured template using most of the schema:
@@ -481,7 +509,8 @@ does impose three constraints:
   project folder, because envbuilder replaces the entire root filesystem during
   the build and a devcontainer image's user home is often not `/home/coder` at
   all. Extensions and IDE settings are therefore reinstalled on each start —
-  declare them in `extensions` rather than relying on them persisting.
+  declare them in `extensions` and `vscode_settings` rather than relying on them
+  persisting. A student's own settings changes are lost on restart.
 
 Authentication is the same as outside devcontainer mode: code-server presents a
 login page taking the workspace password.
@@ -575,7 +604,8 @@ keys the build ignores; and some keys are honoured by neither.
 | `features` | The build |
 | `containerEnv`, `remoteEnv` | The build |
 | `postCreateCommand`, `onCreateCommand`, `updateContentCommand` | The build |
-| `customizations.vscode.extensions` | **EasyLab** — copied to `extensions` on import |
+| `customizations.vscode.extensions` | **EasyLab** — copied to `extensions` on import; `-publisher.ext` removal entries are dropped, along with the extension they remove |
+| `customizations.vscode.settings` | **EasyLab** — copied to `vscode_settings` on import |
 | `hostRequirements.cpus` / `memory` / `storage` | **EasyLab** — copied to `cpu` / `memory` / `disk_size` on import |
 | `workspaceFolder` | **EasyLab** — copied to `git_folder` when relative |
 | `dockerComposeFile`, `service`, `runServices` | **Nobody** — rejected at import |
