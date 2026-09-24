@@ -1751,6 +1751,28 @@ func TestTemplatesFromUploadRequest_LegacyFlatFields(t *testing.T) {
 	assert.Equal(t, "5Gi", templates[0].DiskSize)
 }
 
+func TestParseWorkspaceTemplatesFromForm_GitShallow(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		form     map[string][]string
+		expected bool
+	}{
+		{name: "unchecked", form: map[string][]string{"template_0_name": {"t"}}, expected: false},
+		{name: "checked", form: map[string][]string{"template_0_name": {"t"}, "template_0_git_shallow": {"true"}}, expected: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequest("POST", "/", nil)
+			req.Form = tt.form
+			templates := parseWorkspaceTemplatesFromForm(req)
+			require.Len(t, templates, 1)
+			assert.Equal(t, tt.expected, templates[0].GitShallow)
+		})
+	}
+}
+
 func TestParseWorkspaceTemplatesFromForm_WithEnv(t *testing.T) {
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Form = map[string][]string{

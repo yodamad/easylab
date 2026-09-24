@@ -281,7 +281,12 @@ func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsM
 	// The executor owns that moment; the handler owns the cluster connection — so
 	// the executor calls back here rather than growing a backend of its own.
 	if pulumiExec != nil {
-		pulumiExec.afterProvision = h.applyPendingSecrets
+		pulumiExec.afterProvision = func(jobID string) {
+			h.applyPendingSecrets(jobID)
+			// After the secrets, which the pre-pull may need to pull with. Async so a
+			// slow cluster does not hold back the lab being reported ready.
+			go h.reconcilePrepull(jobID)
+		}
 	}
 	return h
 }
@@ -477,6 +482,7 @@ func parseWorkspaceTemplatesFromForm(r *http.Request) []WorkspaceTemplate {
 			GitRepo:       getFormValue(r, fmt.Sprintf("template_%d_git_repo", i)),
 			GitBranch:     getFormValue(r, fmt.Sprintf("template_%d_git_branch", i)),
 			GitFolder:     getFormValue(r, fmt.Sprintf("template_%d_git_folder", i)),
+			GitShallow:    getFormValue(r, fmt.Sprintf("template_%d_git_shallow", i)) != "",
 			CPU:           getFormValue(r, fmt.Sprintf("template_%d_cpu", i)),
 			Memory:        getFormValue(r, fmt.Sprintf("template_%d_memory", i)),
 			CPULimit:      getFormValue(r, fmt.Sprintf("template_%d_cpu_limit", i)),
@@ -1820,6 +1826,9 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Failed to persist templates for lab %s: %v", jobID, err)
 		}
 	}()
+	// Start pulling the new template's images onto the nodes now, not at the next
+	// cleanup tick.
+	go h.reconcilePrepull(jobID)
 
 	names := make([]string, len(templates))
 	for i, t := range templates {
@@ -1854,6 +1863,7 @@ func templatesFromUploadRequest(r *http.Request) ([]WorkspaceTemplate, error) {
 		GitRepo:       strings.TrimSpace(r.FormValue("template_git_repo")),
 		GitBranch:     strings.TrimSpace(r.FormValue("template_git_branch")),
 		GitFolder:     strings.TrimSpace(r.FormValue("template_git_folder")),
+		GitShallow:    strings.TrimSpace(r.FormValue("template_git_shallow")) != "",
 		CPU:           strings.TrimSpace(r.FormValue("template_cpu")),
 		Memory:        strings.TrimSpace(r.FormValue("template_memory")),
 		CPULimit:      strings.TrimSpace(r.FormValue("template_cpu_limit")),
@@ -2056,6 +2066,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		GitRepo:          selected.GitRepo,
 		GitBranch:        selected.GitBranch,
 		GitFolder:        selected.GitFolder,
+		GitShallow:       selected.GitShallow,
 		CPU:              selected.CPU,
 		Memory:           selected.Memory,
 		CPULimit:         selected.CPULimit,
@@ -4043,6 +4054,9 @@ func (h *Handler) DestroyStack(w http.ResponseWriter, r *http.Request) {
 		h.pulumiExecSem <- struct{}{}
 		defer func() { <-h.pulumiExecSem }()
 		log.Printf("Starting stack destruction for job: %s, stack: %s", jobID, stackName)
+		// Best-effort: on a BYO cluster, which outlives the lab, nothing else would
+		// remove the lab's image pre-pull.
+		h.removePrepull(jobID)
 		if err := h.pulumiExec.Destroy(jobID); err != nil {
 			log.Printf("Stack destruction failed for job %s: %v", jobID, err)
 			h.jobManager.SetError(jobID, fmt.Errorf("destroy failed: %w", err))

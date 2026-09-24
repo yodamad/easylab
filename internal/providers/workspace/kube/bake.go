@@ -171,7 +171,9 @@ func bakeRepoSteps(req workspace.BakeRequest, pushRepo, dockerConfig string) (pr
 	dockerConfigDir := bakeRepoStagingPath + "/.docker"
 	topDir, _, _ := strings.Cut(strings.TrimPrefix(bakedRepoPath, "/"), "/")
 
-	clone := gitCloneInit(req.GitRepo, req.GitBranch, bakeRepoStagingPath+bakedRepoPath, bakeRepoStagingPath, req.GitAuthSecret)
+	// Always a full clone: the bake runs once per template, so the history in the
+	// snapshot costs nothing per student.
+	clone := gitCloneInit(req.GitRepo, req.GitBranch, bakeRepoStagingPath+bakedRepoPath, bakeRepoStagingPath, req.GitAuthSecret, false)
 
 	script := fmt.Sprintf(`tar -C %s -cf %s %s && if [ -n "$DOCKER_CONFIG_BASE64" ]; then mkdir -p %s && echo "$DOCKER_CONFIG_BASE64" | base64 -d > %s/config.json; fi`,
 		bakeRepoStagingPath, layerTar, topDir, dockerConfigDir, dockerConfigDir)

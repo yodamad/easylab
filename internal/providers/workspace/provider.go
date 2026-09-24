@@ -165,6 +165,7 @@ type Spec struct {
 	GitRepo     string            // optional git repo cloned into the workspace on first start
 	GitBranch   string            // optional branch to clone (default branch when empty)
 	GitFolder   string            // optional subfolder the IDE opens (repo root when empty)
+	GitShallow  bool              // clone GitRepo with --depth 1: faster for big repos, but no history
 	CPU         string            // optional CPU request (e.g. "500m"); also the limit when CPULimit is empty
 	Memory      string            // optional memory request (e.g. "1Gi"); also the limit when MemoryLimit is empty
 	CPULimit    string            // optional CPU limit override; empty means limit == CPU
@@ -280,6 +281,25 @@ type RegistryCacheProvider interface {
 	// require EnsureRegistryIngress to have run yet. external is "" when domain is
 	// empty (no Ingress is possible without one).
 	BakedImageRepo(labID, template, domain string) (internalRepo, externalRepo string)
+}
+
+// PrepullRequest lists the images a lab's workspaces start from, so they can be
+// pulled onto every node ahead of the first student instead of during their wait.
+type PrepullRequest struct {
+	Images       []string          // every image a workspace pod of this lab can run
+	PullSecrets  []string          // dockerconfigjson Secrets needed to pull them
+	NodeSelector map[string]string // nodes workspaces can land on (empty = all)
+}
+
+// ImagePrepuller is implemented by backends that can warm the nodes' image cache
+// for a lab. Optional and deliberately separate from Backend, like
+// RegistryCacheProvider above — callers type-assert for it.
+type ImagePrepuller interface {
+	// EnsurePrepull creates or updates (idempotently) the lab's pre-pull workload so
+	// every matching node holds req.Images. An empty image list removes it.
+	EnsurePrepull(ctx context.Context, labID string, req PrepullRequest) error
+	// RemovePrepull deletes the lab's pre-pull workload; absent is not an error.
+	RemovePrepull(ctx context.Context, labID string) error
 }
 
 // BakeState reports the outcome of a template's most recent bake attempt.

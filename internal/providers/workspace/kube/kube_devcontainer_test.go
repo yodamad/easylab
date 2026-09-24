@@ -250,6 +250,73 @@ func TestEnsureWorkspace_PlainModeStillClones(t *testing.T) {
 	assert.NotEqual(t, envbuilderImage, c.Image)
 }
 
+func TestGitCloneInit_Shallow(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		branch      string
+		shallow     bool
+		contains    []string
+		notContains []string
+	}{
+		{name: "full clone by default", notContains: []string{"--depth"}},
+		{name: "shallow", shallow: true, contains: []string{"clone --depth 1 'https://"}},
+		{name: "shallow with branch", branch: "main", shallow: true, contains: []string{"--depth 1 --branch 'main' --single-branch "}},
+		{name: "branch only", branch: "main", contains: []string{"--branch 'main' --single-branch "}, notContains: []string{"--depth"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := gitCloneInit("https://gitlab.com/org/workshop.git", tt.branch, "/home/coder/project", "/home/coder", "", tt.shallow)
+			require.Len(t, c.Command, 3)
+			for _, s := range tt.contains {
+				assert.Contains(t, c.Command[2], s)
+			}
+			for _, s := range tt.notContains {
+				assert.NotContains(t, c.Command[2], s)
+			}
+			assert.Equal(t, GitCloneImage, c.Image)
+		})
+	}
+}
+
+func TestEnsureWorkspace_GitShallowReachesClone(t *testing.T) {
+	b, cs := newTestBackend()
+
+	ws, err := b.EnsureWorkspace(context.Background(), workspace.Spec{
+		LabID: "job-1", Owner: "bob", Domain: "d", Token: "t",
+		GitRepo: "https://gitlab.com/org/workshop.git", GitShallow: true,
+	})
+	require.NoError(t, err)
+
+	c, ok := initContainerNamed(t, cs, ws.ID, "git-clone")
+	require.True(t, ok)
+	assert.Contains(t, c.Command[2], "--depth 1")
+}
+
+func TestEnsureWorkspace_DevcontainerGitCloneDepth(t *testing.T) {
+	tests := []struct {
+		name     string
+		shallow  bool
+		expected string
+	}{
+		{name: "full clone leaves depth unset", shallow: false, expected: ""},
+		{name: "shallow sets depth 1", shallow: true, expected: "1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, cs := newTestBackend()
+			spec := devcontainerSpec()
+			spec.GitShallow = tt.shallow
+
+			ws, err := b.EnsureWorkspace(context.Background(), spec)
+			require.NoError(t, err)
+			env := envOf(ideContainer(t, cs, ws.ID))
+			assert.Equal(t, tt.expected, env["ENVBUILDER_GIT_CLONE_DEPTH"])
+		})
+	}
+}
+
 func TestEnsureWorkspace_DevcontainerAppliesSetupSteps(t *testing.T) {
 	b, cs := newTestBackend()
 

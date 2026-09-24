@@ -101,6 +101,11 @@ const (
 	// clones the repo, builds devcontainer.json (image, Dockerfile, features) and
 	// then execs the init script in the result.
 	envbuilderImage = "ghcr.io/coder/envbuilder:latest"
+	// EnvbuilderImage exports envbuilderImage so the server can list it among the
+	// images a lab's nodes should pre-pull.
+	EnvbuilderImage = envbuilderImage
+	// GitCloneImage runs a workspace's git-clone init container (see gitCloneInit).
+	GitCloneImage = "alpine/git:latest"
 
 	// ideMountPath is where the IDE bundle is injected in devcontainer mode. The
 	// image envbuilder builds is the workshop's own and contains no IDE, so the
@@ -595,7 +600,7 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 			if spec.Devcontainer != nil && spec.Devcontainer.PrebuiltRepo {
 				initContainers = append(initContainers, bakedRepoSeedInit(spec.Devcontainer.PrebuiltImage, p.workspaceDir, mountPath))
 			} else {
-				initContainers = append(initContainers, gitCloneInit(spec.GitRepo, spec.GitBranch, p.workspaceDir, mountPath, spec.GitAuthSecret))
+				initContainers = append(initContainers, gitCloneInit(spec.GitRepo, spec.GitBranch, p.workspaceDir, mountPath, spec.GitAuthSecret, spec.GitShallow))
 			}
 		}
 	}
@@ -892,6 +897,10 @@ func devcontainerEnv(spec workspace.Spec, p ideProfile, dockerConfig string) []c
 	}
 	if dc.Insecure {
 		env = append(env, corev1.EnvVar{Name: "ENVBUILDER_INSECURE", Value: "true"})
+	}
+	// Same opt-in as the plain clone's --depth 1 (see gitCloneInit).
+	if spec.GitShallow {
+		env = append(env, corev1.EnvVar{Name: "ENVBUILDER_GIT_CLONE_DEPTH", Value: "1"})
 	}
 	// Credentials for a private workshop repo, by reference so the token stays out
 	// of the Deployment. Safe to hand envbuilder despite the IDE running as its
@@ -1216,10 +1225,16 @@ func homeSeedInit(image, homeDir string) corev1.Container {
 // mountPath is where the workspace volume is mounted, which is dir itself for a
 // project-only mount and the home directory above it when the whole home is
 // persisted — dir is created either way before the clone.
-func gitCloneInit(repo, branch, dir, mountPath, authSecret string) corev1.Container {
+//
+// shallow clones only the tip commit (--depth 1, which implies --single-branch),
+// trading the repo's history for a much faster first start on large repos.
+func gitCloneInit(repo, branch, dir, mountPath, authSecret string, shallow bool) corev1.Container {
 	branchFlag := ""
+	if shallow {
+		branchFlag = "--depth 1 "
+	}
 	if b := strings.TrimSpace(branch); b != "" {
-		branchFlag = fmt.Sprintf("--branch %s --single-branch ", shellQuote(b))
+		branchFlag += fmt.Sprintf("--branch %s --single-branch ", shellQuote(b))
 	}
 
 	// gitCmd carries a literal %s (from the helper's printf). It is only ever
@@ -1236,7 +1251,7 @@ func gitCloneInit(repo, branch, dir, mountPath, authSecret string) corev1.Contai
 		dir, dirEmptyTest(dir), gitCmd, branchFlag, shellQuote(repo), dir, dir)
 	return corev1.Container{
 		Name:  "git-clone",
-		Image: "alpine/git:latest",
+		Image: GitCloneImage,
 		// See the workspace container's ImagePullPolicy comment: this image is
 		// shared by every workspace pod, so reuse the node's cache once present.
 		ImagePullPolicy: corev1.PullIfNotPresent,

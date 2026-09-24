@@ -128,7 +128,7 @@ The **essentials**:
 
 * **Template name** — Name shown in the student template selector.
 * **Description** (optional) — a free-text summary of what the template provides (e.g. *Go 1.26 + Postgres*). Shown next to the template name in the lab's **Templates** panel.
-* **Git Repository** (optional) — a repo cloned into the workspace on first start, into an empty workspace only. The **branch** field clones a specific branch; **subfolder** opens a subdirectory of the repo.
+* **Git Repository** (optional) — a repo cloned into the workspace on first start, into an empty workspace only. The **branch** field clones a specific branch; **subfolder** opens a subdirectory of the repo. Tick **Shallow clone** to clone only the latest commit. The workspace starts faster on a large repo, but the student gets no git history (see [Faster first start](templates.md#faster-first-start)).
 
 Under **Advanced options** (all optional):
 

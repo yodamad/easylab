@@ -39,6 +39,7 @@ validation instead of silently shipping a lab without its image.
 | `git_repo` | string | Cloned into the workspace on first start, into an empty workspace only. |
 | `git_branch` | string | Clones a single branch. Default branch when unset. |
 | `git_folder` | string | Subfolder of the repo the IDE opens. Repo root when unset. |
+| `git_shallow` | bool | `true` clones only the latest commit (`--depth 1`): faster first start on a large repo, but **no git history**. See [Faster first start](#faster-first-start). |
 | `cpu` | string | Resource request, e.g. `500m`. **Quote plain numbers**: `"2"`. |
 | `memory` | string | Resource request, e.g. `4Gi`. |
 | `cpu_limit` | string | Resource limit override. **Empty means it matches `cpu`** (the request). |
@@ -111,6 +112,38 @@ workspace_templates:
 
 The repo is cloned **only when the volume is empty** — a restarting workspace keeps
 the student's own commits and edits rather than being reset.
+
+## Faster first start
+
+Most of a student's wait happens while the workspace pod starts, not in EasyLab.
+Two things help:
+
+* **Images are pre-pulled for you.** Every lab runs a small DaemonSet
+  (`easylab-prepull-<lab id>`, in the workspace namespace) that pulls each
+  template's images onto every node ahead of time. That covers the IDE image,
+  sidecars, the git-clone helper, and the baked or envbuilder image for
+  devcontainer templates. So the first student on a node, or on a node the
+  autoscaler just added, does not wait on a multi-hundred-megabyte pull. This
+  needs no configuration; see
+  [Image pre-pull](admin-lab-management.md#image-pre-pull).
+* **`git_shallow: true` for large repos.** It clones only the latest commit
+  instead of the full history. The student can still commit, push and pull, but
+  `git log`, `git blame` and checking out older commits only see that one commit.
+  Use it when the history is large and the exercises don't need it. It also
+  applies to a devcontainer template that is not baked
+  (`ENVBUILDER_GIT_CLONE_DEPTH=1`). A baked repo snapshot is always a full clone,
+  because it is taken once and not per student.
+
+```yaml
+workspace_templates:
+  - name: big-repo
+    git_repo: https://gitlab.com/org/monorepo.git
+    git_shallow: true
+```
+
+If students don't need their work to survive a reschedule, `ephemeral: true`
+also skips attaching a persistent volume, which on OVHcloud adds tens of seconds
+to a start. Read the warning under [Persistence](#persistence) first.
 
 ## Sizing a workspace
 

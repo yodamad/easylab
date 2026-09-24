@@ -775,6 +775,23 @@ main {
     margin-top: 0.5rem;
 }
 
+/* A checkbox directly in a step (e.g. "Shallow clone" under the git repo): keep
+   the box inline with its text rather than stretched by the generic input width,
+   same fix as .form-checkboxes .checkbox-label below. */
+.ut-step-body > .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    font-size: 0.875rem;
+}
+
+.ut-step-body > .checkbox-label input[type="checkbox"] {
+    width: auto;
+    flex: none;
+    margin: 0;
+}
+
 /* Collapsible "Advanced options" (per template) and "Credentials" disclosures.
    Everything past the essentials lives here so the step opens calm, not crowded. */
 .template-advanced {

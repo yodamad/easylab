@@ -30,7 +30,7 @@ test.describe('Workspace template editor', () => {
 
   test('offers every field the form builder submits', async ({ page }) => {
     const fields = [
-      'name', 'description', 'git_repo', 'git_branch', 'git_folder',
+      'name', 'description', 'git_repo', 'git_branch', 'git_folder', 'git_shallow',
       'git_auth_secret', 'image', 'cpu', 'cpu_limit', 'memory',
       'memory_limit', 'disk_size', 'startup_script', 'dotfiles_repo', 'extensions',
     ];

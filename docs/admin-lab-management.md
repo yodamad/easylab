@@ -146,6 +146,28 @@ workspaces.
 > the workspace is recreated. Because workspaces are cleaned up on their lifetime,
 > this resolves on its own.
 
+### Image pre-pull
+
+Each lab keeps its workspace images cached on the cluster's nodes, so a student
+never waits for an image download that could have happened earlier. EasyLab runs
+one DaemonSet per lab, `easylab-prepull-<lab id>`, in the workspace namespace.
+Its pod pulls every image the lab's templates use (IDE image, sidecars,
+git-clone helper, and baked or envbuilder images), then idles on a `pause`
+container. It requests almost no CPU or memory.
+
+* It is created when the lab finishes provisioning, and updated right away when
+  you add a template or a bake succeeds. The background cleanup pass (every 5
+  minutes) also re-checks it, which covers templates edited any other way and
+  nodes the autoscaler adds.
+* If every template sets the same **Node Selector**, pulls are limited to those
+  nodes. Otherwise every node pulls.
+* It uses the templates' `image_pull_secrets`, plus the in-cluster registry's
+  credentials when a baked image lives there.
+* Destroying the lab removes it, including on a bring-your-own cluster.
+
+To check it, run `kubectl get ds -n <workspace namespace>`. It should show one
+ready pod per node.
+
 ### Pre-baking a devcontainer template
 
 A devcontainer template's card carries a **Bake image** button (**Rebuild** once a

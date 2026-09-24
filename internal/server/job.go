@@ -101,8 +101,12 @@ type WorkspaceTemplate struct {
 	GitRepo     string `json:"git_repo,omitempty"`
 	GitBranch   string `json:"git_branch,omitempty"`
 	GitFolder   string `json:"git_folder,omitempty"`
-	CPU         string `json:"cpu,omitempty"`
-	Memory      string `json:"memory,omitempty"`
+	// GitShallow clones GitRepo with --depth 1: only the tip commit, so a large
+	// workshop repo is ready much sooner, at the cost of the student having no git
+	// history (no log, blame or checkout of older commits). Opt-in for that reason.
+	GitShallow bool   `json:"git_shallow,omitempty"`
+	CPU        string `json:"cpu,omitempty"`
+	Memory     string `json:"memory,omitempty"`
 	// CPULimit/MemoryLimit override the pod's resource limit independently of
 	// CPU/Memory (the request); left blank, the limit equals the request, same
 	// as before these fields existed.

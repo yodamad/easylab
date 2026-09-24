@@ -396,6 +396,9 @@ poll:
 			log.Printf("Failed to persist bake result for lab %s template %s: %v", jobID, templateName, err)
 		}
 	}()
+	// The baked image replaces envbuilder for this template — get it onto the nodes
+	// before students start pulling it.
+	go h.reconcilePrepull(jobID)
 
 	h.bakeStatusesMu.Lock()
 	delete(h.bakeStatuses, key)

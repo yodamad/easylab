@@ -27,6 +27,7 @@ workspace_templates:
     # git_repo: https://gitlab.com/user/repo.git # cloned into the workspace on first start
     # git_branch: main
     # git_folder: exercises                      # subfolder opened in the IDE
+    # git_shallow: true                          # clone only the latest commit: faster, but no history
     # git_auth_secret: gitcred                   # basic-auth Secret for a private git_repo (http(s) only)
     # image_pull_secrets:                        # dockerconfigjson Secrets the kubelet pulls images with
     #   - regcred
