@@ -8,14 +8,22 @@
         return match ? decodeURIComponent(match[1]) : '';
     }
 
-    function csrfToken() {
-        // Only one of these is set at a time (admin session vs student session).
-        return getCookie('csrf_token') || getCookie('student_csrf_token');
+    // Pick the token matching the session the target route authenticates
+    // against. Both cookies can coexist in one browser (admin + student logins,
+    // or a leftover admin cookie whose in-memory session died on redeploy), so
+    // preferring one blindly sends the wrong token and auth.go answers 403.
+    function csrfToken(url) {
+        let path = window.location.pathname;
+        try {
+            if (url) path = new URL(url, window.location.href).pathname;
+        } catch (e) { /* keep current page path */ }
+        const isStudent = path.startsWith('/student/') || path.startsWith('/api/student/');
+        return getCookie(isStudent ? 'student_csrf_token' : 'csrf_token');
     }
 
     // HTMX requests: attach the header HTMX will send along with the request.
     document.body.addEventListener('htmx:configRequest', function (event) {
-        const token = csrfToken();
+        const token = csrfToken(event.detail.path);
         if (token) {
             event.detail.headers['X-CSRF-Token'] = token;
         }
@@ -32,7 +40,7 @@
         }
         if ((form.getAttribute('method') || 'get').toLowerCase() !== 'post') return;
 
-        const token = csrfToken();
+        const token = csrfToken(form.getAttribute('action') || window.location.href);
         if (!token) return;
 
         let input = form.querySelector('input[name="csrf_token"]');
@@ -60,7 +68,7 @@
             return originalFetch(input, init);
         }
 
-        const token = csrfToken();
+        const token = csrfToken(url);
         if (!token) return originalFetch(input, init);
 
         const headers = new Headers((init && init.headers) || (input instanceof Request ? input.headers : undefined));

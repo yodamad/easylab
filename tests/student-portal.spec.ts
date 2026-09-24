@@ -231,3 +231,28 @@ test.describe('Student Portal Access Control', () => {
   });
 });
 
+
+test.describe('Student CSRF with stale admin cookie', () => {
+  test('should not send a leftover admin csrf_token on student requests', async ({ page, context }) => {
+    // A browser that used the admin UI keeps its csrf_token cookie even after the
+    // admin session is gone (e.g. server redeploy). It must not shadow the student token.
+    await context.addCookies([{ name: 'csrf_token', value: 'stale-admin-token', url: 'http://localhost:8080' }]);
+
+    await page.goto('/student/login');
+    await page.locator('input[type="email"]').fill('student@example.com');
+    await page.locator('input[type="password"]').fill('studentpass');
+    await page.locator('button[type="submit"]').click();
+    await page.waitForLoadState('networkidle');
+    await expect(page).toHaveURL(/\/student\/dashboard/);
+
+    const status = await page.evaluate(async () => {
+      const resp = await fetch('/api/student/workspace/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'lab_id=unknown',
+      });
+      return resp.status;
+    });
+    expect(status).not.toBe(403);
+  });
+});
