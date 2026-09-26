@@ -25,8 +25,8 @@ lab's history rather than scanning the global log.
 
 ## What's tracked
 
-* Lab actions: create, dry run, launch, destroy, retry (with or without an edited configuration), recreate, delete, template upload, lifecycle edit
-* Workspace actions: student-initiated creation, admin-initiated deletion (single or bulk)
+* Lab actions: create, dry run, launch, destroy, retry (with or without an edited configuration), recreate, delete, template upload, template removal, lifecycle edit
+* Workspace actions: student-initiated creation, admin-initiated deletion (single, bulk, or as part of removing a template)
 * Credential changes: saving OVH or Azure credentials (the credential values themselves are never recorded)
 * Admin viewing the shared student portal login password
 * Automatic (system) actions: workspaces deleted for exceeding their configured lifetime, labs auto-destroyed past their scheduled deletion date

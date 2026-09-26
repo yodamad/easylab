@@ -91,7 +91,7 @@ func sanitizeRepoSegment(s string) string {
 	return strings.Trim(s, "-")
 }
 
-// bakePathParts parses "api/labs/{id}/templates/{name}/bake[-status]" and returns
+// bakePathParts parses "api/labs/{id}/templates/{name}/{bake,bake-status,remove}" and returns
 // the job ID and (URL-decoded) template name, or ok=false with the response already
 // written on failure.
 func bakePathParts(w http.ResponseWriter, r *http.Request) (jobID, templateName string, ok bool) {

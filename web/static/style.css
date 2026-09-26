@@ -6869,6 +6869,76 @@ details[open] > .secrets-summary::after {
     border: 1px solid var(--border);
 }
 
+/* Remove a template: a quiet button that opens a confirmation inside the card,
+   which also turns the card's border red while it's open. */
+.template-remove-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: auto; /* stays at the bottom when grid rows stretch the card */
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+}
+
+.template-remove-confirm {
+    display: none;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.6rem 0.75rem;
+    border-left: 3px solid var(--error);
+    background: color-mix(in srgb, var(--error) 6%, transparent);
+    border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.template-status-card.is-confirming {
+    border-color: var(--error);
+}
+
+/* An open confirmation makes its card tall; don't stretch its neighbours to match. */
+.templates-grid:has(.is-confirming) {
+    align-items: start;
+}
+
+.template-status-card.is-confirming .template-remove-row {
+    display: none;
+}
+
+.template-status-card.is-confirming .template-remove-confirm {
+    display: flex;
+}
+
+.template-remove-text {
+    margin: 0;
+    font-size: 0.82rem;
+    color: var(--text);
+}
+
+.template-remove-owners {
+    margin: 0;
+    padding-left: 1.1rem;
+    font-size: 0.8rem;
+    color: var(--text-light);
+    max-height: 7.5rem;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+}
+
+.template-remove-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .template-status-card.is-confirming .template-remove-confirm {
+        animation: template-remove-reveal 160ms ease-out;
+    }
+}
+
+@keyframes template-remove-reveal {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
 .templates-unattributed-note {
     margin: 0.75rem 0 0;
     font-size: 0.8rem;

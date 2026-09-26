@@ -1840,6 +1840,130 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "template": names[0], "templates": names})
 }
 
+// RemoveTemplateFromLab handles POST /api/labs/{id}/templates/{name}/remove.
+// It takes the template off the lab and deletes every student workspace that
+// was created from it. A lab's last template can't be removed: an empty list
+// would make GetWorkspaceTemplates fall back to an implicit "default" template.
+//
+// The template leaves the config before any workspace is deleted, so a student
+// request racing the removal is rejected by RequestWorkspace rather than
+// recreating a workspace behind it. It also leaves the config when the cluster
+// can't be reached — the response then reports the workspaces as not cleaned up.
+func (h *Handler) RemoveTemplateFromLab(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	jobID, templateName, ok := bakePathParts(w, r)
+	if !ok {
+		return
+	}
+
+	job, exists := h.jobManager.GetJob(jobID)
+	if !exists {
+		http.Error(w, "Lab not found", http.StatusNotFound)
+		return
+	}
+	job.mu.RLock()
+	status := job.Status
+	kubeconfig := extractStringFromConfigValue(job.Kubeconfig)
+	namespace := job.workspaceNamespace()
+	job.mu.RUnlock()
+	if status != JobStatusCompleted {
+		http.Error(w, "Lab is not ready yet", http.StatusConflict)
+		return
+	}
+
+	found, isLast := false, false
+	h.updateJobConfig(jobID, func(config *LabConfig) {
+		kept := make([]WorkspaceTemplate, 0, len(config.WorkspaceTemplates))
+		for _, t := range config.WorkspaceTemplates {
+			if t.Name == templateName {
+				found = true
+				continue
+			}
+			kept = append(kept, t)
+		}
+		if !found {
+			return
+		}
+		if len(kept) == 0 {
+			isLast = true
+			return
+		}
+		config.WorkspaceTemplates = kept
+		delete(config.BakedImages, templateName)
+	})
+	if !found {
+		http.Error(w, "Template not found", http.StatusNotFound)
+		return
+	}
+	if isLast {
+		http.Error(w, "A lab needs at least one template — add another before removing this one", http.StatusConflict)
+		return
+	}
+	// Off the response's critical path — see the comment on the SaveJob call in
+	// UploadTemplateToLab for why this is safe to run async.
+	go func() {
+		if err := h.jobManager.SaveJob(jobID); err != nil {
+			log.Printf("Failed to persist template removal for lab %s: %v", jobID, err)
+		}
+	}()
+	// Stop pre-pulling the removed template's images onto the nodes.
+	go h.reconcilePrepull(jobID)
+	h.recordAudit(adminActor(r), "admin", "lab.template_remove", jobID, templateName)
+
+	deletedNames, failed, cleanupErr := h.deleteTemplateWorkspaces(r, jobID, kubeconfig, namespace, templateName)
+	if cleanupErr != nil {
+		log.Printf("RemoveTemplateFromLab: template %q removed from lab %s but its workspaces were not cleaned up: %v", templateName, jobID, cleanupErr)
+	}
+	if len(deletedNames) > 0 {
+		h.recordAudit(adminActor(r), "admin", "workspace.delete", jobID, fmt.Sprintf("template removal: %s", strings.Join(deletedNames, ", ")))
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":         "ok",
+		"template":       templateName,
+		"deleted":        len(deletedNames),
+		"failed":         failed,
+		"cleanup_failed": cleanupErr != nil,
+	})
+}
+
+// deleteTemplateWorkspaces deletes the lab's workspaces created from
+// templateName. It returns the deleted names, the number of deletes that
+// failed, and an error when the workspaces couldn't be listed at all.
+func (h *Handler) deleteTemplateWorkspaces(r *http.Request, labID, kubeconfig, namespace, templateName string) (deletedNames []string, failed int, err error) {
+	backend, err := h.workspaceBackendFor(labID, kubeconfig, namespace)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to build workspace backend: %w", err)
+	}
+	all, err := backend.ListWorkspaces(r.Context(), labID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list workspaces: %w", err)
+	}
+	var matching []workspace.Workspace
+	for _, ws := range all {
+		if ws.Template == templateName {
+			matching = append(matching, ws)
+		}
+	}
+	if len(matching) == 0 {
+		return nil, 0, nil
+	}
+	deletedNames, delErrors := h.deleteWorkspacesConcurrently(r.Context(), backend, labID, matching)
+	for _, e := range delErrors {
+		log.Printf("RemoveTemplateFromLab: lab %s: %s", labID, e)
+	}
+	go func() {
+		if serr := h.jobManager.SaveJob(labID); serr != nil {
+			log.Printf("Failed to persist workspace deletion events for lab %s: %v", labID, serr)
+		}
+	}()
+	return deletedNames, len(delErrors), nil
+}
+
 // templatesFromUploadRequest resolves the workspace templates to append to a lab.
 // It prefers the create-lab wizard's payload (templates_mode + template_N_* fields,
 // or templates_yaml) so the "Add Template" drawer matches lab creation, and falls
@@ -3444,6 +3568,11 @@ type TemplateStatus struct {
 	// (LabConfig.BakedImages), if any. BakedImage empty means never baked.
 	BakedImage string
 	BakedAt    string
+	// Owners lists who owns the running workspaces created from this template,
+	// for the remove confirmation — removing a template deletes them.
+	Owners []string
+	// Removable is false for a lab's only template: a lab needs at least one.
+	Removable bool
 }
 
 // buildTemplateStatus correlates a lab's configured templates with the live
@@ -3459,9 +3588,11 @@ func buildTemplateStatus(templates []WorkspaceTemplate, workspaces []workspace.W
 	}
 
 	counts := make(map[string]int, len(templates))
+	owners := make(map[string][]string, len(templates))
 	for _, ws := range workspaces {
 		if ws.Template != "" && known[ws.Template] {
 			counts[ws.Template]++
+			owners[ws.Template] = append(owners[ws.Template], ownerDisplayName(ws))
 			continue
 		}
 		unattributed++
@@ -3486,6 +3617,8 @@ func buildTemplateStatus(templates []WorkspaceTemplate, workspaces []workspace.W
 			RunningCount:   n,
 			HasRunning:     n > 0,
 			IsDevcontainer: t.Devcontainer != nil && t.Devcontainer.Enabled,
+			Owners:         owners[t.Name],
+			Removable:      len(templates) > 1,
 		}
 		if baked, ok := bakedImages[t.Name]; ok {
 			status.BakedImage = baked.Image
@@ -3796,6 +3929,57 @@ func writeJSONError(w http.ResponseWriter, status int, message string) {
 	})
 }
 
+// deleteWorkspacesConcurrently deletes the given workspaces from a lab's cluster
+// and records a WorkspaceEventDeleted for each one that goes. It returns the
+// display names of the deleted workspaces and one message per failure (the
+// failure messages carry backend detail — log them, don't send them to clients).
+//
+// A workspace with only its ID set is looked up first, best-effort, so the
+// history can still show who owned it once it is gone; a lookup failure leaves
+// the owner/template blank rather than blocking the delete.
+//
+// Deletes are bounded and parallel: sequential deletes made a bulk request as
+// slow as N sequential Kubernetes API round trips. It reuses workspaceCreateSem,
+// the same budget that already protects the cluster's API server from a burst
+// of concurrent create requests.
+func (h *Handler) deleteWorkspacesConcurrently(ctx context.Context, backend workspace.Backend, labID string, workspaces []workspace.Workspace) (deletedNames, delErrors []string) {
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, ws := range workspaces {
+		wg.Add(1)
+		h.workspaceCreateSem <- struct{}{}
+		go func(wsInfo workspace.Workspace) {
+			defer wg.Done()
+			defer func() { <-h.workspaceCreateSem }()
+
+			wsID := wsInfo.ID
+			if wsInfo.Name == "" {
+				if got, err := backend.GetWorkspace(ctx, wsID); err == nil {
+					wsInfo = got
+				}
+			}
+			if err := backend.DeleteWorkspace(ctx, labID, wsID); err != nil {
+				mu.Lock()
+				delErrors = append(delErrors, fmt.Sprintf("Failed to delete workspace %s: %v", wsID, err))
+				mu.Unlock()
+				return
+			}
+			wsName := wsInfo.Name
+			if wsName == "" {
+				wsName = wsID
+			}
+			mu.Lock()
+			deletedNames = append(deletedNames, wsName)
+			mu.Unlock()
+			if rerr := h.jobManager.RecordWorkspaceEvent(labID, WorkspaceEventDeleted, wsID, wsName, ownerDisplayName(wsInfo), wsInfo.Template); rerr != nil {
+				log.Printf("Failed to record workspace deletion event for %s: %v", wsID, rerr)
+			}
+		}(ws)
+	}
+	wg.Wait()
+	return deletedNames, delErrors
+}
+
 // DeleteWorkspace handles workspace deletion requests
 func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -3845,44 +4029,11 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Bound and parallelize the per-workspace deletes: sequential deletes made
-		// a bulk request as slow as N sequential Kubernetes API round trips.
-		// Reuses workspaceCreateSem, the same budget that already protects the
-		// cluster's API server from a burst of concurrent create requests.
-		var delErrors []string
-		var deletedNames []string
-		var delErrorsMu sync.Mutex
-		var wg sync.WaitGroup
-		for _, wsID := range workspaceIDs {
-			wg.Add(1)
-			h.workspaceCreateSem <- struct{}{}
-			go func(wsID string) {
-				defer wg.Done()
-				defer func() { <-h.workspaceCreateSem }()
-
-				// Best-effort: captured before deletion so the history can still show
-				// who owned the workspace once it is gone. A lookup failure leaves the
-				// owner/template blank rather than blocking the delete.
-				wsInfo, _ := backend.GetWorkspace(r.Context(), wsID)
-				if err := backend.DeleteWorkspace(r.Context(), labID, wsID); err != nil {
-					delErrorsMu.Lock()
-					delErrors = append(delErrors, fmt.Sprintf("Failed to delete workspace %s: %v", wsID, err))
-					delErrorsMu.Unlock()
-					return
-				}
-				wsName := wsInfo.Name
-				if wsName == "" {
-					wsName = wsID
-				}
-				delErrorsMu.Lock()
-				deletedNames = append(deletedNames, wsName)
-				delErrorsMu.Unlock()
-				if rerr := h.jobManager.RecordWorkspaceEvent(labID, WorkspaceEventDeleted, wsID, wsName, ownerDisplayName(wsInfo), wsInfo.Template); rerr != nil {
-					log.Printf("Failed to record workspace deletion event for %s: %v", wsID, rerr)
-				}
-			}(wsID)
+		toDelete := make([]workspace.Workspace, len(workspaceIDs))
+		for i, wsID := range workspaceIDs {
+			toDelete[i] = workspace.Workspace{ID: wsID}
 		}
-		wg.Wait()
+		deletedNames, delErrors := h.deleteWorkspacesConcurrently(r.Context(), backend, labID, toDelete)
 		// Off the response's critical path — see the comment on the SaveJob call
 		// in UploadTemplateToLab for why this is safe to run async.
 		go func() {

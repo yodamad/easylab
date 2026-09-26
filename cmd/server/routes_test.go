@@ -84,6 +84,31 @@ func TestResolveLabRoute(t *testing.T) {
 			want:   routeUploadTemplate,
 		},
 		{
+			name:   "remove a template",
+			path:   "/api/labs/job-1/templates/go-workshop/remove",
+			method: http.MethodPost,
+			want:   routeRemoveTemplate,
+		},
+		{
+			name:   "remove a template on the legacy jobs prefix",
+			path:   "/api/jobs/job-1/templates/go-workshop/remove",
+			method: http.MethodPost,
+			want:   routeRemoveTemplate,
+		},
+		{
+			// Template names are admin-chosen, so one can be a route word.
+			name:   "remove a template named delete is not a lab deletion",
+			path:   "/api/labs/job-1/templates/delete/remove",
+			method: http.MethodPost,
+			want:   routeRemoveTemplate,
+		},
+		{
+			name:   "GET on template remove falls through rather than removing",
+			path:   "/api/labs/job-1/templates/go-workshop/remove",
+			method: http.MethodGet,
+			want:   routeJobStatus,
+		},
+		{
 			// bake-status must not be shadowed by the plainer /bake suffix check.
 			name:   "bake a template",
 			path:   "/api/labs/job-1/templates/go-workshop/bake",

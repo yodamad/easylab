@@ -665,6 +665,56 @@ function submitUploadTemplate(event) {
         });
 }
 
+// ---------------------------------------------------------------------------
+// Remove a template (Workspaces & Templates tab)
+// ---------------------------------------------------------------------------
+
+// toggleTemplateRemove opens or closes a template card's inline confirmation.
+function toggleTemplateRemove(button, open) {
+    var card = button.closest('.template-status-card');
+    card.classList.toggle('is-confirming', open);
+    var focusTarget = open
+        ? card.querySelector('.template-remove-actions .btn-danger')
+        : card.querySelector('.template-remove-row .btn');
+    if (focusTarget) focusTarget.focus();
+}
+
+// removeTemplate takes the template off the lab (the server also deletes its
+// workspaces), then reloads onto this tab with the outcome as a toast.
+function removeTemplate(button) {
+    var labId = button.dataset.labId;
+    var name = button.dataset.template;
+    var label = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Removing…';
+
+    fetch('/api/labs/' + encodeURIComponent(labId) + '/templates/' + encodeURIComponent(name) + '/remove', { method: 'POST' })
+        .then(function (response) {
+            if (!response.ok) {
+                return response.text().then(function (text) { return Promise.reject(text || 'Remove failed (' + response.status + ').'); });
+            }
+            return response.json();
+        })
+        .then(function (data) {
+            var flash = { msg: 'Template “' + name + '” removed.', kind: 'success' };
+            if (data.cleanup_failed) {
+                flash = { kind: 'error', msg: 'Template “' + name + '” removed, but the lab cluster couldn’t be reached. Delete its workspaces from the list below once it’s back.' };
+            } else if (data.failed > 0) {
+                flash = { kind: 'error', msg: 'Template “' + name + '” removed, but ' + data.failed + ' workspace(s) couldn’t be deleted. Delete them from the list below.' };
+            } else if (data.deleted > 0) {
+                flash.msg = 'Template “' + name + '” removed and ' + data.deleted + ' workspace(s) deleted.';
+            }
+            try { sessionStorage.setItem('ut-flash', JSON.stringify(flash)); } catch (e) { /* ignore */ }
+            window.location.hash = 'workspaces';
+            window.location.reload();
+        })
+        .catch(function (err) {
+            button.disabled = false;
+            button.textContent = label;
+            showToast(typeof err === 'string' ? err : 'Failed to remove template.', 'error');
+        });
+}
+
 document.addEventListener('DOMContentLoaded', function () {
     TemplateEditor.init({
         multi: false,

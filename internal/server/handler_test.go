@@ -2832,6 +2832,49 @@ func TestBuildTemplateStatus_DisplayFields(t *testing.T) {
 	assert.Equal(t, "devcontainer", statuses[2].Image)
 }
 
+func TestBuildTemplateStatus_RemoveFields(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		templates     []WorkspaceTemplate
+		workspaces    []workspace.Workspace
+		wantOwners    map[string][]string
+		wantRemovable bool
+	}{
+		{
+			name:          "only template is not removable",
+			templates:     []WorkspaceTemplate{{Name: "go"}},
+			workspaces:    []workspace.Workspace{{ID: "ws-1", Owner: "alice", Template: "go"}},
+			wantOwners:    map[string][]string{"go": {"alice"}},
+			wantRemovable: false,
+		},
+		{
+			name:      "owners prefer email and skip other templates",
+			templates: []WorkspaceTemplate{{Name: "go"}, {Name: "python"}},
+			workspaces: []workspace.Workspace{
+				{ID: "ws-1", Owner: "alice", OwnerEmail: "alice@example.com", Template: "go"},
+				{ID: "ws-2", Owner: "bob", Template: "go"},
+				{ID: "ws-3", Owner: "carol", Template: "python"},
+				{ID: "ws-4", Owner: "dave"},
+			},
+			wantOwners:    map[string][]string{"go": {"alice@example.com", "bob"}, "python": {"carol"}},
+			wantRemovable: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			statuses, _ := buildTemplateStatus(tt.templates, tt.workspaces, nil)
+			for _, s := range statuses {
+				assert.Equal(t, tt.wantOwners[s.Name], s.Owners, "owners for %s", s.Name)
+				assert.Equal(t, tt.wantRemovable, s.Removable, "removable for %s", s.Name)
+			}
+		})
+	}
+}
+
 func TestBuildTemplateStatus_BakedImage(t *testing.T) {
 	bakedAt := time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC)
 	statuses, _ := buildTemplateStatus([]WorkspaceTemplate{

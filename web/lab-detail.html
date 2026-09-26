@@ -254,6 +254,25 @@
                                 <div id="bake-status-{{.Name}}" class="template-bake-status" hx-get="/api/labs/{{$ws.LabID}}/templates/{{.Name}}/bake-status" hx-trigger="load" hx-swap="innerHTML"></div>
                             </div>
                             {{end}}
+                            {{if .Removable}}
+                            <div class="template-remove-row">
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="toggleTemplateRemove(this, true)">Remove</button>
+                            </div>
+                            <div class="template-remove-confirm" role="group" aria-label="Remove {{.Name}}">
+                                {{if .HasRunning}}
+                                <p class="template-remove-text">Removing <strong>{{.Name}}</strong> also deletes {{.RunningCount}} workspace{{if gt .RunningCount 1}}s{{end}}. Anything not pushed to git is lost.</p>
+                                <ul class="template-remove-owners">
+                                    {{range .Owners}}<li>{{.}}</li>{{end}}
+                                </ul>
+                                {{else}}
+                                <p class="template-remove-text">No workspaces use <strong>{{.Name}}</strong>. Students won't be able to pick it any more.</p>
+                                {{end}}
+                                <div class="template-remove-actions">
+                                    <button type="button" class="btn btn-danger btn-sm" data-lab-id="{{$ws.LabID}}" data-template="{{.Name}}" onclick="removeTemplate(this)">{{if .HasRunning}}Remove template and {{.RunningCount}} workspace{{if gt .RunningCount 1}}s{{end}}{{else}}Remove template{{end}}</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleTemplateRemove(this, false)">Cancel</button>
+                                </div>
+                            </div>
+                            {{end}}
                         </div>
                         {{end}}
                     </div>

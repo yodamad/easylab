@@ -69,8 +69,8 @@ lab, organized into tabs at the top:
   finishes, the page reloads itself so the **Workspaces & Templates** tab appears.
 * **Workspaces & Templates** — shown once the lab is completed; this absorbs everything
   that used to live on the standalone **View Workspaces** page: the **Credentials**
-  panel, the **Templates on this lab** panel (with **Bake image**/**Rebuild**), the
-  **Add Template** drawer, and the **Active Workspaces**/**History** tabs. See
+  panel, the **Templates on this lab** panel (with **Bake image**/**Rebuild** and
+  **Remove**), the **Add Template** drawer, and the **Active Workspaces**/**History** tabs. See
   [Templates on a lab](#templates-on-a-lab) and the sections after it below — the
   content is unchanged, only where you reach it moved.
 * **Feedback** — a compact summary (average rating, most recent comments) with a link to
@@ -243,8 +243,9 @@ rather than inside either one.
 **History** records every workspace **created** and **deleted** for the lab,
 newest first — who owned it, which template it came from, and when. Unlike
 **Active Workspaces**, this is not a live view of the cluster: a workspace still
-shows up here after it has been deleted (by a student, by you, or by automatic
-lifetime cleanup), which is what lets you see who held a workspace once it is gone.
+shows up here after it has been deleted (by a student, by you, by
+[removing its template](#remove-a-template-from-a-lab), or by automatic lifetime
+cleanup), which is what lets you see who held a workspace once it is gone.
 
 Each entry shows:
 
@@ -308,6 +309,43 @@ cluster to clone the devcontainer during the import, so there is no token to ret
 > A devcontainer template added here still needs baking before students use it — see
 > [Pre-baking a devcontainer template](#pre-baking-a-devcontainer-template) above. The
 > **Bake image** button appears on the new template's card once it is added.
+
+### Remove a template from a lab
+
+Each card in the **Templates on this lab** panel has a **Remove** button. Removing a
+template takes it off the lab, so students can no longer pick it, and **deletes every
+student workspace created from it**.
+
+Clicking **Remove** doesn't delete anything yet. It opens a confirmation inside the card,
+and the card's border turns red:
+
+![Remove template confirmation](screens/remove-template-confirm.png){width=480}
+
+* If students have workspaces from that template, the confirmation lists their owners and
+  the button reads **Remove template and N workspaces**. Anything a student hasn't pushed
+  to git is lost with their workspace.
+* If no one uses the template, the confirmation says so and the button reads **Remove
+  template**.
+* **Cancel** closes the confirmation without changing anything.
+
+Once it's done, the page reloads on the **Workspaces & Templates** tab and a toast reports
+the result. Each deleted workspace appears as a deletion in **History**, and the
+[audit log](audit-log.md) records the template removal and the workspace deletions.
+
+A few rules:
+
+* **A lab always keeps at least one template.** A lab with a single template shows no
+  **Remove** button. [Add a template](#add-a-template-to-an-existing-lab) first if you want
+  to replace it.
+* **The template is removed even if some workspaces can't be deleted**, for example when
+  the cluster is unreachable or a delete fails. The toast then tells you how many were left
+  behind. They still appear under **Active Workspaces**, reported as not attributed to a
+  template, and you can delete them from there.
+* A pre-baked image for the template is forgotten, and the template's images stop being
+  [pre-pulled](#image-pre-pull) onto the nodes. The image itself stays in its registry.
+* Workspaces from before template attribution existed have no template recorded, so
+  removing a template can't identify them and leaves them running. Delete them from
+  **Active Workspaces** if needed.
 
 ### Edit a lab's lifecycle
 

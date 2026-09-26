@@ -538,6 +538,7 @@ const (
 	routeDeleteLab
 	routeRetryJob
 	routeUploadTemplate
+	routeRemoveTemplate
 	routeBakeTemplate
 	routeBakeTemplateStatus
 	routeCoderCredentials
@@ -576,6 +577,10 @@ func resolveLabRoute(path, method, format string) labRoute {
 		return routeRetryJob
 	case strings.HasSuffix(path, "/templates/upload") && method == http.MethodPost:
 		return routeUploadTemplate
+	// "/remove", not "/delete": a template path ending in "/delete" would be
+	// taken by routeDeleteLab above.
+	case strings.Contains(path, "/templates/") && strings.HasSuffix(path, "/remove") && method == http.MethodPost:
+		return routeRemoveTemplate
 	// bake-status must be matched before the plainer /bake below, which
 	// "/bake-status" does not actually share a suffix with (HasSuffix is exact),
 	// but keeping the more specific check first matches this file's existing
@@ -622,6 +627,8 @@ func labRequestRouter(h *server.Handler) http.HandlerFunc {
 			h.RetryJobWithConfig(w, r)
 		case routeUploadTemplate:
 			h.UploadTemplateToLab(w, r)
+		case routeRemoveTemplate:
+			h.RemoveTemplateFromLab(w, r)
 		case routeBakeTemplate:
 			h.BakeTemplate(w, r)
 		case routeBakeTemplateStatus:
