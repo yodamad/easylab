@@ -575,6 +575,14 @@ Set a **Date** (and optionally a **Time**) for the entire lab to be automaticall
 !!! note "Recreating a lab that had a deletion date"
     When you **Recreate** a lab whose scheduled deletion date has already passed, EasyLab prompts you for a **new** deletion date before recreating. This prevents the recreated lab from being destroyed immediately by the cleanup service. Enter a future date, or leave it blank to keep the recreated lab running with no scheduled deletion.
 
+## Deployment progress
+
+After you click **Create Lab**, the wizard is replaced by the deployment progress panel, which shows the job status and the Pulumi output and refreshes every 10 seconds.
+
+* When the lab reaches **completed**, a **Go to Lab Administration** button appears next to the status badge. It opens the lab detail page, where you manage workspaces, credentials, and lifecycle (see [Lab management](admin-lab-management.md)).
+* If kubeconfig is available, a **Download Kubeconfig** button is also shown.
+* If the deployment fails, a **Retry Job** button is shown instead.
+
 ## Dry run (preview before create)
 
 Before creating a lab, you can run a **dry run** to preview what Pulumi would do without actually provisioning resources. This is useful to validate configuration and catch errors early.

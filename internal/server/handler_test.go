@@ -227,6 +227,38 @@ func TestHandler_GetJobStatus_JobNotFound(t *testing.T) {
 	}
 }
 
+func TestHandler_GetJobStatus_LabAdministrationLink(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   JobStatus
+		expected bool
+	}{
+		{name: "completed shows link", status: JobStatusCompleted, expected: true},
+		{name: "running hides link", status: JobStatusRunning, expected: false},
+		{name: "failed hides link", status: JobStatusFailed, expected: false},
+		{name: "dry run completed hides link", status: JobStatusDryRunCompleted, expected: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			jm := NewJobManager("")
+			jobID := jm.CreateJob(&LabConfig{StackName: "test"})
+			require.NoError(t, jm.UpdateJobStatus(jobID, tt.status))
+
+			h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+			req := httptest.NewRequest("GET", "/api/jobs/"+jobID+"/status", nil)
+			w := httptest.NewRecorder()
+
+			h.GetJobStatus(w, req)
+
+			require.Equal(t, http.StatusOK, w.Code)
+			link := `href="/labs/` + jobID + `"`
+			assert.Equal(t, tt.expected, strings.Contains(w.Body.String(), link))
+		})
+	}
+}
+
 func TestHandler_GetJobStatus_Found(t *testing.T) {
 	jm := NewJobManager("")
 	config := &LabConfig{StackName: "test"}

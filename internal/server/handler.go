@@ -1387,6 +1387,13 @@ func (h *Handler) GetJobStatus(w http.ResponseWriter, r *http.Request) {
 		statusHTML.WriteString(`</button>`)
 	}
 
+	// Once the lab is up, link to its administration page
+	if status == JobStatusCompleted {
+		statusHTML.WriteString(fmt.Sprintf(`<a href="/labs/%s" class="btn btn-primary job-status-action">`, escapedJobID))
+		statusHTML.WriteString(`<span class="btn-icon">🛠</span> Go to Lab Administration`)
+		statusHTML.WriteString(`</a>`)
+	}
+
 	// Show download button if kubeconfig is available (for both completed and failed jobs)
 	if kubeconfig != "" && (status == JobStatusCompleted || status == JobStatusFailed) {
 		statusHTML.WriteString(fmt.Sprintf(`<a href="/api/jobs/%s/kubeconfig" class="btn btn-download" download="kubeconfig-%s.yaml">`, escapedJobID, escapedJobID))
