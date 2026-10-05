@@ -260,11 +260,11 @@
             <small>If the workshop repository is <strong>private</strong>, the git credential used to read the devcontainer during import and, baked into the generated template, to clone the repo in each student's workspace. With a single git credential this is applied automatically.</small>
         </div>
         <div class="form-group" id="devcontainer-registry-cred-group">
-            <label for="devcontainer_registry_auth_secret">Registry credential for students (Optional)</label>
+            <label for="devcontainer_registry_auth_secret">Registry credential for the build (Optional)</label>
             <select id="devcontainer_registry_auth_secret" class="template-registry-cred-select">
                 <option value="">None</option>
             </select>
-            <small>If the devcontainer builds from a private base image or pushes to a private cache registry, the registry credential each student's workspace pulls and pushes it with. With a single registry credential this is applied automatically.</small>
+            <small>If the devcontainer builds from a <strong>private base image</strong>, or pushes to a private external cache registry, the registry credential the build (in each student's workspace, and in a bake) pulls and pushes with. An in-cluster cache needs none for itself — EasyLab adds its credentials automatically. With a single registry credential this is applied automatically.</small>
         </div>
 
         <div class="form-group">

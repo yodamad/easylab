@@ -246,6 +246,34 @@ func TestEnsureBakeJob_InClusterPushCarriesRegistryCredentials(t *testing.T) {
 	assert.Equal(t, registryAuthUsername, cfg.Auths[b.registryInternalHost()].Username)
 }
 
+// Baking to the in-cluster registry does not make the devcontainer's base image
+// public: the template's own registry_auth_secret must reach the build alongside the
+// registry's generated credentials, or the base-image pull is denied.
+func TestEnsureBakeJob_InClusterPushKeepsTemplateRegistryCredential(t *testing.T) {
+	b, cs := newTestBackend()
+	ctx := context.Background()
+
+	_, err := b.EnsureBuildCache(ctx)
+	require.NoError(t, err)
+	require.NoError(t, b.EnsureRegistrySecret(ctx, "basecred", "ghcr.io", "bot", "base-token"))
+
+	req := bakeRequest()
+	req.BakeRepo = true
+	req.Devcontainer.CacheRepo, _ = b.BakedImageRepo("job-1", "go-workshop", "")
+	req.Devcontainer.RegistryAuthSecret = "basecred"
+	require.NoError(t, b.EnsureBakeJob(ctx, req))
+
+	job, err := cs.BatchV1().Jobs("workshops").Get(ctx, bakeJobName("job-1", "go-workshop"), metav1.GetOptions{})
+	require.NoError(t, err)
+	raw, err := base64.StdEncoding.DecodeString(envOf(job.Spec.Template.Spec.InitContainers[2])["ENVBUILDER_DOCKER_CONFIG_BASE64"])
+	require.NoError(t, err)
+	var cfg dockerConfig
+	require.NoError(t, json.Unmarshal(raw, &cfg))
+
+	assert.Equal(t, "bot", cfg.Auths["ghcr.io"].Username, "the template's own registry credential must survive the merge")
+	assert.Equal(t, registryAuthUsername, cfg.Auths[b.registryInternalHost()].Username)
+}
+
 func TestRegistryPullAuthHeader_OwnRegistryFallback(t *testing.T) {
 	b, _ := newTestBackend()
 	ctx := context.Background()

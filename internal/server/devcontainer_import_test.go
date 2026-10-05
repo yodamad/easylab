@@ -150,6 +150,28 @@ func TestDetectDevcontainer_RegistryAuthSecretIsBakedIn(t *testing.T) {
 	assert.Equal(t, "regcred", templates[0].Devcontainer.RegistryAuthSecret)
 }
 
+func TestDetectDevcontainer_RegistryAuthSecretWithInClusterCache(t *testing.T) {
+	t.Parallel()
+
+	got := postDevcontainerUpload(t, "devcontainer.json", []byte(`{"name":"Priv","image":"registry.example.com/private/base:1"}`), url.Values{
+		"git_repo":             {"https://gitlab.com/org/private.git"},
+		"use_in_cluster_cache": {"true"},
+		"registry_auth_secret": {"regcred"},
+	})
+
+	// Hosting the cache in-cluster says nothing about where the base image lives: a
+	// private one still needs its credential named, alongside the in-cluster cache.
+	assert.Contains(t, got.TemplatesYAML, "use_in_cluster_cache: true")
+	assert.Contains(t, got.TemplatesYAML, "registry_auth_secret: regcred")
+
+	templates, err := parseWorkspaceTemplatesYAML(got.TemplatesYAML)
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	require.NotNil(t, templates[0].Devcontainer)
+	assert.True(t, templates[0].Devcontainer.UseInClusterCache)
+	assert.Equal(t, "regcred", templates[0].Devcontainer.RegistryAuthSecret)
+}
+
 func TestDetectDevcontainer_ConfigRepoIsBakedIn(t *testing.T) {
 	t.Parallel()
 

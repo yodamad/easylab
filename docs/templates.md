@@ -510,7 +510,7 @@ workspace_templates:
 | `dir` | string | Folder holding `devcontainer.json`. Defaults to `.devcontainer`. |
 | `cache_repo` | string | Registry the built layers are cached in — see below. **Required unless `use_in_cluster_cache` is set.** |
 | `use_in_cluster_cache` | bool | Provisions the build cache **inside the lab's cluster** instead of requiring `cache_repo` to name an external registry. Ignored if `cache_repo` is also set — an explicit `cache_repo` always wins. See below. |
-| `registry_auth_secret` | string | Registry credential for **everything the build pulls or pushes**: the base image, `fallback_image`, and `cache_repo`. Omit for public registries, and always for an in-cluster cache. See [Private registries and repositories](#private-registries-and-repositories). |
+| `registry_auth_secret` | string | Registry credential for **everything the build pulls or pushes**: the base image, `fallback_image`, and `cache_repo`. Omit when all of them are public. An in-cluster cache needs none for itself, but a **private base image** still does — the two combine. See [Private registries and repositories](#private-registries-and-repositories). |
 | `fallback_image` | string | Used when the devcontainer names neither an image nor a Dockerfile. |
 | `insecure` | bool | Skip TLS verification when cloning and pulling. |
 | `config_repo` | string | Reads `devcontainer.json` from a **separate** repo instead of `git_repo` — see [Devcontainer config from a separate repository](#devcontainer-config-from-a-separate-repository). `dir` then resolves inside this repo. |
@@ -675,7 +675,7 @@ keys the build ignores; and some keys are honoured by neither.
       use_in_cluster_cache: true
     ```
 
-    No `registry_auth_secret` is needed. The in-cluster registry does require
+    No `registry_auth_secret` is needed for the cache itself. The in-cluster registry does require
     authentication (once a template is [pre-baked](#pre-baking-skipping-the-build-entirely)
     it is also exposed through the lab's domain, and baked images carry the
     workshop repo), but EasyLab generates its credentials itself — stored in the
@@ -687,6 +687,18 @@ keys the build ignores; and some keys are honoured by neither.
     destroyed. An external `cache_repo` remains the right choice when a cache
     needs to survive across labs (e.g. a shared base image reused by several
     workshops) or be inspected outside the cluster.
+
+    A devcontainer built from a **private base image** still needs
+    `registry_auth_secret` for that image — EasyLab merges it with the in-cluster
+    registry's credentials, for live builds and bakes alike:
+
+    ```yaml
+    devcontainer:
+      enabled: true
+      dir: .devcontainer
+      use_in_cluster_cache: true
+      registry_auth_secret: regcred   # for the private base image
+    ```
 
 !!! tip "First start is slow, and it uses node disk"
     Even with a warm cache the first workspace of a lab builds the devcontainer
@@ -786,7 +798,7 @@ workshop edition to the next.
 | `git_auth_secret needs an http(s) git_repo` | A username and password is not how `ssh://` authenticates. Use an `https://` remote. |
 | `failed to read git auth secret "x"` | The template names a credential the lab's cluster does not have. Add it in **Credentials** in the lab detail page's Workspaces & Templates section. |
 | Workspace pods stuck in `ImagePullBackOff` | A private image with no `image_pull_secrets`, or a name that does not match a credential. |
-| The devcontainer build fails pulling its base image | Devcontainer images are pulled by the build, not the kubelet — they need `devcontainer.registry_auth_secret`, not `image_pull_secrets`. |
+| The devcontainer build — or a bake — fails pulling its base image (`DENIED: access forbidden`, `UNAUTHORIZED`) | Devcontainer images are pulled by the build, not the kubelet — they need `devcontainer.registry_auth_secret`, not `image_pull_secrets`. This holds with `use_in_cluster_cache` too: EasyLab only supplies the in-cluster registry's own credentials, not the base image's. |
 | Devcontainer build fails with `devcontainer.json: no such file or directory` on a private repo | The clone ran with no credentials (`Using no authentication!` in the pod logs), so nothing was fetched. Add `git_auth_secret` — see [Devcontainer workshops](#devcontainer-workshops). Recreate the workspace so the clone runs again on a clean volume. |
 | Students can read the repo but cannot `git push` | Expected. The token authenticates the clone only and is never given to the IDE. |
 | A devcontainer import fails on `dockerComposeFile` | Compose-based devcontainers are not supported — use `sidecars` instead. |

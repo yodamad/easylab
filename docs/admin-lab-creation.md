@@ -242,14 +242,15 @@ Choose **From a devcontainer** at the top of the **Templates** step:
    `devcontainer.json`) or **Upload** (a `devcontainer.json`, or a repository
    `.zip`).
 4. Choose a **Cache registry**: **Host in-cluster** has EasyLab provision the
-   registry itself, in the lab's own cluster — nothing else to fill in.
-   **External registry** requires a **Cache registry address**, and if the
-   devcontainer builds from a **private base image** or pushes to a **private
-   cache**, a registry credential from the **Credentials** section chosen
-   under **Registry credential for students** — with a single registry
-   credential it is applied automatically. envbuilder pulls the base image
-   (and pushes the cache) inside each student's pod with it; without it the
-   pull falls back to anonymous and the build fails.
+   registry itself, in the lab's own cluster — no address or cache credential
+   to fill in. **External registry** requires a **Cache registry address**.
+   Either way, if the devcontainer builds from a **private base image** (or,
+   with an external registry, pushes to a **private cache**), choose a registry
+   credential from the **Credentials** section under **Registry credential for
+   the build** — with a single registry credential it is applied automatically.
+   envbuilder pulls the base image (and pushes the cache) with it, inside each
+   student's pod and in a bake; without it the pull falls back to anonymous and
+   the build fails.
 5. If the workshop repository is **private**, add a git token in the **Credentials**
    section and choose it under **Git credential** — with a single git credential it is
    applied automatically. The same credential reads the devcontainer during import and,
@@ -291,7 +292,9 @@ directory`, this is why.
     registry in the lab's own cluster and it disappears when the lab is
     destroyed. It requires authentication, but EasyLab generates those
     credentials itself and supplies them wherever the registry is used, so
-    there is no credential to create or choose.
+    there is no credential to create or choose for the cache. A **private
+    base image** is a separate matter: it still needs its own registry
+    credential, chosen under **Registry credential for the build**.
 
     **External registry** needs the credentials Secret created in the
     workspace namespace beforehand:
@@ -304,7 +307,7 @@ directory`, this is why.
       --namespace=workshops
     ```
 
-    Then choose it under **Registry credential for students** (or leave the picker
+    Then choose it under **Registry credential for the build** (or leave the picker
     on **Auto** if it is your only registry credential). A public cache registry
     with a public base image needs no Secret.
 

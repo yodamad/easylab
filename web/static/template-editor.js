@@ -297,10 +297,11 @@ var TemplateEditor = (function () {
 
         externalBtn.classList.toggle('selected', mode === 'external');
         inClusterBtn.classList.toggle('selected', mode === 'in-cluster');
+        // Only the address is mode-dependent. The registry credential stays: an
+        // in-cluster cache brings its own credentials, but the devcontainer's base
+        // image can still live in a private registry the build has to pull from.
         var externalFields = el('devcontainer-cache-external-fields');
-        var credGroup = el('devcontainer-registry-cred-group');
         if (externalFields) externalFields.style.display = mode === 'in-cluster' ? 'none' : '';
-        if (credGroup) credGroup.style.display = mode === 'in-cluster' ? 'none' : '';
         hidden.value = mode === 'in-cluster' ? 'true' : 'false';
     }
 
