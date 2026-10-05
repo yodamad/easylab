@@ -42,6 +42,10 @@ You need to provide:
 
 Your email address is automatically filled in from your login session and is not editable on this form.
 
+The organiser can close a lab or a template to new students. A closed one no longer appears here unless you already have a workspace on it. In that case its card has a dashed border and reads *"Closed to new students. Your workspace is still here."*, and the button becomes **Open my workspace**: it gives you back the link and password of your existing workspace instead of creating a new one. Your workspace also stays on the **My Workspaces** page.
+
+![A closed template you still have a workspace on](screens/student-closed-template.png){width=85%}
+
 Then, you'll get all information needed to connect to your workspace!
 
 Just use the provided link and credentials to connect to your workspace. A **View my workspaces →** link takes you to the My Workspaces page, where the new workspace is already listed.

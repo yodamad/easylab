@@ -16,6 +16,7 @@
                         {{if eq .Lab.Status "completed"}}✓{{else if eq .Lab.Status "failed"}}✗{{else if eq .Lab.Status "running"}}⟳{{else if eq .Lab.Status "pending"}}⏳{{else if eq .Lab.Status "destroyed"}}🗑{{else}}{{.Lab.Status}}{{end}}
                     </span>
                     <span class="lab-type-badge" title="{{if .Lab.IsDryRun}}Dry Run{{else}}Real Run{{end}}">{{if .Lab.IsDryRun}}🔍{{else}}🚀{{end}}</span>
+                    {{if .Lab.Disabled}}<span class="lab-closed-badge" title="Closed to new students">Closed</span>{{end}}
                 </span>
                 {{if .Lab.Description}}<span class="lab-detail-description">{{.Lab.Description}}</span>{{end}}
             </h1>
@@ -178,6 +179,22 @@
                 </div>
                 {{with .Workspaces}}
                 {{$ws := .}}
+                <div class="lab-access-strip{{if .LabDisabled}} is-closed{{end}}">
+                    <div class="lab-access-text">
+                        {{if .LabDisabled}}
+                        <span class="lab-access-state">Closed to new students</span>
+                        <span class="lab-access-hint">Students no longer see this lab. Existing workspaces keep running, and their owners can still open them.</span>
+                        {{else}}
+                        <span class="lab-access-state">Open to students</span>
+                        <span class="lab-access-hint">Students can pick this lab and request a workspace.</span>
+                        {{end}}
+                    </div>
+                    {{if .LabDisabled}}
+                    <button type="button" class="btn btn-primary btn-sm" data-url="/api/labs/{{.LabID}}/availability" data-disabled="false" data-done="Reopened the lab" onclick="setAvailability(this)">Reopen lab</button>
+                    {{else}}
+                    <button type="button" class="btn btn-secondary btn-sm" data-url="/api/labs/{{.LabID}}/availability" data-disabled="true" data-done="Closed the lab to new students" onclick="setAvailability(this)">Close lab to new students</button>
+                    {{end}}
+                </div>
                 <details class="secrets-section">
                     <summary class="secrets-summary">
                         <span class="secrets-summary-title">Credentials</span>
@@ -229,17 +246,18 @@
                 <div class="templates-panel">
                     <div class="templates-panel-header">
                         <h3 class="templates-panel-title">Templates on this lab</h3>
-                        <span class="templates-panel-hint">{{len .Templates}} configured</span>
+                        <span class="templates-panel-hint">{{len .Templates}} configured{{if gt .ClosedCount 0}}, {{.ClosedCount}} closed{{end}}</span>
                     </div>
                     <div class="templates-grid">
                         {{range .Templates}}
-                        <div class="template-status-card">
+                        <div class="template-status-card{{if .Disabled}} is-closed{{end}}">
                             <div class="template-status-main">
                                 <div class="template-status-info">
                                     <span class="template-status-name">{{.Name}}</span>
                                     {{if .Description}}<span class="template-status-description">{{.Description}}</span>{{end}}
                                     <span class="template-status-meta">{{.IDE}}{{if .Image}} · {{.Image}}{{end}}</span>
                                 </div>
+                                {{if .Disabled}}<span class="template-closed-badge">Closed to new students</span>{{end}}
                                 {{if .HasRunning}}
                                 <span class="template-run-badge is-running">● {{.RunningCount}} running</span>
                                 {{else}}
@@ -254,10 +272,18 @@
                                 <div id="bake-status-{{.Name}}" class="template-bake-status" hx-get="/api/labs/{{$ws.LabID}}/templates/{{.Name}}/bake-status" hx-trigger="load" hx-swap="innerHTML"></div>
                             </div>
                             {{end}}
-                            {{if .Removable}}
+                            {{if .Disabled}}
+                            <p class="template-closed-note">Students no longer see this template.{{if .HasRunning}} {{.RunningCount}} existing workspace{{if gt .RunningCount 1}}s keep{{else}} keeps{{end}} running.{{end}}</p>
+                            {{end}}
                             <div class="template-remove-row">
-                                <button type="button" class="btn btn-secondary btn-sm" onclick="toggleTemplateRemove(this, true)">Remove</button>
+                                {{if .Disabled}}
+                                <button type="button" class="btn btn-primary btn-sm" data-url="/api/labs/{{$ws.LabID}}/templates/{{.Name}}/availability" data-disabled="false" data-done="Reopened {{.Name}}" onclick="setAvailability(this)">Reopen</button>
+                                {{else}}
+                                <button type="button" class="btn btn-secondary btn-sm" data-url="/api/labs/{{$ws.LabID}}/templates/{{.Name}}/availability" data-disabled="true" data-done="Closed {{.Name}} to new students" onclick="setAvailability(this)">Close to new students</button>
+                                {{end}}
+                                {{if .Removable}}<button type="button" class="btn btn-secondary btn-sm template-remove-trigger" onclick="toggleTemplateRemove(this, true)">Remove</button>{{end}}
                             </div>
+                            {{if .Removable}}
                             <div class="template-remove-confirm" role="group" aria-label="Remove {{.Name}}">
                                 {{if .HasRunning}}
                                 <p class="template-remove-text">Removing <strong>{{.Name}}</strong> also deletes {{.RunningCount}} workspace{{if gt .RunningCount 1}}s{{end}}. Anything not pushed to git is lost.</p>

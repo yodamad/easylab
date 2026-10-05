@@ -337,6 +337,17 @@ type LabConfig struct {
 	// unreachable or wrong image.
 	BakedImages map[string]BakedImage `json:"baked_images,omitempty"`
 
+	// Disabled closes the whole lab to new students: it is no longer offered in the
+	// student portal and no new workspace can be requested on it. Students who
+	// already own a workspace keep seeing the lab and keep using that workspace.
+	Disabled bool `json:"disabled,omitempty"`
+	// DisabledTemplates closes individual templates the same way, keyed by template
+	// name. Like BakedImages above it is lab-scoped state and deliberately NOT part
+	// of WorkspaceTemplate, so it never leaks into a YAML export or a cloned lab.
+	// Writers replace the map rather than mutating it: sanitized job copies alias
+	// it and are encoded outside the job lock.
+	DisabledTemplates map[string]bool `json:"disabled_templates,omitempty"`
+
 	// OVH Endpoint
 	OvhEndpoint string `json:"ovh_endpoint"`
 
@@ -408,6 +419,15 @@ func (c *LabConfig) GetWorkspaceTemplates() []WorkspaceTemplate {
 		return c.WorkspaceTemplates
 	}
 	return []WorkspaceTemplate{{Name: "default"}}
+}
+
+// IsTemplateDisabled reports whether the named template is closed to new
+// students. It does not account for the lab-wide Disabled flag.
+func (c *LabConfig) IsTemplateDisabled(name string) bool {
+	if c == nil {
+		return false
+	}
+	return c.DisabledTemplates[name]
 }
 
 // JobManager manages Pulumi execution jobs

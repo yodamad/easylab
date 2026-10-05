@@ -109,6 +109,44 @@ func TestResolveLabRoute(t *testing.T) {
 			want:   routeJobStatus,
 		},
 		{
+			// The template form also ends with "/availability", so an ordering slip
+			// would close the whole lab instead of one template.
+			name:   "template availability is not lab availability",
+			path:   "/api/labs/job-1/templates/go-workshop/availability",
+			method: http.MethodPost,
+			want:   routeSetTemplateAvailability,
+		},
+		{
+			name:   "lab availability",
+			path:   "/api/labs/job-1/availability",
+			method: http.MethodPost,
+			want:   routeSetLabAvailability,
+		},
+		{
+			name:   "lab availability on the legacy jobs prefix",
+			path:   "/api/jobs/job-1/availability",
+			method: http.MethodPost,
+			want:   routeSetLabAvailability,
+		},
+		{
+			name:   "remove a template named availability is not an availability change",
+			path:   "/api/labs/job-1/templates/availability/remove",
+			method: http.MethodPost,
+			want:   routeRemoveTemplate,
+		},
+		{
+			name:   "GET on availability falls through rather than changing it",
+			path:   "/api/labs/job-1/availability",
+			method: http.MethodGet,
+			want:   routeJobStatus,
+		},
+		{
+			name:   "GET on template availability falls through rather than changing it",
+			path:   "/api/labs/job-1/templates/go-workshop/availability",
+			method: http.MethodGet,
+			want:   routeJobStatus,
+		},
+		{
 			// bake-status must not be shadowed by the plainer /bake suffix check.
 			name:   "bake a template",
 			path:   "/api/labs/job-1/templates/go-workshop/bake",

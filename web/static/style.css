@@ -6873,7 +6873,9 @@ details[open] > .secrets-summary::after {
    which also turns the card's border red while it's open. */
 .template-remove-row {
     display: flex;
+    flex-wrap: wrap;
     justify-content: flex-end;
+    gap: 0.5rem;
     margin-top: auto; /* stays at the bottom when grid rows stretch the card */
     padding-top: 0.5rem;
     border-top: 1px solid var(--border);
@@ -6937,6 +6939,95 @@ details[open] > .secrets-summary::after {
 @keyframes template-remove-reveal {
     from { opacity: 0; transform: translateY(-4px); }
     to { opacity: 1; transform: translateY(0); }
+}
+
+/* Closed to new students: a dashed outline is the one sign for "closed", on the
+   lab badge, the lab strip, the template card and the student picker tile. It
+   stays clear of amber (pending, expiring) and grey fill (destroyed); a closed
+   template's running count keeps its green because those workspaces are alive. */
+.lab-closed-badge,
+.template-closed-badge {
+    display: inline-block;
+    flex-shrink: 0;
+    padding: 0.15rem 0.55rem;
+    border: 1px dashed var(--secondary-color);
+    border-radius: 999px;
+    background: var(--background);
+    color: var(--text-light);
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1.4;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.lab-name + .lab-closed-badge {
+    margin-left: 0.4rem;
+}
+
+.template-status-card.is-closed {
+    border-style: dashed;
+    border-color: var(--secondary-color);
+    background: var(--surface);
+}
+
+.template-status-card.is-closed .template-status-name {
+    color: var(--text-light);
+}
+
+.template-status-card.is-closed .template-status-main {
+    flex-wrap: wrap;
+}
+
+.template-closed-note {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--text-light);
+}
+
+.lab-access-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--background);
+}
+
+.lab-access-strip.is-closed {
+    border-style: dashed;
+    border-color: var(--secondary-color);
+    background: var(--surface);
+}
+
+.lab-access-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+}
+
+.lab-access-state {
+    font-weight: 600;
+    color: var(--text);
+}
+
+.lab-access-hint {
+    font-size: 0.82rem;
+    color: var(--text-light);
+}
+
+.template-tile.is-closed {
+    border-style: dashed;
+}
+
+.template-tile-closed-note {
+    font-size: 0.8rem;
+    color: var(--text-light);
 }
 
 .templates-unattributed-note {

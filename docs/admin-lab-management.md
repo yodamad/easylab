@@ -33,7 +33,8 @@ disabled in that case, and students can only sign in via Azure AD if it's config
 The table shows, per lab:
 
 * **Status** — created, running, completed, failed, destroyed, or dry-run-completed (preview-only)
-* **Name** — the stack name and description you gave it when creating it
+* **Name** — the stack name and description you gave it when creating it, with a dashed
+  **Closed** badge when the lab is [closed to new students](#close-a-lab-or-a-template-to-new-students)
 * **Creation date**
 * **Cleanup** — the workspace lifetime policy (*i.e. after how many hours/days the workspaces will be deleted*)
 * **Deletes at** — the lab's scheduled auto-destroy date, if one is set
@@ -139,6 +140,11 @@ badge telling you which templates currently have running student workspaces:
 
 Use the **Refresh** button to update the counts as students start and stop
 workspaces.
+
+A template that is [closed to new students](#close-a-lab-or-a-template-to-new-students)
+has a dashed border and a **Closed to new students** badge. Its running count stays
+as it was, because closing a template leaves its workspaces alone. The panel header
+counts them too, for example "3 configured, 1 closed".
 
 > Attribution applies to workspaces **created after this feature shipped**. Any
 > workspace that was already running beforehand has no template recorded and is
@@ -312,6 +318,48 @@ cluster to clone the devcontainer during the import, so there is no token to ret
 > A devcontainer template added here still needs baking before students use it — see
 > [Pre-baking a devcontainer template](#pre-baking-a-devcontainer-template) above. The
 > **Bake image** button appears on the new template's card once it is added.
+
+### Close a lab or a template to new students
+
+Closing stops new students from joining without touching anyone's work. Use it when a
+session is full, when a template is being replaced, or at the end of a workshop while
+participants finish up.
+
+![A closed template next to an open one](screens/template-closed.png){width=700}
+
+* **One template**: each card in the **Templates on this lab** panel has a **Close to
+  new students** button.
+* **The whole lab**: the strip at the top of the **Workspaces & Templates** tab has a
+  **Close lab to new students** button. A closed lab also shows a **Closed** badge in
+  the page header and in the labs list.
+
+Both take effect immediately, with no confirmation, because nothing is deleted and
+**Reopen** (or **Reopen lab**) undoes it.
+
+What changes for students:
+
+* Students without a workspace there no longer see the closed lab or template in the
+  student portal, and a request for it is refused.
+* Students who already have a workspace there keep it. It keeps running, it stays on
+  their **My Workspaces** page, and the closed lab or template still appears in their
+  picker, marked as closed, so they can get their link and password back at any time.
+* A closed lab disappears from the [feedback form](feedbacks.md) the same way: only
+  students with a workspace on it can still pick it. Collect feedback before closing
+  the lab if you want it from everyone.
+
+What doesn't change:
+
+* Workspace lifetimes and the lab's deletion date still apply to existing workspaces.
+* A closed template stays [pre-pulled](#image-pre-pull) and keeps its baked image, so
+  reopening it is instant.
+* A closed template can still be baked, exported and removed.
+* Closing every template of a lab has the same effect for students as closing the lab.
+* A lab that is closed when you destroy and recreate it comes back closed.
+
+The [audit log](audit-log.md) records each close and reopen.
+
+Closing is different from removing: [removing a template](#remove-a-template-from-a-lab)
+deletes its workspaces.
 
 ### Remove a template from a lab
 

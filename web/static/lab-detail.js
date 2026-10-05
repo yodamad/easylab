@@ -675,8 +675,32 @@ function toggleTemplateRemove(button, open) {
     card.classList.toggle('is-confirming', open);
     var focusTarget = open
         ? card.querySelector('.template-remove-actions .btn-danger')
-        : card.querySelector('.template-remove-row .btn');
+        : card.querySelector('.template-remove-row .template-remove-trigger');
     if (focusTarget) focusTarget.focus();
+}
+
+// setAvailability closes a lab or a template to new students, or reopens it,
+// then reloads onto this tab with the outcome as a toast. Nothing is deleted
+// and the change is reversible, so there is no confirmation step.
+function setAvailability(button) {
+    var label = button.textContent;
+    button.disabled = true;
+
+    var body = new URLSearchParams();
+    body.append('disabled', button.dataset.disabled);
+
+    fetch(button.dataset.url, { method: 'POST', body: body })
+        .then(function (response) {
+            if (!response.ok) return Promise.reject(new Error('availability failed'));
+            try { sessionStorage.setItem('ut-flash', JSON.stringify({ msg: button.dataset.done + '.', kind: 'success' })); } catch (e) { /* ignore */ }
+            window.location.hash = 'workspaces';
+            window.location.reload();
+        })
+        .catch(function () {
+            button.disabled = false;
+            button.textContent = label;
+            showToast('Couldn’t save the change. Try again.', 'error');
+        });
 }
 
 // removeTemplate takes the template off the lab (the server also deletes its

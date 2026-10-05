@@ -63,7 +63,9 @@ function setupLabTemplateHandlers() {
     if (!labTilesContainer || !templateTilesContainer || !templateGroup) return;
 
     function setSubmitEnabled(enabled) {
-        if (submitBtn) submitBtn.disabled = !enabled;
+        if (!submitBtn) return;
+        submitBtn.disabled = !enabled;
+        submitBtn.textContent = submitLabel();
     }
 
     function showTilesStatus(container, countEl, message, isError) {
@@ -176,9 +178,17 @@ function setupLabTemplateHandlers() {
     loadLabs();
 }
 
+// submitLabel names the request button after what it will do: a template closed
+// to new students is only listed for a student who already has a workspace on it,
+// so submitting opens that workspace rather than requesting a new one.
+function submitLabel() {
+    const picked = document.querySelector('#template-tiles input[name="template_id"]:checked');
+    return picked && picked.dataset.closed === 'true' ? 'Open my workspace' : 'Request Workspace';
+}
+
 // renderPickerTile builds one selectable card for a radio group from
-// {id, name, description, chips} — shared by the lab and template pickers on this
-// page. Built with DOM APIs (not innerHTML) so admin-authored names and
+// {id, name, description, chips, closed} — shared by the lab and template pickers
+// on this page. Built with DOM APIs (not innerHTML) so admin-authored names and
 // descriptions can never break out into markup.
 function renderPickerTile(item, checked, groupName) {
     const label = document.createElement('label');
@@ -188,6 +198,10 @@ function renderPickerTile(item, checked, groupName) {
     input.type = 'radio';
     input.name = groupName;
     input.value = item.id;
+    if (item.closed) {
+        input.dataset.closed = 'true';
+        label.classList.add('is-closed');
+    }
     if (checked) {
         input.checked = true;
         label.classList.add('is-selected');
@@ -232,6 +246,13 @@ function renderPickerTile(item, checked, groupName) {
         label.appendChild(meta);
     }
 
+    if (item.closed) {
+        const note = document.createElement('span');
+        note.className = 'template-tile-closed-note';
+        note.textContent = 'Closed to new students. Your workspace is still here.';
+        label.appendChild(note);
+    }
+
     return label;
 }
 
@@ -240,7 +261,7 @@ function renderPickerTile(item, checked, groupName) {
 function renderTemplateTile(t, checked) {
     const chips = [];
     if (t.resources) chips.push(['cpu', t.resources]);
-    return renderPickerTile({ id: t.id, name: t.name, description: t.description, chips: chips }, checked, 'template_id');
+    return renderPickerTile({ id: t.id, name: t.name, description: t.description, chips: chips, closed: t.closed }, checked, 'template_id');
 }
 
 // renderLabTile builds one selectable lab card from a job returned by
@@ -251,7 +272,8 @@ function renderLabTile(lab, checked) {
         id: lab.id,
         name: config.stack_name || lab.id,
         description: config.description,
-        chips: []
+        chips: [],
+        closed: config.disabled
     }, checked, 'lab_id');
 }
 
@@ -322,7 +344,7 @@ if (typeof htmx !== 'undefined') {
     workspaceForm.addEventListener('htmx:afterRequest', function(event) {
         const btn = document.getElementById('submit-btn');
         btn.disabled = false;
-        btn.textContent = 'Request Workspace';
+        btn.textContent = submitLabel();
         if (!event.detail.successful) {
             const fields = document.getElementById('workspace-form-fields');
             if (fields) fields.style.display = '';
@@ -352,13 +374,13 @@ if (typeof htmx !== 'undefined') {
         .then(html => {
             responseDiv.innerHTML = html;
             btn.disabled = false;
-            btn.textContent = 'Request Workspace';
+            btn.textContent = submitLabel();
             setTimeout(startWorkspaceStatusPolling, 100);
         })
         .catch(error => {
             responseDiv.innerHTML = `<div class="error-message">Error: ${error.message}</div>`;
             btn.disabled = false;
-            btn.textContent = 'Request Workspace';
+            btn.textContent = submitLabel();
             if (fields) fields.style.display = '';
         });
     });

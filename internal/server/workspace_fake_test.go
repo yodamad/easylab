@@ -30,6 +30,7 @@ type fakeBackend struct {
 	callsMu     sync.Mutex
 	DeleteCalls []string
 	Ensured     []workspace.Spec
+	ListCalls   int
 }
 
 func (f *fakeBackend) EnsureWorkspace(_ context.Context, spec workspace.Spec) (workspace.Workspace, error) {
@@ -56,6 +57,9 @@ func (f *fakeBackend) GetWorkspace(_ context.Context, _ string) (workspace.Works
 }
 
 func (f *fakeBackend) ListWorkspaces(_ context.Context, _ string) ([]workspace.Workspace, error) {
+	f.callsMu.Lock()
+	f.ListCalls++
+	f.callsMu.Unlock()
 	if f.listErr != nil {
 		return nil, f.listErr
 	}

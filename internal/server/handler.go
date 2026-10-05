@@ -1673,15 +1673,33 @@ func (h *Handler) ListLabTemplates(w http.ResponseWriter, r *http.Request) {
 
 	job.mu.RLock()
 	status := job.Status
+	kubeconfig := extractStringFromConfigValue(job.Kubeconfig)
+	namespace := job.workspaceNamespace()
+	labDisabled := false
+	var disabledTemplates map[string]bool
 	var templates []WorkspaceTemplate
 	if job.Config != nil {
 		templates = job.Config.GetWorkspaceTemplates()
+		labDisabled = job.Config.Disabled
+		disabledTemplates = job.Config.DisabledTemplates
 	}
 	job.mu.RUnlock()
 
 	if status != JobStatusCompleted {
 		http.Error(w, "Lab is not ready yet", http.StatusBadRequest)
 		return
+	}
+
+	// A closed template is only offered to students who already have a workspace
+	// on it. The cluster is asked only when something is closed, and a failed
+	// lookup hides the closed templates rather than exposing them.
+	var owned map[string]bool
+	if labDisabled || len(disabledTemplates) > 0 {
+		var err error
+		owned, err = h.ownedTemplates(r.Context(), labID, kubeconfig, namespace, studentEmailFromContext(r))
+		if err != nil {
+			log.Printf("Failed to look up workspaces on lab %s with closed templates: %v", labID, err)
+		}
 	}
 
 	type templateOption struct {
@@ -1691,9 +1709,16 @@ func (h *Handler) ListLabTemplates(w http.ResponseWriter, r *http.Request) {
 		IDE         string `json:"ide,omitempty"`
 		Resources   string `json:"resources,omitempty"`
 		Repo        string `json:"repo,omitempty"`
+		// Closed marks a template that takes no new students: it is listed only
+		// because this student already has a workspace on it.
+		Closed bool `json:"closed,omitempty"`
 	}
 	options := make([]templateOption, 0, len(templates))
 	for _, t := range templates {
+		closed := labDisabled || disabledTemplates[t.Name]
+		if closed && !owned[t.Name] {
+			continue
+		}
 		ide := t.IDE
 		if ide == "" || ide == workspace.IDEOpenVSCode {
 			ide = workspace.DefaultIDEKind
@@ -1705,6 +1730,7 @@ func (h *Handler) ListLabTemplates(w http.ResponseWriter, r *http.Request) {
 			IDE:         ide,
 			Resources:   templateResourceSummary(t),
 			Repo:        shortRepoName(t.GitRepo),
+			Closed:      closed,
 		})
 	}
 
@@ -1907,6 +1933,7 @@ func (h *Handler) RemoveTemplateFromLab(w http.ResponseWriter, r *http.Request) 
 		}
 		config.WorkspaceTemplates = kept
 		delete(config.BakedImages, templateName)
+		config.DisabledTemplates = withTemplateDisabled(config.DisabledTemplates, templateName, false)
 	})
 	if !found {
 		http.Error(w, "Template not found", http.StatusNotFound)
@@ -2021,13 +2048,23 @@ func templatesFromUploadRequest(r *http.Request) ([]WorkspaceTemplate, error) {
 
 // ListLabs returns a list of completed jobs (labs) available for workspace requests
 func (h *Handler) ListLabs(w http.ResponseWriter, r *http.Request) {
-	h.jobManager.mu.RLock()
-	defer h.jobManager.mu.RUnlock()
+	// closedLab carries what the ownership lookup below needs for a lab that is
+	// closed to new students; it never leaves the server.
+	type closedLab struct {
+		id         string
+		kubeconfig string
+		namespace  string
+	}
+	type candidate struct {
+		job    *Job
+		closed *closedLab
+	}
 
 	// Redact credentials and kubeconfigs before this leaves the server — the raw
 	// job carries provider secrets and cluster-admin kubeconfigs that must not be
 	// exposed to students. Mirrors GetJobStatusJSON's use of sanitizedCopy.
-	var completedLabs []*Job
+	h.jobManager.mu.RLock()
+	var candidates []candidate
 	for _, job := range h.jobManager.jobs {
 		job.mu.RLock()
 		status := job.Status
@@ -2036,13 +2073,42 @@ func (h *Handler) ListLabs(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		sanitized, err := job.sanitizedCopy(false)
+		c := candidate{job: sanitized}
+		if job.Config != nil && job.Config.Disabled {
+			c.closed = &closedLab{
+				id:         job.ID,
+				kubeconfig: extractStringFromConfigValue(job.Kubeconfig),
+				namespace:  job.workspaceNamespace(),
+			}
+		}
 		job.mu.RUnlock()
 		if err != nil {
+			h.jobManager.mu.RUnlock()
 			log.Printf("Failed to sanitize job %s for labs list response: %v", job.ID, err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
-		completedLabs = append(completedLabs, sanitized)
+		candidates = append(candidates, c)
+	}
+	h.jobManager.mu.RUnlock()
+
+	// A closed lab is only listed for students who already have a workspace on
+	// it. That takes a cluster call, so it runs after the locks are released and
+	// only for closed labs; a failed lookup hides the lab rather than exposing it.
+	email := studentEmailFromContext(r)
+	var completedLabs []*Job
+	for _, c := range candidates {
+		if c.closed != nil {
+			owned, err := h.ownedTemplates(r.Context(), c.closed.id, c.closed.kubeconfig, c.closed.namespace, email)
+			if err != nil {
+				log.Printf("Failed to look up workspaces on closed lab %s: %v", c.closed.id, err)
+				continue
+			}
+			if len(owned) == 0 {
+				continue
+			}
+		}
+		completedLabs = append(completedLabs, c.job)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -2117,6 +2183,8 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	var labDeletionDate *time.Time
 	var templates []WorkspaceTemplate
 	var bakedImages map[string]BakedImage
+	labDisabled := false
+	var disabledTemplates map[string]bool
 	if job.Config != nil {
 		domain = job.Config.Domain
 		dnsProvider = job.Config.DNSProvider
@@ -2126,6 +2194,8 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		labName = job.Config.StackName
 		templates = job.Config.GetWorkspaceTemplates()
 		bakedImages = job.Config.BakedImages
+		labDisabled = job.Config.Disabled
+		disabledTemplates = job.Config.DisabledTemplates
 	}
 	job.mu.RUnlock()
 	if clusterIssuerName == "" {
@@ -2162,8 +2232,14 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve the selected template by name (template_id is the template name);
-	// fall back to the first template.
+	// fall back to the first template still open to new students.
 	selected := templates[0]
+	for _, t := range templates {
+		if !disabledTemplates[t.Name] {
+			selected = t
+			break
+		}
+	}
 	if templateIDStr != "" {
 		found := false
 		for _, t := range templates {
@@ -2186,6 +2262,28 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprintf(w, `<div class="error-message">Unable to reach the lab cluster. Please contact the lab administrator.</div>`)
 		return
+	}
+
+	// A closed lab or template takes no new students, but a student who already
+	// has a workspace on it can still come back for it: EnsureWorkspace below
+	// then returns that workspace instead of creating one.
+	if labDisabled || disabledTemplates[selected.Name] {
+		owned, err := h.ownedTemplates(r.Context(), labID, kubeconfig, namespace, email)
+		if err != nil {
+			log.Printf("Failed to look up %s's workspaces on closed lab/template %s/%s: %v", email, labID, selected.Name, err)
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, `<div class="error-message">Unable to reach the lab cluster. Please contact the lab administrator.</div>`)
+			return
+		}
+		if !owned[selected.Name] {
+			message := "This template is closed to new students."
+			if labDisabled {
+				message = "This lab is closed to new students."
+			}
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprintf(w, `<div class="error-message">%s</div>`, message)
+			return
+		}
 	}
 
 	// DiskSize is passed through as-is: it sizes the volume but no longer decides
@@ -3601,6 +3699,8 @@ type LabSummary struct {
 	LabDeletionTimeValue      string
 	HasDeletionDate           bool
 	WorkspaceTemplateNamesCSV string
+	// Disabled reports a lab closed to new students (LabConfig.Disabled).
+	Disabled bool
 }
 
 // buildLabSummary builds the display-safe summary for a single lab (job),
@@ -3624,7 +3724,9 @@ func buildLabSummary(job *Job) LabSummary {
 	labDeletionTimeValue := ""
 	hasLabDeletionDate := false
 	var templateNames []string
+	disabled := false
 	if job.Config != nil {
+		disabled = job.Config.Disabled
 		stackName = job.Config.StackName
 		description = job.Config.Description
 		provider = job.Config.Provider
@@ -3672,6 +3774,7 @@ func buildLabSummary(job *Job) LabSummary {
 		LabDeletionTimeValue:      labDeletionTimeValue,
 		HasDeletionDate:           hasLabDeletionDate,
 		WorkspaceTemplateNamesCSV: strings.Join(templateNames, ", "),
+		Disabled:                  disabled,
 	}
 }
 
@@ -3696,6 +3799,9 @@ type TemplateStatus struct {
 	Owners []string
 	// Removable is false for a lab's only template: a lab needs at least one.
 	Removable bool
+	// Disabled reports a template closed to new students
+	// (LabConfig.DisabledTemplates). Its running workspaces are unaffected.
+	Disabled bool
 }
 
 // buildTemplateStatus correlates a lab's configured templates with the live
@@ -3799,6 +3905,10 @@ type WorkspacesViewModel struct {
 	Templates    []TemplateStatus
 	Unattributed int
 	History      []WorkspaceHistoryDisplay
+	// LabDisabled reports a lab closed to new students; ClosedCount is how many
+	// of Templates are individually closed.
+	LabDisabled bool
+	ClosedCount int
 }
 
 // buildWorkspacesViewModel assembles the Workspaces & Templates view for a
@@ -3816,10 +3926,14 @@ func (h *Handler) buildWorkspacesViewModel(ctx context.Context, job *Job) (*Work
 	stackName := ""
 	var templates []WorkspaceTemplate
 	var bakedImages map[string]BakedImage
+	labDisabled := false
+	var disabledTemplates map[string]bool
 	if job.Config != nil {
 		stackName = job.Config.StackName
 		templates = job.Config.GetWorkspaceTemplates()
 		bakedImages = job.Config.BakedImages
+		labDisabled = job.Config.Disabled
+		disabledTemplates = job.Config.DisabledTemplates
 	}
 	events := append([]WorkspaceEvent(nil), job.WorkspaceEvents...)
 	job.mu.RUnlock()
@@ -3859,6 +3973,13 @@ func (h *Handler) buildWorkspacesViewModel(ctx context.Context, job *Job) (*Work
 	}
 
 	templateStatuses, unattributed := buildTemplateStatus(templates, workspaces, bakedImages)
+	closedCount := 0
+	for i := range templateStatuses {
+		if disabledTemplates[templateStatuses[i].Name] {
+			templateStatuses[i].Disabled = true
+			closedCount++
+		}
+	}
 
 	// Newest first, independent of whether the workspace it names is still running.
 	history := make([]WorkspaceHistoryDisplay, 0, len(events))
@@ -3881,6 +4002,8 @@ func (h *Handler) buildWorkspacesViewModel(ctx context.Context, job *Job) (*Work
 		Templates:    templateStatuses,
 		Unattributed: unattributed,
 		History:      history,
+		LabDisabled:  labDisabled,
+		ClosedCount:  closedCount,
 	}, nil
 }
 
