@@ -89,8 +89,13 @@ For each workspace card you can:
 
 ### Managing workspaces
 
-* **Clear** — Remove a single workspace from your saved list
-* **Clear All** — Remove all saved workspaces at once
+* **Clear** — Delete a single workspace. It is removed from the lab (its environment is shut down and deleted) and from your saved list.
+* **Clear All** — Delete all your workspaces at once, in the same way.
+
+!!! warning "Clearing deletes the workspace"
+    Clearing a workspace is not just a tidy-up of the list: the workspace itself is deleted from the lab, along with everything saved in it. Push or download anything you want to keep first. Once cleared, you can request a new workspace for that template from the **Request a workspace** page.
+
+If a workspace cannot be deleted from the lab (for example the lab is temporarily unreachable), **Clear** asks whether to remove it from your list anyway, and **Clear All** keeps it in the list so you can retry. A workspace that is already gone — deleted by the organiser or by its auto-deletion date — is simply removed from the list.
 
 The panel is collapsible — click the header to expand or collapse it.
 

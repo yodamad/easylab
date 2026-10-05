@@ -2619,6 +2619,115 @@ func (h *Handler) OpenWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// writeStudentWorkspaceDeleted writes the JSON success response for
+// DeleteStudentWorkspace. deleted is false when there was nothing left on the
+// cluster to remove, which the student UI treats the same as a real deletion.
+func writeStudentWorkspaceDeleted(w http.ResponseWriter, deleted bool) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"deleted": deleted,
+	})
+}
+
+// DeleteStudentWorkspace handles POST /api/student/workspace/delete: it removes
+// the authenticated student's own workspace (Deployment, Service, Ingress, PVC)
+// from the lab's cluster. It backs the "Clear" / "Clear all" actions of the My
+// Workspaces page, which would otherwise only forget the workspace locally and
+// leave its pod running.
+//
+// A workspace that is already gone (deleted by an admin, by the cleanup job, or
+// along with its lab) is reported as a success so the student can still clear
+// the saved entry.
+func (h *Handler) DeleteStudentWorkspace(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	labID := r.FormValue("lab_id")
+	workspaceName := r.FormValue("workspace_name")
+	email := studentEmailFromContext(r)
+	// The owner is always the authenticated student — never trusted from the client.
+	owner := usernameFromEmail(email)
+
+	if labID == "" || workspaceName == "" || owner == "" {
+		writeJSONError(w, http.StatusBadRequest, "lab_id and workspace_name are required and you must be logged in")
+		return
+	}
+
+	job, exists := h.jobManager.GetJob(labID)
+	if !exists {
+		writeStudentWorkspaceDeleted(w, false)
+		return
+	}
+
+	job.mu.RLock()
+	kubeconfig := extractStringFromConfigValue(job.Kubeconfig)
+	namespace := job.workspaceNamespace()
+	job.mu.RUnlock()
+
+	// No kubeconfig means the lab has no cluster (not provisioned yet, or
+	// destroyed), so no workspace can be running on it.
+	if kubeconfig == "" {
+		writeStudentWorkspaceDeleted(w, false)
+		return
+	}
+
+	backend, err := h.workspaceBackendFor(labID, kubeconfig, namespace)
+	if err != nil {
+		log.Printf("DeleteStudentWorkspace: failed to build backend for lab %s: %v", labID, err)
+		writeJSONError(w, http.StatusInternalServerError, "Failed to reach lab cluster")
+		return
+	}
+
+	// Listing (rather than GetWorkspace) tells "already gone" apart from a
+	// cluster error, which GetWorkspace reports the same way.
+	workspaces, err := backend.ListWorkspaces(r.Context(), labID)
+	if err != nil {
+		log.Printf("DeleteStudentWorkspace: failed to list workspaces for lab %s: %v", labID, err)
+		writeJSONError(w, http.StatusInternalServerError, "Failed to reach lab cluster")
+		return
+	}
+
+	var target *workspace.Workspace
+	for i := range workspaces {
+		if workspaces[i].Name == workspaceName {
+			target = &workspaces[i]
+			break
+		}
+	}
+	if target == nil {
+		writeStudentWorkspaceDeleted(w, false)
+		return
+	}
+
+	// Authorization: a student may only delete their own workspace.
+	if target.Owner != owner {
+		log.Printf("DeleteStudentWorkspace: authz failed workspace=%s owner=%s in lab %s", workspaceName, owner, labID)
+		writeJSONError(w, http.StatusForbidden, "You can only delete your own workspace")
+		return
+	}
+
+	deletedNames, delErrors := h.deleteWorkspacesConcurrently(r.Context(), backend, labID, []workspace.Workspace{*target})
+	if len(delErrors) > 0 || len(deletedNames) == 0 {
+		log.Printf("DeleteStudentWorkspace: failed to delete workspace %s in lab %s: %v", workspaceName, labID, delErrors)
+		writeJSONError(w, http.StatusInternalServerError, "Failed to delete workspace")
+		return
+	}
+
+	// Off the response's critical path — see the comment on the SaveJob call
+	// in UploadTemplateToLab for why this is safe to run async.
+	go func() {
+		if serr := h.jobManager.SaveJob(labID); serr != nil {
+			log.Printf("Failed to persist workspace deletion event for %s: %v", workspaceName, serr)
+		}
+	}()
+	h.recordAudit(email, "student", "workspace.delete", labID, target.Name)
+
+	writeStudentWorkspaceDeleted(w, true)
+}
+
 // buildWorkspaceStatusHTML returns an HTML partial for the workspace readiness indicator.
 // When the workspace is running, the returned HTML has no HTMX polling attributes so polling stops.
 func buildWorkspaceStatusHTML(labID, workspaceName, status, workspaceURL string) string {

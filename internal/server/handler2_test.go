@@ -5,6 +5,7 @@ import (
 	"context"
 	"easylab/internal/providers/workspace"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -697,4 +698,119 @@ func TestHandler_OpenWorkspace_WrongOwner(t *testing.T) {
 
 	require.Equal(t, http.StatusServiceUnavailable, w.Code)
 	assert.NotContains(t, w.Body.String(), "secret-token-123")
+}
+
+// --- DeleteStudentWorkspace ---
+
+// Clearing a workspace from the student area deletes it from the cluster, but only
+// for its owner; a workspace that is already gone still reports success so the
+// saved entry can be cleared.
+func TestHandler_DeleteStudentWorkspace(t *testing.T) {
+	mine := workspace.Workspace{ID: "ws-student", Name: "ws-student", Owner: "student", OwnerEmail: "student@example.com", Template: "go"}
+	other := workspace.Workspace{ID: "ws-other", Name: "ws-other", Owner: "other"}
+
+	tests := []struct {
+		name          string
+		method        string
+		email         string
+		labID         string // "" means the lab created for the test
+		noKubeconfig  bool
+		workspaceName string
+		backend       *fakeBackend
+		wantStatus    int
+		wantDeleted   bool // expected "deleted" field on a 200
+		wantCalls     []string
+	}{
+		{
+			name: "owner deletes their workspace", method: http.MethodPost, email: "student@example.com",
+			workspaceName: "ws-student", backend: &fakeBackend{workspaces: []workspace.Workspace{other, mine}},
+			wantStatus: http.StatusOK, wantDeleted: true, wantCalls: []string{"ws-student"},
+		},
+		{
+			name: "foreign workspace is refused", method: http.MethodPost, email: "student@example.com",
+			workspaceName: "ws-other", backend: &fakeBackend{workspaces: []workspace.Workspace{other, mine}},
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name: "workspace already gone is a success", method: http.MethodPost, email: "student@example.com",
+			workspaceName: "ws-student", backend: &fakeBackend{workspaces: []workspace.Workspace{other}},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name: "unknown lab is a success", method: http.MethodPost, email: "student@example.com",
+			labID: "job-missing", workspaceName: "ws-student", backend: &fakeBackend{workspaces: []workspace.Workspace{mine}},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name: "lab without a cluster is a success", method: http.MethodPost, email: "student@example.com",
+			noKubeconfig: true, workspaceName: "ws-student", backend: &fakeBackend{workspaces: []workspace.Workspace{mine}},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name: "cluster list failure", method: http.MethodPost, email: "student@example.com",
+			workspaceName: "ws-student", backend: &fakeBackend{listErr: fmt.Errorf("connection refused to 10.0.0.1")},
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name: "cluster delete failure", method: http.MethodPost, email: "student@example.com",
+			workspaceName: "ws-student", backend: &fakeBackend{workspaces: []workspace.Workspace{mine}, deleteErr: fmt.Errorf("connection refused to 10.0.0.1")},
+			wantStatus: http.StatusInternalServerError, wantCalls: []string{"ws-student"},
+		},
+		{
+			name: "missing workspace name", method: http.MethodPost, email: "student@example.com",
+			backend: &fakeBackend{workspaces: []workspace.Workspace{mine}}, wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "no authenticated student", method: http.MethodPost,
+			workspaceName: "ws-student", backend: &fakeBackend{workspaces: []workspace.Workspace{mine}},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "wrong method", method: http.MethodGet, email: "student@example.com",
+			workspaceName: "ws-student", backend: &fakeBackend{workspaces: []workspace.Workspace{mine}},
+			wantStatus: http.StatusMethodNotAllowed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			jm := NewJobManager("")
+			id := jm.CreateJob(&LabConfig{StackName: "test", WorkspaceNamespace: "workshops"})
+			jm.UpdateJobStatus(id, JobStatusCompleted)
+			if !tt.noKubeconfig {
+				job, _ := jm.GetJob(id)
+				job.mu.Lock()
+				job.Kubeconfig = "fake-kubeconfig"
+				job.mu.Unlock()
+			}
+			h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+			useFakeBackend(h, tt.backend)
+
+			labID := tt.labID
+			if labID == "" {
+				labID = id
+			}
+			form := url.Values{"lab_id": {labID}, "workspace_name": {tt.workspaceName}}
+			req := httptest.NewRequest(tt.method, "/api/student/workspace/delete", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			if tt.email != "" {
+				req = req.WithContext(context.WithValue(req.Context(), studentEmailContextKey, tt.email))
+			}
+			w := httptest.NewRecorder()
+			h.DeleteStudentWorkspace(w, req)
+
+			require.Equal(t, tt.wantStatus, w.Code)
+			// Backend detail must never reach the client.
+			assert.NotContains(t, w.Body.String(), "10.0.0.1")
+			assert.Equal(t, tt.wantCalls, tt.backend.DeleteCalls)
+
+			var body map[string]interface{}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+			assert.Equal(t, tt.wantStatus == http.StatusOK, body["success"])
+			if tt.wantStatus == http.StatusOK {
+				assert.Equal(t, tt.wantDeleted, body["deleted"])
+			}
+		})
+	}
 }

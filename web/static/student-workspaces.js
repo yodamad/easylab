@@ -240,18 +240,63 @@ async function decryptAndShowPassword(labId) {
     }
 }
 
-function clearWorkspaceInfo(labId) {
-    if (confirm('Are you sure you want to clear workspace information for this lab?')) {
-        deleteCookie(`workspace_info_${labId}`);
-        loadAllWorkspaceInfos();
+// deleteWorkspaceFromCluster asks the server to delete the workspace itself (its pod
+// and storage), not just the locally saved entry. Resolves to true when the workspace
+// is gone from the cluster — including when it had already been deleted.
+async function deleteWorkspaceFromCluster(info) {
+    const body = new URLSearchParams({
+        lab_id: info.lab_id || '',
+        workspace_name: info.workspace_name || ''
+    });
+    try {
+        const resp = await fetch('/api/student/workspace/delete', { method: 'POST', credentials: 'same-origin', body });
+        return resp.ok;
+    } catch (e) {
+        console.error('Failed to delete workspace:', e);
+        return false;
     }
 }
 
-function clearAllWorkspaceInfos() {
-    if (!confirm('Are you sure you want to clear all saved workspace information?')) return;
-    const workspaces = getAllWorkspaceCookies();
-    workspaces.forEach(ws => deleteCookie(ws.cookieName));
+async function clearWorkspaceInfo(labId) {
+    const cookieName = `workspace_info_${labId}`;
+    const cookieValue = getCookie(cookieName);
+    let info = null;
+    try {
+        info = cookieValue ? JSON.parse(decodeURIComponent(cookieValue)) : null;
+    } catch (e) {
+        console.error('Failed to parse workspace cookie:', e);
+    }
+
+    if (!confirm('Are you sure you want to clear this workspace? It will be deleted from the lab, along with everything saved in it.')) return;
+
+    if (info && !(await deleteWorkspaceFromCluster(info))) {
+        if (!confirm('The workspace could not be deleted from the lab. Remove it from your list anyway?')) return;
+    }
+    deleteCookie(cookieName);
     loadAllWorkspaceInfos();
+}
+
+async function clearAllWorkspaceInfos() {
+    if (!confirm('Are you sure you want to clear all your workspaces? They will be deleted from their labs, along with everything saved in them.')) return;
+    const currentEmail = document.querySelector('.student-dashboard-container')?.dataset.currentEmail || '';
+    const clearAllBtn = document.getElementById('clear-all-btn');
+    if (clearAllBtn) clearAllBtn.disabled = true;
+
+    // Only the logged-in student's workspaces can be deleted from the cluster; entries
+    // saved under another email are not listed here and are just forgotten locally.
+    const results = await Promise.all(getAllWorkspaceCookies().map(async ws => {
+        const mine = !currentEmail || ws.info.email === currentEmail;
+        const ok = !mine || await deleteWorkspaceFromCluster(ws.info);
+        if (ok) deleteCookie(ws.cookieName);
+        return ok;
+    }));
+
+    if (clearAllBtn) clearAllBtn.disabled = false;
+    loadAllWorkspaceInfos();
+    const failed = results.filter(ok => !ok).length;
+    if (failed > 0) {
+        alert(`${failed} workspace(s) could not be deleted from their lab and were kept in your list. Please try again.`);
+    }
 }
 
 async function encryptSingleWorkspace(labId) {
