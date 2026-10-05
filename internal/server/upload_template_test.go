@@ -1,11 +1,14 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+
+	"easylab/internal/providers/workspace"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -218,4 +221,83 @@ func TestUploadTemplateToLab_UnknownLab(t *testing.T) {
 	body := url.Values{"templates_mode": {"form"}, "template_0_name": {"x"}}.Encode()
 	rec := postUpload(h, "does-not-exist", body)
 	require.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+// The drawer's git-credential picker posts an empty value for "Auto". The wizard
+// resolves that against its own credentials; a lab that is already up has to
+// resolve it against the cluster's, or the template's bake and workspaces clone
+// the private repo with no credential at all.
+func TestUploadTemplateToLab_AutolinksLabGitCredential(t *testing.T) {
+	git := func(name string) workspace.AuthSecret {
+		return workspace.AuthSecret{Name: name, Type: workspace.AuthSecretGit}
+	}
+	registry := workspace.AuthSecret{Name: "regcred", Type: workspace.AuthSecretRegistry}
+
+	tests := []struct {
+		name     string
+		secrets  []workspace.AuthSecret
+		listErr  error
+		form     url.Values
+		expected string
+	}{
+		{
+			name:     "single git credential is linked",
+			secrets:  []workspace.AuthSecret{registry, git("gitcredz")},
+			form:     url.Values{"templates_mode": {"form"}, "template_0_git_repo": {"https://gitlab.com/o/r.git"}},
+			expected: "gitcredz",
+		},
+		{
+			name:     "explicit choice is kept",
+			secrets:  []workspace.AuthSecret{git("gitcredz")},
+			form:     url.Values{"templates_mode": {"form"}, "template_0_git_repo": {"https://gitlab.com/o/r.git"}, "template_0_git_auth_secret": {"other"}},
+			expected: "other",
+		},
+		{
+			name:     "several git credentials are ambiguous",
+			secrets:  []workspace.AuthSecret{git("one"), git("two")},
+			form:     url.Values{"templates_mode": {"form"}, "template_0_git_repo": {"https://gitlab.com/o/r.git"}},
+			expected: "",
+		},
+		{
+			name:     "no repository, nothing to link",
+			secrets:  []workspace.AuthSecret{git("gitcredz")},
+			form:     url.Values{"templates_mode": {"form"}},
+			expected: "",
+		},
+		{
+			name:     "unlistable cluster still adds the template",
+			listErr:  errors.New("cluster down"),
+			form:     url.Values{"templates_mode": {"form"}, "template_0_git_repo": {"https://gitlab.com/o/r.git"}},
+			expected: "",
+		},
+		{
+			name:     "yaml is authoritative",
+			secrets:  []workspace.AuthSecret{git("gitcredz")},
+			form:     url.Values{"templates_mode": {"yaml"}, "templates_yaml": {"workspace_templates:\n  - name: docker\n    git_repo: https://gitlab.com/o/r.git\n"}},
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			jm := NewJobManager("")
+			h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+			fb := &fakeSecretBackend{secrets: tt.secrets, listErrSecrets: tt.listErr}
+			h.newWorkspaceBackend = func(_, _ string) (workspace.Backend, error) { return fb, nil }
+			id := completedLabWithKubeconfig(jm, 0)
+
+			if tt.form.Get("templates_mode") == "form" {
+				tt.form.Set("template_0_name", "docker")
+			}
+			rec := postUpload(h, id, tt.form.Encode())
+			require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+
+			job, _ := jm.GetJob(id)
+			job.mu.RLock()
+			defer job.mu.RUnlock()
+			require.Len(t, job.Config.WorkspaceTemplates, 1)
+			assert.Equal(t, tt.expected, job.Config.WorkspaceTemplates[0].GitAuthSecret)
+		})
+	}
 }

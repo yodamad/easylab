@@ -1803,6 +1803,13 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Form path only, as in the wizard: the drawer's git-credential picker posts an
+	// empty value for "Auto", so resolve it against the credentials this lab has.
+	// The YAML path names git_auth_secret itself and is authoritative.
+	if getFormValue(r, "templates_mode") != "yaml" {
+		h.autolinkLabGitCredential(r.Context(), jobID, templates)
+	}
+
 	// Append to the lab config, rejecting a name that clashes with an existing
 	// template or another in the same batch, then persist.
 	var dupName string

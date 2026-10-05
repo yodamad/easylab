@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -419,6 +420,44 @@ func (h *Handler) DeleteLabSecret(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Deleted credential %q for lab %s", name, labID)
 	h.ServeLabSecrets(w, r)
+}
+
+// autolinkLabGitCredential is autolinkGitCredential for a lab that is already up:
+// the candidates are the git credentials in the lab's cluster rather than the
+// ones typed into the wizard. Without it a template added from the drawer with
+// the picker left on "Auto" names no credential, and both its bake and its
+// workspaces clone the private repo anonymously.
+//
+// It is best effort. A cluster that cannot be listed leaves the templates as
+// posted — the add still succeeds and the admin can name the credential later.
+func (h *Handler) autolinkLabGitCredential(ctx context.Context, labID string, templates []WorkspaceTemplate) {
+	needed := false
+	for _, t := range templates {
+		if t.GitRepo != "" && strings.TrimSpace(t.GitAuthSecret) == "" {
+			needed = true
+			break
+		}
+	}
+	if !needed {
+		return
+	}
+
+	sm, err := h.labSecretManagerFor(labID)
+	if err != nil {
+		log.Printf("Lab %s: git credential not auto-linked to the new template: %v", labID, err)
+		return
+	}
+	secrets, err := sm.ListAuthSecrets(ctx)
+	if err != nil {
+		log.Printf("Lab %s: git credential not auto-linked to the new template: failed to list credentials: %v", labID, err)
+		return
+	}
+
+	candidates := make([]pendingSecret, 0, len(secrets))
+	for _, s := range secrets {
+		candidates = append(candidates, pendingSecret{Kind: s.Type, Name: s.Name})
+	}
+	autolinkGitCredential(templates, candidates)
 }
 
 // defaultGitAuthUsername is what GitLab expects alongside a personal access

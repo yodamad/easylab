@@ -303,6 +303,9 @@ Credentials work the same way as in the wizard, with one difference: the pickers
 the credentials **this lab already has** (see [Lab credentials](#lab-credentials-private-registries-and-repositories)
 below). Add one in the **Credentials** panel just above and it appears in the drawer's
 pickers straight away — you do not have to recreate the lab to introduce a new token.
+As in the wizard, a git-credential picker left on **Auto** uses the lab's git credential
+when it has exactly one, for both the bake and the students' workspaces; with several,
+pick one explicitly.
 When a private repository's credential is picked, EasyLab reads it from the lab's
 cluster to clone the devcontainer during the import, so there is no token to retype.
 
