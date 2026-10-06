@@ -16,3 +16,9 @@ For your students, they can access the student space to request a new developmen
 > Go to [Student documentation](student.md)
 
 ![EasyLab Homepage](screens/homepage.png)
+
+## Light and dark theme
+
+The homepage follows your system's light or dark preference. Use the sun/moon button in the top-right corner to switch theme; your choice is remembered in the browser.
+
+![EasyLab Homepage in light theme](screens/homepage-light.png)

@@ -4,12 +4,23 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<script src="{{asset "/static/home-theme.js"}}"></script>
 {{end}}
 
 {{define "body-class"}}home-page{{end}}
 
 {{define "body"}}
 <canvas class="home-canvas" id="nodeCanvas"></canvas>
+
+<button type="button" class="home-theme-toggle" id="homeThemeToggle" aria-label="Switch to light theme">
+    <svg class="home-theme-icon home-theme-icon--sun" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="2"/>
+        <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    <svg class="home-theme-icon home-theme-icon--moon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+    </svg>
+</button>
 
 <div class="home-scene">
     <div class="home-brand">
@@ -81,6 +92,10 @@
     var nodes = [];
     var NODE_COUNT = 55;
     var MAX_DIST = 160;
+    var PALETTES = {
+        dark:  { line: '0, 200, 200', lineAlpha: 0.18, node: 'rgba(0, 220, 210, 0.55)' },
+        light: { line: '0, 110, 104', lineAlpha: 0.3,  node: 'rgba(0, 125, 116, 0.45)' }
+    };
 
     function resize() {
         canvas.width = window.innerWidth;
@@ -101,6 +116,7 @@
     }
 
     function draw() {
+        var palette = PALETTES[document.documentElement.dataset.theme] || PALETTES.dark;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         for (var i = 0; i < nodes.length; i++) {
             var n = nodes[i];
@@ -114,9 +130,9 @@
                 var dx = n.x - m.x, dy = n.y - m.y;
                 var dist = Math.sqrt(dx * dx + dy * dy);
                 if (dist < MAX_DIST) {
-                    var alpha = (1 - dist / MAX_DIST) * 0.18;
+                    var alpha = (1 - dist / MAX_DIST) * palette.lineAlpha;
                     ctx.beginPath();
-                    ctx.strokeStyle = 'rgba(0, 200, 200, ' + alpha + ')';
+                    ctx.strokeStyle = 'rgba(' + palette.line + ', ' + alpha + ')';
                     ctx.lineWidth = 0.8;
                     ctx.moveTo(n.x, n.y);
                     ctx.lineTo(m.x, m.y);
@@ -126,7 +142,7 @@
 
             ctx.beginPath();
             ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(0, 220, 210, 0.55)';
+            ctx.fillStyle = palette.node;
             ctx.fill();
         }
         requestAnimationFrame(draw);

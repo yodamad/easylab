@@ -1771,6 +1771,155 @@ body.home-page {
     }
 }
 
+/* Theme toggle (home page) */
+.home-theme-toggle {
+    position: fixed;
+    top: 1.25rem;
+    right: 1.25rem;
+    z-index: 2;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+    color: #7ba8bd;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.home-theme-toggle:hover {
+    color: #00dcc8;
+    border-color: #00dcc8;
+}
+
+.home-theme-toggle:focus-visible {
+    outline: 2px solid #00dcc8;
+    outline-offset: 3px;
+}
+
+.home-theme-icon {
+    width: 18px;
+    height: 18px;
+}
+
+.home-theme-icon--moon {
+    display: none;
+}
+
+/* Home page — light theme (set by home-theme.js on <html data-theme="light">) */
+[data-theme="light"] body.home-page {
+    background: #edf2f1;
+    color-scheme: light;
+}
+
+[data-theme="light"] .home-theme-toggle {
+    border-color: rgba(12, 37, 48, 0.16);
+    background: rgba(255, 255, 255, 0.7);
+    color: #4c6670;
+}
+
+[data-theme="light"] .home-theme-toggle:hover {
+    color: #007d74;
+    border-color: #007d74;
+}
+
+[data-theme="light"] .home-theme-toggle:focus-visible {
+    outline-color: #007d74;
+}
+
+[data-theme="light"] .home-theme-icon--sun {
+    display: none;
+}
+
+[data-theme="light"] .home-theme-icon--moon {
+    display: block;
+}
+
+[data-theme="light"] .home-brand {
+    background: rgba(255, 255, 255, 0.72);
+    border-color: rgba(0, 125, 116, 0.18);
+    box-shadow: 0 24px 60px -28px rgba(0, 95, 88, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+[data-theme="light"] .home-brand-logo {
+    border-radius: 12px;
+    filter: drop-shadow(0 6px 14px rgba(12, 37, 48, 0.22));
+}
+
+[data-theme="light"] .home-wordmark {
+    background: linear-gradient(120deg, #0c2530 0%, #0b5a5c 50%, #00a396 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    filter: none;
+}
+
+[data-theme="light"] .home-tagline {
+    color: #4c6670;
+}
+
+[data-theme="light"] .home-card {
+    border-color: rgba(12, 37, 48, 0.1);
+    background: rgba(255, 255, 255, 0.78);
+    box-shadow: 0 1px 2px rgba(12, 37, 48, 0.05);
+}
+
+[data-theme="light"] .home-card--student {
+    --card-accent: #007d74;
+    --card-glow: rgba(0, 125, 116, 0.14);
+}
+
+[data-theme="light"] .home-card--admin {
+    --card-accent: #b45309;
+    --card-glow: rgba(180, 83, 9, 0.14);
+}
+
+[data-theme="light"] .home-card:hover {
+    border-color: var(--card-accent);
+    box-shadow: 0 0 0 1px var(--card-accent), 0 22px 44px -18px var(--card-glow), 0 8px 18px -10px rgba(12, 37, 48, 0.18);
+}
+
+[data-theme="light"] .home-card-icon,
+[data-theme="light"] .home-card:hover .home-card-icon {
+    background: var(--card-glow);
+    border-color: transparent;
+}
+
+[data-theme="light"] .home-card-title {
+    color: #0c2530;
+}
+
+[data-theme="light"] .home-card-desc {
+    color: #4c6670;
+}
+
+[data-theme="light"] .home-card-arrow {
+    border-color: rgba(12, 37, 48, 0.16);
+    opacity: 0.8;
+}
+
+[data-theme="light"] .home-card:hover .home-card-arrow {
+    border-color: var(--card-accent);
+    opacity: 1;
+}
+
+[data-theme="light"] .home-footer-credits,
+[data-theme="light"] .home-credit-pill {
+    color: #5d7680;
+}
+
+[data-theme="light"] .home-credit-pill a {
+    color: #2f5b68;
+}
+
+[data-theme="light"] .home-credit-pill a:hover,
+[data-theme="light"] .home-credit-pill a:focus-visible {
+    color: #007d74;
+}
+
 /* ============================================
    LOGIN PAGE STYLES — Mission Control
    ============================================ */
