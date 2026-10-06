@@ -97,6 +97,8 @@ Collapsed, each card shows:
 * **Lab** and **Template** — the lab and workspace template this environment was created from, shown as small chips
 * **Auto-deletion date** — when your workspace will be deleted automatically, shown as an amber *"⏳ Auto-deletes …"* badge with the date and hour. It only appears when the lab schedules a deletion (either a per-workspace lifetime or a lab-wide end date); if the lab sets no expiry, no badge is shown. Save anything you want to keep before this time.
 
+* **Teacher access note** — if a teacher opened your workspace (to check your work or help you debug), the card says *"A teacher opened this workspace on …"* with the date and time of the latest time they did. Nothing is shown when no teacher has opened it.
+
 Expand the card to reveal the rest:
 
 * **Workspace URL** — direct link to your code-server workspace (with a copy button)

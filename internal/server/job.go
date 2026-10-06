@@ -65,6 +65,15 @@ type WorkspaceEvent struct {
 	Template      string    `json:"template,omitempty"`
 }
 
+// WorkspaceAccess records the latest time an admin (teacher) opened a student's
+// workspace, so the student portal can tell the owner about it. Owner is the
+// workspace's sanitized owner username, kept so the student endpoint can
+// authorize the lookup without a round-trip to the cluster.
+type WorkspaceAccess struct {
+	At    time.Time `json:"at"`
+	Owner string    `json:"owner"`
+}
+
 // Job represents a Pulumi execution job
 type Job struct {
 	ID         string     `json:"id"`
@@ -81,7 +90,11 @@ type Job struct {
 	WorkspaceSnapshots []WorkspaceSnapshot                `json:"workspace_snapshots,omitempty"`
 	DeletionRetries    map[string]*WorkspaceDeletionRetry `json:"deletion_retries,omitempty"`
 	WorkspaceEvents    []WorkspaceEvent                   `json:"workspace_events,omitempty"`
-	mu                 sync.RWMutex                       `json:"-"`
+	// WorkspaceAccesses holds the latest admin open of each live workspace, keyed
+	// by workspace ID. Kept apart from WorkspaceEvents, whose consumers (history,
+	// stats) only know creations and deletions.
+	WorkspaceAccesses map[string]WorkspaceAccess `json:"workspace_accesses,omitempty"`
+	mu                sync.RWMutex               `json:"-"`
 	// saveMu serializes SaveJob's disk writes for this job. Without it, many
 	// students creating workspaces in the same lab at once can call SaveJob
 	// concurrently, all racing on the same tmp/final file path — whichever write
@@ -626,9 +639,47 @@ func (jm *JobManager) RecordWorkspaceEvent(id, action, workspaceID, workspaceNam
 		Owner:         owner,
 		Template:      template,
 	})
+	// Workspace names are deterministic, so a workspace recreated after this
+	// deletion would otherwise inherit the previous one's access record.
+	if action == WorkspaceEventDeleted {
+		delete(job.WorkspaceAccesses, workspaceID)
+	}
 	job.UpdatedAt = time.Now()
 	job.mu.Unlock()
 	return nil
+}
+
+// RecordWorkspaceAccess stores the time an admin opened a workspace, replacing
+// any earlier access recorded for it.
+func (jm *JobManager) RecordWorkspaceAccess(id, workspaceID, owner string) error {
+	jm.mu.RLock()
+	job, exists := jm.jobs[id]
+	jm.mu.RUnlock()
+	if !exists {
+		return fmt.Errorf("job %s not found", id)
+	}
+	job.mu.Lock()
+	if job.WorkspaceAccesses == nil {
+		job.WorkspaceAccesses = make(map[string]WorkspaceAccess)
+	}
+	job.WorkspaceAccesses[workspaceID] = WorkspaceAccess{At: time.Now(), Owner: owner}
+	job.mu.Unlock()
+	return nil
+}
+
+// GetWorkspaceAccess returns the latest admin open recorded for a workspace, and
+// whether there is one.
+func (jm *JobManager) GetWorkspaceAccess(id, workspaceID string) (WorkspaceAccess, bool) {
+	jm.mu.RLock()
+	job, exists := jm.jobs[id]
+	jm.mu.RUnlock()
+	if !exists {
+		return WorkspaceAccess{}, false
+	}
+	job.mu.RLock()
+	access, ok := job.WorkspaceAccesses[workspaceID]
+	job.mu.RUnlock()
+	return access, ok
 }
 
 // ResetJobForRetry resets a failed job to pending status for retry
@@ -683,6 +734,11 @@ func (j *Job) sanitizedCopy(encryptSecrets bool) (*Job, error) {
 		WorkspaceSnapshots: j.WorkspaceSnapshots,
 		DeletionRetries:    j.DeletionRetries,
 		WorkspaceEvents:    j.WorkspaceEvents,
+	}
+	// Persisted, but left out of API responses: a student only learns about
+	// accesses to their own workspace, through WorkspaceTeacherAccess.
+	if encryptSecrets {
+		cp.WorkspaceAccesses = j.WorkspaceAccesses
 	}
 
 	// atRest encrypts when persisting and blanks when exposing via the API.

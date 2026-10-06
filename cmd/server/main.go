@@ -381,6 +381,7 @@ func main() {
 	mux.HandleFunc("/api/student/workspace/status", authHandler.RequireStudentAuth(handler.WorkspaceStatus))
 	mux.HandleFunc("/api/student/workspace/open", authHandler.RequireStudentAuth(handler.OpenWorkspace))
 	mux.HandleFunc("/api/student/workspace/delete", authHandler.RequireStudentAuth(handler.DeleteStudentWorkspace))
+	mux.HandleFunc("/api/student/workspace/access", authHandler.RequireStudentAuth(handler.WorkspaceTeacherAccess))
 	mux.HandleFunc("/api/student/feedback", authHandler.RequireStudentAuth(handler.SubmitFeedback))
 
 	// Public homepage (no auth required)
@@ -574,6 +575,7 @@ const (
 	routeRecreateCredentials
 	routeUpdateLabLifecycle
 	routeRetryJobWithConfig
+	routeOpenWorkspace
 )
 
 // resolveLabRoute picks the endpoint for a request. The case order is the
@@ -582,6 +584,11 @@ func resolveLabRoute(path, method, format string) labRoute {
 	switch {
 	case strings.Contains(path, "/workspaces") && !strings.Contains(path, "/delete") && method == http.MethodGet:
 		return routeListWorkspaces
+	// Opening a workspace must be matched before the delete below, which takes any
+	// workspace path containing "delete" — including one whose workspace name does
+	// (the name embeds the student's username).
+	case strings.Contains(path, "/workspaces/") && strings.HasSuffix(path, "/open") && method == http.MethodPost:
+		return routeOpenWorkspace
 	case strings.Contains(path, "/workspaces/") && strings.Contains(path, "delete") && method == http.MethodPost:
 		return routeDeleteWorkspace
 
@@ -645,6 +652,8 @@ func labRequestRouter(h *server.Handler) http.HandlerFunc {
 		switch resolveLabRoute(r.URL.Path, r.Method, r.URL.Query().Get("format")) {
 		case routeListWorkspaces:
 			h.ListLabWorkspaces(w, r)
+		case routeOpenWorkspace:
+			h.OpenWorkspaceAsAdmin(w, r)
 		case routeDeleteWorkspace:
 			h.DeleteWorkspace(w, r)
 		case routeDeleteLabSecret:

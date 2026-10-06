@@ -2726,6 +2726,114 @@ func (h *Handler) OpenWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// OpenWorkspaceAsAdmin handles POST /api/labs/{id}/workspaces/{workspace_id}/open:
+// it logs an admin (teacher) into a student's code-server workspace, to check
+// their work or help them debug. It serves the same self-submitting login form as
+// OpenWorkspace, without the owner check — any admin may open any workspace of a
+// lab. Each open is audited and recorded on the lab so the owner is told about it
+// in the student portal (see WorkspaceTeacherAccess).
+func (h *Handler) OpenWorkspaceAsAdmin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// /api/labs/{lab_id}/workspaces/{workspace_id}/open
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) != 6 || pathParts[3] != "workspaces" || pathParts[5] != "open" {
+		http.Error(w, "lab and workspace are required", http.StatusBadRequest)
+		return
+	}
+	labID, workspaceID := pathParts[2], pathParts[4]
+
+	job, exists := h.jobManager.GetJob(labID)
+	if !exists {
+		http.Error(w, "lab not found", http.StatusNotFound)
+		return
+	}
+
+	job.mu.RLock()
+	kubeconfig := extractStringFromConfigValue(job.Kubeconfig)
+	namespace := job.workspaceNamespace()
+	job.mu.RUnlock()
+
+	if kubeconfig == "" {
+		http.Error(w, "lab is not ready", http.StatusServiceUnavailable)
+		return
+	}
+
+	backend, err := h.workspaceBackendFor(labID, kubeconfig, namespace)
+	if err != nil {
+		log.Printf("OpenWorkspaceAsAdmin: failed to build backend for lab %s: %v", labID, err)
+		http.Error(w, "lab is not ready", http.StatusServiceUnavailable)
+		return
+	}
+
+	ws, err := backend.GetWorkspace(r.Context(), workspaceID)
+	if err != nil || ws.OpenURL == "" {
+		log.Printf("OpenWorkspaceAsAdmin: workspace=%s not available in lab %s: %v", workspaceID, labID, err)
+		http.Error(w, "workspace not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	if rerr := h.jobManager.RecordWorkspaceAccess(labID, workspaceID, ws.Owner); rerr != nil {
+		log.Printf("Failed to record admin access to workspace %s: %v", workspaceID, rerr)
+	} else {
+		// Off the response's critical path — see the comment on the SaveJob call
+		// in UploadTemplateToLab for why this is safe to run async.
+		go func() {
+			if serr := h.jobManager.SaveJob(labID); serr != nil {
+				log.Printf("Failed to persist admin access to workspace %s: %v", workspaceID, serr)
+			}
+		}()
+	}
+	wsName := ws.Name
+	if wsName == "" {
+		wsName = workspaceID
+	}
+	h.recordAudit(adminActor(r), "admin", "workspace.open", labID, wsName)
+
+	loginURL := strings.TrimRight(ws.OpenURL, "/") + "/login"
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := autoLoginPage.Execute(w, struct {
+		LoginURL string
+		Token    string
+	}{LoginURL: loginURL, Token: ws.Token}); err != nil {
+		log.Printf("OpenWorkspaceAsAdmin: failed to render auto-login page for lab %s: %v", labID, err)
+	}
+}
+
+// WorkspaceTeacherAccess handles GET /api/student/workspace/access: it tells the
+// authenticated student when an admin (teacher) last opened their workspace, so
+// the My Workspaces page can show it. teacher_accessed_at is an RFC 3339
+// timestamp, or "" when the workspace was never opened by an admin — which is
+// also the answer for a workspace the student does not own.
+func (h *Handler) WorkspaceTeacherAccess(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	labID := r.URL.Query().Get("lab_id")
+	workspaceName := r.URL.Query().Get("workspace_name")
+	// The owner is always the authenticated student — never trusted from the client.
+	owner := usernameFromEmail(studentEmailFromContext(r))
+
+	if labID == "" || workspaceName == "" || owner == "" {
+		writeJSONError(w, http.StatusBadRequest, "lab_id and workspace_name are required and you must be logged in")
+		return
+	}
+
+	accessedAt := ""
+	// Authorization: a student may only learn about accesses to their own workspace.
+	if access, ok := h.jobManager.GetWorkspaceAccess(labID, workspaceName); ok && access.Owner == owner {
+		accessedAt = access.At.Format(time.RFC3339)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"teacher_accessed_at": accessedAt})
+}
+
 // writeStudentWorkspaceDeleted writes the JSON success response for
 // DeleteStudentWorkspace. deleted is false when there was nothing left on the
 // cluster to remove, which the student UI treats the same as a real deletion.
@@ -3891,6 +3999,9 @@ type WorkspaceDisplay struct {
 	Status    string
 	CreatedAt string
 	UpdatedAt string
+	// CanOpen reports a workspace that is up and has a URL, so an admin can be
+	// logged into it (see OpenWorkspaceAsAdmin).
+	CanOpen bool
 }
 
 // WorkspaceHistoryDisplay is one workspace creation/deletion event, shown in
@@ -3978,6 +4089,7 @@ func (h *Handler) buildWorkspacesViewModel(ctx context.Context, job *Job) (*Work
 			Status:    ws.Phase,
 			CreatedAt: createdAt,
 			UpdatedAt: updatedAt,
+			CanOpen:   ws.Ready && ws.OpenURL != "",
 		})
 	}
 

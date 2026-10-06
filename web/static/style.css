@@ -2906,6 +2906,13 @@ select.loading {
     white-space: nowrap;
 }
 
+/* Note telling the student a teacher opened their workspace. */
+.workspace-teacher-access-note {
+    margin-top: 0.5rem;
+    font-size: 0.8125rem;
+    color: var(--text-light);
+}
+
 /* Collapsible body: animates open/closed with a grid-rows transition that works
    regardless of the content's height. */
 .workspace-card-collapsible {
@@ -3721,6 +3728,12 @@ select.loading {
     text-align: right;
 }
 
+/* Cells clip their content to ellipsize long text; the actions cell holds buttons
+   whose tooltips sit above them, outside the cell, so it must not clip. */
+.workspace-table td.col-actions {
+    overflow: visible;
+}
+
 .workspace-table th:nth-child(3),
 .workspace-table td:nth-child(3) {
     width: 14rem;
@@ -3776,6 +3789,13 @@ select.loading {
 .workspace-table .btn-icon-only .icon {
     width: 1.125rem;
     height: 1.125rem;
+}
+
+/* The "open workspace" action is a form (it POSTs to a new tab); keep it on the
+   same line as the delete button next to it. */
+.workspace-open-form {
+    display: inline-block;
+    margin: 0 0.25rem 0 0;
 }
 
 .checkbox-label {

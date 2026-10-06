@@ -477,6 +477,30 @@ configured) at `https://{workspace}.{domain}/`. Access is gated by a per-student
 student enters it on code-server's own login page when they open their
 workspace, and EasyLab's own student authentication protects the portal itself.
 
+### Opening a student's workspace
+
+To check a student's work or help them debug, open their workspace yourself: in
+the **Active Workspaces** tab, click the **Open Workspace** button of the row
+(next to **Delete**). The workspace opens in a new tab and EasyLab signs you in,
+so you land straight in the student's code-server IDE — files, editor and
+terminal — without needing their password. It works from any browser; nothing
+has to be installed on your laptop.
+
+![Open Workspace button in the Active Workspaces tab](screens/workspace-open.png){width=850}
+
+The button only appears once the workspace is up and has a URL; a workspace that
+is still starting cannot be opened yet.
+
+Things to know:
+
+* You get the **same access as the student**: anything you edit or run is done in
+  their environment. The student can stay connected at the same time, but
+  code-server does not show each other's cursors.
+* The student is told. Their workspace card on **My Workspaces** shows *"A teacher
+  opened this workspace on …"* with the date and time of the latest open.
+* Each open is recorded in the [audit log](audit-log.md) as `workspace.open`, and
+  in the lab's **Activity** tab.
+
 ### Certificates repair themselves
 
 A workspace's Ingress used to be written once, at creation, and never revisited.

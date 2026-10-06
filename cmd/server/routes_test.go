@@ -68,6 +68,26 @@ func TestResolveLabRoute(t *testing.T) {
 			method: http.MethodPost,
 			want:   routeDeleteWorkspace,
 		},
+		{
+			name:   "open a workspace",
+			path:   "/api/labs/job-1/workspaces/ws-1/open",
+			method: http.MethodPost,
+			want:   routeOpenWorkspace,
+		},
+		// A workspace name embeds the student's username, so it can contain
+		// "delete"; opening it must not be taken for a deletion.
+		{
+			name:   "open a workspace whose name contains delete",
+			path:   "/api/labs/job-1/workspaces/ws-delete-me-1a2b3c4d/open",
+			method: http.MethodPost,
+			want:   routeOpenWorkspace,
+		},
+		{
+			name:   "delete a workspace whose name contains open",
+			path:   "/api/labs/job-1/workspaces/ws-open-1a2b3c4d/delete",
+			method: http.MethodPost,
+			want:   routeDeleteWorkspace,
+		},
 
 		// The rest.
 		{name: "retry", path: "/api/labs/job-1/retry", method: http.MethodPost, want: routeRetryJob},

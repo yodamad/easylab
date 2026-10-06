@@ -69,6 +69,25 @@ function loadAllWorkspaceInfos() {
     if (countEl) countEl.textContent = workspaces.length === 1 ? '1 workspace' : `${workspaces.length} workspaces`;
 
     setTimeout(() => attachCopyButtonListeners(), 10);
+    workspaces.forEach(ws => loadTeacherAccessNote(ws.info, ws.uniqueId));
+}
+
+// loadTeacherAccessNote asks the server whether a teacher has opened this workspace
+// and, if so, says when on its card. Failures are silent: the note is informational.
+async function loadTeacherAccessNote(info, labId) {
+    const url = `/api/student/workspace/access?lab_id=${encodeURIComponent(info.lab_id || '')}&workspace_name=${encodeURIComponent(info.workspace_name || '')}`;
+    try {
+        const resp = await fetch(url, { credentials: 'same-origin' });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const accessedAt = formatWorkspaceDate(data.teacher_accessed_at);
+        const note = document.getElementById(`workspace-teacher-access-${labId}`);
+        if (!accessedAt || !note) return;
+        note.textContent = `A teacher opened this workspace on ${accessedAt}`;
+        note.classList.remove('is-hidden');
+    } catch (e) {
+        console.error('Failed to load teacher access:', e);
+    }
 }
 
 // Toggle a single workspace card between collapsed (name + lab/template + expiry only)
@@ -131,6 +150,7 @@ function renderWorkspaceCard(info, labId) {
                 </div>
             </div>
             ${expiryPill}
+            <div class="workspace-teacher-access-note is-hidden" id="workspace-teacher-access-${safeLab}"></div>
             <div class="workspace-card-collapsible">
                 <div class="workspace-card-collapsible-inner">
                     <div class="workspace-card-details">
