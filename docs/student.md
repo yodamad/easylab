@@ -64,7 +64,7 @@ You need to provide:
 
 Your email address is automatically filled in from your login session and is not editable on this form.
 
-The organiser can close a lab or a template to new students. A closed one no longer appears here unless you already have a workspace on it. In that case its card has a dashed border and reads *"Closed to new students. Your workspace is still here."*, and the button becomes **Open my workspace**: it gives you back the link and password of your existing workspace instead of creating a new one. Your workspace also stays on the **My Workspaces** page.
+The organiser can close a lab or a template to new students. A closed one no longer appears here unless you already have a workspace on it. In that case its card has a dashed border and reads *"Closed to new students. Your workspace is still here."*, and the button becomes **Open my workspace**: it gives you back the link and connection token of your existing workspace instead of creating a new one. Your workspace also stays on the **My Workspaces** page.
 
 ![A closed template you still have a workspace on](screens/student-closed-template.png){width=85%}
 
@@ -72,20 +72,27 @@ Then, you'll get all information needed to connect to your workspace!
 
 Just use the provided link and credentials to connect to your workspace. A **View my workspaces →** link takes you to the My Workspaces page, where the new workspace is already listed.
 
+The **connection token** is the password code-server asks for when you open the workspace URL directly. It is shown here, when you request the workspace; the My Workspaces page does not display it. You rarely need it: **Open Code Server** on the My Workspaces page signs you in for you.
+
 !!! info "Waiting for DNS"
     Right after a workspace starts you may briefly see *"Workspace is up — waiting for DNS to propagate..."*. On a lab with a public domain, the workspace address is created in DNS when the environment is provisioned and can take up to a minute to become resolvable. EasyLab holds back the **Open** button until the address actually resolves, so you are not handed a link that fails with `DNS_PROBE_FINISHED_NXDOMAIN`. When the button turns green, the workspace is reachable.
 
 ![Request a new development environment](screens/lab-create.png){width=85%}
 
-### Save your workspace information
-
-You can store the workspace information in a secured cookie in your browser to be able to retrieve information later if needed. You need to provide a password to encrypt and decrypt the workspace information.
-
-![Save your workspace information](screens/workspace-created.png){width=85%}
-
 ## My Workspaces
 
-**My Workspaces** is its own page, reached from the link in the header (or the **View my workspaces →** link shown after you request one). It displays a card for each workspace you have requested — across different labs and different templates within the same lab. Only workspaces matching your logged-in email are shown. When you have none yet, the page invites you to request your first one.
+**My Workspaces** is its own page, reached from the link in the header (or the **View my workspaces →** link shown after you request one). It displays a card for each workspace you have requested — across different labs and different templates within the same lab. Only your own workspaces are shown. When you have none yet, the page invites you to request your first one.
+
+![My Workspaces](screens/workspace-data.png){width=75%}
+
+### Find your workspaces on another device
+
+Your workspaces follow your login, not your browser. Nothing is stored on your laptop: sign in to the student portal from another computer with the **same email** (or the same Microsoft, GitHub or GitLab account) and **My Workspaces** lists the same workspaces, ready to open.
+
+!!! info "Sign in the same way"
+    A workspace belongs to the name before the `@` of the email you signed in with. Signing in with a different email, or with a different provider that gives you a different username, shows a different list.
+
+If a lab cannot be reached when the page loads, a message says that some workspaces may be missing from the list. Reload the page a moment later.
 
 ### Workspace cards
 
@@ -102,38 +109,20 @@ Collapsed, each card shows:
 Expand the card to reveal the rest:
 
 * **Workspace URL** — direct link to your code-server workspace (with a copy button)
-* **Email** — the email used to create the workspace (with a copy button)
-* **Password** — your workspace password, encrypted or in clear text (with a copy button)
+* **Email** — the email you are signed in with (with a copy button)
 * **Created at** — when the workspace was created
 
-An **Open Code Server** button is available on each card header — you don't need to expand the card to use it. Click it to open your code-server directly in a new tab — EasyLab resolves the workspace URL automatically so you don't need to copy it manually, and signs you in for you, so you land straight in the IDE without retyping the password. The **Password** is still shown on the card in case you open the workspace URL directly, where code-server asks for it on its login page.
-
-### Encrypting and decrypting credentials
-
-For each workspace card you can:
-
-* **Encrypt** — Enter a password to encrypt your workspace credentials. The encrypted data is stored in a browser cookie. This protects your password if someone accesses your browser.
-* **Decrypt** — Use the same password to reveal your workspace password later.
+An **Open Code Server** button is available on each card header — you don't need to expand the card to use it. Click it to open your code-server directly in a new tab — EasyLab resolves the workspace URL automatically so you don't need to copy it manually, and signs you in for you, so you land straight in the IDE without typing a password. The card does not show the workspace's connection token: if you open the workspace URL directly, code-server asks for the token you were given when you requested the workspace.
 
 ### Managing workspaces
 
-* **Clear** — Delete a single workspace. It is removed from the lab (its environment is shut down and deleted) and from your saved list.
+* **Clear** — Delete a single workspace. It is removed from the lab (its environment is shut down and deleted) and from your list.
 * **Clear All** — Delete all your workspaces at once, in the same way.
 
 !!! warning "Clearing deletes the workspace"
     Clearing a workspace is not just a tidy-up of the list: the workspace itself is deleted from the lab, along with everything saved in it. Push or download anything you want to keep first. Once cleared, you can request a new workspace for that template from the **Request a workspace** page.
 
-If a workspace cannot be deleted from the lab (for example the lab is temporarily unreachable), **Clear** asks whether to remove it from your list anyway, and **Clear All** keeps it in the list so you can retry. A workspace that is already gone — deleted by the organiser or by its auto-deletion date — is simply removed from the list.
-
-The panel is collapsible — click the header to expand or collapse it.
-
-## Retrieve information about your environments
-
-If you have already saved a workspace, you can retrieve information about your environments from the **My Workspaces** panel described above.
-
-You need to provide the same password you used to encrypt the workspace information to decrypt the workspace password.
-
-![Retrieve your workspace information](screens/workspace-data.png){width=75%}
+If a workspace cannot be deleted from the lab (for example the lab is temporarily unreachable), it stays in the list and a message asks you to try again. A workspace that is already gone — deleted by the organiser or by its auto-deletion date — no longer appears in the list.
 
 ## Submit feedback
 

@@ -3304,22 +3304,6 @@ select.loading {
     font-family: monospace;
 }
 
-.encrypted-state {
-    opacity: 0.8;
-}
-
-.encrypted-indicator {
-    font-style: italic;
-    color: var(--text-light);
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-}
-
-.decrypt-btn {
-    margin-top: 0.5rem;
-}
-
 /* ============================================
    JOBS LIST PAGE STYLES
    ============================================ */
@@ -5254,10 +5238,6 @@ details.credentials-box > :last-child {
 .credential-item .value a {
     color: #2563eb;
     text-decoration: underline;
-}
-
-.credentials-save-btn {
-    margin-top: 0.5rem;
 }
 
 /* Provider page tabs */

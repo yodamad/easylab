@@ -1,28 +1,18 @@
-// My Workspaces page: renders the workspaces a student has saved locally (in cookies),
-// each with its credentials, auto-deletion time, and per-workspace actions. Shared
-// helpers (cookies, crypto, copy, escaping) live in student-common.js, loaded first.
+// My Workspaces page: renders the logged-in student's workspaces as reported by the
+// server (GET /api/student/workspaces), each with its details, auto-deletion time, and
+// per-workspace actions. The list follows the student's login, not the browser, so it
+// is the same on every device. Shared helpers (copy, escaping) live in
+// student-common.js, loaded first.
 
-// lab_id in a saved workspace is the internal job id (e.g. "job-1a2b…"), which is
-// not meaningful to a student. We resolve it to the lab's real name from the live
-// labs list so even workspaces saved before the name was recorded read correctly.
-let _labNames = {};
+// The workspaces currently listed, keyed by the id their card is rendered under.
+let _workspaces = {};
 
-function fetchLabNames() {
-    return fetch('/api/student/labs', { credentials: 'same-origin' })
-        .then(r => r.ok ? r.json() : [])
-        .then(labs => {
-            (labs || []).forEach(lab => {
-                _labNames[lab.id] = (lab.config && lab.config.stack_name) || lab.id;
-            });
-        })
-        .catch(() => {});
+document.addEventListener('DOMContentLoaded', loadAllWorkspaceInfos);
+
+// workspaceKey identifies a workspace across labs; it names the card's DOM ids.
+function workspaceKey(info) {
+    return `${info.lab_id}_${info.workspace_name}`;
 }
-
-document.addEventListener('DOMContentLoaded', function() {
-    // Render once the lab names are in (or the lookup has failed), so cards show a
-    // readable lab name from the first paint rather than flashing the job id.
-    fetchLabNames().finally(loadAllWorkspaceInfos);
-});
 
 // formatWorkspaceDate turns an ISO timestamp into a compact "Mon DD, YYYY · HH:MM"
 // label in the viewer's locale. Returns '' when the value is missing or unparseable.
@@ -42,56 +32,59 @@ function renderEmptyState() {
                 <path stroke-linecap="round" stroke-linejoin="round" d="M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122" />
             </svg>
             <h3>No workspaces yet</h3>
-            <p>Request a workspace to get your development environment. It shows up here so you can reconnect anytime.</p>
+            <p>Request a workspace to get your development environment. It shows up here so you can reconnect anytime, from any device.</p>
             <a href="/student/dashboard" class="student-btn">Request a workspace</a>
         </div>
     `;
 }
 
-function loadAllWorkspaceInfos() {
-    const currentEmail = document.querySelector('.student-dashboard-container')?.dataset.currentEmail || '';
-    const all = getAllWorkspaceCookies();
-    const workspaces = currentEmail ? all.filter(ws => ws.info.email === currentEmail) : all;
+// The server skips a lab whose cluster it cannot reach rather than failing the whole
+// list, so say that some workspaces may be missing.
+function renderIncompleteNotice() {
+    return `<div class="warning-message">Some labs could not be reached, so workspaces may be missing from this list. Please try again in a moment.</div>`;
+}
+
+async function loadAllWorkspaceInfos() {
     const container = document.getElementById('workspaces-list-container');
     const clearAllBtn = document.getElementById('clear-all-btn');
     const countEl = document.getElementById('workspaces-count');
     if (!container) return;
 
-    if (workspaces.length === 0) {
-        container.innerHTML = renderEmptyState();
+    let data;
+    try {
+        const resp = await fetch('/api/student/workspaces', { credentials: 'same-origin' });
+        if (!resp.ok) throw new Error('Failed to fetch workspaces');
+        data = await resp.json();
+    } catch (e) {
+        console.error('Failed to load workspaces:', e);
+        _workspaces = {};
+        container.innerHTML = `<div class="error-message">Your workspaces could not be loaded. Please refresh the page.</div>`;
         if (clearAllBtn) clearAllBtn.style.display = 'none';
         if (countEl) countEl.textContent = '';
         return;
     }
 
-    container.innerHTML = workspaces.map(ws => renderWorkspaceCard(ws.info, ws.uniqueId)).join('');
+    const workspaces = data.workspaces || [];
+    const notice = data.incomplete ? renderIncompleteNotice() : '';
+    _workspaces = {};
+    workspaces.forEach(info => { _workspaces[workspaceKey(info)] = info; });
+
+    if (workspaces.length === 0) {
+        container.innerHTML = notice + renderEmptyState();
+        if (clearAllBtn) clearAllBtn.style.display = 'none';
+        if (countEl) countEl.textContent = '';
+        return;
+    }
+
+    container.innerHTML = notice + workspaces.map(info => renderWorkspaceCard(info, workspaceKey(info))).join('');
     if (clearAllBtn) clearAllBtn.style.display = '';
     if (countEl) countEl.textContent = workspaces.length === 1 ? '1 workspace' : `${workspaces.length} workspaces`;
 
     setTimeout(() => attachCopyButtonListeners(), 10);
-    workspaces.forEach(ws => loadTeacherAccessNote(ws.info, ws.uniqueId));
-}
-
-// loadTeacherAccessNote asks the server whether a teacher has opened this workspace
-// and, if so, says when on its card. Failures are silent: the note is informational.
-async function loadTeacherAccessNote(info, labId) {
-    const url = `/api/student/workspace/access?lab_id=${encodeURIComponent(info.lab_id || '')}&workspace_name=${encodeURIComponent(info.workspace_name || '')}`;
-    try {
-        const resp = await fetch(url, { credentials: 'same-origin' });
-        if (!resp.ok) return;
-        const data = await resp.json();
-        const accessedAt = formatWorkspaceDate(data.teacher_accessed_at);
-        const note = document.getElementById(`workspace-teacher-access-${labId}`);
-        if (!accessedAt || !note) return;
-        note.textContent = `A teacher opened this workspace on ${accessedAt}`;
-        note.classList.remove('is-hidden');
-    } catch (e) {
-        console.error('Failed to load teacher access:', e);
-    }
 }
 
 // Toggle a single workspace card between collapsed (name + lab/template + expiry only)
-// and expanded (full credentials). Triggered from the card header and chevron.
+// and expanded (full details). Triggered from the card header and chevron.
 function toggleWorkspaceCard(labId) {
     const card = document.getElementById(`workspace-card-${labId}`);
     if (!card) return;
@@ -101,21 +94,19 @@ function toggleWorkspaceCard(labId) {
 }
 
 function renderWorkspaceCard(info, labId) {
-    const createdAt = formatWorkspaceDate(info.created_at) || new Date(info.created_at).toLocaleString();
+    const createdAt = formatWorkspaceDate(info.created_at);
     const deletionAt = formatWorkspaceDate(info.deletion_at);
-    const isEncrypted = info.encrypted_password && !info.password;
+    const teacherAccessedAt = formatWorkspaceDate(info.teacher_accessed_at);
     // safeLab is embedded inside single-quoted onclick="fn('...')" handlers
     // below, so it needs quote-safe escaping, not just HTML-text escaping.
     const safeLab = escapeHtmlAttr(labId);
-    const safeUrl = escapeHtml(info.workspace_url);
+    const safeUrl = escapeHtml(info.workspace_url || '');
     // Only render as a clickable link when the scheme is http(s) — otherwise
     // (e.g. a javascript: URL) show it as inert text instead of a link.
     const workspaceLinkHref = /^https?:\/\//i.test(info.workspace_url || '') ? escapeHtmlAttr(info.workspace_url) : null;
-    const safeEmail = escapeHtml(info.email);
+    const safeEmail = escapeHtml(info.email || '');
     const safeName = escapeHtml(info.workspace_name);
-    const labDisplay = escapeHtml(_labNames[info.lab_id] || info.lab_name || info.lab_id || '');
-
-    const ownerID = info.email.split('@')[0].toLowerCase().replace(/\./g, '-');
+    const labDisplay = escapeHtml(info.lab_name || info.lab_id || '');
 
     const templateChip = info.template
         ? `<span class="workspace-card-chip"><span class="workspace-card-chip-key">Template</span>${escapeHtml(info.template)}</span>`
@@ -133,6 +124,10 @@ function renderWorkspaceCard(info, labId) {
                     <span class="workspace-expiry-date">${escapeHtml(deletionAt)}</span>
                 </div>` : '';
 
+    const teacherNote = teacherAccessedAt
+        ? `<div class="workspace-teacher-access-note">A teacher opened this workspace on ${escapeHtml(teacherAccessedAt)}</div>`
+        : '';
+
     return `
         <div class="workspace-card collapsed" id="workspace-card-${safeLab}">
             <div class="workspace-card-header" onclick="toggleWorkspaceCard('${safeLab}')">
@@ -141,7 +136,7 @@ function renderWorkspaceCard(info, labId) {
                     <div class="workspace-card-subtitle">${labChip}${templateChip}</div>
                 </div>
                 <div class="workspace-card-header-actions">
-                    <button onclick="event.stopPropagation(); openCodeServer('${escapeHtmlAttr(info.lab_id)}', '${escapeHtmlAttr(info.workspace_name)}', '${escapeHtmlAttr(ownerID)}')" class="student-btn student-btn-small workspace-card-open" title="Open code-server">Open Code Server</button>
+                    <button onclick="event.stopPropagation(); openCodeServer('${escapeHtmlAttr(info.lab_id)}', '${escapeHtmlAttr(info.workspace_name)}')" class="student-btn student-btn-small workspace-card-open" title="Open code-server">Open Code Server</button>
                     <button class="collapsible-toggle" type="button" aria-label="Toggle workspace details" aria-expanded="false">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="chevron-icon">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
@@ -150,7 +145,7 @@ function renderWorkspaceCard(info, labId) {
                 </div>
             </div>
             ${expiryPill}
-            <div class="workspace-teacher-access-note is-hidden" id="workspace-teacher-access-${safeLab}"></div>
+            ${teacherNote}
             <div class="workspace-card-collapsible">
                 <div class="workspace-card-collapsible-inner">
                     <div class="workspace-card-details">
@@ -171,25 +166,12 @@ function renderWorkspaceCard(info, labId) {
                             </div>
                         </div>
                         <div class="student-credential-item">
-                            <label>Password:</label>
-                            <div class="student-credential-item-value credential-with-copy ${isEncrypted ? 'encrypted-state' : ''}" id="workspace-password-display-${safeLab}">
-                                ${info.password ?
-                                    `<span class="password-value">${escapeHtml(info.password)}</span>
-                                     <button class="copy-btn" data-copy-text="${escapeHtml(info.password)}" title="Copy Password">${copyIconSvg}</button>` :
-                                    `<em class="encrypted-indicator">Encrypted - click to decrypt</em>`}
-                            </div>
-                            ${isEncrypted ?
-                                `<button onclick="decryptAndShowPassword('${safeLab}')" class="student-btn student-btn-small decrypt-btn">Decrypt Password</button>` :
-                                ''}
-                        </div>
-                        <div class="student-credential-item">
                             <label>Created At:</label>
-                            <div class="student-credential-item-value">${createdAt}</div>
+                            <div class="student-credential-item-value">${escapeHtml(createdAt)}</div>
                         </div>
                     </div>
                     <div class="workspace-card-footer-actions">
-                        ${isEncrypted ? '' : `<button onclick="encryptSingleWorkspace('${safeLab}')" class="student-btn student-btn-small" title="Encrypt password">Encrypt</button>`}
-                        <button onclick="clearWorkspaceInfo('${safeLab}')" class="student-btn student-btn-danger student-btn-small" title="Remove">Clear</button>
+                        <button onclick="clearWorkspaceInfo('${safeLab}')" class="student-btn student-btn-danger student-btn-small" title="Delete this workspace">Clear</button>
                     </div>
                 </div>
             </div>
@@ -197,8 +179,8 @@ function renderWorkspaceCard(info, labId) {
     `;
 }
 
-async function openCodeServer(labId, workspaceName, ownerID) {
-    const statusUrl = `/api/student/workspace/status?lab_id=${encodeURIComponent(labId)}&workspace_name=${encodeURIComponent(workspaceName)}&owner_id=${encodeURIComponent(ownerID)}`;
+async function openCodeServer(labId, workspaceName) {
+    const statusUrl = `/api/student/workspace/status?lab_id=${encodeURIComponent(labId)}&workspace_name=${encodeURIComponent(workspaceName)}`;
     try {
         const resp = await fetch(statusUrl, { credentials: 'same-origin' });
         if (!resp.ok) throw new Error('Failed to fetch workspace status');
@@ -217,52 +199,9 @@ async function openCodeServer(labId, workspaceName, ownerID) {
     }
 }
 
-async function decryptAndShowPassword(labId) {
-    const cookieName = `workspace_info_${labId}`;
-    const cookieValue = getCookie(cookieName);
-    if (!cookieValue) {
-        alert('No workspace information found for this lab');
-        return;
-    }
-
-    try {
-        const workspaceInfo = JSON.parse(decodeURIComponent(cookieValue));
-        if (!workspaceInfo.encrypted_password) {
-            alert('Password is not encrypted');
-            return;
-        }
-
-        const studentPassword = await promptStudentPassword('Enter your student password to decrypt the workspace password:');
-        const decryptedPassword = await decryptPassword(workspaceInfo.encrypted_password, workspaceInfo.email, studentPassword);
-
-        const passwordDisplay = document.getElementById(`workspace-password-display-${labId}`);
-        if (passwordDisplay) {
-            passwordDisplay.className = 'student-credential-item-value credential-with-copy';
-            passwordDisplay.innerHTML = `
-                <span class="password-value">${escapeHtml(decryptedPassword)}</span>
-                <button class="copy-btn" data-copy-text="${escapeHtml(decryptedPassword)}" title="Copy Password">${copyIconSvg}</button>
-            `;
-
-            const copyBtn = passwordDisplay.querySelector('.copy-btn');
-            if (copyBtn) {
-                copyBtn.addEventListener('click', function() {
-                    copyToClipboard(decryptedPassword, this);
-                });
-            }
-
-            const decryptBtn = passwordDisplay.parentElement.querySelector('.decrypt-btn');
-            if (decryptBtn) decryptBtn.remove();
-        }
-    } catch (error) {
-        console.error('Failed to decrypt password:', error);
-        if (error.message.includes('cancelled')) return;
-        alert('Failed to decrypt password. Please check your password and try again.');
-    }
-}
-
 // deleteWorkspaceFromCluster asks the server to delete the workspace itself (its pod
-// and storage), not just the locally saved entry. Resolves to true when the workspace
-// is gone from the cluster — including when it had already been deleted.
+// and storage). Resolves to true when the workspace is gone from the cluster —
+// including when it had already been deleted.
 async function deleteWorkspaceFromCluster(info) {
     const body = new URLSearchParams({
         lab_id: info.lab_id || '',
@@ -278,64 +217,29 @@ async function deleteWorkspaceFromCluster(info) {
 }
 
 async function clearWorkspaceInfo(labId) {
-    const cookieName = `workspace_info_${labId}`;
-    const cookieValue = getCookie(cookieName);
-    let info = null;
-    try {
-        info = cookieValue ? JSON.parse(decodeURIComponent(cookieValue)) : null;
-    } catch (e) {
-        console.error('Failed to parse workspace cookie:', e);
-    }
+    const info = _workspaces[labId];
+    if (!info) return;
 
     if (!confirm('Are you sure you want to clear this workspace? It will be deleted from the lab, along with everything saved in it.')) return;
 
-    if (info && !(await deleteWorkspaceFromCluster(info))) {
-        if (!confirm('The workspace could not be deleted from the lab. Remove it from your list anyway?')) return;
+    const deleted = await deleteWorkspaceFromCluster(info);
+    await loadAllWorkspaceInfos();
+    if (!deleted) {
+        alert('The workspace could not be deleted from the lab. Please try again.');
     }
-    deleteCookie(cookieName);
-    loadAllWorkspaceInfos();
 }
 
 async function clearAllWorkspaceInfos() {
     if (!confirm('Are you sure you want to clear all your workspaces? They will be deleted from their labs, along with everything saved in them.')) return;
-    const currentEmail = document.querySelector('.student-dashboard-container')?.dataset.currentEmail || '';
     const clearAllBtn = document.getElementById('clear-all-btn');
     if (clearAllBtn) clearAllBtn.disabled = true;
 
-    // Only the logged-in student's workspaces can be deleted from the cluster; entries
-    // saved under another email are not listed here and are just forgotten locally.
-    const results = await Promise.all(getAllWorkspaceCookies().map(async ws => {
-        const mine = !currentEmail || ws.info.email === currentEmail;
-        const ok = !mine || await deleteWorkspaceFromCluster(ws.info);
-        if (ok) deleteCookie(ws.cookieName);
-        return ok;
-    }));
+    const results = await Promise.all(Object.values(_workspaces).map(deleteWorkspaceFromCluster));
 
     if (clearAllBtn) clearAllBtn.disabled = false;
-    loadAllWorkspaceInfos();
+    await loadAllWorkspaceInfos();
     const failed = results.filter(ok => !ok).length;
     if (failed > 0) {
-        alert(`${failed} workspace(s) could not be deleted from their lab and were kept in your list. Please try again.`);
-    }
-}
-
-async function encryptSingleWorkspace(labId) {
-    const cookieName = `workspace_info_${labId}`;
-    const cookieValue = getCookie(cookieName);
-    if (!cookieValue) {
-        alert('No workspace information found for this lab');
-        return;
-    }
-
-    try {
-        const workspaceInfo = JSON.parse(decodeURIComponent(cookieValue));
-        if (!workspaceInfo.password) {
-            alert('Password is already encrypted');
-            return;
-        }
-        await saveWorkspaceInfoWithEncryption(workspaceInfo);
-    } catch (error) {
-        console.error('Failed to encrypt workspace info:', error);
-        alert('Failed to encrypt workspace information');
+        alert(`${failed} workspace(s) could not be deleted from their lab and are still in your list. Please try again.`);
     }
 }

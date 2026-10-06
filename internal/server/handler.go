@@ -1645,8 +1645,8 @@ func (h *Handler) ServeStudentDashboard(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// ServeStudentWorkspaces serves the "My Workspaces" page, which lists the workspaces
-// a student has saved locally. The list itself is rendered client-side from cookies;
+// ServeStudentWorkspaces serves the "My Workspaces" page, which lists the student's
+// workspaces. The list itself is fetched client-side from ListStudentWorkspaces;
 // the page only needs the student's identity for the header.
 func (h *Handler) ServeStudentWorkspaces(w http.ResponseWriter, r *http.Request) {
 	email := studentEmailFromContext(r)
@@ -2187,9 +2187,6 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	domain := ""
 	dnsProvider := ""
 	clusterIssuerName := ""
-	lifetimeHours := 0
-	labName := ""
-	var labDeletionDate *time.Time
 	var templates []WorkspaceTemplate
 	var bakedImages map[string]BakedImage
 	labDisabled := false
@@ -2198,9 +2195,6 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		domain = job.Config.Domain
 		dnsProvider = job.Config.DNSProvider
 		clusterIssuerName = job.Config.ClusterIssuerName
-		lifetimeHours = job.Config.WorkspaceLifetimeHours
-		labDeletionDate = job.Config.LabDeletionDate
-		labName = job.Config.StackName
 		templates = job.Config.GetWorkspaceTemplates()
 		bakedImages = job.Config.BakedImages
 		labDisabled = job.Config.Disabled
@@ -2404,59 +2398,12 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	workspaceURL := ws.URL
 	workspaceName := ws.Name
-
-	// Compute a single creation timestamp and the workspace's scheduled auto-deletion
-	// time (nil when neither a per-workspace lifetime nor a lab deletion date applies),
-	// so the student portal can show the student when the workspace will disappear.
-	createdAt := time.Now()
-	deletionAtStr := ""
-	if deletionAt := workspaceDeletionTime(createdAt, lifetimeHours, labDeletionDate); deletionAt != nil {
-		deletionAtStr = deletionAt.Format(time.RFC3339)
+	// For a workspace that already existed, the freshly generated password above
+	// was never applied: the running pod keeps the token it was created with, and
+	// that is the one the backend reports.
+	if ws.Token != "" {
+		password = ws.Token
 	}
-
-	// Create workspace info structure for the client-side encrypted cookie.
-	workspaceInfo := map[string]interface{}{
-		"email":              email,
-		"workspace_url":      workspaceURL,
-		"password":           password, // code-server login password; encrypted client-side
-		"encrypted_password": "",
-		"workspace_name":     workspaceName,
-		"lab_id":             labID,
-		"lab_name":           labName,
-		"template":           selected.Name,
-		"created_at":         createdAt.Format(time.RFC3339),
-		"deletion_at":        deletionAtStr,
-	}
-	if workspaceInfoJSON, jsonErr := json.Marshal(workspaceInfo); jsonErr == nil {
-		isSecure := strings.HasPrefix(workspaceURL, "https://") || r.TLS != nil
-		cookieName := fmt.Sprintf("workspace_info_%s_%s", labID, workspaceName)
-		http.SetCookie(w, &http.Cookie{
-			Name:     cookieName,
-			Value:    url.QueryEscape(string(workspaceInfoJSON)),
-			Path:     "/",
-			MaxAge:   86400,
-			HttpOnly: false,
-			Secure:   isSecure,
-			SameSite: http.SameSiteLaxMode,
-		})
-		log.Printf("Set %s cookie for email: %s", cookieName, email)
-	} else {
-		log.Printf("Failed to marshal workspace info: %v", jsonErr)
-	}
-
-	workspaceInfoForClient := map[string]interface{}{
-		"email":          email,
-		"workspace_url":  workspaceURL,
-		"password":       password,
-		"workspace_name": workspaceName,
-		"lab_id":         labID,
-		"lab_name":       labName,
-		"template":       selected.Name,
-		"created_at":     createdAt.Format(time.RFC3339),
-		"deletion_at":    deletionAtStr,
-	}
-	workspaceInfoJSONForClient, _ := json.Marshal(workspaceInfoForClient)
-	workspaceInfoJSONEscaped := template.HTMLEscapeString(string(workspaceInfoJSONForClient))
 
 	title := "✅ Workspace Created Successfully!"
 	if ws.Ready {
@@ -2478,10 +2425,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	response.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Email:</label><div class="value">%s</div></div>`, template.HTMLEscapeString(email)))
 	response.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Connection token:</label><div class="value">%s</div></div>`, template.HTMLEscapeString(password)))
-	response.WriteString(`<p><strong>Important:</strong> Please save these credentials. You will need the token to open your workspace.</p>`)
-	response.WriteString(`<p><small>Your workspace information can be encrypted and saved locally. Click "Encrypt & Save" below to store it securely.</small></p>`)
-	response.WriteString(fmt.Sprintf(`<div data-workspace-info='%s' style="display:none;"></div>`, workspaceInfoJSONEscaped))
-	response.WriteString(`<button onclick="encryptAndSaveWorkspaceInfo(this)" class="btn credentials-save-btn">Encrypt & Save Workspace Info</button>`)
+	response.WriteString(`<p><strong>Important:</strong> Keep this token if you plan to open the workspace URL directly. Otherwise, open your workspace from the My Workspaces page: it signs you in for you, on any device you log in on.</p>`)
 	response.WriteString(`</details>`)
 	response.WriteString(`<a href="/student/workspaces" class="btn workspace-view-all-link">View my workspaces →</a>`)
 	response.WriteString(`</div>`)

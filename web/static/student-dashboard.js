@@ -1,7 +1,7 @@
 // Request a workspace page: lets a student pick a lab + template, request a workspace,
-// watch it start, and optionally encrypt & save its credentials locally. The saved
-// workspaces themselves are shown on the separate My Workspaces page. Shared helpers
-// (cookies, crypto, copy, escaping) live in student-common.js, loaded first.
+// and watch it start. The student's workspaces themselves are shown on the separate
+// My Workspaces page. Shared helpers (copy, escaping) live in student-common.js,
+// loaded first.
 
 document.addEventListener('DOMContentLoaded', function() {
     setupLabTemplateHandlers();
@@ -27,28 +27,6 @@ function advanceStep(stepNum) {
         } else {
             if (divider) divider.classList.remove('completed');
         }
-    }
-}
-
-async function encryptAndSaveWorkspaceInfo(button) {
-    const responseDiv = document.getElementById('workspace-response');
-    if (!responseDiv) {
-        alert('Workspace information not found');
-        return;
-    }
-
-    const dataElement = responseDiv.querySelector('[data-workspace-info]');
-    if (!dataElement) {
-        alert('Workspace information data not found');
-        return;
-    }
-
-    try {
-        const workspaceInfo = JSON.parse(dataElement.getAttribute('data-workspace-info'));
-        await saveWorkspaceInfoWithEncryption(workspaceInfo);
-    } catch (error) {
-        console.error('Failed to parse workspace info:', error);
-        alert('Failed to parse workspace information');
     }
 }
 
