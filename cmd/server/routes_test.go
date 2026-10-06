@@ -296,6 +296,37 @@ func TestResolveLabRoute_RetryWithConfigIsNotShadowedByRetry(t *testing.T) {
 	assert.Equal(t, routeRetryJobWithConfig, got)
 }
 
+// "/portal" is matched by suffix like its neighbours, and sits below every
+// workspace and template route: a workspace or template that happens to be called
+// "portal" must keep resolving to what it always did.
+func TestResolveLabRoute_StudentPortal(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		path   string
+		method string
+		want   labRoute
+	}{
+		{name: "set the lab's portal", path: "/api/labs/job-1/portal", method: http.MethodPost, want: routeSetLabPortal},
+		{name: "legacy jobs prefix", path: "/api/jobs/job-1/portal", method: http.MethodPost, want: routeSetLabPortal},
+		{name: "GET is not the portal route", path: "/api/labs/job-1/portal", method: http.MethodGet, want: routeJobStatus},
+		{name: "workspace named portal: open", path: "/api/labs/job-1/workspaces/portal/open", method: http.MethodPost, want: routeOpenWorkspace},
+		{name: "workspace named portal: delete", path: "/api/labs/job-1/workspaces/portal/delete", method: http.MethodPost, want: routeDeleteWorkspace},
+		{name: "template named portal: availability", path: "/api/labs/job-1/templates/portal/availability", method: http.MethodPost, want: routeSetTemplateAvailability},
+		{name: "template named portal: remove", path: "/api/labs/job-1/templates/portal/remove", method: http.MethodPost, want: routeRemoveTemplate},
+		{name: "deeper path ending in portal", path: "/api/labs/job-1/templates/portal", method: http.MethodPost, want: routeJobStatus},
+		{name: "a lab called portal still resolves to status", path: "/api/labs/portal", method: http.MethodPost, want: routeJobStatus},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, resolveLabRoute(tt.path, tt.method, ""), "%s %s", tt.method, tt.path)
+		})
+	}
+}
+
 // noStoreByDefault makes "not cacheable" the default for every response, so an
 // endpoint that forgets its own cache headers cannot be heuristically cached by a
 // browser — the trap that kept fixed bugs alive in users' sessions.

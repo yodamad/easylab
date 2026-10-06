@@ -242,6 +242,7 @@ Documentation is part of the deliverable, not a follow-up task. Any change to a 
 | Azure AD authentication setup and admin group configuration | `docs/azure-ad.md` |
 | Azure cloud provider setup | `docs/azure.md` |
 | Student portal, login, workspace access | `docs/student.md` |
+| Run modes (`all`/`admin`/`student`), in-lab student portal, brokered sign-in | `docs/student-portal.md` |
 | OVHcloud setup, regions, flavors, infra | `docs/ovhcloud.md` |
 | DNS provider configuration and TLS/HTTPS setup | `docs/ovhcloud.md` |
 | Workspace templates | `docs/templates.md` |

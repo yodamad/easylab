@@ -78,6 +78,9 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 | `config.port` | Application port | `"8080"` |
 | `config.workDir` | Job workspace directory | `"/app/jobs"` |
 | `config.dataDir` | Data persistence directory | `"/app/data"` |
+| `config.mode` | Areas served: `all` or `admin` — see [In-lab student portals](#in-lab-student-portals) | `""` (`all`) |
+| `config.publicUrl` | This release's address as students reach it, used by in-lab student portals for Microsoft / GitHub / GitLab sign-in | `""` (the ingress host when `ingress.enabled`) |
+| `config.portalImage` | Image the in-lab student portals run | `""` (this release's own image) |
 | `secrets.create` | Create a Kubernetes secret | `true` |
 | `secrets.adminPassword` | Admin login password | `""` |
 | `secrets.studentPassword` | Student login password | `""` |
@@ -134,6 +137,26 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 
 !!! note "X-Forwarded-Proto trust"
     The server trusts an incoming `X-Forwarded-Proto: https` header to mark the session cookie `Secure` (env var `TRUST_FORWARDED_PROTO`, default `true` — see [Docker — Environment Variables](docker.md#environment-variables)). This is safe with the standard ingress-terminated-TLS setup above, since the ingress controller sets this header itself and any client-supplied value is overwritten. Only set `TRUST_FORWARDED_PROTO=false` if you expose the pod in a way where a client-supplied header could reach it unmodified.
+
+### In-lab student portals
+
+A lab can have its own [student portal](student-portal.md), deployed by EasyLab inside the
+lab's cluster. Three values control how this release takes part:
+
+```yaml
+config:
+  # "admin": this release serves the admin space only; students use each lab's portal.
+  # Leave empty to also keep the central student space.
+  mode: admin
+  # Where portals send students for Microsoft / GitHub / GitLab sign-in.
+  # Defaults to the ingress host when ingress.enabled is true.
+  publicUrl: https://easylab.example.com
+  # Defaults to this release's own image. The lab's nodes must be able to pull it.
+  portalImage: ""
+```
+
+`secrets.studentPassword` is still what students type on a portal's password form: each
+portal checks it locally, against a hash EasyLab copies to it.
 
 ### Optional infrastructure components
 

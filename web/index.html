@@ -32,6 +32,7 @@
     </div>
 
     <div class="home-cards">
+        {{if .ShowStudentSpace}}
         <a href="/student/login" class="home-card home-card--student">
             <div class="home-card-glow"></div>
             <div class="home-card-icon">
@@ -53,6 +54,7 @@
                 </svg>
             </div>
         </a>
+        {{end}}
 
         <a href="/login" class="home-card home-card--admin">
             <div class="home-card-glow"></div>

@@ -703,6 +703,36 @@ function setAvailability(button) {
         });
 }
 
+// setLabPortal deploys, redeploys or removes the lab's own student portal, then
+// reloads the overview with the outcome as a toast. The request only returns
+// once the deployment has been attempted, so the button says what it is doing.
+function setLabPortal(button) {
+    var label = button.textContent;
+    button.disabled = true;
+    button.textContent = button.dataset.busy;
+
+    var body = new URLSearchParams();
+    body.append('enabled', button.dataset.enabled);
+
+    fetch(button.dataset.url, { method: 'POST', body: body })
+        .then(function (response) {
+            if (!response.ok) {
+                return response.json().then(
+                    function (data) { return Promise.reject(data && data.message); },
+                    function () { return Promise.reject(); }
+                );
+            }
+            try { sessionStorage.setItem('ut-flash', JSON.stringify({ msg: button.dataset.done + '.', kind: 'success' })); } catch (e) { /* ignore */ }
+            window.location.hash = 'overview';
+            window.location.reload();
+        })
+        .catch(function (message) {
+            button.disabled = false;
+            button.textContent = label;
+            showToast(typeof message === 'string' && message ? message : 'Couldn’t update the student portal. Try again.', 'error');
+        });
+}
+
 // removeTemplate takes the template off the lab (the server also deletes its
 // workspaces), then reloads onto this tab with the outcome as a toast.
 function removeTemplate(button) {

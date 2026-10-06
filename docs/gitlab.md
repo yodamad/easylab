@@ -20,6 +20,9 @@ When enabled, a **Sign in with GitLab** button appears on the student login page
 
 EasyLab requests the `openid` scope only. It cannot read the student's email address, projects or anything through the GitLab API. The GitLab token is used once during sign-in and is not stored.
 
+!!! note "Labs with their own student portal"
+    A lab's [in-lab student portal](student-portal.md) shows the same **Sign in with GitLab** button, on its own address. The sign-in still runs through this (central) instance, which then hands the student back to the lab's portal — so the redirect URI below is the only one to register, whatever the number of labs. It requires `EASYLAB_PUBLIC_URL` to be set.
+
 ---
 
 ## Setup — GitLab application

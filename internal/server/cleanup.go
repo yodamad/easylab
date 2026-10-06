@@ -87,6 +87,7 @@ func (h *Handler) StartWorkspaceCleanup(ctx context.Context) {
 			h.cleanupExpiredWorkspaces()
 			h.cleanupExpiredLabs()
 			h.reconcilePrepulls()
+			h.reconcilePortals()
 		}
 	}
 }

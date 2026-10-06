@@ -7174,7 +7174,11 @@ details[open] > .secrets-summary::after {
     background: var(--background);
 }
 
-.lab-access-strip.is-closed {
+/* is-off is the same look for a strip whose feature is simply not in use (a lab
+   without its own student portal), kept apart from is-closed, which means
+   closed to new students. */
+.lab-access-strip.is-closed,
+.lab-access-strip.is-off {
     border-style: dashed;
     border-color: var(--secondary-color);
     background: var(--surface);
@@ -7195,6 +7199,18 @@ details[open] > .secrets-summary::after {
 .lab-access-hint {
     font-size: 0.82rem;
     color: var(--text-light);
+}
+
+/* On the Overview tab the strip follows the config grid, which ends flush. */
+.lab-detail-config-grid + .lab-access-strip {
+    margin-top: 1.25rem;
+}
+
+/* Several actions on one strip (the student portal's redeploy / remove). */
+.lab-access-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
 }
 
 .template-tile.is-closed {

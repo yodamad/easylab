@@ -19,6 +19,16 @@ config:
   port: "8080"
   workDir: "/app/jobs"
   dataDir: "/app/data"
+  # Which areas this release serves: "all" (admin UI + student portal, the
+  # default when empty) or "admin" (admin UI only — students then use the portal
+  # deployed inside each lab). See docs/student-portal.md.
+  mode: ""
+  # This release's address as students reach it, e.g. https://easylab.example.com.
+  # In-lab student portals send students here for Microsoft / GitHub / GitLab
+  # sign-in. Defaults to the ingress host when ingress.enabled is true.
+  publicUrl: ""
+  # Image the in-lab student portals run. Defaults to this release's own image.
+  portalImage: ""
 
 secrets:
   create: true

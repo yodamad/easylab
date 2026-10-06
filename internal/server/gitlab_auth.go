@@ -267,7 +267,7 @@ func gitlabCallbackURL(r *http.Request) string {
 
 // gitlabLoginError sends the student back to the login page with a safe message.
 func gitlabLoginError(w http.ResponseWriter, r *http.Request, message string) {
-	http.Redirect(w, r, "/student/login?error="+url.QueryEscape(message), http.StatusSeeOther)
+	http.Redirect(w, r, studentLoginURL(r)+"?error="+url.QueryEscape(message), http.StatusSeeOther)
 }
 
 // HandleGitLabLogin initiates the GitLab OAuth 2.0 flow for student login.
@@ -286,6 +286,10 @@ func (ah *AuthHandler) HandleGitLabLogin(w http.ResponseWriter, r *http.Request)
 
 	if cfg == nil {
 		gitlabLoginError(w, r, "GitLab sign-in is not available.")
+		return
+	}
+	// A sign-in run for an in-lab student portal ends there, not here.
+	if !ah.beginBrokeredLogin(w, r, state) {
 		return
 	}
 
@@ -311,6 +315,9 @@ func (ah *AuthHandler) HandleGitLabLogin(w http.ResponseWriter, r *http.Request)
 // userinfo endpoint, checks group membership when a restriction is configured,
 // and creates a student session identified as <username>@users.noreply.<gitlab host>.
 func (ah *AuthHandler) HandleGitLabCallback(w http.ResponseWriter, r *http.Request) {
+	// A sign-in run for an in-lab student portal answers that portal, errors included.
+	r = ah.resumeBrokeredLogin(r)
+
 	ah.mu.RLock()
 	cfg := ah.gitlabConfig
 	baseURL := ah.gitlabBaseURL
@@ -388,24 +395,7 @@ func (ah *AuthHandler) HandleGitLabCallback(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	sessionToken, csrfToken := ah.createStudentSession(username + "@users.noreply." + gitlabHost(baseURL))
-
-	// SameSite=Lax for the same reason as the Azure AD callback: the navigation
-	// that lands on the dashboard originated from another site.
-	isSecure := isSecureRequest(r)
-	http.SetCookie(w, &http.Cookie{
-		Name:     StudentSessionCookieName,
-		Value:    sessionToken,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   isSecure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(SessionExpiry.Seconds()),
-	})
-	http.SetCookie(w, csrfCookie(StudentCSRFCookieName, csrfToken, isSecure, http.SameSiteLaxMode))
-
-	log.Printf("Successful GitLab student login")
-	http.Redirect(w, r, "/student/dashboard", http.StatusSeeOther)
+	ah.completeStudentLogin(w, r, username+"@users.noreply."+gitlabHost(baseURL), "GitLab")
 }
 
 // fetchGitLabUserInfo returns the lowercased username of the token's owner and
@@ -569,6 +559,8 @@ func (h *Handler) SaveGitLabAuthConfig(w http.ResponseWriter, r *http.Request) {
 	if h.gitlabAuthConfigurer != nil {
 		h.gitlabAuthConfigurer(cfg)
 	}
+	// In-lab student portals mirror these settings.
+	go h.syncAllPortals()
 
 	detail := "disabled"
 	if cfg.Enabled() {

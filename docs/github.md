@@ -20,6 +20,9 @@ When enabled, a **Sign in with GitHub** button appears on the student login page
 
 EasyLab never reads the student's email address, repositories, or anything else from the account. It requests no OAuth scope at all, or `read:org` only when an organization restriction is set. The GitHub token is used once during sign-in and is not stored.
 
+!!! note "Labs with their own student portal"
+    A lab's [in-lab student portal](student-portal.md) shows the same **Sign in with GitHub** button, on its own address. The sign-in still runs through this (central) instance, which then hands the student back to the lab's portal — so the callback URL below is the only one to register, whatever the number of labs. It requires `EASYLAB_PUBLIC_URL` to be set.
+
 ---
 
 ## Setup — GitHub OAuth app

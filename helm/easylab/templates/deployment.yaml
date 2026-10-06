@@ -61,6 +61,23 @@ spec:
                 configMapKeyRef:
                   name: {{ include "easylab.fullname" . }}-config
                   key: DATA_DIR
+            {{- with .Values.config.mode }}
+            - name: EASYLAB_MODE
+              value: {{ . | quote }}
+            {{- end }}
+            {{- /* Where in-lab student portals send students to sign in: the explicit
+                   value, else this release's own ingress address. */}}
+            {{- $publicUrl := .Values.config.publicUrl }}
+            {{- if and (not $publicUrl) .Values.ingress.enabled }}
+            {{- $publicUrl = printf "%s://%s" (ternary "https" "http" .Values.ingress.tls.enabled) .Values.ingress.host }}
+            {{- end }}
+            {{- with $publicUrl }}
+            - name: EASYLAB_PUBLIC_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- /* In-lab student portals run the image this release runs unless told otherwise. */}}
+            - name: EASYLAB_PORTAL_IMAGE
+              value: {{ .Values.config.portalImage | default (printf "%s:%s" .Values.image.repository (include "easylab.imageTag" .)) | quote }}
             {{- if .Values.secrets.create }}
             - name: LAB_ADMIN_PASSWORD
               valueFrom:

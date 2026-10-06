@@ -105,6 +105,13 @@ configure. On the **Workspace** step you only set:
 
 * **Workspace Namespace** (optional) — the Kubernetes namespace student
   workspaces are created in. Defaults to `workshops`.
+* **Deploy a dedicated student portal in this lab** (optional) — runs the
+  student portal inside the lab's own cluster, at `portal.<lab domain>`,
+  instead of sending this lab's students to the central instance. They can then
+  keep working while the admin instance is unreachable. It can be turned on or
+  off later from the lab's page. See [In-lab student portal](student-portal.md).
+
+![Workspace step with the student portal option](screens/student-portal-option.png){width=700}
 
 Then, on the **Templates** step, you define **one or more** workspace templates
 for the lab. Each template is a different workspace flavor that students can

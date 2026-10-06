@@ -15,6 +15,10 @@ For your students, they can access the student space to request a new developmen
 
 > Go to [Student documentation](student.md)
 
+One instance can serve both spaces, or you can keep a central admin and give each lab its own student portal, running inside the lab's cluster.
+
+> Go to [In-lab student portal](student-portal.md)
+
 ![EasyLab Homepage](screens/homepage.png)
 
 ## Light and dark theme

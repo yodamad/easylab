@@ -123,6 +123,17 @@ type AuthHandler struct {
 	gitlabAllowedGroups        []string
 	gitlabClassicLoginDisabled bool
 	gitlabOAuthStates          map[string]time.Time
+	// Brokered sign-in for in-lab student portals (see broker.go). On the central
+	// instance: brokerReturns remembers, per OAuth state, the portal a sign-in is
+	// run for; brokerLabResolver finds a lab's portal; brokerOnly refuses any
+	// sign-in that is not for one (admin-only mode). On a portal: portalAuth is how
+	// it reaches the central instance, and portalClassicLoginDisabled mirrors the
+	// central setting, which there is derived from the per-provider flags above.
+	brokerReturns              map[string]brokerReturn
+	brokerLabResolver          func(labID string) (portalURL, secret string, ok bool)
+	brokerOnly                 bool
+	portalAuth                 *portalAuthSettings
+	portalClassicLoginDisabled bool
 	templates                  map[string]*template.Template
 	templatesMu                sync.RWMutex
 	mu                         sync.RWMutex
@@ -216,8 +227,14 @@ func NewAuthHandler() (*AuthHandler, error) {
 		templates:           make(map[string]*template.Template),
 		loginAttempts:       make(map[string]*loginAttemptState),
 	}
+	ah.startEviction()
 
-	// Periodically evict expired sessions and OAuth states so the maps don't grow unboundedly.
+	return ah, nil
+}
+
+// startEviction periodically evicts expired sessions and OAuth states so the
+// maps don't grow unboundedly.
+func (ah *AuthHandler) startEviction() {
 	go func() {
 		ticker := time.NewTicker(15 * time.Minute)
 		defer ticker.Stop()
@@ -249,6 +266,11 @@ func NewAuthHandler() (*AuthHandler, error) {
 					delete(ah.gitlabOAuthStates, state)
 				}
 			}
+			for state, ret := range ah.brokerReturns {
+				if now.After(ret.expiresAt) {
+					delete(ah.brokerReturns, state)
+				}
+			}
 			ah.mu.Unlock()
 
 			ah.loginAttemptsMu.Lock()
@@ -260,8 +282,23 @@ func NewAuthHandler() (*AuthHandler, error) {
 			ah.loginAttemptsMu.Unlock()
 		}
 	}()
+}
 
-	return ah, nil
+// classicStudentLoginDisabledLocked reports whether students must use a sign-in
+// provider rather than the shared password: a provider's "disable password
+// login" setting only counts while that provider is enabled. Callers hold ah.mu.
+func (ah *AuthHandler) classicStudentLoginDisabledLocked() bool {
+	return (ah.classicLoginDisabled && ah.azureADEnabled) ||
+		(ah.githubClassicLoginDisabled && ah.githubEnabled) ||
+		(ah.gitlabClassicLoginDisabled && ah.gitlabEnabled) ||
+		ah.portalClassicLoginDisabled
+}
+
+// studentLoginAvailable reports whether students have any way to sign in.
+func (ah *AuthHandler) studentLoginAvailable() bool {
+	ah.mu.RLock()
+	defer ah.mu.RUnlock()
+	return ah.studentPasswordHash != "" || ah.azureADEnabled || ah.githubEnabled || ah.gitlabEnabled
 }
 
 // isSecureRequest reports whether a request should be treated as HTTPS for
@@ -841,7 +878,7 @@ func (ah *AuthHandler) ServeStudentLogin(w http.ResponseWriter, r *http.Request)
 	azureADEnabled := ah.azureADEnabled
 	githubEnabled := ah.githubEnabled
 	gitlabEnabled := ah.gitlabEnabled
-	classicDisabled := (ah.classicLoginDisabled && ah.azureADEnabled) || (ah.githubClassicLoginDisabled && ah.githubEnabled) || (ah.gitlabClassicLoginDisabled && ah.gitlabEnabled)
+	classicDisabled := ah.classicStudentLoginDisabledLocked()
 	ah.mu.RUnlock()
 
 	data := map[string]interface{}{
@@ -867,7 +904,7 @@ func (ah *AuthHandler) HandleStudentLogin(w http.ResponseWriter, r *http.Request
 
 	ah.mu.RLock()
 	storedHash := ah.studentPasswordHash
-	classicDisabled := (ah.classicLoginDisabled && ah.azureADEnabled) || (ah.githubClassicLoginDisabled && ah.githubEnabled) || (ah.gitlabClassicLoginDisabled && ah.gitlabEnabled)
+	classicDisabled := ah.classicStudentLoginDisabledLocked()
 	ah.mu.RUnlock()
 
 	if storedHash == "" {
@@ -960,7 +997,7 @@ func (ah *AuthHandler) HandleStudentLogout(w http.ResponseWriter, r *http.Reques
 // RequireStudentAuth is middleware that requires student authentication
 func (ah *AuthHandler) RequireStudentAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if ah.studentPasswordHash == "" && !ah.azureADEnabled && !ah.GitHubEnabled() && !ah.GitLabEnabled() {
+		if !ah.studentLoginAvailable() {
 			http.Error(w, "Student login is disabled", http.StatusForbidden)
 			return
 		}
@@ -987,6 +1024,10 @@ func (ah *AuthHandler) HandleAzureADLogin(w http.ResponseWriter, r *http.Request
 	}
 
 	state := generateToken()
+	// A sign-in run for an in-lab student portal ends there, not here.
+	if !ah.beginBrokeredLogin(w, r, state) {
+		return
+	}
 	ah.mu.Lock()
 	ah.azureOAuthStates[state] = time.Now().Add(azureOAuthStateExpiry)
 	ah.mu.Unlock()
@@ -1006,15 +1047,18 @@ func (ah *AuthHandler) HandleAzureADLogin(w http.ResponseWriter, r *http.Request
 // It exchanges the authorization code for tokens, extracts the student email,
 // and creates a local session — identical to the password-based login flow.
 func (ah *AuthHandler) HandleAzureADCallback(w http.ResponseWriter, r *http.Request) {
+	// A sign-in run for an in-lab student portal answers that portal, errors included.
+	r = ah.resumeBrokeredLogin(r)
+
 	if !ah.azureADEnabled {
-		http.Redirect(w, r, "/student/login?error=Azure+AD+login+not+configured", http.StatusSeeOther)
+		http.Redirect(w, r, studentLoginURL(r)+"?error=Azure+AD+login+not+configured", http.StatusSeeOther)
 		return
 	}
 
 	errParam := r.URL.Query().Get("error")
 	if errParam != "" {
 		log.Printf("Azure AD OAuth error: %s", errParam)
-		http.Redirect(w, r, "/student/login?error=Azure+AD+authentication+failed", http.StatusSeeOther)
+		http.Redirect(w, r, studentLoginURL(r)+"?error=Azure+AD+authentication+failed", http.StatusSeeOther)
 		return
 	}
 
@@ -1031,12 +1075,12 @@ func (ah *AuthHandler) HandleAzureADCallback(w http.ResponseWriter, r *http.Requ
 
 	if !valid || time.Now().After(expiry) {
 		log.Printf("Azure AD callback: invalid or expired state")
-		http.Redirect(w, r, "/student/login?error=Invalid+authentication+state", http.StatusSeeOther)
+		http.Redirect(w, r, studentLoginURL(r)+"?error=Invalid+authentication+state", http.StatusSeeOther)
 		return
 	}
 
 	if code == "" {
-		http.Redirect(w, r, "/student/login?error=Missing+authorization+code", http.StatusSeeOther)
+		http.Redirect(w, r, studentLoginURL(r)+"?error=Missing+authorization+code", http.StatusSeeOther)
 		return
 	}
 
@@ -1050,42 +1094,24 @@ func (ah *AuthHandler) HandleAzureADCallback(w http.ResponseWriter, r *http.Requ
 	token, err := ah.azureADConfig.Exchange(r.Context(), code, oauth2.SetAuthURLParam("redirect_uri", redirectURI))
 	if err != nil {
 		log.Printf("Azure AD token exchange failed: %v", err)
-		http.Redirect(w, r, "/student/login?error=Authentication+failed", http.StatusSeeOther)
+		http.Redirect(w, r, studentLoginURL(r)+"?error=Authentication+failed", http.StatusSeeOther)
 		return
 	}
 
 	email, err := extractEmailFromIDToken(token)
 	if err != nil {
 		log.Printf("Azure AD: failed to extract email: %v", err)
-		http.Redirect(w, r, "/student/login?error=Could+not+retrieve+email+from+Azure+AD", http.StatusSeeOther)
+		http.Redirect(w, r, studentLoginURL(r)+"?error=Could+not+retrieve+email+from+Azure+AD", http.StatusSeeOther)
 		return
 	}
 
 	if !strings.Contains(email, "@") {
 		log.Printf("Azure AD: invalid email format: %s", email)
-		http.Redirect(w, r, "/student/login?error=Invalid+email+from+Azure+AD", http.StatusSeeOther)
+		http.Redirect(w, r, studentLoginURL(r)+"?error=Invalid+email+from+Azure+AD", http.StatusSeeOther)
 		return
 	}
 
-	sessionToken, csrfToken := ah.createStudentSession(email)
-
-	// Use SameSite=Lax (not Strict) so the cookie is included when the browser
-	// follows the 303 redirect from our callback — the overall navigation context
-	// is cross-site (originated from login.microsoftonline.com), and Strict would
-	// prevent the cookie from being sent on that first same-site hop in some browsers.
-	http.SetCookie(w, &http.Cookie{
-		Name:     StudentSessionCookieName,
-		Value:    sessionToken,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   isSecure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(SessionExpiry.Seconds()),
-	})
-	http.SetCookie(w, csrfCookie(StudentCSRFCookieName, csrfToken, isSecure, http.SameSiteLaxMode))
-
-	log.Printf("Successful Azure AD student login")
-	http.Redirect(w, r, "/student/dashboard", http.StatusSeeOther)
+	ah.completeStudentLogin(w, r, email, "Azure AD")
 }
 
 // HandleAdminAzureADLogin initiates the Azure AD OAuth 2.0 flow for admin login.

@@ -224,7 +224,7 @@ func githubCallbackURL(r *http.Request) string {
 
 // githubLoginError sends the student back to the login page with a safe message.
 func githubLoginError(w http.ResponseWriter, r *http.Request, message string) {
-	http.Redirect(w, r, "/student/login?error="+url.QueryEscape(message), http.StatusSeeOther)
+	http.Redirect(w, r, studentLoginURL(r)+"?error="+url.QueryEscape(message), http.StatusSeeOther)
 }
 
 // clearGitHubStateCookie expires the OAuth state cookie.
@@ -256,6 +256,10 @@ func (ah *AuthHandler) HandleGitHubLogin(w http.ResponseWriter, r *http.Request)
 		githubLoginError(w, r, "GitHub sign-in is not available.")
 		return
 	}
+	// A sign-in run for an in-lab student portal ends there, not here.
+	if !ah.beginBrokeredLogin(w, r, state) {
+		return
+	}
 
 	// Bind the state to this browser: the callback must present the same value
 	// in this cookie, so a state issued to someone else cannot be replayed here.
@@ -279,6 +283,9 @@ func (ah *AuthHandler) HandleGitHubLogin(w http.ResponseWriter, r *http.Request)
 // organization membership when a restriction is configured, and creates a
 // student session identified as <username>@users.noreply.github.com.
 func (ah *AuthHandler) HandleGitHubCallback(w http.ResponseWriter, r *http.Request) {
+	// A sign-in run for an in-lab student portal answers that portal, errors included.
+	r = ah.resumeBrokeredLogin(r)
+
 	ah.mu.RLock()
 	cfg := ah.githubConfig
 	allowedOrgs := append([]string(nil), ah.githubAllowedOrgs...)
@@ -361,24 +368,7 @@ func (ah *AuthHandler) HandleGitHubCallback(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	sessionToken, csrfToken := ah.createStudentSession(login + "@" + githubNoReplyDomain)
-
-	// SameSite=Lax for the same reason as the Azure AD callback: the navigation
-	// that lands on the dashboard originated from another site.
-	isSecure := isSecureRequest(r)
-	http.SetCookie(w, &http.Cookie{
-		Name:     StudentSessionCookieName,
-		Value:    sessionToken,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   isSecure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(SessionExpiry.Seconds()),
-	})
-	http.SetCookie(w, csrfCookie(StudentCSRFCookieName, csrfToken, isSecure, http.SameSiteLaxMode))
-
-	log.Printf("Successful GitHub student login")
-	http.Redirect(w, r, "/student/dashboard", http.StatusSeeOther)
+	ah.completeStudentLogin(w, r, login+"@"+githubNoReplyDomain, "GitHub")
 }
 
 // githubAPIGet performs an authenticated GET against the GitHub REST API and
@@ -542,6 +532,8 @@ func (h *Handler) SaveGitHubAuthConfig(w http.ResponseWriter, r *http.Request) {
 	if h.githubAuthConfigurer != nil {
 		h.githubAuthConfigurer(cfg)
 	}
+	// In-lab student portals mirror these settings.
+	go h.syncAllPortals()
 
 	detail := "disabled"
 	if cfg.Enabled() {

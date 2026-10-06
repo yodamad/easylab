@@ -10,6 +10,13 @@ You can request **one workspace per template per lab**. If a lab has multiple te
 
 Every student page shows the EasyLab copyright and version in a footer at the bottom of the page. The version reflects the latest Git tag the binary was built from (`dev` for local/untagged builds).
 
+!!! note "Which address do I use?"
+    Your workshop organiser gives you the address of the student space. It is either a
+    shared one for every lab, or one dedicated to your lab (it then starts with
+    `portal.`). A dedicated one works exactly as described on this page, shows only that
+    lab, and opens straight on the login page. Organisers: see
+    [In-lab student portal](student-portal.md).
+
 ## Login
 
 To access the student portal, you must log in with:

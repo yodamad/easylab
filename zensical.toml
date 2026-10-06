@@ -28,6 +28,7 @@ nav = [
         "admin-lab-management.md",
         "templates.md",
         "student.md",
+        "student-portal.md",
         "feedbacks.md",
         "stats.md",
         "audit-log.md"

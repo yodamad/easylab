@@ -401,3 +401,69 @@ type SecretManager interface {
 	// is not an error.
 	DeleteAuthSecret(ctx context.Context, name string) error
 }
+
+// PortalSpec describes the student portal the admin deploys into a lab's own
+// cluster: the same EasyLab image, started in student mode, serving that one lab.
+type PortalSpec struct {
+	LabID string
+	// Image is the EasyLab image the portal runs.
+	Image string
+	// Domain, WildcardTLSSecret and ClusterIssuer expose the portal the same way a
+	// workspace is exposed (see Spec): under "portal.{Domain}", with the lab's
+	// wildcard certificate when it has one, else a per-host certificate. An empty
+	// Domain falls back to the backend's own routing (nip.io over plain HTTP).
+	Domain            string
+	WildcardTLSSecret string
+	ClusterIssuer     string
+	// Config is the portal's whole view of its lab (see PortalRuntime): everything
+	// it serves students from, since it has no connection back to the admin.
+	Config map[string][]byte
+	// SecretNames lists the credential Secrets the lab's templates reference by
+	// name (git and registry auth). They are the only Secrets, besides its own
+	// config, the portal is allowed to read: it validates them when a student
+	// requests a workspace. Anything not listed — another lab's portal config, a
+	// TLS key, an unrelated credential in a shared namespace — stays out of reach.
+	SecretNames []string
+}
+
+// PortalStatus reports what is deployed for a lab's student portal.
+type PortalStatus struct {
+	Deployed bool   `json:"deployed"`
+	Ready    bool   `json:"ready"`
+	URL      string `json:"url,omitempty"`
+	Image    string `json:"image,omitempty"`
+}
+
+// PortalDeployer is implemented by backends that can host a lab's student portal
+// inside the lab's cluster. Optional and deliberately separate from Backend, like
+// ImagePrepuller above — callers type-assert for it. This is the admin's side.
+type PortalDeployer interface {
+	// EnsurePortal creates or updates (idempotently) everything the portal runs
+	// from — its identity and permissions, config, outbox, workload and Ingress —
+	// and returns its public URL ("" when it is reachable only in-cluster).
+	EnsurePortal(ctx context.Context, spec PortalSpec) (url string, err error)
+	// SyncPortalConfig replaces the config of an already deployed portal. It is the
+	// cheap path taken on every change an admin makes to the lab; a portal that is
+	// not deployed is not an error.
+	SyncPortalConfig(ctx context.Context, labID string, config map[string][]byte) error
+	// DrainPortalOutbox hands every record the portal queued to apply, then removes
+	// the ones apply accepted. A record apply fails on stays queued for the next
+	// drain, so delivery is at-least-once: apply must tolerate seeing one twice.
+	DrainPortalOutbox(ctx context.Context, labID string, apply func(id, record string) error) error
+	// RemovePortal deletes everything EnsurePortal created; absent is not an error.
+	RemovePortal(ctx context.Context, labID string) error
+	// PortalStatus reports what is currently deployed for the lab's portal.
+	PortalStatus(ctx context.Context, labID string) (PortalStatus, error)
+}
+
+// PortalRuntime is the portal's own side of the same resources: it reads the
+// config the admin syncs and queues what it has to report back. It is what a
+// backend built from the portal's in-cluster identity is used through.
+type PortalRuntime interface {
+	// ReadPortalConfig returns the config last written by EnsurePortal or
+	// SyncPortalConfig.
+	ReadPortalConfig(ctx context.Context, labID string) (map[string][]byte, error)
+	// AppendPortalOutbox queues records for the admin's next DrainPortalOutbox,
+	// keyed by record ID.
+	AppendPortalOutbox(ctx context.Context, labID string, records map[string]string) error
+}

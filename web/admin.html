@@ -622,6 +622,16 @@
                             <input type="text" id="workspace_namespace" name="workspace_namespace" value="workshops" placeholder="workshops">
                             <small>Kubernetes namespace student workspaces are created in. Defaults to "workshops".</small>
                         </div>
+                        <div class="form-checkboxes">
+                            <span>Student portal</span>
+                            <div class="checkbox-stack">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="student_portal" name="student_portal" value="true">
+                                    Deploy a dedicated student portal in this lab
+                                </label>
+                            </div>
+                            <small>Runs the student portal inside the lab's own cluster, at <code>portal.&lt;lab domain&gt;</code>, next to the workspaces it hands out. Students of this lab then keep working even when this admin instance is unreachable. It can also be turned on or off later from the lab's page.</small>
+                        </div>
                     </div>
                 </section>
 
