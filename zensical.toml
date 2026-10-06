@@ -36,7 +36,8 @@ nav = [
         "ovhcloud.md",
         "azure.md",
         "azure-ad.md",
-        "github.md"
+        "github.md",
+        "gitlab.md"
     ]},
     { "Deployment" = [
         "docker.md",

@@ -69,3 +69,5 @@ Once GitHub login is on, **Turn off password sign-in for students** hides the pa
 ### Student identity and password login
 
 A workspace is owned by the part of the student's identity before the `@`. A student signing in with GitHub as `octocat` and a student typing `octocat@example.com` in the password form therefore share the same workspaces. Password login already behaves this way between two email addresses with the same name; since the email typed there is not verified, turn off password sign-in for students when a workshop uses GitHub login.
+
+The same applies between GitHub and [GitLab login](gitlab.md): if both are on, the GitHub user `octocat` and the GitLab user `octocat` share the same workspaces, even when they are two different people. Offer one of the two per workshop, or restrict both to your own organization and group.

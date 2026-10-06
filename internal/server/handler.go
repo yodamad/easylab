@@ -93,6 +93,9 @@ type Handler struct {
 	// pushes them to the live AuthHandler. Both nil unless SetGitHubAuth is called.
 	githubAuthStore      *GitHubAuthStore
 	githubAuthConfigurer func(cfg GitHubAuthConfig)
+	// Same pair for GitLab student login. Both nil unless SetGitLabAuth is called.
+	gitlabAuthStore      *GitLabAuthStore
+	gitlabAuthConfigurer func(cfg GitLabAuthConfig)
 }
 
 // SetAzureADConfigurer wires a callback so the handler can update Azure AD OAuth config at runtime.
@@ -989,6 +992,7 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 		"azure-provider.html":     "web/azure-provider.html",
 		"azure-ad.html":           "web/azure-ad.html",
 		"github-auth.html":        "web/github-auth.html",
+		"gitlab-auth.html":        "web/gitlab-auth.html",
 		"labs-list.html":          "web/labs-list.html",
 		"lab-detail.html":         "web/lab-detail.html",
 		"admin-stats.html":        "web/admin-stats.html",

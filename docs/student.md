@@ -19,7 +19,7 @@ To access the student portal, you must log in with:
 
 Your email is validated on submission and stored in your session. It will be pre-filled automatically on all subsequent pages so you don't need to enter it again.
 
-After 5 failed password attempts, further attempts are locked out for 15 minutes as a brute-force protection. If you're locked out, wait 15 minutes and try again, or use Azure AD or GitHub login if your workshop offers it.
+After 5 failed password attempts, further attempts are locked out for 15 minutes as a brute-force protection. If you're locked out, wait 15 minutes and try again, or use Azure AD, GitHub or GitLab login if your workshop offers it.
 
 ![Student Login](screens/student-login.png){width=45%}
 
@@ -42,6 +42,16 @@ If the organiser limited sign-in to a GitHub organization you are not a member o
 If the organiser has turned off password sign-in, the password form is hidden and only the sign-in buttons are shown.
 
 ![Student GitHub login](screens/student-login-github.png){width=45%}
+
+### GitLab login (optional)
+
+If the workshop organiser has configured [GitLab login](gitlab.md), a **Sign in with GitLab** button is displayed at the top of the login page. It takes you to gitlab.com, or to the GitLab instance chosen by the organiser, where you authorize EasyLab — no student password is required. EasyLab only reads your GitLab username and the groups you belong to.
+
+After a successful GitLab login you are identified by your GitLab username, shown in EasyLab as `<username>@users.noreply.<gitlab host>`, and your workspaces are created under that name.
+
+If the organiser limited sign-in to a GitLab group you are not a member of, you are sent back to the login page with a message — ask your instructor for access.
+
+![Student GitLab login](screens/student-login-gitlab.png){width=45%}
 
 ## Request a new development environment
 

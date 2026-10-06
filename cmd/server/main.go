@@ -325,6 +325,14 @@ func main() {
 		log.Printf("[STARTUP] GitHub login config loaded from persisted storage")
 	}
 
+	// GitLab student login settings, persisted the same way.
+	gitlabAuthStore := server.NewGitLabAuthStore(*dataDir)
+	handler.SetGitLabAuth(gitlabAuthStore, authHandler.ConfigureGitLab)
+	if gitlabCfg := gitlabAuthStore.Get(); gitlabCfg.Enabled() {
+		authHandler.ConfigureGitLab(gitlabCfg)
+		log.Printf("[STARTUP] GitLab login config loaded from persisted storage")
+	}
+
 	go handler.StartWorkspaceCleanup(appCtx)
 
 	// Setup routes
@@ -357,6 +365,8 @@ func main() {
 	mux.HandleFunc("/student/auth/azure/callback", authHandler.HandleAzureADCallback)
 	mux.HandleFunc("/student/auth/github/login", authHandler.HandleGitHubLogin)
 	mux.HandleFunc("/student/auth/github/callback", authHandler.HandleGitHubCallback)
+	mux.HandleFunc("/student/auth/gitlab/login", authHandler.HandleGitLabLogin)
+	mux.HandleFunc("/student/auth/gitlab/callback", authHandler.HandleGitLabCallback)
 
 	// Admin Azure AD login routes (public — redirect to /admin on success)
 	mux.HandleFunc("/admin/auth/azure/login", authHandler.HandleAdminAzureADLogin)
@@ -432,6 +442,8 @@ func main() {
 	mux.HandleFunc("/api/azure-ad-config", authHandler.RequireAuth(handler.SaveAzureADConfig))
 	mux.HandleFunc("/admin/github", authHandler.RequireAuth(handler.ServeGitHubAuth))
 	mux.HandleFunc("/api/github-auth-config", authHandler.RequireAuth(handler.SaveGitHubAuthConfig))
+	mux.HandleFunc("/admin/gitlab", authHandler.RequireAuth(handler.ServeGitLabAuth))
+	mux.HandleFunc("/api/gitlab-auth-config", authHandler.RequireAuth(handler.SaveGitLabAuthConfig))
 	mux.HandleFunc("/api/student-portal-password", authHandler.RequireAuth(handler.GetStudentPortalPassword))
 	mux.HandleFunc("/api/templates/detect-variables", authHandler.RequireAuth(handler.DetectTemplateVariables))
 	mux.HandleFunc("/api/templates/detect-devcontainer", authHandler.RequireAuth(handler.DetectDevcontainer))

@@ -34,7 +34,7 @@ Every admin page shows the EasyLab copyright and version in the sidebar footer. 
 
 Admin login uses the password set via `LAB_ADMIN_PASSWORD` (or Azure AD, if configured — see [Azure AD authentication](azure-ad.md)). After 5 failed password attempts, further attempts from the same client are locked out for 15 minutes as a brute-force protection.
 
-Student login can additionally be opened to Microsoft accounts ([Azure AD authentication](azure-ad.md)) or GitHub accounts ([GitHub login](github.md)); both are configured from their own entry in the admin sidebar.
+Student login can additionally be opened to Microsoft accounts ([Azure AD authentication](azure-ad.md)) GitHub accounts ([GitHub login](github.md)), or GitLab accounts on gitlab.com or a self-managed instance ([GitLab login](gitlab.md)); each is configured from its own entry in the admin sidebar.
 
 ## Provider credentials
 

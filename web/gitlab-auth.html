@@ -1,0 +1,132 @@
+{{define "title"}}GitLab login{{end}}
+{{define "body-class"}}admin-page{{end}}
+{{define "head-extra"}}
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.0/dist/htmx.min.js" integrity="sha384-wS5l5IKJBvK6sPTKa2WZ1js3d947pvWXbPJ1OmWfEuxLgeHcEbjUUA5i9V5ZkpCw" crossorigin="anonymous"></script>
+{{end}}
+
+{{define "body"}}
+<div class="admin-layout">
+    {{template "admin-sidebar" .}}
+    <div class="admin-main">
+        <div class="admin-page-header">
+            <h1>GitLab login</h1>
+        </div>
+        <div class="admin-page-body">
+        <div class="admin-content-narrow">
+
+        <form id="gitlab-auth-form"
+              method="POST"
+              action="/api/gitlab-auth-config"
+              hx-post="/api/gitlab-auth-config"
+              hx-target="#save-response"
+              hx-swap="innerHTML"
+              hx-indicator="#gitlab-auth-loading"
+              hx-boost="false">
+            <div id="gitlab-auth-loading" class="htmx-indicator">
+                <div class="spinner"></div>
+                <p>Saving GitLab login settings...</p>
+            </div>
+
+            <div id="save-response"></div>
+
+            <div class="form-section">
+                <h2>Student sign-in with GitLab</h2>
+                <p class="section-description">Let students sign in to the student portal with their account on gitlab.com or on your own GitLab instance. Each student is identified by their GitLab username.</p>
+
+                {{if not .Enabled}}
+                <div class="info-box" id="gitlab-auth-status">
+                    <p>GitLab login is <strong>off</strong>. Add an application ID and secret to turn it on.</p>
+                </div>
+                {{else if .AllowedGroups}}
+                <div class="info-box" id="gitlab-auth-status">
+                    <p>GitLab login is <strong>on</strong> for <strong>{{.Host}}</strong>. Only members of <strong>{{.AllowedGroups}}</strong> can sign in.</p>
+                </div>
+                {{else}}
+                <div class="warning-message" id="gitlab-auth-status">
+                    <p>GitLab login is <strong>on</strong> for <strong>any account on {{.Host}}</strong>. Add a group below to limit who can sign in.</p>
+                </div>
+                {{end}}
+
+                {{if .Insecure}}
+                <div class="warning-message" id="gitlab-auth-insecure">
+                    <p>The GitLab URL uses <strong>http://</strong>, so sign-in is not encrypted between EasyLab and GitLab. Use https:// outside of a test setup.</p>
+                </div>
+                {{end}}
+
+                <div class="form-group">
+                    <label for="gitlab_url">GitLab URL</label>
+                    <input type="url" id="gitlab_url" name="gitlab_url"
+                           value="{{.BaseURL}}"
+                           placeholder="https://gitlab.com"
+                           autocomplete="off">
+                    <small>Keep https://gitlab.com, or enter the address of your self-managed instance, for example https://gitlab.example.org.</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="gitlab_callback_url">Callback URL</label>
+                    <div class="input-with-action">
+                        <input type="text" id="gitlab_callback_url" value="{{.CallbackURL}}" readonly>
+                        <button type="button" class="btn btn-secondary btn-copy-value" id="gitlab-callback-copy">Copy</button>
+                    </div>
+                    <small>Paste this as the "Redirect URI" when you add the application in GitLab (your user or group Settings → Applications). Select the <strong>openid</strong> scope only.</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="gitlab_client_id">Application ID</label>
+                    <input type="text" id="gitlab_client_id" name="gitlab_client_id"
+                           value="{{.ClientID}}"
+                           autocomplete="off">
+                    <small>Shown by GitLab after you save the application</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="gitlab_client_secret">Secret</label>
+                    <input type="password" id="gitlab_client_secret" name="gitlab_client_secret"
+                           autocomplete="new-password"
+                           {{if .HasSecret}}placeholder="(saved — enter new value to change)"{{end}}>
+                    <small>GitLab shows it once, when the application is created. It is stored encrypted and never shown again here.</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="gitlab_allowed_groups">Allowed groups</label>
+                    <input type="text" id="gitlab_allowed_groups" name="gitlab_allowed_groups"
+                           value="{{.AllowedGroups}}"
+                           placeholder="my-group, my-group/sub-group"
+                           autocomplete="off">
+                    <small>Only members of these GitLab groups can sign in. Use the full group path, separated by commas. Leave empty to accept any account on this GitLab instance.</small>
+                </div>
+
+                {{if .Enabled}}
+                <div class="form-checkboxes">
+                    <span>Sign-in restrictions</span>
+                    <div class="checkbox-stack">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="gitlab_disable_classic_login" id="gitlab_disable_classic_login"
+                                   {{if .DisableClassicLogin}}checked{{end}}>
+                            Turn off password sign-in for students
+                        </label>
+                    </div>
+                    <small>When checked, the password form is hidden on the student login page and students use the sign-in buttons only.</small>
+                </div>
+                {{end}}
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">
+                    <span class="btn-icon">💾</span> Save GitLab login
+                </button>
+                {{if .Enabled}}
+                <button type="button" class="btn btn-secondary" id="gitlab-auth-turn-off">
+                    <span class="btn-icon">✕</span> Turn off GitLab login
+                </button>
+                {{end}}
+            </div>
+        </form>
+
+        </div>
+        </div>
+    </div>
+</div>
+
+<script src="{{asset "/static/gitlab-auth.js"}}"></script>
+{{end}}
