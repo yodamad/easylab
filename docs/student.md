@@ -19,7 +19,7 @@ To access the student portal, you must log in with:
 
 Your email is validated on submission and stored in your session. It will be pre-filled automatically on all subsequent pages so you don't need to enter it again.
 
-After 5 failed password attempts, further attempts are locked out for 15 minutes as a brute-force protection. If you're locked out, wait 15 minutes and try again, or use Azure AD login if your workshop offers it.
+After 5 failed password attempts, further attempts are locked out for 15 minutes as a brute-force protection. If you're locked out, wait 15 minutes and try again, or use Azure AD or GitHub login if your workshop offers it.
 
 ![Student Login](screens/student-login.png){width=45%}
 
@@ -30,6 +30,18 @@ If the workshop organiser has configured Azure AD authentication, a **Sign in wi
 After a successful Azure AD login, your workspace account is created automatically using your Microsoft email address, exactly as with the password-based flow.
 
 If the organiser has also enabled **Disable password login for students**, the password form is hidden entirely and only the Microsoft login button is shown.
+
+### GitHub login (optional)
+
+If the workshop organiser has configured [GitHub login](github.md), a **Sign in with GitHub** button is displayed at the top of the login page, above the password form. Click it and authorize EasyLab on GitHub — no student password is required. EasyLab only reads your GitHub username (and, if the organiser restricted access, whether you belong to the workshop's GitHub organization).
+
+After a successful GitHub login you are identified by your GitHub username, shown in EasyLab as `<username>@users.noreply.github.com`, and your workspaces are created under that name.
+
+If the organiser limited sign-in to a GitHub organization you are not a member of, you are sent back to the login page with a message — ask your instructor for access.
+
+If the organiser has turned off password sign-in, the password form is hidden and only the sign-in buttons are shown.
+
+![Student GitHub login](screens/student-login-github.png){width=45%}
 
 ## Request a new development environment
 

@@ -1,0 +1,118 @@
+{{define "title"}}GitHub login{{end}}
+{{define "body-class"}}admin-page{{end}}
+{{define "head-extra"}}
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.0/dist/htmx.min.js" integrity="sha384-wS5l5IKJBvK6sPTKa2WZ1js3d947pvWXbPJ1OmWfEuxLgeHcEbjUUA5i9V5ZkpCw" crossorigin="anonymous"></script>
+{{end}}
+
+{{define "body"}}
+<div class="admin-layout">
+    {{template "admin-sidebar" .}}
+    <div class="admin-main">
+        <div class="admin-page-header">
+            <h1>GitHub login</h1>
+        </div>
+        <div class="admin-page-body">
+        <div class="admin-content-narrow">
+
+        <form id="github-auth-form"
+              method="POST"
+              action="/api/github-auth-config"
+              hx-post="/api/github-auth-config"
+              hx-target="#save-response"
+              hx-swap="innerHTML"
+              hx-indicator="#github-auth-loading"
+              hx-boost="false">
+            <div id="github-auth-loading" class="htmx-indicator">
+                <div class="spinner"></div>
+                <p>Saving GitHub login settings...</p>
+            </div>
+
+            <div id="save-response"></div>
+
+            <div class="form-section">
+                <h2>Student sign-in with GitHub</h2>
+                <p class="section-description">Let students sign in to the student portal with their GitHub account. Each student is identified by their GitHub username.</p>
+
+                {{if not .Enabled}}
+                <div class="info-box" id="github-auth-status">
+                    <p>GitHub login is <strong>off</strong>. Add a client ID and client secret to turn it on.</p>
+                </div>
+                {{else if .AllowedOrgs}}
+                <div class="info-box" id="github-auth-status">
+                    <p>GitHub login is <strong>on</strong>. Only members of <strong>{{.AllowedOrgs}}</strong> can sign in.</p>
+                </div>
+                {{else}}
+                <div class="warning-message" id="github-auth-status">
+                    <p>GitHub login is <strong>on</strong> for <strong>any GitHub account</strong>. Add an organization below to limit who can sign in.</p>
+                </div>
+                {{end}}
+
+                <div class="form-group">
+                    <label for="github_callback_url">Callback URL</label>
+                    <div class="input-with-action">
+                        <input type="text" id="github_callback_url" value="{{.CallbackURL}}" readonly>
+                        <button type="button" class="btn btn-secondary btn-copy-value" id="github-callback-copy">Copy</button>
+                    </div>
+                    <small>Paste this as the "Authorization callback URL" when you create the OAuth app on GitHub (Settings → Developer settings → OAuth Apps).</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="github_client_id">Client ID</label>
+                    <input type="text" id="github_client_id" name="github_client_id"
+                           value="{{.ClientID}}"
+                           placeholder="Ov23li…"
+                           autocomplete="off">
+                    <small>Shown on the OAuth app's page on GitHub</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="github_client_secret">Client secret</label>
+                    <input type="password" id="github_client_secret" name="github_client_secret"
+                           autocomplete="new-password"
+                           {{if .HasSecret}}placeholder="(saved — enter new value to change)"{{end}}>
+                    <small>Generate one on the OAuth app's page. It is stored encrypted and never shown again here.</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="github_allowed_orgs">Allowed organizations</label>
+                    <input type="text" id="github_allowed_orgs" name="github_allowed_orgs"
+                           value="{{.AllowedOrgs}}"
+                           placeholder="my-org, another-org"
+                           autocomplete="off">
+                    <small>Only members of these GitHub organizations can sign in. Separate names with commas. Leave empty to accept any GitHub account.</small>
+                </div>
+
+                {{if .Enabled}}
+                <div class="form-checkboxes">
+                    <span>Sign-in restrictions</span>
+                    <div class="checkbox-stack">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="github_disable_classic_login" id="github_disable_classic_login"
+                                   {{if .DisableClassicLogin}}checked{{end}}>
+                            Turn off password sign-in for students
+                        </label>
+                    </div>
+                    <small>When checked, the password form is hidden on the student login page and students use the sign-in buttons only.</small>
+                </div>
+                {{end}}
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">
+                    <span class="btn-icon">💾</span> Save GitHub login
+                </button>
+                {{if .Enabled}}
+                <button type="button" class="btn btn-secondary" id="github-auth-turn-off">
+                    <span class="btn-icon">✕</span> Turn off GitHub login
+                </button>
+                {{end}}
+            </div>
+        </form>
+
+        </div>
+        </div>
+    </div>
+</div>
+
+<script src="{{asset "/static/github-auth.js"}}"></script>
+{{end}}

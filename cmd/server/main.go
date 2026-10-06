@@ -316,6 +316,15 @@ func main() {
 		log.Printf("[STARTUP] Azure AD config loaded from persisted storage")
 	}
 
+	// GitHub student login settings (persisted, secret encrypted at rest — must
+	// come after initDataEncryption above).
+	githubAuthStore := server.NewGitHubAuthStore(*dataDir)
+	handler.SetGitHubAuth(githubAuthStore, authHandler.ConfigureGitHub)
+	if githubCfg := githubAuthStore.Get(); githubCfg.Enabled() {
+		authHandler.ConfigureGitHub(githubCfg)
+		log.Printf("[STARTUP] GitHub login config loaded from persisted storage")
+	}
+
 	go handler.StartWorkspaceCleanup(appCtx)
 
 	// Setup routes
@@ -346,6 +355,8 @@ func main() {
 	})
 	mux.HandleFunc("/student/auth/azure/login", authHandler.HandleAzureADLogin)
 	mux.HandleFunc("/student/auth/azure/callback", authHandler.HandleAzureADCallback)
+	mux.HandleFunc("/student/auth/github/login", authHandler.HandleGitHubLogin)
+	mux.HandleFunc("/student/auth/github/callback", authHandler.HandleGitHubCallback)
 
 	// Admin Azure AD login routes (public — redirect to /admin on success)
 	mux.HandleFunc("/admin/auth/azure/login", authHandler.HandleAdminAzureADLogin)
@@ -419,6 +430,8 @@ func main() {
 	mux.HandleFunc("/api/azure-options", authHandler.RequireAuth(handler.SaveAzureOptions))
 	mux.HandleFunc("/api/azure-options/refresh", authHandler.RequireAuth(handler.RefreshAzureOptions))
 	mux.HandleFunc("/api/azure-ad-config", authHandler.RequireAuth(handler.SaveAzureADConfig))
+	mux.HandleFunc("/admin/github", authHandler.RequireAuth(handler.ServeGitHubAuth))
+	mux.HandleFunc("/api/github-auth-config", authHandler.RequireAuth(handler.SaveGitHubAuthConfig))
 	mux.HandleFunc("/api/student-portal-password", authHandler.RequireAuth(handler.GetStudentPortalPassword))
 	mux.HandleFunc("/api/templates/detect-variables", authHandler.RequireAuth(handler.DetectTemplateVariables))
 	mux.HandleFunc("/api/templates/detect-devcontainer", authHandler.RequireAuth(handler.DetectDevcontainer))

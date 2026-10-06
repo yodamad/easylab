@@ -106,9 +106,19 @@ type AuthHandler struct {
 	classicLoginDisabled      bool
 	adminGroupID              string
 	classicAdminLoginDisabled bool
-	templates                 map[string]*template.Template
-	templatesMu               sync.RWMutex
-	mu                        sync.RWMutex
+	// GitHub OAuth student login (see github_auth.go). githubEndpoint and
+	// githubAPIBase are zero in production (GitHub's own URLs are used) and
+	// only set by tests.
+	githubEnabled              bool
+	githubConfig               *oauth2.Config
+	githubAllowedOrgs          []string
+	githubClassicLoginDisabled bool
+	githubOAuthStates          map[string]time.Time
+	githubEndpoint             oauth2.Endpoint
+	githubAPIBase              string
+	templates                  map[string]*template.Template
+	templatesMu                sync.RWMutex
+	mu                         sync.RWMutex
 	// loginAttempts is intentionally guarded by its own mutex, separate from mu:
 	// it's touched on every login POST (a hot path) and shouldn't contend with
 	// session/config reads elsewhere.
@@ -193,6 +203,7 @@ func NewAuthHandler() (*AuthHandler, error) {
 		azureADEnabled:      azureADEnabled,
 		azureADConfig:       azureADConfig,
 		azureOAuthStates:    make(map[string]time.Time),
+		githubOAuthStates:   make(map[string]time.Time),
 		adminGroupID:        adminGroupID,
 		templates:           make(map[string]*template.Template),
 		loginAttempts:       make(map[string]*loginAttemptState),
@@ -218,6 +229,11 @@ func NewAuthHandler() (*AuthHandler, error) {
 			for state, expiry := range ah.azureOAuthStates {
 				if now.After(expiry) {
 					delete(ah.azureOAuthStates, state)
+				}
+			}
+			for state, expiry := range ah.githubOAuthStates {
+				if now.After(expiry) {
+					delete(ah.githubOAuthStates, state)
 				}
 			}
 			ah.mu.Unlock()
@@ -810,12 +826,14 @@ func (ah *AuthHandler) ServeStudentLogin(w http.ResponseWriter, r *http.Request)
 
 	ah.mu.RLock()
 	azureADEnabled := ah.azureADEnabled
-	classicDisabled := ah.classicLoginDisabled && ah.azureADEnabled
+	githubEnabled := ah.githubEnabled
+	classicDisabled := (ah.classicLoginDisabled && ah.azureADEnabled) || (ah.githubClassicLoginDisabled && ah.githubEnabled)
 	ah.mu.RUnlock()
 
 	data := map[string]interface{}{
 		"Error":                r.URL.Query().Get("error"),
 		"AzureADEnabled":       azureADEnabled,
+		"GitHubEnabled":        githubEnabled,
 		"ClassicLoginDisabled": classicDisabled,
 	}
 
@@ -834,7 +852,7 @@ func (ah *AuthHandler) HandleStudentLogin(w http.ResponseWriter, r *http.Request
 
 	ah.mu.RLock()
 	storedHash := ah.studentPasswordHash
-	classicDisabled := ah.classicLoginDisabled && ah.azureADEnabled
+	classicDisabled := (ah.classicLoginDisabled && ah.azureADEnabled) || (ah.githubClassicLoginDisabled && ah.githubEnabled)
 	ah.mu.RUnlock()
 
 	if storedHash == "" {
@@ -842,7 +860,7 @@ func (ah *AuthHandler) HandleStudentLogin(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if classicDisabled {
-		http.Redirect(w, r, "/student/login?error=Password+login+is+disabled%2C+please+use+Microsoft+login", http.StatusSeeOther)
+		http.Redirect(w, r, "/student/login?error=Password+login+is+disabled.+Use+one+of+the+sign-in+buttons+instead.", http.StatusSeeOther)
 		return
 	}
 
@@ -927,7 +945,7 @@ func (ah *AuthHandler) HandleStudentLogout(w http.ResponseWriter, r *http.Reques
 // RequireStudentAuth is middleware that requires student authentication
 func (ah *AuthHandler) RequireStudentAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if ah.studentPasswordHash == "" && !ah.azureADEnabled {
+		if ah.studentPasswordHash == "" && !ah.azureADEnabled && !ah.GitHubEnabled() {
 			http.Error(w, "Student login is disabled", http.StatusForbidden)
 			return
 		}

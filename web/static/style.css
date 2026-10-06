@@ -494,7 +494,8 @@ main {
     min-width: 0;
 }
 
-.input-with-action .btn-generate-password {
+.input-with-action .btn-generate-password,
+.input-with-action .btn-copy-value {
     flex-shrink: 0;
     white-space: nowrap;
 }
@@ -2001,7 +2002,22 @@ body.student-login-page {
     opacity: 0.92;
 }
 
-.btn-azure-full {
+.login-alert {
+    padding: 1.25rem 1.75rem 0;
+}
+
+.login-alert .error-alert {
+    margin-bottom: 0;
+}
+
+.login-social-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+}
+
+.btn-azure-full,
+.btn-github-full {
     width: 100%;
     display: flex;
     align-items: center;
@@ -2018,12 +2034,19 @@ body.student-login-page {
     transition: all 0.2s;
 }
 
-.btn-azure-full:hover {
+.btn-azure-full:hover,
+.btn-github-full:hover {
     border-color: rgba(255, 255, 255, 0.2);
     background: rgba(255, 255, 255, 0.1);
 }
 
-.btn-azure-full svg {
+.btn-github-full:focus-visible {
+    outline: 2px solid var(--login-accent);
+    outline-offset: 2px;
+}
+
+.btn-azure-full svg,
+.btn-github-full svg {
     width: 1.25rem;
     height: 1.25rem;
     flex-shrink: 0;

@@ -89,6 +89,10 @@ type Handler struct {
 	classicLoginConfigurer      func(disabled bool)
 	adminGroupIDConfigurer      func(groupID string)
 	classicAdminLoginConfigurer func(disabled bool)
+	// githubAuthStore persists the GitHub student login settings; githubAuthConfigurer
+	// pushes them to the live AuthHandler. Both nil unless SetGitHubAuth is called.
+	githubAuthStore      *GitHubAuthStore
+	githubAuthConfigurer func(cfg GitHubAuthConfig)
 }
 
 // SetAzureADConfigurer wires a callback so the handler can update Azure AD OAuth config at runtime.
@@ -984,6 +988,7 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 		"azure-options.html":      "web/azure-options.html",
 		"azure-provider.html":     "web/azure-provider.html",
 		"azure-ad.html":           "web/azure-ad.html",
+		"github-auth.html":        "web/github-auth.html",
 		"labs-list.html":          "web/labs-list.html",
 		"lab-detail.html":         "web/lab-detail.html",
 		"admin-stats.html":        "web/admin-stats.html",

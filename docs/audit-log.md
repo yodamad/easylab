@@ -29,6 +29,7 @@ lab's history rather than scanning the global log.
 * Workspace actions: student-initiated creation, student-initiated deletion (**Clear** / **Clear All** on the My Workspaces page), admin-initiated deletion (single, bulk, or as part of removing a template)
 * Credential changes: saving OVH or Azure credentials (the credential values themselves are never recorded)
 * Admin viewing the shared student portal login password
+* Admin saving the [GitHub login](github.md) settings (`github_auth.update`, with whether it is enabled and for which organizations as detail — never the client secret)
 * Automatic (system) actions: workspaces deleted for exceeding their configured lifetime, labs auto-destroyed past their scheduled deletion date
 
 ## Admin identity caveat
