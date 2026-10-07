@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -65,6 +66,26 @@ func (fs *FeedbackStore) Add(f Feedback) error {
 	}
 	entries = append(entries, f)
 	return fs.writeUnsafe(f.LabID, entries)
+}
+
+// AddIfAbsent appends a feedback entry unless one with the same ID is already
+// stored, and reports whether it was added. It is how feedback collected by an
+// in-lab student portal is imported: that delivery is at-least-once.
+func (fs *FeedbackStore) AddIfAbsent(f Feedback) (bool, error) {
+	lock := fs.lockFor(f.LabID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	entries, err := fs.readUnsafe(f.LabID)
+	if err != nil {
+		return false, fmt.Errorf("failed to read feedback for lab %s: %w", f.LabID, err)
+	}
+	for _, e := range entries {
+		if e.ID == f.ID {
+			return false, nil
+		}
+	}
+	return true, fs.writeUnsafe(f.LabID, append(entries, f))
 }
 
 // GetByLab returns all feedback entries for a given lab
@@ -146,6 +167,15 @@ func redirectFeedback(w http.ResponseWriter, r *http.Request, errMsg string) {
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
+// saveFeedback stores a student's feedback: in the feedback store, or — on an
+// in-lab portal, which has none — in the outbox the admin collects it from.
+func (h *Handler) saveFeedback(ctx context.Context, f Feedback) error {
+	if h.portal != nil {
+		return h.portal.reportFeedback(ctx, f)
+	}
+	return h.feedbackStore.Add(f)
+}
+
 // SubmitFeedback handles POST /api/student/feedback
 func (h *Handler) SubmitFeedback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -213,7 +243,7 @@ func (h *Handler) SubmitFeedback(w http.ResponseWriter, r *http.Request) {
 		SubmittedAt: time.Now().UTC(),
 	}
 
-	if err := h.feedbackStore.Add(f); err != nil {
+	if err := h.saveFeedback(r.Context(), f); err != nil {
 		log.Printf("Failed to save feedback for lab %s: %v", labID, err)
 		if htmx {
 			writeToast(w, false, "Failed to save feedback. Please try again.")
@@ -350,6 +380,9 @@ func (h *Handler) ServeAdminLabFeedback(w http.ResponseWriter, r *http.Request) 
 			data.LabName = labID
 		}
 
+		// Feedback given in the lab's own student portal is collected from it first.
+		h.drainPortalOutboxForPage(r, labID)
+
 		entries, err := h.feedbackStore.GetByLab(labID)
 		if err != nil {
 			log.Printf("Failed to load feedback for lab %s: %v", labID, err)
@@ -436,6 +469,9 @@ func (h *Handler) ExportLabFeedbackCSV(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "lab_id is required", http.StatusBadRequest)
 		return
 	}
+
+	// Feedback given in the lab's own student portal is collected from it first.
+	h.drainPortalOutboxForPage(r, labID)
 
 	entries, err := h.feedbackStore.GetByLab(labID)
 	if err != nil {

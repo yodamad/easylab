@@ -1,0 +1,83 @@
+{{define "title"}}Student portals{{end}}
+{{define "body-class"}}admin-page{{end}}
+{{define "head-extra"}}
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.0/dist/htmx.min.js" integrity="sha384-wS5l5IKJBvK6sPTKa2WZ1js3d947pvWXbPJ1OmWfEuxLgeHcEbjUUA5i9V5ZkpCw" crossorigin="anonymous"></script>
+{{end}}
+
+{{define "body"}}
+<div class="admin-layout">
+    {{template "admin-sidebar" .}}
+    <div class="admin-main">
+        <div class="admin-page-header">
+            <h1>Student portals</h1>
+        </div>
+        <div class="admin-page-body">
+        <div class="admin-content-narrow">
+
+        <form id="portal-settings-form"
+              method="POST"
+              action="/api/portal-settings"
+              hx-post="/api/portal-settings"
+              hx-target="#save-response"
+              hx-swap="innerHTML"
+              hx-indicator="#portal-settings-loading"
+              hx-boost="false">
+            <div id="portal-settings-loading" class="htmx-indicator">
+                <div class="spinner"></div>
+                <p>Saving student portal settings...</p>
+            </div>
+
+            <div id="save-response"></div>
+
+            <div class="form-section">
+                <h2>In-lab student portals</h2>
+                <p class="section-description">A lab can run its own student portal inside its cluster. These two settings are what every portal gets from this instance. Leave a field empty to use its default.</p>
+
+                {{if not .EffectiveImage}}
+                <div class="warning-message" id="portal-settings-status">
+                    <p>Portals <strong>cannot be deployed</strong> yet: this is a development build, which has no published image to run them from. Set a portal image below.</p>
+                </div>
+                {{else if not .EffectivePublicURL}}
+                <div class="warning-message" id="portal-settings-status">
+                    <p>Portals offer <strong>password sign-in only</strong>. Set the public address below to offer Microsoft, GitHub and GitLab sign-in on them too.</p>
+                </div>
+                {{else}}
+                <div class="info-box" id="portal-settings-status">
+                    <p>Portals run <strong>{{.EffectiveImage}}</strong> and send students to <strong>{{.EffectivePublicURL}}</strong> for Microsoft, GitHub and GitLab sign-in.</p>
+                </div>
+                {{end}}
+
+                <div class="form-group">
+                    <label for="portal_public_url">Public address of this instance</label>
+                    <input type="url" id="portal_public_url" name="portal_public_url"
+                           value="{{.PublicURL}}"
+                           placeholder="{{if .DefaultPublicURL}}{{.DefaultPublicURL}}{{else}}https://easylab.example.com{{end}}"
+                           autocomplete="off">
+                    <small>Where students' browsers reach this instance. Portals send them here to sign in with Microsoft, GitHub or GitLab, then take them back. You are currently on <code>{{.DetectedURL}}</code>. {{if .DefaultPublicURL}}Default: <code>{{.DefaultPublicURL}}</code> (from <code>EASYLAB_PUBLIC_URL</code>).{{else}}No default: without it portals offer password sign-in only.{{end}}</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="portal_image">Portal image</label>
+                    <input type="text" id="portal_image" name="portal_image"
+                           value="{{.Image}}"
+                           placeholder="{{if .DefaultImage}}{{.DefaultImage}}{{else}}registry.example.com/easylab:my-build{{end}}"
+                           autocomplete="off">
+                    <small>The EasyLab image the portals run. It has to be built from the same version as this instance, and the labs' clusters must be able to pull it. {{if .DefaultImage}}Default: <code>{{.DefaultImage}}</code>.{{else}}No default on a development build.{{end}}</small>
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">
+                    <span class="btn-icon">💾</span> Save student portal settings
+                </button>
+            </div>
+            {{if .PortalLabs}}
+            <p class="section-description">Saving updates the portal of {{.PortalLabs}} lab{{if gt .PortalLabs 1}}s{{end}} in the background. A new image restarts them, which signs their students out.</p>
+            {{end}}
+        </form>
+
+        </div>
+        </div>
+    </div>
+</div>
+{{end}}

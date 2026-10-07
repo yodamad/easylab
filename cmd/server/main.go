@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
-	_ "easylab/internal/providers/workspace/kube" // register the kube workspace backend
+	"easylab/internal/providers/workspace/kube" // also registers the kube workspace backend
 	"easylab/internal/server"
 	"easylab/utils"
 	"encoding/base64"
@@ -175,6 +175,7 @@ func main() {
 		workDir = flag.String("work-dir", utils.DEFAULT_WORK_DIR, "Directory for job workspaces")
 		dataDir = flag.String("data-dir", utils.DEFAULT_DATA_DIR, "Directory for persisting job data")
 		envFile = flag.String("env-file", "", "Path to environment file to load at startup")
+		modeArg = flag.String("mode", "", "Areas to serve: all (default), admin, or student (in-lab portal). Defaults to "+server.EnvMode)
 	)
 	flag.Parse()
 
@@ -183,6 +184,24 @@ func main() {
 		if err := loadEnvFile(*envFile); err != nil {
 			log.Fatalf("Failed to load env file: %v", err)
 		}
+	}
+
+	if *modeArg == "" {
+		*modeArg = os.Getenv(server.EnvMode)
+	}
+	mode, err := server.ParseMode(*modeArg)
+	if err != nil {
+		log.Fatalf("Invalid mode: %v", err)
+	}
+	log.Printf("[STARTUP] Mode: %s", mode)
+
+	// An in-lab student portal shares none of the admin's state: no jobs on
+	// disk, no Pulumi, no provider credentials. It has its own, much shorter, startup.
+	if mode == server.ModeStudent {
+		if err := runStudentPortal(*port); err != nil {
+			log.Fatalf("Student portal failed: %v", err)
+		}
+		return
 	}
 
 	// Get default values from environment variables if set, otherwise use hardcoded defaults
@@ -335,149 +354,27 @@ func main() {
 
 	go handler.StartWorkspaceCleanup(appCtx)
 
+	// In-lab student portals mirror this instance's student sign-in settings, and
+	// send students here for the providers only this instance is registered with.
+	// Both the public URL and the portal image default from the environment and
+	// can be overridden from the Student portals admin page (persisted).
+	publicURL := os.Getenv(server.EnvPublicURL)
+	portalSettings := server.NewPortalSettingsStore(*dataDir)
+	handler.SetMode(mode)
+	handler.SetPortalAuth(publicURL, authHandler.StudentAuthSnapshot)
+	handler.SetPortalSettingsStore(portalSettings)
+	authHandler.SetBrokerLabResolver(handler.BrokerPortal)
+	authHandler.SetBrokerOnly(mode == server.ModeAdmin)
+	if publicURL == "" && portalSettings.Get().PublicURL == "" {
+		log.Printf("[STARTUP] No public address configured: in-lab student portals will offer password login only. Set it on the Student portals admin page or with %s", server.EnvPublicURL)
+	}
+
 	// Setup routes
-	mux := http.NewServeMux()
-
-	// Public routes (no auth required)
-	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			authHandler.HandleLogin(w, r)
-		} else {
-			authHandler.ServeLogin(w, r)
-		}
-	})
-	mux.HandleFunc("/logout", authHandler.HandleLogout)
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
-	mux.HandleFunc("/static/", handler.ServeStatic) // Static files don't need auth
-
-	// Student routes (public login, protected dashboard)
-	mux.HandleFunc("/student/login", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			authHandler.HandleStudentLogin(w, r)
-		} else {
-			authHandler.ServeStudentLogin(w, r)
-		}
-	})
-	mux.HandleFunc("/student/auth/azure/login", authHandler.HandleAzureADLogin)
-	mux.HandleFunc("/student/auth/azure/callback", authHandler.HandleAzureADCallback)
-	mux.HandleFunc("/student/auth/github/login", authHandler.HandleGitHubLogin)
-	mux.HandleFunc("/student/auth/github/callback", authHandler.HandleGitHubCallback)
-	mux.HandleFunc("/student/auth/gitlab/login", authHandler.HandleGitLabLogin)
-	mux.HandleFunc("/student/auth/gitlab/callback", authHandler.HandleGitLabCallback)
-
-	// Admin Azure AD login routes (public — redirect to /admin on success)
-	mux.HandleFunc("/admin/auth/azure/login", authHandler.HandleAdminAzureADLogin)
-	mux.HandleFunc("/admin/auth/azure/callback", authHandler.HandleAdminAzureADCallback)
-	mux.HandleFunc("/student/logout", authHandler.HandleStudentLogout)
-	mux.HandleFunc("/student/dashboard", authHandler.RequireStudentAuth(handler.ServeStudentDashboard))
-	mux.HandleFunc("/student/workspaces", authHandler.RequireStudentAuth(handler.ServeStudentWorkspaces))
-	mux.HandleFunc("/student/feedback", authHandler.RequireStudentAuth(handler.ServeFeedback))
-	mux.HandleFunc("/api/student/labs", authHandler.RequireStudentAuth(handler.ListLabs))
-	mux.HandleFunc("/api/student/labs/templates", authHandler.RequireStudentAuth(handler.ListLabTemplates))
-	mux.HandleFunc("/api/student/workspace/request", authHandler.RequireStudentAuth(handler.RequestWorkspace))
-	mux.HandleFunc("/api/student/workspace/status", authHandler.RequireStudentAuth(handler.WorkspaceStatus))
-	mux.HandleFunc("/api/student/workspace/open", authHandler.RequireStudentAuth(handler.OpenWorkspace))
-	mux.HandleFunc("/api/student/workspace/delete", authHandler.RequireStudentAuth(handler.DeleteStudentWorkspace))
-	mux.HandleFunc("/api/student/workspace/access", authHandler.RequireStudentAuth(handler.WorkspaceTeacherAccess))
-	mux.HandleFunc("/api/student/feedback", authHandler.RequireStudentAuth(handler.SubmitFeedback))
-
-	// Public homepage (no auth required)
-	mux.HandleFunc("/", handler.ServeUI)
-
-	// Protected routes (auth required)
-	mux.HandleFunc("/admin", authHandler.RequireAuth(handler.ServeAdminUI))
-	mux.HandleFunc("/admin/feedback", authHandler.RequireAuth(handler.ServeAdminLabFeedback))
-	mux.HandleFunc("/admin/feedback/export", authHandler.RequireAuth(handler.ExportLabFeedbackCSV))
-	mux.HandleFunc("/admin/audit-log", authHandler.RequireAuth(handler.ServeAuditLog))
-	mux.HandleFunc("/admin/stats", authHandler.RequireAuth(handler.ServeAdminStats))
-	mux.HandleFunc("/api/admin/stats", authHandler.RequireAuth(handler.GetProjectStats))
-	mux.HandleFunc("/labs", authHandler.RequireAuth(handler.ServeLabsList))
-	// Backward compatibility route
-	mux.HandleFunc("/jobs", authHandler.RequireAuth(handler.ServeLabsList))
-
-	// New generic credentials routes
-	mux.HandleFunc("/credentials", authHandler.RequireAuth(handler.ServeCredentials))
-	mux.HandleFunc("/api/credentials", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			handler.SetCredentials(w, r)
-		} else if r.Method == http.MethodGet {
-			handler.GetCredentials(w, r)
-		} else {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		}
-	}))
-	mux.HandleFunc("/api/providers", authHandler.RequireAuth(handler.ListProviders))
-
-	// Backward compatibility routes for OVH-specific endpoints
-	mux.HandleFunc("/ovh-credentials", authHandler.RequireAuth(handler.ServeOVHCredentials))
-	mux.HandleFunc("/api/ovh-credentials", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			handler.SetOVHCredentials(w, r)
-		} else if r.Method == http.MethodGet {
-			handler.GetOVHCredentials(w, r)
-		} else {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		}
-	}))
-	mux.HandleFunc("/api/ovh/regions", authHandler.RequireAuth(handler.GetOVHRegions))
-	mux.HandleFunc("/api/ovh/flavors", authHandler.RequireAuth(handler.GetOVHFlavors))
-	mux.HandleFunc("/admin/ovh-options", authHandler.RequireAuth(handler.ServeOVHOptions))
-	mux.HandleFunc("/api/ovh-options", authHandler.RequireAuth(handler.SaveOVHOptions))
-	mux.HandleFunc("/api/ovh-options/refresh", authHandler.RequireAuth(handler.RefreshOVHOptions))
-
-	// Azure-specific routes
-	mux.HandleFunc("/azure-credentials", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/credentials?provider=azure", http.StatusMovedPermanently)
-	}))
-	mux.HandleFunc("/admin/azure-options", authHandler.RequireAuth(handler.ServeAzureOptions))
-	mux.HandleFunc("/admin/azure-provider", authHandler.RequireAuth(handler.ServeAzureProvider))
-	mux.HandleFunc("/admin/azure-ad", authHandler.RequireAuth(handler.ServeAzureAD))
-	mux.HandleFunc("/api/azure/locations", authHandler.RequireAuth(handler.GetAzureLocations))
-	mux.HandleFunc("/api/azure/vm-sizes", authHandler.RequireAuth(handler.GetAzureVMSizes))
-	mux.HandleFunc("/api/azure-options/region-vm-sizes", authHandler.RequireAuth(handler.GetAzureOptionsRegionVMSizeHTML))
-	mux.HandleFunc("/api/azure-options", authHandler.RequireAuth(handler.SaveAzureOptions))
-	mux.HandleFunc("/api/azure-options/refresh", authHandler.RequireAuth(handler.RefreshAzureOptions))
-	mux.HandleFunc("/api/azure-ad-config", authHandler.RequireAuth(handler.SaveAzureADConfig))
-	mux.HandleFunc("/admin/github", authHandler.RequireAuth(handler.ServeGitHubAuth))
-	mux.HandleFunc("/api/github-auth-config", authHandler.RequireAuth(handler.SaveGitHubAuthConfig))
-	mux.HandleFunc("/admin/gitlab", authHandler.RequireAuth(handler.ServeGitLabAuth))
-	mux.HandleFunc("/api/gitlab-auth-config", authHandler.RequireAuth(handler.SaveGitLabAuthConfig))
-	mux.HandleFunc("/api/student-portal-password", authHandler.RequireAuth(handler.GetStudentPortalPassword))
-	mux.HandleFunc("/api/templates/detect-variables", authHandler.RequireAuth(handler.DetectTemplateVariables))
-	mux.HandleFunc("/api/templates/detect-devcontainer", authHandler.RequireAuth(handler.DetectDevcontainer))
-	mux.HandleFunc("/api/labs", authHandler.RequireAuth(handler.CreateLab))
-	mux.HandleFunc("/api/labs/templates/yaml", authHandler.RequireAuth(handler.ServeWorkspaceTemplatesYAML))
-	mux.HandleFunc("/api/labs/templates/yaml/validate", authHandler.RequireAuth(handler.ValidateWorkspaceTemplatesYAML))
-	mux.HandleFunc("/api/labs/dry-run", authHandler.RequireAuth(handler.DryRunLab))
-	mux.HandleFunc("/api/labs/launch", authHandler.RequireAuth(handler.LaunchLab))
-	mux.HandleFunc("/api/labs/recreate", authHandler.RequireAuth(handler.RecreateLab))
-	mux.HandleFunc("/api/stacks/destroy", authHandler.RequireAuth(handler.DestroyStack))
-	routeLabRequest := labRequestRouter(handler)
-	mux.HandleFunc("/api/labs/", authHandler.RequireAuth(routeLabRequest))
-	// Backward compatibility route
-	mux.HandleFunc("/api/jobs/", authHandler.RequireAuth(routeLabRequest))
-	// Per-lab pages: the old dedicated workspaces page now redirects into the
-	// consolidated lab detail page (see ServeLabWorkspaces/ServeLabDetail).
-	mux.HandleFunc("/labs/", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/workspaces") {
-			handler.ServeLabWorkspaces(w, r)
-			return
-		}
-		handler.ServeLabDetail(w, r)
-	}))
+	mux := buildMux(mode, handler, authHandler)
 
 	// Configure server with timeouts
 	addr := fmt.Sprintf(":%s", *port)
-	srv := &http.Server{
-		Addr:         addr,
-		Handler:      noStoreByDefault(mux),
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 5 * time.Minute, // long enough for log-streaming and kubeconfig responses
-		IdleTimeout:  60 * time.Second,
-	}
+	srv := newHTTPServer(addr, mux)
 
 	// Start server in goroutine
 	go func() {
@@ -542,6 +439,265 @@ func main() {
 	log.Println("Server exited")
 }
 
+// buildMux registers the routes of the areas mode serves. The paths themselves
+// do not depend on the mode — an area is either all there or absent — so a
+// combined instance and a split admin/student pair answer on the same URLs.
+//
+// The route functions live in this file on purpose: the Playwright web server
+// builds it on its own (go build cmd/server/main.go).
+func buildMux(mode server.Mode, handler *server.Handler, authHandler *server.AuthHandler) *http.ServeMux {
+	mux := http.NewServeMux()
+	registerCommonRoutes(mux, handler)
+	if mode.ServesStudent() {
+		registerStudentRoutes(mux, handler, authHandler)
+	}
+	if mode == server.ModeStudent {
+		registerPortalSignInRoutes(mux, authHandler)
+	} else {
+		registerProviderSignInRoutes(mux, authHandler)
+	}
+	if mode.ServesAdmin() {
+		registerAdminRoutes(mux, handler, authHandler)
+	}
+	return mux
+}
+
+// registerCommonRoutes registers what every mode serves, none of it behind auth.
+func registerCommonRoutes(mux *http.ServeMux, handler *server.Handler) {
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+	mux.HandleFunc("/static/", handler.ServeStatic) // Static files don't need auth
+
+	// Public homepage (no auth required)
+	mux.HandleFunc("/", handler.ServeUI)
+}
+
+// registerStudentRoutes registers the student portal (public login, protected dashboard).
+func registerStudentRoutes(mux *http.ServeMux, handler *server.Handler, authHandler *server.AuthHandler) {
+	mux.HandleFunc("/student/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			authHandler.HandleStudentLogin(w, r)
+		} else {
+			authHandler.ServeStudentLogin(w, r)
+		}
+	})
+	mux.HandleFunc("/student/logout", authHandler.HandleStudentLogout)
+	mux.HandleFunc("/student/dashboard", authHandler.RequireStudentAuth(handler.ServeStudentDashboard))
+	mux.HandleFunc("/student/workspaces", authHandler.RequireStudentAuth(handler.ServeStudentWorkspaces))
+	mux.HandleFunc("/student/feedback", authHandler.RequireStudentAuth(handler.ServeFeedback))
+	mux.HandleFunc("/api/student/labs", authHandler.RequireStudentAuth(handler.ListLabs))
+	mux.HandleFunc("/api/student/labs/templates", authHandler.RequireStudentAuth(handler.ListLabTemplates))
+	mux.HandleFunc("/api/student/workspaces", authHandler.RequireStudentAuth(handler.ListStudentWorkspaces))
+	mux.HandleFunc("/api/student/workspace/request", authHandler.RequireStudentAuth(handler.RequestWorkspace))
+	mux.HandleFunc("/api/student/workspace/status", authHandler.RequireStudentAuth(handler.WorkspaceStatus))
+	mux.HandleFunc("/api/student/workspace/open", authHandler.RequireStudentAuth(handler.OpenWorkspace))
+	mux.HandleFunc("/api/student/workspace/delete", authHandler.RequireStudentAuth(handler.DeleteStudentWorkspace))
+	mux.HandleFunc("/api/student/workspace/access", authHandler.RequireStudentAuth(handler.WorkspaceTeacherAccess))
+	mux.HandleFunc("/api/student/feedback", authHandler.RequireStudentAuth(handler.SubmitFeedback))
+}
+
+// registerProviderSignInRoutes registers the student sign-in flows this instance
+// runs against Azure AD, GitHub and GitLab — its callbacks are the ones
+// registered with them. A combined instance opens its own student sessions from
+// them; both it and an admin-only instance also run them on behalf of the in-lab
+// student portals (see internal/server/broker.go).
+func registerProviderSignInRoutes(mux *http.ServeMux, authHandler *server.AuthHandler) {
+	mux.HandleFunc("/student/auth/azure/login", authHandler.HandleAzureADLogin)
+	mux.HandleFunc("/student/auth/azure/callback", authHandler.HandleAzureADCallback)
+	mux.HandleFunc("/student/auth/github/login", authHandler.HandleGitHubLogin)
+	mux.HandleFunc("/student/auth/github/callback", authHandler.HandleGitHubCallback)
+	mux.HandleFunc("/student/auth/gitlab/login", authHandler.HandleGitLabLogin)
+	mux.HandleFunc("/student/auth/gitlab/callback", authHandler.HandleGitLabCallback)
+}
+
+// registerPortalSignInRoutes registers the same login paths on an in-lab student
+// portal, where they hand the sign-in to the central instance and take its
+// answer back on the broker callback.
+func registerPortalSignInRoutes(mux *http.ServeMux, authHandler *server.AuthHandler) {
+	mux.HandleFunc("/student/auth/azure/login", authHandler.HandlePortalProviderLogin("azure"))
+	mux.HandleFunc("/student/auth/github/login", authHandler.HandlePortalProviderLogin("github"))
+	mux.HandleFunc("/student/auth/gitlab/login", authHandler.HandlePortalProviderLogin("gitlab"))
+	mux.HandleFunc("/student/auth/broker/callback", authHandler.HandlePortalBrokerCallback)
+}
+
+// registerAdminRoutes registers the admin area: its login, then everything behind it.
+func registerAdminRoutes(mux *http.ServeMux, handler *server.Handler, authHandler *server.AuthHandler) {
+	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			authHandler.HandleLogin(w, r)
+		} else {
+			authHandler.ServeLogin(w, r)
+		}
+	})
+	mux.HandleFunc("/logout", authHandler.HandleLogout)
+
+	// Admin Azure AD login routes (public — redirect to /admin on success)
+	mux.HandleFunc("/admin/auth/azure/login", authHandler.HandleAdminAzureADLogin)
+	mux.HandleFunc("/admin/auth/azure/callback", authHandler.HandleAdminAzureADCallback)
+
+	// Protected routes (auth required)
+	mux.HandleFunc("/admin", authHandler.RequireAuth(handler.ServeAdminUI))
+	mux.HandleFunc("/admin/feedback", authHandler.RequireAuth(handler.ServeAdminLabFeedback))
+	mux.HandleFunc("/admin/feedback/export", authHandler.RequireAuth(handler.ExportLabFeedbackCSV))
+	mux.HandleFunc("/admin/audit-log", authHandler.RequireAuth(handler.ServeAuditLog))
+	mux.HandleFunc("/admin/stats", authHandler.RequireAuth(handler.ServeAdminStats))
+	mux.HandleFunc("/api/admin/stats", authHandler.RequireAuth(handler.GetProjectStats))
+	mux.HandleFunc("/labs", authHandler.RequireAuth(handler.ServeLabsList))
+	// Backward compatibility route
+	mux.HandleFunc("/jobs", authHandler.RequireAuth(handler.ServeLabsList))
+
+	// New generic credentials routes
+	mux.HandleFunc("/credentials", authHandler.RequireAuth(handler.ServeCredentials))
+	mux.HandleFunc("/api/credentials", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			handler.SetCredentials(w, r)
+		} else if r.Method == http.MethodGet {
+			handler.GetCredentials(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	}))
+	mux.HandleFunc("/api/providers", authHandler.RequireAuth(handler.ListProviders))
+
+	// Backward compatibility routes for OVH-specific endpoints
+	mux.HandleFunc("/ovh-credentials", authHandler.RequireAuth(handler.ServeOVHCredentials))
+	mux.HandleFunc("/api/ovh-credentials", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			handler.SetOVHCredentials(w, r)
+		} else if r.Method == http.MethodGet {
+			handler.GetOVHCredentials(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	}))
+	mux.HandleFunc("/api/ovh/regions", authHandler.RequireAuth(handler.GetOVHRegions))
+	mux.HandleFunc("/api/ovh/flavors", authHandler.RequireAuth(handler.GetOVHFlavors))
+	mux.HandleFunc("/admin/ovh-options", authHandler.RequireAuth(handler.ServeOVHOptions))
+	mux.HandleFunc("/api/ovh-options", authHandler.RequireAuth(handler.SaveOVHOptions))
+	mux.HandleFunc("/api/ovh-options/refresh", authHandler.RequireAuth(handler.RefreshOVHOptions))
+
+	// Azure-specific routes
+	mux.HandleFunc("/azure-credentials", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/credentials?provider=azure", http.StatusMovedPermanently)
+	}))
+	mux.HandleFunc("/admin/azure-options", authHandler.RequireAuth(handler.ServeAzureOptions))
+	mux.HandleFunc("/admin/azure-provider", authHandler.RequireAuth(handler.ServeAzureProvider))
+	mux.HandleFunc("/admin/azure-ad", authHandler.RequireAuth(handler.ServeAzureAD))
+	mux.HandleFunc("/api/azure/locations", authHandler.RequireAuth(handler.GetAzureLocations))
+	mux.HandleFunc("/api/azure/vm-sizes", authHandler.RequireAuth(handler.GetAzureVMSizes))
+	mux.HandleFunc("/api/azure-options/region-vm-sizes", authHandler.RequireAuth(handler.GetAzureOptionsRegionVMSizeHTML))
+	mux.HandleFunc("/api/azure-options", authHandler.RequireAuth(handler.SaveAzureOptions))
+	mux.HandleFunc("/api/azure-options/refresh", authHandler.RequireAuth(handler.RefreshAzureOptions))
+	mux.HandleFunc("/api/azure-ad-config", authHandler.RequireAuth(handler.SaveAzureADConfig))
+	mux.HandleFunc("/admin/github", authHandler.RequireAuth(handler.ServeGitHubAuth))
+	mux.HandleFunc("/api/github-auth-config", authHandler.RequireAuth(handler.SaveGitHubAuthConfig))
+	mux.HandleFunc("/admin/gitlab", authHandler.RequireAuth(handler.ServeGitLabAuth))
+	mux.HandleFunc("/api/gitlab-auth-config", authHandler.RequireAuth(handler.SaveGitLabAuthConfig))
+	mux.HandleFunc("/admin/student-portals", authHandler.RequireAuth(handler.ServePortalSettings))
+	mux.HandleFunc("/api/portal-settings", authHandler.RequireAuth(handler.SavePortalSettings))
+	mux.HandleFunc("/api/student-portal-password", authHandler.RequireAuth(handler.GetStudentPortalPassword))
+	mux.HandleFunc("/api/templates/detect-variables", authHandler.RequireAuth(handler.DetectTemplateVariables))
+	mux.HandleFunc("/api/templates/detect-devcontainer", authHandler.RequireAuth(handler.DetectDevcontainer))
+	mux.HandleFunc("/api/labs", authHandler.RequireAuth(handler.CreateLab))
+	mux.HandleFunc("/api/labs/templates/yaml", authHandler.RequireAuth(handler.ServeWorkspaceTemplatesYAML))
+	mux.HandleFunc("/api/labs/templates/yaml/validate", authHandler.RequireAuth(handler.ValidateWorkspaceTemplatesYAML))
+	mux.HandleFunc("/api/labs/dry-run", authHandler.RequireAuth(handler.DryRunLab))
+	mux.HandleFunc("/api/labs/launch", authHandler.RequireAuth(handler.LaunchLab))
+	mux.HandleFunc("/api/labs/recreate", authHandler.RequireAuth(handler.RecreateLab))
+	mux.HandleFunc("/api/stacks/destroy", authHandler.RequireAuth(handler.DestroyStack))
+	routeLabRequest := labRequestRouter(handler)
+	mux.HandleFunc("/api/labs/", authHandler.RequireAuth(routeLabRequest))
+	// Backward compatibility route
+	mux.HandleFunc("/api/jobs/", authHandler.RequireAuth(routeLabRequest))
+	// Per-lab pages: the old dedicated workspaces page now redirects into the
+	// consolidated lab detail page (see ServeLabWorkspaces/ServeLabDetail).
+	mux.HandleFunc("/labs/", authHandler.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/workspaces") {
+			handler.ServeLabWorkspaces(w, r)
+			return
+		}
+		handler.ServeLabDetail(w, r)
+	}))
+}
+
+// newHTTPServer configures the HTTP server with the timeouts every mode uses.
+func newHTTPServer(addr string, mux *http.ServeMux) *http.Server {
+	return &http.Server{
+		Addr:         addr,
+		Handler:      noStoreByDefault(mux),
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 5 * time.Minute, // long enough for log-streaming and kubeconfig responses
+		IdleTimeout:  60 * time.Second,
+	}
+}
+
+// runStudentPortal runs the server as the student portal of a single lab, from
+// inside that lab's cluster (--mode student). Which lab, and in which namespace,
+// comes from the environment the admin set on the portal's Deployment; everything
+// else it knows about the lab is read from the cluster (see server.PortalRuntime).
+func runStudentPortal(port string) error {
+	labID := strings.TrimSpace(os.Getenv(kube.EnvPortalLabID))
+	if labID == "" {
+		return fmt.Errorf("%s is not set", kube.EnvPortalLabID)
+	}
+	namespace := strings.TrimSpace(os.Getenv(kube.EnvPortalNamespace))
+
+	backend, err := kube.NewInCluster(namespace)
+	if err != nil {
+		return fmt.Errorf("failed to reach the lab cluster: %w", err)
+	}
+
+	jobManager := server.NewJobManager("") // a mirror of the admin's lab, never persisted here
+	authHandler := server.NewStudentAuthHandler()
+	handler := server.NewHandler(jobManager, nil, nil, nil, nil, nil)
+	handler.SetMode(server.ModeStudent)
+
+	runtime, err := server.NewPortalRuntime(labID, backend, jobManager, authHandler)
+	if err != nil {
+		return fmt.Errorf("failed to start portal runtime: %w", err)
+	}
+	handler.UsePortalRuntime(runtime)
+
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
+	runtimeDone := make(chan struct{})
+	go func() {
+		defer close(runtimeDone)
+		runtime.Run(appCtx)
+	}()
+
+	addr := fmt.Sprintf(":%s", port)
+	srv := newHTTPServer(addr, buildMux(server.ModeStudent, handler, authHandler))
+	go func() {
+		log.Printf("Starting student portal for lab %s on http://localhost%s", labID, addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down student portal...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	shutdownErr := srv.Shutdown(ctx)
+
+	// Stop the runtime only once no request can report anything more: its last
+	// act is to write out what is still queued for the admin.
+	appCancel()
+	<-runtimeDone
+
+	if shutdownErr != nil {
+		return fmt.Errorf("server forced to shutdown: %w", shutdownErr)
+	}
+	log.Println("Student portal exited")
+	return nil
+}
+
 // labRoute names one of the endpoints under /api/labs/{id}/... (and the
 // backward-compatible /api/jobs/{id}/... prefix).
 //
@@ -576,6 +732,7 @@ const (
 	routeUpdateLabLifecycle
 	routeRetryJobWithConfig
 	routeOpenWorkspace
+	routeSetLabPortal
 )
 
 // resolveLabRoute picks the endpoint for a request. The case order is the
@@ -638,6 +795,12 @@ func resolveLabRoute(path, method, format string) labRoute {
 		return routeKubeconfig
 	case strings.HasSuffix(path, "/lifecycle") && method == http.MethodPost:
 		return routeUpdateLabLifecycle
+	// Anchored on the segment count as well as the suffix: every workspace and
+	// template route sits above and so never gets here, but a path this check
+	// could be confused by must not start meaning "deploy a portal" the day one of
+	// those cases moves.
+	case strings.HasSuffix(path, "/portal") && strings.Count(strings.Trim(path, "/"), "/") == 3 && method == http.MethodPost:
+		return routeSetLabPortal
 	case format == "json":
 		return routeJobStatusJSON
 	default:
@@ -690,6 +853,8 @@ func labRequestRouter(h *server.Handler) http.HandlerFunc {
 			h.GetJobStatusJSON(w, r)
 		case routeUpdateLabLifecycle:
 			h.UpdateLabLifecycle(w, r)
+		case routeSetLabPortal:
+			h.SetLabPortal(w, r)
 		default:
 			h.GetJobStatus(w, r)
 		}

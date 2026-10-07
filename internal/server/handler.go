@@ -96,6 +96,48 @@ type Handler struct {
 	// Same pair for GitLab student login. Both nil unless SetGitLabAuth is called.
 	gitlabAuthStore      *GitLabAuthStore
 	gitlabAuthConfigurer func(cfg GitLabAuthConfig)
+	// mode is which areas this process serves (see Mode). The zero value behaves
+	// as ModeAll, so a Handler built without SetMode — every test — is unchanged.
+	mode Mode
+	// portal is set only on an in-lab student portal (ModeStudent): what the
+	// student handlers record is then reported to the admin through it instead of
+	// being stored locally. See portal_runtime.go.
+	portal *PortalRuntime
+	// publicURL is this instance's own address as students reach it, and
+	// studentAuthSnapshot reads its live student sign-in settings. Together they
+	// are what an in-lab portal is told about signing in (see portal.go). Both
+	// optional: without them a portal offers password login only, or none.
+	publicURL           string
+	studentAuthSnapshot func() StudentAuthSnapshot
+	// portalSettings holds the public URL and portal image an admin saved from
+	// the Student portals page; they take precedence over the environment (see
+	// portal_settings.go). Nil unless SetPortalSettingsStore is called.
+	portalSettings *PortalSettingsStore
+	// portalErrors holds the last deployment failure of each lab's portal, keyed
+	// by lab ID, for the lab detail page. Not persisted: the next reconcile
+	// either clears or reproduces it.
+	portalErrors   map[string]string
+	portalErrorsMu sync.RWMutex
+	// portalURLs caches each lab's portal URL as its last deployment reported it,
+	// so brokering a sign-in does not cost a cluster call. Guarded by portalErrorsMu.
+	portalURLs map[string]string
+	// portalLocks holds one *sync.Mutex per lab ID, serializing that lab's portal
+	// deployments and state syncs: two racing writers could otherwise leave the
+	// older state in the cluster.
+	portalLocks sync.Map
+}
+
+// SetMode sets which areas this process serves.
+func (h *Handler) SetMode(mode Mode) {
+	h.mode = mode
+}
+
+// SetPortalAuth wires what in-lab student portals need to sign students in:
+// this instance's public URL, for the brokered providers, and a reader of its
+// current student sign-in settings.
+func (h *Handler) SetPortalAuth(publicURL string, snapshot func() StudentAuthSnapshot) {
+	h.publicURL = strings.TrimRight(strings.TrimSpace(publicURL), "/")
+	h.studentAuthSnapshot = snapshot
 }
 
 // SetAzureADConfigurer wires a callback so the handler can update Azure AD OAuth config at runtime.
@@ -130,7 +172,7 @@ func (h *Handler) SetAuditStore(store *AuditStore) {
 // request (see the SaveJob comment in UploadTemplateToLab) — an audit-log
 // write must never add latency to, or fail, the action it's recording.
 func (h *Handler) recordAudit(actor, role, action, labID, detail string) {
-	if h.auditStore == nil {
+	if h.auditStore == nil && h.portal == nil {
 		return
 	}
 	entry := AuditEntry{
@@ -140,6 +182,11 @@ func (h *Handler) recordAudit(actor, role, action, labID, detail string) {
 		Action: action,
 		LabID:  labID,
 		Detail: detail,
+	}
+	// An in-lab portal has no audit log of its own: the entry goes to the admin's.
+	if h.portal != nil {
+		h.portal.reportAudit(entry)
+		return
 	}
 	go func() {
 		if err := h.auditStore.Record(entry); err != nil {
@@ -283,6 +330,8 @@ func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsM
 		azureOptionsManager: azureOptionsManager,
 		feedbackStore:       feedbackStore,
 		pendingSecrets:      newPendingSecretStore(),
+		portalErrors:        make(map[string]string),
+		portalURLs:          make(map[string]string),
 	}
 	// Credentials captured in the wizard are written once the lab's cluster is up.
 	// The executor owns that moment; the handler owns the cluster connection — so
@@ -293,6 +342,8 @@ func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsM
 			// After the secrets, which the pre-pull may need to pull with. Async so a
 			// slow cluster does not hold back the lab being reported ready.
 			go h.reconcilePrepull(jobID)
+			// Likewise for the lab's own student portal, when it asked for one.
+			go h.reconcilePortal(jobID)
 		}
 	}
 	return h
@@ -709,6 +760,7 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 		DNSProvider:          r.FormValue("dns_provider"),
 		DNSZone:              r.FormValue("dns_zone"),
 		UseExternalDNS:       r.FormValue("use_external_dns") == "true",
+		StudentPortal:        r.FormValue("student_portal") == "true",
 		DNSAlreadyConfigured: r.FormValue("dns_already_configured") == "true",
 	}
 
@@ -993,6 +1045,7 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 		"azure-ad.html":           "web/azure-ad.html",
 		"github-auth.html":        "web/github-auth.html",
 		"gitlab-auth.html":        "web/gitlab-auth.html",
+		"portal-settings.html":    "web/portal-settings.html",
 		"labs-list.html":          "web/labs-list.html",
 		"lab-detail.html":         "web/lab-detail.html",
 		"admin-stats.html":        "web/admin-stats.html",
@@ -1030,7 +1083,16 @@ func (h *Handler) ServeUI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.serveTemplate(w, "index.html", nil)
+	// An in-lab portal has a single audience: skip the "who are you" page.
+	if h.mode == ModeStudent {
+		http.Redirect(w, r, "/student/dashboard", http.StatusSeeOther)
+		return
+	}
+
+	h.serveTemplate(w, "index.html", map[string]interface{}{
+		// False only on an admin-only instance, where students have no space here.
+		"ShowStudentSpace": h.mode != ModeAdmin,
+	})
 }
 
 // ServeAdminUI serves the admin HTML UI
@@ -1040,6 +1102,9 @@ func (h *Handler) ServeAdminUI(w http.ResponseWriter, r *http.Request) {
 
 	data := map[string]interface{}{
 		"HasCredentials": hasCredentials,
+		// A new lab gets its own student portal unless this build has no image
+		// to run one from (see portalImage).
+		"PortalAvailable": h.effectivePortalImage() != "",
 	}
 	if h.ovhOptionsManager != nil {
 		cfg := h.ovhOptionsManager.GetConfig()
@@ -1227,6 +1292,9 @@ func (h *Handler) updateJobConfig(jobID string, updater func(*LabConfig)) {
 			updater(job.Config)
 		}
 		job.mu.Unlock()
+		// A lab with its own student portal serves students from a copy of this
+		// config: every change has to reach it. A no-op for every other lab.
+		go h.reconcilePortal(jobID)
 	}
 }
 
@@ -1645,8 +1713,8 @@ func (h *Handler) ServeStudentDashboard(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// ServeStudentWorkspaces serves the "My Workspaces" page, which lists the workspaces
-// a student has saved locally. The list itself is rendered client-side from cookies;
+// ServeStudentWorkspaces serves the "My Workspaces" page, which lists the student's
+// workspaces. The list itself is fetched client-side from ListStudentWorkspaces;
 // the page only needs the student's identity for the header.
 func (h *Handler) ServeStudentWorkspaces(w http.ResponseWriter, r *http.Request) {
 	email := studentEmailFromContext(r)
@@ -2187,9 +2255,6 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	domain := ""
 	dnsProvider := ""
 	clusterIssuerName := ""
-	lifetimeHours := 0
-	labName := ""
-	var labDeletionDate *time.Time
 	var templates []WorkspaceTemplate
 	var bakedImages map[string]BakedImage
 	labDisabled := false
@@ -2198,9 +2263,6 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		domain = job.Config.Domain
 		dnsProvider = job.Config.DNSProvider
 		clusterIssuerName = job.Config.ClusterIssuerName
-		lifetimeHours = job.Config.WorkspaceLifetimeHours
-		labDeletionDate = job.Config.LabDeletionDate
-		labName = job.Config.StackName
 		templates = job.Config.GetWorkspaceTemplates()
 		bakedImages = job.Config.BakedImages
 		labDisabled = job.Config.Disabled
@@ -2404,59 +2466,12 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	workspaceURL := ws.URL
 	workspaceName := ws.Name
-
-	// Compute a single creation timestamp and the workspace's scheduled auto-deletion
-	// time (nil when neither a per-workspace lifetime nor a lab deletion date applies),
-	// so the student portal can show the student when the workspace will disappear.
-	createdAt := time.Now()
-	deletionAtStr := ""
-	if deletionAt := workspaceDeletionTime(createdAt, lifetimeHours, labDeletionDate); deletionAt != nil {
-		deletionAtStr = deletionAt.Format(time.RFC3339)
+	// For a workspace that already existed, the freshly generated password above
+	// was never applied: the running pod keeps the token it was created with, and
+	// that is the one the backend reports.
+	if ws.Token != "" {
+		password = ws.Token
 	}
-
-	// Create workspace info structure for the client-side encrypted cookie.
-	workspaceInfo := map[string]interface{}{
-		"email":              email,
-		"workspace_url":      workspaceURL,
-		"password":           password, // code-server login password; encrypted client-side
-		"encrypted_password": "",
-		"workspace_name":     workspaceName,
-		"lab_id":             labID,
-		"lab_name":           labName,
-		"template":           selected.Name,
-		"created_at":         createdAt.Format(time.RFC3339),
-		"deletion_at":        deletionAtStr,
-	}
-	if workspaceInfoJSON, jsonErr := json.Marshal(workspaceInfo); jsonErr == nil {
-		isSecure := strings.HasPrefix(workspaceURL, "https://") || r.TLS != nil
-		cookieName := fmt.Sprintf("workspace_info_%s_%s", labID, workspaceName)
-		http.SetCookie(w, &http.Cookie{
-			Name:     cookieName,
-			Value:    url.QueryEscape(string(workspaceInfoJSON)),
-			Path:     "/",
-			MaxAge:   86400,
-			HttpOnly: false,
-			Secure:   isSecure,
-			SameSite: http.SameSiteLaxMode,
-		})
-		log.Printf("Set %s cookie for email: %s", cookieName, email)
-	} else {
-		log.Printf("Failed to marshal workspace info: %v", jsonErr)
-	}
-
-	workspaceInfoForClient := map[string]interface{}{
-		"email":          email,
-		"workspace_url":  workspaceURL,
-		"password":       password,
-		"workspace_name": workspaceName,
-		"lab_id":         labID,
-		"lab_name":       labName,
-		"template":       selected.Name,
-		"created_at":     createdAt.Format(time.RFC3339),
-		"deletion_at":    deletionAtStr,
-	}
-	workspaceInfoJSONForClient, _ := json.Marshal(workspaceInfoForClient)
-	workspaceInfoJSONEscaped := template.HTMLEscapeString(string(workspaceInfoJSONForClient))
 
 	title := "✅ Workspace Created Successfully!"
 	if ws.Ready {
@@ -2478,10 +2493,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	response.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Email:</label><div class="value">%s</div></div>`, template.HTMLEscapeString(email)))
 	response.WriteString(fmt.Sprintf(`<div class="credential-item"><label>Connection token:</label><div class="value">%s</div></div>`, template.HTMLEscapeString(password)))
-	response.WriteString(`<p><strong>Important:</strong> Please save these credentials. You will need the token to open your workspace.</p>`)
-	response.WriteString(`<p><small>Your workspace information can be encrypted and saved locally. Click "Encrypt & Save" below to store it securely.</small></p>`)
-	response.WriteString(fmt.Sprintf(`<div data-workspace-info='%s' style="display:none;"></div>`, workspaceInfoJSONEscaped))
-	response.WriteString(`<button onclick="encryptAndSaveWorkspaceInfo(this)" class="btn credentials-save-btn">Encrypt & Save Workspace Info</button>`)
+	response.WriteString(`<p><strong>Important:</strong> Keep this token if you plan to open the workspace URL directly. Otherwise, open your workspace from the My Workspaces page: it signs you in for you, on any device you log in on.</p>`)
 	response.WriteString(`</details>`)
 	response.WriteString(`<a href="/student/workspaces" class="btn workspace-view-all-link">View my workspaces →</a>`)
 	response.WriteString(`</div>`)
@@ -2786,6 +2798,8 @@ func (h *Handler) OpenWorkspaceAsAdmin(w http.ResponseWriter, r *http.Request) {
 				log.Printf("Failed to persist admin access to workspace %s: %v", workspaceID, serr)
 			}
 		}()
+		// The owner is told about it in their portal, which may be the lab's own.
+		go h.syncPortalState(labID)
 	}
 	wsName := ws.Name
 	if wsName == "" {
@@ -3575,6 +3589,8 @@ func (h *Handler) SaveAzureADConfig(w http.ResponseWriter, r *http.Request) {
 	if h.classicAdminLoginConfigurer != nil {
 		h.classicAdminLoginConfigurer(disableClassicAdmin)
 	}
+	// In-lab student portals mirror these settings.
+	go h.syncAllPortals()
 
 	if r.Header.Get("HX-Request") == "true" {
 		w.Header().Set("HX-Redirect", "/admin/azure-ad")
@@ -4148,6 +4164,11 @@ func (h *Handler) ServeLabDetail(w http.ResponseWriter, r *http.Request) {
 
 	lab := buildLabSummary(job)
 
+	// What happened in the lab's own student portal (workspaces created there,
+	// feedback, activity) is collected before any of it is read below.
+	h.drainPortalOutboxForPage(r, labID)
+	portal := h.portalDisplayFor(r.Context(), job)
+
 	job.mu.RLock()
 	cleanupEvents := append([]CleanupEvent(nil), job.CleanupEvents...)
 	createdAtRaw := job.CreatedAt
@@ -4220,6 +4241,7 @@ func (h *Handler) ServeLabDetail(w http.ResponseWriter, r *http.Request) {
 
 	data := map[string]interface{}{
 		"Lab":                lab,
+		"Portal":             portal,
 		"Workspaces":         workspacesVM,
 		"WorkspacesFailed":   err != nil,
 		"Feedback":           feedback,
@@ -4575,6 +4597,8 @@ func (h *Handler) DestroyStack(w http.ResponseWriter, r *http.Request) {
 		// Best-effort: on a BYO cluster, which outlives the lab, nothing else would
 		// remove the lab's image pre-pull.
 		h.removePrepull(jobID)
+		// Same for the lab's student portal, after collecting what it still holds.
+		h.removePortal(jobID)
 		if err := h.pulumiExec.Destroy(jobID); err != nil {
 			log.Printf("Stack destruction failed for job %s: %v", jobID, err)
 			h.jobManager.SetError(jobID, fmt.Errorf("destroy failed: %w", err))

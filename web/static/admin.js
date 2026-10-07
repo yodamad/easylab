@@ -1008,6 +1008,9 @@ function updateDNSManualWarning() {
 
     const domain = domainInput.value.trim();
     record.textContent = domain !== '' ? '*.' + domain : '*.your-domain';
+    // The student portal's record: the domain itself, which the wildcard does not match.
+    const baseRecord = document.getElementById('dns-warning-base-record');
+    if (baseRecord) baseRecord.textContent = domain !== '' ? domain : 'your-domain';
 }
 
 // Fetch Azure VM sizes for the selected location
@@ -2071,6 +2074,9 @@ async function applyPrefill(config, templatesYaml, jobId, action) {
 
     // Step 5: Workspace
     setFieldValue('workspace_namespace', config.workspace_namespace);
+    const studentPortal = document.getElementById('student_portal');
+    // A retried or recreated lab keeps what it had, rather than the new-lab default.
+    if (studentPortal && !studentPortal.disabled) studentPortal.checked = !!config.student_portal;
 
     // Step 6: Templates. The structured config already has everything the
     // form-mode builder would otherwise need reconstructed field by field

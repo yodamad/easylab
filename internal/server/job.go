@@ -94,7 +94,11 @@ type Job struct {
 	// by workspace ID. Kept apart from WorkspaceEvents, whose consumers (history,
 	// stats) only know creations and deletions.
 	WorkspaceAccesses map[string]WorkspaceAccess `json:"workspace_accesses,omitempty"`
-	mu                sync.RWMutex               `json:"-"`
+	// PortalBrokerSecret signs the sign-in assertions this instance hands the lab's
+	// in-lab student portal (see broker.go). Generated the first time the portal is
+	// deployed; encrypted at rest and never exposed, like Kubeconfig.
+	PortalBrokerSecret string       `json:"portal_broker_secret,omitempty"`
+	mu                 sync.RWMutex `json:"-"`
 	// saveMu serializes SaveJob's disk writes for this job. Without it, many
 	// students creating workspaces in the same lab at once can call SaveJob
 	// concurrently, all racing on the same tmp/final file path — whichever write
@@ -361,6 +365,10 @@ type LabConfig struct {
 	// it and are encoded outside the job lock.
 	DisabledTemplates map[string]bool `json:"disabled_templates,omitempty"`
 
+	// StudentPortal deploys a student portal dedicated to this lab inside the lab's
+	// own cluster (see portal.go), next to the workspaces it hands out.
+	StudentPortal bool `json:"student_portal,omitempty"`
+
 	// OVH Endpoint
 	OvhEndpoint string `json:"ovh_endpoint"`
 
@@ -449,6 +457,11 @@ type JobManager struct {
 	dataDir string
 	mu      sync.RWMutex
 	archive *StatsArchive
+	// workspaceEventSink, when set, receives workspace events instead of the job's
+	// own history. An in-lab student portal sets it: its jobs are a read-only
+	// mirror of the admin's, so what happens there is reported back rather than
+	// kept (see portal_runtime.go).
+	workspaceEventSink func(labID string, event WorkspaceEvent)
 }
 
 // NewJobManager creates a new job manager with optional data directory for persistence
@@ -630,15 +643,20 @@ func (jm *JobManager) RecordWorkspaceEvent(id, action, workspaceID, workspaceNam
 	if !exists {
 		return fmt.Errorf("job %s not found", id)
 	}
-	job.mu.Lock()
-	job.WorkspaceEvents = append(job.WorkspaceEvents, WorkspaceEvent{
+	event := WorkspaceEvent{
 		At:            time.Now(),
 		Action:        action,
 		WorkspaceID:   workspaceID,
 		WorkspaceName: workspaceName,
 		Owner:         owner,
 		Template:      template,
-	})
+	}
+	job.mu.Lock()
+	if jm.workspaceEventSink != nil {
+		jm.workspaceEventSink(id, event)
+	} else {
+		job.WorkspaceEvents = append(job.WorkspaceEvents, event)
+	}
 	// Workspace names are deterministic, so a workspace recreated after this
 	// deletion would otherwise inherit the previous one's access record.
 	if action == WorkspaceEventDeleted {
@@ -647,6 +665,32 @@ func (jm *JobManager) RecordWorkspaceEvent(id, action, workspaceID, workspaceNam
 	job.UpdatedAt = time.Now()
 	job.mu.Unlock()
 	return nil
+}
+
+// ImportWorkspaceEvent adds an event that happened elsewhere — in the lab's own
+// student portal — to the job's history, keeping the time it happened at. It
+// reports false, without adding anything, for an event already in the history:
+// the portal's outbox is delivered at least once.
+func (jm *JobManager) ImportWorkspaceEvent(id string, event WorkspaceEvent) (bool, error) {
+	jm.mu.RLock()
+	job, exists := jm.jobs[id]
+	jm.mu.RUnlock()
+	if !exists {
+		return false, fmt.Errorf("job %s not found", id)
+	}
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	for _, e := range job.WorkspaceEvents {
+		if e.At.Equal(event.At) && e.Action == event.Action && e.WorkspaceID == event.WorkspaceID {
+			return false, nil
+		}
+	}
+	job.WorkspaceEvents = append(job.WorkspaceEvents, event)
+	if event.Action == WorkspaceEventDeleted {
+		delete(job.WorkspaceAccesses, event.WorkspaceID)
+	}
+	job.UpdatedAt = time.Now()
+	return true, nil
 }
 
 // RecordWorkspaceAccess stores the time an admin opened a workspace, replacing
@@ -754,6 +798,12 @@ func (j *Job) sanitizedCopy(encryptSecrets bool) (*Job, error) {
 		return nil, err
 	}
 	cp.Kubeconfig = kc
+
+	bs, err := atRest(j.PortalBrokerSecret)
+	if err != nil {
+		return nil, err
+	}
+	cp.PortalBrokerSecret = bs
 
 	if j.Config != nil {
 		cfg := *j.Config
@@ -919,6 +969,12 @@ func (jm *JobManager) LoadJobs() error {
 			continue
 		} else {
 			job.Kubeconfig = kc
+		}
+		if bs, decErr := decryptSecret(job.PortalBrokerSecret); decErr != nil {
+			log.Printf("Warning: failed to decrypt portal broker secret in job file %s: %v", jobFile, decErr)
+			continue
+		} else {
+			job.PortalBrokerSecret = bs
 		}
 		if job.Config != nil {
 			if ek, decErr := decryptSecret(job.Config.ExternalKubeconfig); decErr != nil {

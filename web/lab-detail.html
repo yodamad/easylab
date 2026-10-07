@@ -108,6 +108,41 @@
                     </div>
                 </div>
 
+                {{if .Portal.Supported}}
+                <div class="lab-access-strip{{if not .Portal.Enabled}} is-off{{end}}" id="student-portal">
+                    <div class="lab-access-text">
+                        {{if .Portal.Enabled}}
+                        <span class="lab-access-state">Student portal &middot; {{if .Portal.Ready}}running{{else if .Portal.Deployed}}starting{{else}}not deployed{{end}}</span>
+                        {{if .Portal.URL}}
+                        <span class="lab-access-hint"><a href="{{.Portal.URL}}/student/login" target="_blank" rel="noopener">{{.Portal.URL}}</a> &mdash; the address to give this lab's students. It runs inside the lab's cluster.</span>
+                        {{else if .Portal.Deployed}}
+                        <span class="lab-access-hint">The portal has no public address: the lab has no domain and its ingress controller has no external IP.</span>
+                        {{end}}
+                        {{if not .Portal.BrokeredLogin}}
+                        <span class="lab-access-hint">Password sign-in only. Set this instance's public address in <a href="/admin/student-portals">Student portals</a> to offer Microsoft, GitHub and GitLab sign-in there too.</span>
+                        {{end}}
+                        {{else}}
+                        <span class="lab-access-state">No dedicated student portal</span>
+                        <span class="lab-access-hint">{{if .Portal.CentralPortal}}Students of this lab sign in on this instance.{{else}}Students have nowhere to sign in for this lab yet.{{end}} Deploy a portal inside the lab's cluster to give them an address of their own.</span>
+                        {{end}}
+                    </div>
+                    {{if .Portal.Enabled}}
+                    <div class="lab-access-actions">
+                        <button type="button" class="btn btn-secondary btn-sm" data-url="/api/labs/{{.Lab.ID}}/portal" data-enabled="true" data-busy="Redeploying…" data-done="Redeployed the student portal" onclick="setLabPortal(this)">Redeploy</button>
+                        <button type="button" class="btn btn-secondary btn-sm" data-url="/api/labs/{{.Lab.ID}}/portal" data-enabled="false" data-busy="Removing…" data-done="Removed the student portal" onclick="setLabPortal(this)">Remove portal</button>
+                    </div>
+                    {{else}}
+                    <button type="button" class="btn btn-primary btn-sm" data-url="/api/labs/{{.Lab.ID}}/portal" data-enabled="true" data-busy="Deploying…" data-done="Deployed the student portal" onclick="setLabPortal(this)">Deploy student portal</button>
+                    {{end}}
+                </div>
+                {{if .Portal.Error}}
+                <div class="error-message">
+                    <h3>Student Portal Not Deployed</h3>
+                    <p>{{.Portal.Error}}</p>
+                </div>
+                {{end}}
+                {{end}}
+
                 {{if .Lab.HasError}}
                 <div class="error-message">
                     <h3>Last Error</h3>

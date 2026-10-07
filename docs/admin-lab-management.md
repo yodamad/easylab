@@ -59,6 +59,7 @@ lab, organized into tabs at the top:
   workspace templates at a glance; the **Download Kubeconfig** and **Export Templates
   YAML** actions; and, once the lab is completed, an inline **Lab Endpoint Info** panel
   with the workspace base URL and namespace (this replaces the old read-only modal).
+  Once the lab is completed it also shows the lab's [student portal](#student-portal).
   A small **lifecycle strip** under the page header plots the lab's timeline — created,
   deployed, each automatic cleanup sweep, and its scheduled or actual destruction — using
   the same data as the Lifecycle & Cleanup section below.
@@ -87,6 +88,33 @@ lab, organized into tabs at the top:
 
 The old `/labs/{id}/workspaces` URL still works — it redirects into this page's
 Workspaces & Templates section.
+
+### Student portal
+
+A completed lab's **Overview** tab has a **Student portal** strip. It manages the
+[in-lab student portal](student-portal.md): a student space dedicated to this lab,
+running in the lab's own cluster.
+
+![Student portal on the lab detail page](screens/lab-student-portal.png){width=850}
+
+* **No dedicated student portal** — the lab's students use the central student space.
+  Click **Deploy student portal** to give the lab its own. The button waits for the
+  deployment and reports its outcome.
+* **Student portal · running** (or **starting**) — the strip shows the portal's address,
+  which is the one to give this lab's students. **Redeploy** runs the deployment again
+  (for instance after fixing what made it fail); **Remove portal** deletes it from the
+  cluster and sends the lab's students back to the central student space. Whatever the
+  portal still had to report — workspaces created, feedback — is collected first.
+
+If the deployment failed, the reason is shown under the strip (**Student Portal Not
+Deployed**), and EasyLab retries on its own every few minutes. The strip also tells you
+when the portal can only offer password sign-in because this instance's public address
+is not set, with a link to the [Student portals](student-portal.md#the-student-portals-page)
+page where you set it.
+
+You never have to push changes to the portal: closing a template, adding one, editing the
+lifecycle and so on reach it within seconds, and what students do there shows up in this
+page's Workspaces, Feedback and Activity tabs.
 
 ### Retry or recreate a lab
 

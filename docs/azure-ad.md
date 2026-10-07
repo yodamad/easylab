@@ -20,6 +20,9 @@ When enabled, a **Sign in with Microsoft** button appears on the student login p
 
 ![Student Microsoft login](screens/student-login-microsoft.png){ width=300 }
 
+!!! note "Labs with their own student portal"
+    A lab's [in-lab student portal](student-portal.md) shows the same **Sign in with Microsoft** button, on its own address. The sign-in still runs through this (central) instance, which then hands the student back to the lab's portal — so the redirect URIs below are the only ones to register, whatever the number of labs. It requires this instance's public address to be set on the [Student portals](student-portal.md#the-student-portals-page) page.
+
 ---
 
 ## Admin authentication

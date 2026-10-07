@@ -105,6 +105,14 @@ configure. On the **Workspace** step you only set:
 
 * **Workspace Namespace** (optional) — the Kubernetes namespace student
   workspaces are created in. Defaults to `workshops`.
+* **Deploy a dedicated student portal in this lab** — checked by default. Runs
+  the student portal inside the lab's own cluster, on the lab's domain itself,
+  instead of sending this lab's students to the central instance. They can then
+  keep working while the admin instance is unreachable. Uncheck it to keep this
+  lab on the central student space; either way it can be changed later from the
+  lab's page. See [In-lab student portal](student-portal.md).
+
+![Workspace step with the student portal option](screens/student-portal-option.png){width=700}
 
 Then, on the **Templates** step, you define **one or more** workspace templates
 for the lab. Each template is a different workspace flavor that students can
@@ -374,6 +382,10 @@ Picking either custom-domain option reveals:
     stay pending forever, because cert-manager's HTTP-01 self-check fails on the very
     same lookup. The wizard shows this same guidance inline as soon as you pick that
     option.
+
+    If the lab has its own [student portal](student-portal.md) (the default), add a
+    second record for the domain itself, `<domain> → <ingressIP>`: the portal is served
+    there, and a wildcard record does not match it.
 
 ![DNS configuration](screens/dns-config.png)
 
