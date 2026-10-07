@@ -272,9 +272,10 @@ Choose **From a devcontainer** at the top of the **Templates** step:
 3. Choose **Git repository** (EasyLab clones the repo and finds the
    `devcontainer.json`) or **Upload** (a `devcontainer.json`, or a repository
    `.zip`).
-4. Choose a **Cache registry**: **Host in-cluster** has EasyLab provision the
-   registry itself, in the lab's own cluster — no address or cache credential
-   to fill in. **External registry** requires a **Cache registry address**.
+4. Choose a **Cache registry**: **Host in-cluster**, the default, has EasyLab
+   provision the registry itself, in the lab's own cluster — no address or cache
+   credential to fill in. **External registry** requires a **Cache registry
+   address**.
    Either way, if the devcontainer builds from a **private base image** (or,
    with an external registry, pushes to a **private cache**), choose a registry
    credential from the **Credentials** section under **Registry credential for

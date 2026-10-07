@@ -565,7 +565,7 @@ function showUploadTemplateModal(labId, labName, existingCsv) {
     // Always open on the form mode with a git devcontainer source.
     TemplateEditor.setTemplatesMode('form');
     TemplateEditor.setDevcontainerSource('git');
-    TemplateEditor.setDevcontainerCacheMode('external');
+    TemplateEditor.setDevcontainerCacheMode('in-cluster');
 
     utLoadCredentials(labId);
 

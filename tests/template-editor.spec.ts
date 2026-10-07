@@ -116,13 +116,10 @@ test.describe('Workspace template editor', () => {
 
     const address = page.locator('#devcontainer-cache-external-fields');
     const registryCred = page.locator('#devcontainer-registry-cred-group');
-    await expect(address).toBeVisible();
-    await expect(registryCred).toBeVisible();
-
-    // An in-cluster registry is provisioned by EasyLab, so there is no address to
-    // give. The registry credential stays: the devcontainer's base image can still
-    // be private, whatever registry the cache lives in.
-    await page.locator('#devcontainer-cache-incluster-btn').click();
+    // Host in-cluster is the default. EasyLab provisions that registry, so there is
+    // no address to give. The registry credential stays: the devcontainer's base
+    // image can still be private, whatever registry the cache lives in.
+    await expect(page.locator('#devcontainer-cache-incluster-btn')).toHaveClass(/selected/);
     await expect(address).toBeHidden();
     await expect(registryCred).toBeVisible();
     await expect(page.locator('#devcontainer_use_in_cluster_cache')).toHaveValue('true');
@@ -131,6 +128,11 @@ test.describe('Workspace template editor', () => {
     await expect(address).toBeVisible();
     await expect(registryCred).toBeVisible();
     await expect(page.locator('#devcontainer_use_in_cluster_cache')).toHaveValue('false');
+
+    await page.locator('#devcontainer-cache-incluster-btn').click();
+    await expect(address).toBeHidden();
+    await expect(registryCred).toBeVisible();
+    await expect(page.locator('#devcontainer_use_in_cluster_cache')).toHaveValue('true');
   });
 
   test('devcontainer config can live in a separate repository', async ({ page }) => {
