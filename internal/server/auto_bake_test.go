@@ -218,6 +218,32 @@ func TestUploadTemplateToLab_AutoBake(t *testing.T) {
 	}
 }
 
+// The drawer reloads the page as soon as the addition is answered, and a template's
+// card asks for its bake status once, on load: the bake must already read as building
+// by then, however long it takes to actually start.
+func TestUploadTemplateToLab_AutoBake_BuildingBeforeTheBakeStarts(t *testing.T) {
+	t.Parallel()
+	const yaml = "workspace_templates:\n  - name: go\n    git_repo: https://gitlab.com/o/r.git\n    devcontainer:\n      enabled: true\n      cache_repo: registry.example.com/cache\n"
+
+	h, jm := newUploadTestHandler(t)
+	cb := useCapturingBakeBackend(h)
+	id := bakeLab(t, jm, WorkspaceTemplate{Name: "existing"})
+
+	// Holding the backend's lock keeps EnsureBakeJob — and so startBake — from
+	// completing until the status has been read.
+	cb.mu.Lock()
+	form := url.Values{"templates_mode": {"yaml"}, "templates_yaml": {yaml}, "auto_bake": {"true"}}
+	rec := postUpload(h, id, form.Encode())
+	status := h.renderBakeStatus(id, "go")
+	cb.mu.Unlock()
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	assert.Contains(t, status, "status-running")
+	assert.Contains(t, status, "bake-status", "the card must keep polling the bake")
+
+	require.Eventually(t, func() bool { return len(cb.bakedTemplates()) == 1 }, 2*time.Second, 10*time.Millisecond)
+}
+
 // The wizard offers the option unchecked; the drawer opens on the lab's own setting.
 func TestAutoBakeOption_Rendered(t *testing.T) {
 	t.Chdir("../..")

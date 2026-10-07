@@ -345,6 +345,21 @@ func (h *Handler) autoBakeTemplates(jobID string, templateNames []string, actor,
 	}
 }
 
+// markBakesStarting records each named template's bake as building before
+// autoBakeTemplates gets to it. Starting a bake takes seconds (the registry, its
+// Ingress, the Job) and templates are started one after the other, while a template's
+// card asks for its status once, on page load, and only keeps polling a bake it sees
+// building — without this, the reload that follows a template's addition lands before
+// the bake has started and the card stays on "not baked" for a bake that is running.
+// startBake then overwrites the entry, with the real start or the reason it failed.
+func (h *Handler) markBakesStarting(jobID string, templateNames []string) {
+	h.bakeStatusesMu.Lock()
+	defer h.bakeStatusesMu.Unlock()
+	for _, name := range templateNames {
+		h.bakeStatuses[jobID+"/"+name] = &bakeStatus{State: "building", Started: time.Now()}
+	}
+}
+
 // autoBakeLab bakes every devcontainer template of a lab created with
 // LabConfig.AutoBake. Called once the lab's cluster is up (afterProvision).
 func (h *Handler) autoBakeLab(jobID string) {
@@ -358,6 +373,7 @@ func (h *Handler) autoBakeLab(jobID string) {
 		names = devcontainerTemplateNames(job.Config.WorkspaceTemplates)
 	}
 	job.mu.RUnlock()
+	h.markBakesStarting(jobID, names)
 	h.autoBakeTemplates(jobID, names, "system", "system")
 }
 

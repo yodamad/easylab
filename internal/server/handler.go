@@ -1975,6 +1975,9 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 	// exactly as it always has.
 	if len(baking) > 0 {
 		resp["baking"] = baking
+		// Before the response, not in the goroutine: the drawer reloads the page as
+		// soon as it has its answer.
+		h.markBakesStarting(jobID, baking)
 		go h.autoBakeTemplates(jobID, baking, adminActor(r), "admin")
 	}
 	json.NewEncoder(w).Encode(resp)
