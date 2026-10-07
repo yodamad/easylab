@@ -30,6 +30,10 @@ After 5 failed password attempts, further attempts are locked out for 15 minutes
 
 ![Student Login](screens/student-login.png){width=45%}
 
+The login page follows your system's light or dark preference. Use the sun/moon button in the top-right corner to switch theme; your choice is remembered in the browser.
+
+![Student Login in light theme](screens/student-login-light.png){width=45%}
+
 ### Azure AD login (optional)
 
 If the workshop organiser has configured Azure AD authentication, a **Sign in with Microsoft** button is displayed at the top of the login page, above the password form. Click it to authenticate with your Microsoft account — any valid account in the organisation's tenant is accepted. No separate student password is required via this method.

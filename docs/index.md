@@ -23,6 +23,6 @@ One instance can serve both spaces, or you can keep a central admin and give eac
 
 ## Light and dark theme
 
-The homepage follows your system's light or dark preference. Use the sun/moon button in the top-right corner to switch theme; your choice is remembered in the browser.
+The homepage and the admin and student login pages follow your system's light or dark preference. Use the sun/moon button in the top-right corner to switch theme; your choice is remembered in the browser and shared between these pages.
 
 ![EasyLab Homepage in light theme](screens/homepage-light.png)

@@ -2227,6 +2227,87 @@ body.student-login-page {
     box-shadow: 0 0 0 3px rgba(72, 187, 120, 0.1);
 }
 
+/* Login pages — light theme (set by home-theme.js on <html data-theme="light">) */
+[data-theme="light"] body.login-page,
+[data-theme="light"] body.student-login-page {
+    background: #edf2f1;
+    color-scheme: light;
+}
+
+[data-theme="light"] body.login-page {
+    --login-accent: #b45309;
+    --login-glow: rgba(180, 83, 9, 0.14);
+}
+
+[data-theme="light"] body.student-login-page {
+    --login-accent: #007d74;
+    --login-glow: rgba(0, 125, 116, 0.14);
+}
+
+[data-theme="light"] .login-container {
+    background: rgba(255, 255, 255, 0.78);
+    border-color: rgba(12, 37, 48, 0.1);
+    box-shadow: 0 22px 44px -18px var(--login-glow), 0 8px 18px -10px rgba(12, 37, 48, 0.18);
+}
+
+[data-theme="light"] .login-context-sub,
+[data-theme="light"] .login-form label {
+    color: #4c6670;
+}
+
+[data-theme="light"] .login-form input[type="password"],
+[data-theme="light"] .login-form input[type="email"] {
+    background: #ffffff;
+    border-color: rgba(12, 37, 48, 0.18);
+    color: #0c2530;
+}
+
+[data-theme="light"] .login-form input[type="password"]::placeholder,
+[data-theme="light"] .login-form input[type="email"]::placeholder {
+    color: #6b848d;
+}
+
+[data-theme="light"] .login-form input[type="password"]:focus,
+[data-theme="light"] .login-form input[type="email"]:focus {
+    border-color: var(--login-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--login-accent) 15%, transparent);
+}
+
+[data-theme="light"] .login-form .btn {
+    color: #ffffff;
+}
+
+[data-theme="light"] .login-container .error-alert {
+    background: rgba(220, 38, 38, 0.08);
+    border-color: rgba(220, 38, 38, 0.3);
+    color: #b91c1c;
+}
+
+[data-theme="light"] .login-footer,
+[data-theme="light"] .login-divider {
+    color: #5d7680;
+}
+
+[data-theme="light"] .login-divider::before,
+[data-theme="light"] .login-divider::after {
+    border-bottom-color: rgba(12, 37, 48, 0.12);
+}
+
+[data-theme="light"] .btn-azure-full,
+[data-theme="light"] .btn-github-full,
+[data-theme="light"] .btn-gitlab-full {
+    background: #ffffff;
+    border-color: rgba(12, 37, 48, 0.16);
+    color: #0c2530;
+}
+
+[data-theme="light"] .btn-azure-full:hover,
+[data-theme="light"] .btn-github-full:hover,
+[data-theme="light"] .btn-gitlab-full:hover {
+    background: #f4f8f7;
+    border-color: rgba(12, 37, 48, 0.3);
+}
+
 /* ============================================
    STUDENT DASHBOARD STYLES
    ============================================ */
