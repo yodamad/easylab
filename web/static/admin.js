@@ -2077,6 +2077,8 @@ async function applyPrefill(config, templatesYaml, jobId, action) {
     const studentPortal = document.getElementById('student_portal');
     // A retried or recreated lab keeps what it had, rather than the new-lab default.
     if (studentPortal && !studentPortal.disabled) studentPortal.checked = !!config.student_portal;
+    const autoBake = document.getElementById('auto_bake');
+    if (autoBake) autoBake.checked = !!config.auto_bake;
 
     // Step 6: Templates. The structured config already has everything the
     // form-mode builder would otherwise need reconstructed field by field

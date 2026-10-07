@@ -5,6 +5,7 @@ import (
 	"easylab/coder"
 	"easylab/internal/providers/workspace"
 	"easylab/utils"
+	"errors"
 	"fmt"
 	"html/template"
 	"log"
@@ -82,6 +83,12 @@ func bakeRegistryReadyInterval() time.Duration {
 	return 10 * time.Second
 }
 
+// autoBakeStartTimeout bounds how long an automatic bake may take to *start*
+// (provisioning and exposing the in-cluster registry, creating the Job) — there is
+// no admin request whose context would otherwise bound it. The build itself is
+// bounded separately, by bakeTimeout.
+const autoBakeStartTimeout = 2 * time.Minute
+
 var repoSegmentInvalid = regexp.MustCompile(`[^a-z0-9-]`)
 
 // sanitizeRepoSegment makes template into a safe registry path segment for an
@@ -132,6 +139,43 @@ func (h *Handler) BakeTemplate(w http.ResponseWriter, r *http.Request) {
 	job.mu.RLock()
 	status := job.Status
 	kubeconfig := extractStringFromConfigValue(job.Kubeconfig)
+	job.mu.RUnlock()
+
+	if status != JobStatusCompleted {
+		http.Error(w, "Lab is not ready yet", http.StatusBadRequest)
+		return
+	}
+	if kubeconfig == "" {
+		http.Error(w, "Lab cluster configuration not available", http.StatusInternalServerError)
+		return
+	}
+
+	if err := h.startBake(r.Context(), jobID, templateName); err != nil {
+		h.renderHTMLError(w, "Cannot Bake", err.Error())
+		return
+	}
+
+	h.recordAudit(adminActor(r), "admin", "lab.template_bake", jobID, templateName)
+
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprint(w, h.renderBakeStatus(jobID, templateName))
+}
+
+// startBake validates that a template can be baked, launches its bake Job and hands
+// the wait to awaitBake. It is what BakeTemplate (an admin's click) and the automatic
+// bakes (autoBakeTemplates) share. It deliberately does not look at the lab's status:
+// the bake that follows a lab's creation runs just before the lab is marked completed.
+//
+// The returned error's message is written for the admin and safe to display — the
+// underlying cause is logged here, not returned.
+func (h *Handler) startBake(ctx context.Context, jobID, templateName string) error {
+	job, exists := h.jobManager.GetJob(jobID)
+	if !exists {
+		return errors.New("Lab not found.")
+	}
+
+	job.mu.RLock()
+	kubeconfig := extractStringFromConfigValue(job.Kubeconfig)
 	namespace := job.workspaceNamespace()
 	domain := ""
 	dnsProvider := ""
@@ -147,14 +191,8 @@ func (h *Handler) BakeTemplate(w http.ResponseWriter, r *http.Request) {
 	if clusterIssuerName == "" {
 		clusterIssuerName = utils.DefaultClusterIssuerName
 	}
-
-	if status != JobStatusCompleted {
-		http.Error(w, "Lab is not ready yet", http.StatusBadRequest)
-		return
-	}
 	if kubeconfig == "" {
-		http.Error(w, "Lab cluster configuration not available", http.StatusInternalServerError)
-		return
+		return errors.New("Lab cluster configuration not available.")
 	}
 
 	var tmpl *WorkspaceTemplate
@@ -165,31 +203,26 @@ func (h *Handler) BakeTemplate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if tmpl == nil || tmpl.Devcontainer == nil || !tmpl.Devcontainer.Enabled {
-		h.renderHTMLError(w, "Cannot Bake", "Only enabled devcontainer templates can be pre-baked.")
-		return
+		return errors.New("Only enabled devcontainer templates can be pre-baked.")
 	}
 
 	externalCacheRepo := strings.TrimSpace(tmpl.Devcontainer.CacheRepo)
 	useInCluster := externalCacheRepo == "" && tmpl.Devcontainer.UseInClusterCache
 	if externalCacheRepo == "" && !useInCluster {
-		h.renderHTMLError(w, "Cannot Bake", "This template has no cache registry configured — set an external cache registry, or host it in-cluster, before baking.")
-		return
+		return errors.New("This template has no cache registry configured — set an external cache registry, or host it in-cluster, before baking.")
 	}
 	if useInCluster && domain == "" {
-		h.renderHTMLError(w, "Cannot Bake", "Baking to the in-cluster registry requires the lab to have a domain configured — a student workspace pulls the baked image over trusted HTTPS, which needs a certificate. Set an external cache registry instead, or configure a domain for this lab.")
-		return
+		return errors.New("Baking to the in-cluster registry requires the lab to have a domain configured — a student workspace pulls the baked image over trusted HTTPS, which needs a certificate. Set an external cache registry instead, or configure a domain for this lab.")
 	}
 
 	backend, err := h.workspaceBackendFor(jobID, kubeconfig, namespace)
 	if err != nil {
-		log.Printf("BakeTemplate: failed to build backend for lab %s: %v", jobID, err)
-		h.renderHTMLError(w, "Cannot Bake", "Could not reach the lab cluster.")
-		return
+		log.Printf("startBake: failed to build backend for lab %s: %v", jobID, err)
+		return errors.New("Could not reach the lab cluster.")
 	}
 	bp, ok := backend.(workspace.BakeProvider)
 	if !ok {
-		h.renderHTMLError(w, "Cannot Bake", "This lab's backend does not support pre-baking.")
-		return
+		return errors.New("This lab's backend does not support pre-baking.")
 	}
 
 	var destRepo, pullRepo string
@@ -198,24 +231,21 @@ func (h *Handler) BakeTemplate(w http.ResponseWriter, r *http.Request) {
 	if useInCluster {
 		rc, ok := backend.(workspace.RegistryCacheProvider)
 		if !ok {
-			h.renderHTMLError(w, "Cannot Bake", "This lab's backend does not support the in-cluster registry.")
-			return
+			return errors.New("This lab's backend does not support the in-cluster registry.")
 		}
 		// EnsureBuildCache provisions the registry itself (Deployment/Service/PVC);
 		// the Ingress in front of it needs that Service to already exist.
-		if _, err := rc.EnsureBuildCache(r.Context()); err != nil {
-			log.Printf("BakeTemplate: failed to provision registry for lab %s: %v", jobID, err)
-			h.renderHTMLError(w, "Cannot Bake", "Could not provision the in-cluster registry.")
-			return
+		if _, err := rc.EnsureBuildCache(ctx); err != nil {
+			log.Printf("startBake: failed to provision registry for lab %s: %v", jobID, err)
+			return errors.New("Could not provision the in-cluster registry.")
 		}
 		wildcardTLSSecret := ""
 		if dnsProvider != "" {
 			wildcardTLSSecret = coder.WildcardTLSSecretName
 		}
-		if _, err := rc.EnsureRegistryIngress(r.Context(), domain, wildcardTLSSecret, clusterIssuerName); err != nil {
-			log.Printf("BakeTemplate: failed to expose registry for lab %s: %v", jobID, err)
-			h.renderHTMLError(w, "Cannot Bake", "Could not expose the in-cluster registry over HTTPS.")
-			return
+		if _, err := rc.EnsureRegistryIngress(ctx, domain, wildcardTLSSecret, clusterIssuerName); err != nil {
+			log.Printf("startBake: failed to expose registry for lab %s: %v", jobID, err)
+			return errors.New("Could not expose the in-cluster registry over HTTPS.")
 		}
 		destRepo, pullRepo = rc.BakedImageRepo(jobID, templateName, domain)
 		// envbuilder pushes over the registry's internal, plain-HTTP address — it is
@@ -262,10 +292,9 @@ func (h *Handler) BakeTemplate(w http.ResponseWriter, r *http.Request) {
 		Devcontainer:  dc,
 		BakeRepo:      repoBaked,
 	}
-	if err := bp.EnsureBakeJob(r.Context(), req); err != nil {
-		log.Printf("BakeTemplate: failed to start bake for lab %s template %s: %v", jobID, templateName, err)
-		h.renderHTMLError(w, "Cannot Bake", "Could not start the bake job.")
-		return
+	if err := bp.EnsureBakeJob(ctx, req); err != nil {
+		log.Printf("startBake: failed to start bake for lab %s template %s: %v", jobID, templateName, err)
+		return errors.New("Could not start the bake job.")
 	}
 
 	key := jobID + "/" + templateName
@@ -273,16 +302,63 @@ func (h *Handler) BakeTemplate(w http.ResponseWriter, r *http.Request) {
 	h.bakeStatuses[key] = &bakeStatus{State: "building", Started: time.Now()}
 	h.bakeStatusesMu.Unlock()
 
-	h.recordAudit(adminActor(r), "admin", "lab.template_bake", jobID, templateName)
-
 	go func() {
 		h.bakeExecSem <- struct{}{}
 		defer func() { <-h.bakeExecSem }()
 		h.awaitBake(jobID, templateName, bp, pullRepo, pullInsecure, pullRegistryAuthSecret, repoBaked)
 	}()
 
-	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprint(w, h.renderBakeStatus(jobID, templateName))
+	return nil
+}
+
+// devcontainerTemplateNames returns the names of the templates a bake applies to:
+// the enabled devcontainer ones. Whether each can actually be baked (cache registry,
+// domain) is startBake's call, so that a template that cannot reports why.
+func devcontainerTemplateNames(templates []WorkspaceTemplate) []string {
+	var names []string
+	for _, t := range templates {
+		if t.Devcontainer != nil && t.Devcontainer.Enabled {
+			names = append(names, t.Name)
+		}
+	}
+	return names
+}
+
+// autoBakeTemplates starts a bake of each named template without an admin clicking
+// "Bake image" — after a lab is created with LabConfig.AutoBake, or when a template
+// is added with the option on. Best-effort: a bake that cannot start is recorded as
+// that template's failed bake, so the reason shows on its card where "Rebuild"
+// retries it, rather than failing the lab or the template addition.
+func (h *Handler) autoBakeTemplates(jobID string, templateNames []string, actor, role string) {
+	for _, name := range templateNames {
+		ctx, cancel := context.WithTimeout(context.Background(), autoBakeStartTimeout)
+		err := h.startBake(ctx, jobID, name)
+		cancel()
+		if err != nil {
+			log.Printf("Automatic bake not started for lab %s template %s: %v", jobID, name, err)
+			h.bakeStatusesMu.Lock()
+			h.bakeStatuses[jobID+"/"+name] = &bakeStatus{State: "failed", Error: err.Error()}
+			h.bakeStatusesMu.Unlock()
+			continue
+		}
+		h.recordAudit(actor, role, "lab.template_bake", jobID, name+" (automatic)")
+	}
+}
+
+// autoBakeLab bakes every devcontainer template of a lab created with
+// LabConfig.AutoBake. Called once the lab's cluster is up (afterProvision).
+func (h *Handler) autoBakeLab(jobID string) {
+	job, exists := h.jobManager.GetJob(jobID)
+	if !exists {
+		return
+	}
+	job.mu.RLock()
+	var names []string
+	if job.Config != nil && job.Config.AutoBake {
+		names = devcontainerTemplateNames(job.Config.WorkspaceTemplates)
+	}
+	job.mu.RUnlock()
+	h.autoBakeTemplates(jobID, names, "system", "system")
 }
 
 // awaitBake polls the bake Job to completion (or failure/timeout), then records the

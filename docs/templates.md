@@ -742,8 +742,11 @@ an ordinary image, and records it on the lab — every student workspace for tha
 template afterward does a plain image pull instead of running envbuilder at all, so
 neither the build nor the per-pod layer extraction above happens per student.
 
-This is an admin-triggered action on an already-created lab, not a template YAML
-key — there is nothing to set on the template itself. See
+This is an action on a lab, not a template YAML key — there is nothing to set on the
+template itself. An admin triggers it with the button, or lets EasyLab do it with the
+**Bake devcontainer images automatically** option of the create-lab wizard and of the
+Add Template drawer, which bakes a devcontainer template as soon as the lab is ready
+or the template is added. See
 [Pre-baking a devcontainer template](admin-lab-management.md#pre-baking-a-devcontainer-template)
 in the admin guide for how to trigger it, what the status badges mean, and the
 domain requirement when baking to the in-cluster registry (an external

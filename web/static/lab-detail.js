@@ -639,6 +639,11 @@ function submitUploadTemplate(event) {
         });
     }
 
+    // Always sent, checked or not: left out, the server would fall back to the
+    // lab's own setting and an unchecked box could not turn the bake off.
+    var autoBake = utEl('auto_bake');
+    body.append('auto_bake', autoBake && autoBake.checked ? 'true' : 'false');
+
     var submitBtn = utEl('upload-template-submit-btn');
     submitBtn.disabled = true;
     submitBtn.textContent = 'Adding…';
@@ -655,6 +660,7 @@ function submitUploadTemplate(event) {
             var label = names.length > 1
                 ? (names.length + ' templates added.')
                 : ('Template “' + (names[0] || '') + '” added.');
+            if (data && data.baking && data.baking.length) label += ' Baking its image…';
             // Queue the toast to survive the reload that refreshes the page.
             try { sessionStorage.setItem('ut-flash', JSON.stringify({ msg: label, kind: 'success' })); } catch (e) { /* ignore */ }
             closeUploadTemplateModal();

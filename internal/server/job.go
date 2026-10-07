@@ -354,6 +354,12 @@ type LabConfig struct {
 	// unreachable or wrong image.
 	BakedImages map[string]BakedImage `json:"baked_images,omitempty"`
 
+	// AutoBake pre-bakes every devcontainer template as soon as it can be: all of
+	// them once the lab's cluster is up, and it is the default for a template added
+	// later (which the "Add Template" drawer can override per addition). Off, a
+	// template is only baked when an admin clicks "Bake image".
+	AutoBake bool `json:"auto_bake,omitempty"`
+
 	// Disabled closes the whole lab to new students: it is no longer offered in the
 	// student portal and no new workspace can be requested on it. Students who
 	// already own a workspace keep seeing the lab and keep using that workspace.

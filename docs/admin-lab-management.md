@@ -227,6 +227,32 @@ updates on its own; it turns into a **baked _(date)_** badge once done, or shows
 failure if it did not succeed. Building runs as a one-off job in the lab's cluster,
 entirely separate from any student's workspace — no one waits on it.
 
+#### Baking automatically
+
+You do not have to click **Bake image** yourself. **Bake devcontainer images
+automatically** is offered in two places:
+
+* **When creating a lab** — on the wizard's
+  [Workspace step](admin-lab-creation.md#baking-devcontainer-images-automatically).
+  Every devcontainer template of the lab is baked as soon as its cluster is up, so the
+  images are usually ready by the time students arrive. The lab is reported ready
+  without waiting for the bakes: they keep running in the background, and each
+  template's card shows its **building** badge until its own is done.
+* **When adding a template** — at the bottom of the
+  [Add Template drawer](#add-a-template-to-an-existing-lab), for the template being
+  added. It opens on the lab's own setting.
+
+An automatic bake is the same bake as a click on the button, with the same
+requirements: a cache registry, and a domain when that registry is hosted
+in-cluster. One that cannot start, or that fails, does not fail the lab or the
+template addition — the template's card shows the **failed** badge and the reason,
+and **Rebuild** retries it. Until a bake succeeds, students of that template simply
+build the devcontainer in their own workspace, as they would with no bake at all.
+
+Automatic bakes appear in the [audit log](audit-log.md) as `lab.template_bake` with
+`(automatic)` after the template name — attributed to `system` for a lab's creation,
+and to the admin who added the template otherwise.
+
 A **failed** badge covers two different things, both worth knowing apart: the build
 itself can fail (a bad devcontainer.json, an unreachable base image), or the build
 can succeed and push fine but the image never becomes *pullable* — EasyLab confirms
@@ -343,9 +369,16 @@ pick one explicitly.
 When a private repository's credential is picked, EasyLab reads it from the lab's
 cluster to clone the devcontainer during the import, so there is no token to retype.
 
-> A devcontainer template added here still needs baking before students use it — see
-> [Pre-baking a devcontainer template](#pre-baking-a-devcontainer-template) above. The
-> **Bake image** button appears on the new template's card once it is added.
+At the bottom of the drawer, **Bake devcontainer images automatically** starts the
+bake of a devcontainer template as soon as it is added — the toast says so, and the
+new template's card opens on a **building** badge. The box opens checked when the lab
+was created with the option on (see [Baking automatically](#baking-automatically)),
+and can be changed for each addition. It has no effect on a plain (non-devcontainer)
+template, which has nothing to bake.
+
+> Left unchecked, a devcontainer template added here still needs baking before students
+> use it — see [Pre-baking a devcontainer template](#pre-baking-a-devcontainer-template)
+> above. The **Bake image** button appears on the new template's card once it is added.
 
 ### Close a lab or a template to new students
 

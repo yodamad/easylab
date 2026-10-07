@@ -111,8 +111,31 @@ configure. On the **Workspace** step you only set:
   keep working while the admin instance is unreachable. Uncheck it to keep this
   lab on the central student space; either way it can be changed later from the
   lab's page. See [In-lab student portal](student-portal.md).
+* **Bake devcontainer images automatically** — unchecked by default. See
+  [Baking devcontainer images automatically](#baking-devcontainer-images-automatically)
+  below.
 
-![Workspace step with the student portal option](screens/student-portal-option.png){width=700}
+![Workspace step with the student portal and automatic baking options](screens/student-portal-option.png){width=700}
+
+#### Baking devcontainer images automatically
+
+**Bake devcontainer images automatically** pre-bakes every devcontainer template of
+the lab as soon as its cluster is up: each one is built once and pushed as an
+ordinary image, so students pull a ready image instead of building the devcontainer
+in their own workspace. It is a setting of the lab rather than of one template, which
+is why it sits on this step and not on the next. Without it, the same thing is one
+click per template on the lab's detail page once the lab exists — see
+[Pre-baking a devcontainer template](admin-lab-management.md#pre-baking-a-devcontainer-template)
+for what a bake does and requires.
+
+* The lab is reported ready without waiting for the bakes. They run in the
+  background, and each template's card on the lab's detail page shows its progress.
+* A bake that cannot start (no domain for an in-cluster cache registry, for
+  instance) or that fails never fails the lab: the template's card shows why, and
+  **Rebuild** retries it.
+* The setting is kept on the lab, where it becomes the default of the same checkbox
+  in the [Add Template drawer](admin-lab-management.md#add-a-template-to-an-existing-lab).
+* Plain (non-devcontainer) templates are unaffected.
 
 Then, on the **Templates** step, you define **one or more** workspace templates
 for the lab. Each template is a different workspace flavor that students can

@@ -344,6 +344,9 @@ func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsM
 			go h.reconcilePrepull(jobID)
 			// Likewise for the lab's own student portal, when it asked for one.
 			go h.reconcilePortal(jobID)
+			// And for the devcontainer images, when the lab asked for them to be
+			// baked up front. After the secrets too: a bake clones and pulls with them.
+			go h.autoBakeLab(jobID)
 		}
 	}
 	return h
@@ -761,6 +764,7 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 		DNSZone:              r.FormValue("dns_zone"),
 		UseExternalDNS:       r.FormValue("use_external_dns") == "true",
 		StudentPortal:        r.FormValue("student_portal") == "true",
+		AutoBake:             r.FormValue("auto_bake") == "true",
 		DNSAlreadyConfigured: r.FormValue("dns_already_configured") == "true",
 	}
 
@@ -1875,6 +1879,7 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 
 	job.mu.RLock()
 	status := job.Status
+	autoBake := job.Config != nil && job.Config.AutoBake
 	job.mu.RUnlock()
 
 	if status != JobStatusCompleted {
@@ -1952,9 +1957,27 @@ func (h *Handler) UploadTemplateToLab(w http.ResponseWriter, r *http.Request) {
 		names[i] = t.Name
 	}
 	h.recordAudit(adminActor(r), "admin", "lab.template_upload", jobID, strings.Join(names, ", "))
+
+	// Bake the new devcontainer templates right away when asked to. The drawer
+	// always sends auto_bake; a caller that leaves it out gets the lab's own setting.
+	if _, sent := r.Form["auto_bake"]; sent {
+		autoBake = getFormValue(r, "auto_bake") == "true"
+	}
+	var baking []string
+	if autoBake {
+		baking = devcontainerTemplateNames(templates)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	// "template" (first name) is kept for backward compatibility with older clients.
-	json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "template": names[0], "templates": names})
+	resp := map[string]interface{}{"status": "ok", "template": names[0], "templates": names}
+	// "baking" only appears when a bake was started, so a plain addition answers
+	// exactly as it always has.
+	if len(baking) > 0 {
+		resp["baking"] = baking
+		go h.autoBakeTemplates(jobID, baking, adminActor(r), "admin")
+	}
+	json.NewEncoder(w).Encode(resp)
 }
 
 // RemoveTemplateFromLab handles POST /api/labs/{id}/templates/{name}/remove.
@@ -3834,6 +3857,9 @@ type LabSummary struct {
 	WorkspaceTemplateNamesCSV string
 	// Disabled reports a lab closed to new students (LabConfig.Disabled).
 	Disabled bool
+	// AutoBake reports LabConfig.AutoBake — the "Add Template" drawer's default for
+	// baking a new devcontainer template as it is added.
+	AutoBake bool
 }
 
 // buildLabSummary builds the display-safe summary for a single lab (job),
@@ -3858,8 +3884,10 @@ func buildLabSummary(job *Job) LabSummary {
 	hasLabDeletionDate := false
 	var templateNames []string
 	disabled := false
+	autoBake := false
 	if job.Config != nil {
 		disabled = job.Config.Disabled
+		autoBake = job.Config.AutoBake
 		stackName = job.Config.StackName
 		description = job.Config.Description
 		provider = job.Config.Provider
@@ -3908,6 +3936,7 @@ func buildLabSummary(job *Job) LabSummary {
 		HasDeletionDate:           hasLabDeletionDate,
 		WorkspaceTemplateNamesCSV: strings.Join(templateNames, ", "),
 		Disabled:                  disabled,
+		AutoBake:                  autoBake,
 	}
 }
 

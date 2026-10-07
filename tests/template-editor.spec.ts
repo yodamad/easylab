@@ -47,6 +47,26 @@ test.describe('Workspace template editor', () => {
     }
   });
 
+  test('automatic baking is a workspace setting, off by default and submitted with the lab', async ({ page }) => {
+    const autoBake = page.locator('#auto_bake');
+    // It applies to every template of the lab, so it lives with the workspace
+    // settings (Step 5) rather than in the editor of any one template.
+    await expect(page.locator('.wizard-step[data-step="6"] #auto_bake')).toHaveCount(0);
+    await expect(page.locator('.wizard-step[data-step="5"] #auto_bake')).toHaveCount(1);
+
+    await page.evaluate(() => {
+      (window as any).wizard.currentStep = 5;
+      (window as any).wizard.updateUI();
+    });
+    await expect(autoBake).toBeVisible();
+    await expect(autoBake).not.toBeChecked();
+
+    await autoBake.check();
+    const posted = await page.evaluate(() =>
+      new FormData(document.getElementById('lab-form') as HTMLFormElement).get('auto_bake'));
+    expect(posted).toBe('true');
+  });
+
   test('switches between the three modes, disabling the ones not in use', async ({ page }) => {
     const mode = page.locator('#templates_mode');
     const templateName = page.locator('#templates-form-mode [name="template_0_name"]');

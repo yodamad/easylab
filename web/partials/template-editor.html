@@ -11,7 +11,11 @@
   Two entry points:
 
     template-editor-wizard   modes + credential rows + N templates
-    template-editor-drawer   modes + one template
+    template-editor-drawer   modes + one template + auto-bake
+
+  A third, template-editor-autobake, is the automatic bake option on its own: the
+  drawer ends with it, and the wizard renders it in its Workspace step (Step 5)
+  rather than here, since there it is a setting of the lab, not of one template.
 
   The credential *rows* are wizard-only: they create credentials that are written
   to the cluster once it is provisioned. A lab that already exists has a live
@@ -80,6 +84,25 @@
 {{define "template-editor-drawer"}}
 {{template "template-editor-modes" .}}
 {{template "template-editor-panels" false}}
+{{template "template-editor-autobake" .Lab.AutoBake}}
+{{end}}
+
+
+{{/* The automatic bake option. In the wizard (Step 5, Workspace) it is the lab's
+     setting: every devcontainer template is baked once the lab is ready. In the
+     drawer it applies to the template being added, and . — the lab's setting — is
+     only its default. */}}
+{{define "template-editor-autobake"}}
+<div class="form-checkboxes">
+    <span>Pre-baking</span>
+    <div class="checkbox-stack">
+        <label class="checkbox-label">
+            <input type="checkbox" id="auto_bake" name="auto_bake" value="true"{{if .}} checked{{end}}>
+            Bake devcontainer images automatically
+        </label>
+    </div>
+    <small>Builds each devcontainer template's image as soon as it can be — once the lab is ready, or right after a template is added — instead of waiting for a click on <strong>Bake image</strong>, so students pull a ready image rather than building their own. Only devcontainer templates are baked; a bake that cannot start or fails shows on the template's card, where <strong>Rebuild</strong> retries it.</small>
+</div>
 {{end}}
 
 
