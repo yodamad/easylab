@@ -129,6 +129,17 @@ const (
 	// gets copied onto an empty volume. See homeSeedInit.
 	homeSeedMountPath = "/mnt/home"
 
+	// A persistent devcontainer workspace cannot mount its volume over the home
+	// directory (see createDeployment), so the volume is split in two instead:
+	// workspaceProjectSubPath is mounted at the project folder, and
+	// workspaceIDEStateSubPath at ideStateMountPath, where the IDE's settings and
+	// extensions are kept (see ideStateStep). workspaceRootMountPath is where the
+	// init containers mount the volume whole to prepare and fill those two.
+	workspaceProjectSubPath  = "project"
+	workspaceIDEStateSubPath = "ide-state"
+	ideStateMountPath        = "/ide-state"
+	workspaceRootMountPath   = "/mnt/workspace"
+
 	// defaultDevcontainerCPURequest/Limit, Memory, and EphemeralStorage are
 	// applied (see buildResources) when a devcontainer-enabled template leaves
 	// CPU/Memory blank, so its workspace pods aren't BestEffort during
@@ -564,14 +575,30 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 		// Devcontainer mode is excluded on purpose: envbuilder replaces the entire
 		// root filesystem and preserves only ENVBUILDER_IGNORE_PATHS (see
 		// devcontainerEnv), and a devcontainer image's user home is frequently not
-		// homeDir at all — so those keep the project-only mount.
+		// homeDir at all. A persistent devcontainer workspace splits the volume
+		// instead: one sub-directory at the project folder, another at
+		// ideStateMountPath for the IDE's settings and extensions (see
+		// ideStateStep), which would otherwise be lost with the container.
 		mountPath := p.workspaceDir
+		cloneDir := p.workspaceDir
 		seedHome := hasPVC && spec.Devcontainer == nil
+		splitVolume := hasPVC && spec.Devcontainer != nil
 		if seedHome {
 			mountPath = p.homeDir
 		}
 
-		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{Name: workspaceVolumeName, MountPath: mountPath})
+		if splitVolume {
+			container.VolumeMounts = append(container.VolumeMounts,
+				corev1.VolumeMount{Name: workspaceVolumeName, MountPath: p.workspaceDir, SubPath: workspaceProjectSubPath},
+				corev1.VolumeMount{Name: workspaceVolumeName, MountPath: ideStateMountPath, SubPath: workspaceIDEStateSubPath},
+			)
+			// The init containers see the volume whole, so the clone lands in the
+			// sub-directory the IDE container mounts at workspaceDir.
+			mountPath = workspaceRootMountPath
+			cloneDir = path.Join(workspaceRootMountPath, workspaceProjectSubPath)
+		} else {
+			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{Name: workspaceVolumeName, MountPath: mountPath})
+		}
 		vol := corev1.Volume{Name: workspaceVolumeName}
 		if hasPVC {
 			vol.VolumeSource = corev1.VolumeSource{
@@ -590,6 +617,11 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 		if seedHome {
 			initContainers = append(initContainers, homeSeedInit(image, p.homeDir))
 		}
+		// Likewise ordered before the clone, which fills one of the directories
+		// this creates.
+		if splitVolume {
+			initContainers = append(initContainers, workspaceDirsInit(p.defaultImage))
+		}
 		// In devcontainer mode envbuilder does its own clone, so a git-clone init
 		// container would only race it for the same directory — unless the workspace
 		// is running a baked (PrebuiltImage) image, which has no envbuilder to do it
@@ -598,9 +630,9 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 		// instead, so starting the workspace never reaches the git host at all.
 		if strings.TrimSpace(spec.GitRepo) != "" && (spec.Devcontainer == nil || spec.Devcontainer.PrebuiltImage != "") {
 			if spec.Devcontainer != nil && spec.Devcontainer.PrebuiltRepo {
-				initContainers = append(initContainers, bakedRepoSeedInit(spec.Devcontainer.PrebuiltImage, p.workspaceDir, mountPath))
+				initContainers = append(initContainers, bakedRepoSeedInit(spec.Devcontainer.PrebuiltImage, cloneDir, mountPath))
 			} else {
-				initContainers = append(initContainers, gitCloneInit(spec.GitRepo, spec.GitBranch, p.workspaceDir, mountPath, spec.GitAuthSecret, spec.GitShallow))
+				initContainers = append(initContainers, gitCloneInit(spec.GitRepo, spec.GitBranch, cloneDir, mountPath, spec.GitAuthSecret, spec.GitShallow))
 			}
 		}
 	}
@@ -848,7 +880,7 @@ func devcontainerEnv(spec workspace.Spec, p ideProfile, dockerConfig string) []c
 
 	// What the build must not wipe: the injected IDE, and the student's files —
 	// plus a separately-cloned devcontainer config repo, if any.
-	ignorePaths := []string{ideMountPath, p.workspaceDir}
+	ignorePaths := []string{ideMountPath, p.workspaceDir, ideStateMountPath}
 	configRepo := strings.TrimSpace(dc.ConfigRepo)
 	if configRepo != "" {
 		ignorePaths = append(ignorePaths, devcontainerConfigMountPath)
@@ -921,7 +953,24 @@ func devcontainerEnv(spec workspace.Spec, p ideProfile, dockerConfig string) []c
 // It applies the same setup a plain workspace gets, then starts the IDE from the
 // injected bundle rather than from the image, which has none.
 func devcontainerInitScript(spec workspace.Spec, p ideProfile) string {
-	return setupSteps(spec, p) + ideExecLine(spec, p)
+	return ideStateStep() + setupSteps(spec, p) + ideExecLine(spec, p)
+}
+
+// ideStateStep returns the line that makes the IDE keep its settings and
+// extensions on the workspace volume in devcontainer mode, where the home
+// directory itself is not persisted: it replaces code-server's data directory
+// with a symlink to ideStateMountPath. A symlink rather than --user-data-dir, so
+// the settings seeding and the extension installs in setupSteps follow it without
+// each needing to be told.
+//
+// It guards itself rather than taking a flag: an Ephemeral workspace has nothing
+// mounted there, and a devcontainer user outside gid 1000 cannot write to it —
+// both then keep the data directory in the home, exactly as before. Anything the
+// image already ships in that directory is carried over first, without
+// overwriting what a returning student has.
+func ideStateStep() string {
+	return fmt.Sprintf("s=%s; d=\"${XDG_DATA_HOME:-$HOME/.local/share}/code-server\"; if [ -w \"$s\" ] && [ ! -L \"$d\" ]; then mkdir -p \"${d%%/*}\" && { [ ! -d \"$d\" ] || { cp -an \"$d/.\" \"$s/\"; rm -rf \"$d\"; }; } && ln -s \"$s\" \"$d\"; fi || true\n",
+		ideStateMountPath)
 }
 
 // gitURLWithRef appends the branch the way envbuilder takes it: as a fragment on
@@ -1213,6 +1262,28 @@ func homeSeedInit(image, homeDir string) corev1.Container {
 		// a freshly provisioned volume group-writable for it.
 		SecurityContext: &corev1.SecurityContext{RunAsUser: int64Ptr(1000)},
 		VolumeMounts:    []corev1.VolumeMount{{Name: workspaceVolumeName, MountPath: homeSeedMountPath}},
+	}
+}
+
+// workspaceDirsInit returns an init container that creates the two
+// sub-directories a persistent devcontainer workspace mounts (see
+// createDeployment). Left to the kubelet they would be created root-owned and
+// not group-writable, so neither envbuilder's unprivileged user nor the IDE could
+// write to them; this gives them what the volume root itself gets from the pod's
+// fsGroup. Existing directories are left alone, so a returning student's files
+// keep whatever ownership they have.
+func workspaceDirsInit(image string) corev1.Container {
+	script := fmt.Sprintf(`cd %s && for d in %s %s; do [ -d "$d" ] || { mkdir "$d" && chown 1000:1000 "$d" && chmod 2775 "$d"; }; done`,
+		workspaceRootMountPath, workspaceProjectSubPath, workspaceIDEStateSubPath)
+	return corev1.Container{
+		Name:  "workspace-dirs",
+		Image: image,
+		// The IDE image, which ide-inject pulls for every devcontainer workspace
+		// anyway, so this never costs an extra pull.
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Command:         []string{"sh", "-c", script},
+		SecurityContext: &corev1.SecurityContext{RunAsUser: int64Ptr(0)},
+		VolumeMounts:    []corev1.VolumeMount{{Name: workspaceVolumeName, MountPath: workspaceRootMountPath}},
 	}
 }
 

@@ -76,6 +76,10 @@ settings and the extensions they install all come back when the pod is
 rescheduled onto another node — which happens routinely, on cluster upgrades,
 node failures and autoscaler consolidation.
 
+A [devcontainer](#devcontainer-workshops) workspace is the exception: its volume holds
+the project folder and the IDE's settings and extensions, but not the rest of the
+home directory — see the caveats in that section.
+
 `disk_size` sizes that volume (5Gi by default). `storage_class` places it; left
 empty the cluster's default StorageClass is used, which is what you want on an
 EasyLab-provisioned OVHcloud or Azure cluster.
@@ -537,13 +541,21 @@ does impose three constraints:
   makes the workspace folder writable by the usual uid-1000 devcontainer users
   (`vscode`, `node`, `coder`). Opting out of it can leave the folder owned by
   root, with the student unable to save. Use `disk_size` to size it instead.
-- **`$HOME` is not persisted in devcontainer mode.** A plain workspace mounts its
-  volume over the whole home directory; a devcontainer one covers only the
-  project folder, because envbuilder replaces the entire root filesystem during
-  the build and a devcontainer image's user home is often not `/home/coder` at
-  all. Extensions and IDE settings are therefore reinstalled on each start —
-  declare them in `extensions` and `vscode_settings` rather than relying on them
-  persisting. A student's own settings changes are lost on restart.
+- **`$HOME` is not persisted in devcontainer mode, but the IDE's state is.** A
+  plain workspace mounts its volume over the whole home directory; a
+  devcontainer one cannot, because envbuilder replaces the entire root
+  filesystem during the build and a devcontainer image's user home is often not
+  `/home/coder` at all. Its volume instead holds two things: the project folder,
+  and code-server's data directory (`~/.local/share/code-server`, linked onto
+  the volume at `/ide-state`). So a student's files, their IDE settings and the
+  extensions they install survive a restart, while anything else written to the
+  home directory — shell history, dotfiles, tools installed under `~` — does not.
+    - This needs the devcontainer's user to be root or in group 1000, as the
+      usual `vscode`, `node` and `coder` users are. For any other user the IDE
+      falls back to keeping its data in the unpersisted home directory.
+    - It applies to workspaces created from now on. A devcontainer workspace
+      that already exists keeps the project-only volume it was created with
+      until it is deleted and recreated.
 
 Authentication is the same as outside devcontainer mode: code-server presents a
 login page taking the workspace password.

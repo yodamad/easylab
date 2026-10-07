@@ -724,14 +724,17 @@ func TestEnsureWorkspace_PrebuiltRepoSeedsInsteadOfCloning(t *testing.T) {
 
 			assert.Equal(t, spec.Devcontainer.PrebuiltImage, seed.Image, "the seed runs the baked image the workspace pulls anyway")
 			script := seed.Command[len(seed.Command)-1]
-			assert.Contains(t, script, "cp -a "+bakedRepoPath+"/. /home/coder/project/")
-			assert.Contains(t, script, `if [ -z "$(ls -A /home/coder/project 2>/dev/null | grep -v '^lost+found$')" ]`, "a returning student's files must never be overwritten, but a lost+found-only PVC must still seed")
-			assert.Contains(t, script, "chown -R 1000:1000 /home/coder/project")
+			// The seed sees the volume whole and fills the sub-directory the IDE
+			// container mounts at the project folder.
+			assert.Contains(t, script, "cp -a "+bakedRepoPath+"/. /mnt/workspace/project/")
+			assert.Contains(t, script, `if [ -z "$(ls -A /mnt/workspace/project 2>/dev/null | grep -v '^lost+found$')" ]`, "a returning student's files must never be overwritten, but a lost+found-only PVC must still seed")
+			assert.Contains(t, script, "chown -R 1000:1000 /mnt/workspace/project")
 			require.NotNil(t, seed.SecurityContext)
 			require.NotNil(t, seed.SecurityContext.RunAsUser)
 			assert.Equal(t, int64(0), *seed.SecurityContext.RunAsUser, "the chown needs root whatever the image's default user")
 			require.Len(t, seed.VolumeMounts, 1)
 			assert.Equal(t, workspaceVolumeName, seed.VolumeMounts[0].Name)
+			assert.Equal(t, workspaceRootMountPath, seed.VolumeMounts[0].MountPath)
 		})
 	}
 }
