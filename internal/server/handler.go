@@ -109,6 +109,10 @@ type Handler struct {
 	// optional: without them a portal offers password login only, or none.
 	publicURL           string
 	studentAuthSnapshot func() StudentAuthSnapshot
+	// portalSettings holds the public URL and portal image an admin saved from
+	// the Student portals page; they take precedence over the environment (see
+	// portal_settings.go). Nil unless SetPortalSettingsStore is called.
+	portalSettings *PortalSettingsStore
 	// portalErrors holds the last deployment failure of each lab's portal, keyed
 	// by lab ID, for the lab detail page. Not persisted: the next reconcile
 	// either clears or reproduces it.
@@ -1041,6 +1045,7 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 		"azure-ad.html":           "web/azure-ad.html",
 		"github-auth.html":        "web/github-auth.html",
 		"gitlab-auth.html":        "web/gitlab-auth.html",
+		"portal-settings.html":    "web/portal-settings.html",
 		"labs-list.html":          "web/labs-list.html",
 		"lab-detail.html":         "web/lab-detail.html",
 		"admin-stats.html":        "web/admin-stats.html",
@@ -1097,6 +1102,9 @@ func (h *Handler) ServeAdminUI(w http.ResponseWriter, r *http.Request) {
 
 	data := map[string]interface{}{
 		"HasCredentials": hasCredentials,
+		// A new lab gets its own student portal unless this build has no image
+		// to run one from (see portalImage).
+		"PortalAvailable": h.effectivePortalImage() != "",
 	}
 	if h.ovhOptionsManager != nil {
 		cfg := h.ovhOptionsManager.GetConfig()

@@ -108,8 +108,9 @@ running in the lab's own cluster.
 
 If the deployment failed, the reason is shown under the strip (**Student Portal Not
 Deployed**), and EasyLab retries on its own every few minutes. The strip also tells you
-when the portal can only offer password sign-in because `EASYLAB_PUBLIC_URL` is not set
-on this instance.
+when the portal can only offer password sign-in because this instance's public address
+is not set, with a link to the [Student portals](student-portal.md#the-student-portals-page)
+page where you set it.
 
 You never have to push changes to the portal: closing a template, adding one, editing the
 lifecycle and so on reach it within seconds, and what students do there shows up in this

@@ -581,6 +581,45 @@ func TestCreateLabConfigFromForm_StudentPortal(t *testing.T) {
 	}
 }
 
+// A new lab gets its own portal without the admin doing anything — except on a
+// build that has no image to run one from, where the option is off and says why.
+func TestServeAdminUI_StudentPortalDefault(t *testing.T) {
+	t.Chdir("../..")
+
+	tests := []struct {
+		name        string
+		image       string
+		version     string
+		wantChecked bool
+	}{
+		{name: "release build: on by default", version: "1.2.3", wantChecked: true},
+		{name: "development build with an image override: on by default", image: testPortalImage, version: "dev", wantChecked: true},
+		{name: "development build: unavailable", version: "dev", wantChecked: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(EnvPortalImage, tt.image)
+			previous := Version
+			Version = tt.version
+			t.Cleanup(func() { Version = previous })
+
+			h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+			w := httptest.NewRecorder()
+			h.ServeAdminUI(w, httptest.NewRequest(http.MethodGet, "/admin", nil))
+
+			require.Equal(t, http.StatusOK, w.Code)
+			body := w.Body.String()
+			if tt.wantChecked {
+				assert.Contains(t, body, `name="student_portal" value="true" checked>`)
+				assert.NotContains(t, body, "Not available on this build")
+			} else {
+				assert.Contains(t, body, `name="student_portal" value="true" disabled>`)
+				assert.Contains(t, body, "Not available on this build")
+			}
+		})
+	}
+}
+
 // The broker secret is a credential: encrypted on disk, absent from API
 // responses, and back in the clear after a restart.
 func TestJob_PortalBrokerSecretAtRest(t *testing.T) {
@@ -673,11 +712,11 @@ func TestServeLabDetail_StudentPortal(t *testing.T) {
 		{
 			name: "deployed portal", enabled: true, publicURL: "https://admin.example.com",
 			contains:     []string{"Student portal &middot; running", "https://portal.lab.example.com/student/login", "Redeploy", "Remove portal"},
-			doesNotMatch: []string{"EASYLAB_PUBLIC_URL", "Deploy student portal"},
+			doesNotMatch: []string{"Password sign-in only", "Deploy student portal"},
 		},
 		{
 			name: "deployed portal without a public URL", enabled: true,
-			contains: []string{"Student portal &middot; running", "EASYLAB_PUBLIC_URL"},
+			contains: []string{"Student portal &middot; running", "Password sign-in only"},
 		},
 		{
 			name:         "no portal",

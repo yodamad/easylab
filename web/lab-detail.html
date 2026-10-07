@@ -119,7 +119,7 @@
                         <span class="lab-access-hint">The portal has no public address: the lab has no domain and its ingress controller has no external IP.</span>
                         {{end}}
                         {{if not .Portal.BrokeredLogin}}
-                        <span class="lab-access-hint">Password sign-in only. Set <code>EASYLAB_PUBLIC_URL</code> on this instance to offer Microsoft, GitHub and GitLab sign-in there too.</span>
+                        <span class="lab-access-hint">Password sign-in only. Set this instance's public address in <a href="/admin/student-portals">Student portals</a> to offer Microsoft, GitHub and GitLab sign-in there too.</span>
                         {{end}}
                         {{else}}
                         <span class="lab-access-state">No dedicated student portal</span>

@@ -2072,7 +2072,8 @@ async function applyPrefill(config, templatesYaml, jobId, action) {
     // Step 5: Workspace
     setFieldValue('workspace_namespace', config.workspace_namespace);
     const studentPortal = document.getElementById('student_portal');
-    if (studentPortal) studentPortal.checked = !!config.student_portal;
+    // A retried or recreated lab keeps what it had, rather than the new-lab default.
+    if (studentPortal && !studentPortal.disabled) studentPortal.checked = !!config.student_portal;
 
     // Step 6: Templates. The structured config already has everything the
     // form-mode builder would otherwise need reconstructed field by field

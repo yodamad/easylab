@@ -129,7 +129,7 @@ func (h *Handler) portalConfigFor(job *Job) (map[string][]byte, error) {
 	if h.studentAuthSnapshot != nil {
 		auth = h.studentAuthSnapshot()
 	}
-	return encodePortalState(portalStateFromJob(job, auth, h.publicURL))
+	return encodePortalState(portalStateFromJob(job, auth, h.effectivePublicURL()))
 }
 
 // needsInClusterBuildCache reports whether any template builds its devcontainer
@@ -206,9 +206,13 @@ func (h *Handler) reconcilePortal(labID string) {
 
 // deployPortal runs one EnsurePortal for the job. Callers hold the lab's portal lock.
 func (h *Handler) deployPortal(job *Job, pd workspace.PortalDeployer, backend workspace.Backend) error {
-	image := portalImage()
+	image := h.effectivePortalImage()
 	if image == "" {
-		return fmt.Errorf("no portal image for this build: set %s", EnvPortalImage)
+		// Only a development build gets here: a release runs the image of its own
+		// version. The portal is the same program as this server, started in
+		// student mode, so it needs an image built from the same code — and none
+		// is published for an unversioned build.
+		return fmt.Errorf("this is a development build, so there is no published EasyLab image of the same version for the portal to run; students can keep using this instance's student space, or set a portal image built from this code on the Student portals settings page (or with %s)", EnvPortalImage)
 	}
 
 	hadSecret := func() bool {
@@ -540,7 +544,7 @@ func (h *Handler) portalDisplayFor(ctx context.Context, job *Job) PortalDisplay 
 		Enabled:       target.enabled,
 		Supported:     target.completed && target.kubeconfig != "",
 		Error:         h.portalError(job.ID),
-		BrokeredLogin: h.publicURL != "",
+		BrokeredLogin: h.effectivePublicURL() != "",
 		CentralPortal: h.mode != ModeAdmin,
 	}
 	if !display.Supported || !display.Enabled {

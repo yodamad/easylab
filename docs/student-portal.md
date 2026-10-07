@@ -38,11 +38,13 @@ Nothing changes for an existing deployment: without the option, the mode is `all
 
 ## Give a lab its own portal
 
-* **At creation** — on the wizard's **Workspace** step, check **Deploy a dedicated student
-  portal in this lab**. The portal is deployed right after the lab's cluster is ready.
-* **On an existing lab** — open the lab's page; the **Overview** tab has a **Student
-  portal** strip with a **Deploy student portal** button. See
-  [Managing labs](admin-lab-management.md#student-portal).
+* **New labs get one by default.** On the wizard's **Workspace** step, **Deploy a
+  dedicated student portal in this lab** is already checked; there is nothing else to do.
+  The portal is deployed right after the lab's cluster is ready. Uncheck the box to keep
+  a lab on the central student space.
+* **Labs created before this feature** are left as they are. Open the lab's page; the
+  **Overview** tab has a **Student portal** strip with a **Deploy student portal** button.
+  See [Managing labs](admin-lab-management.md#student-portal).
 
 The portal is served at `portal.<lab domain>`, with the same certificate as the lab's
 workspaces (the wildcard certificate when the lab has a DNS provider, a certificate of
@@ -56,22 +58,53 @@ its workspaces.
 
 ## Configuration
 
-Set these on the **central** instance:
+### The Student portals page
+
+Two settings apply to every portal. Set them from **Student portals** in the admin
+sidebar (`/admin/student-portals`):
+
+![Student portals settings](screens/portal-settings.png){width=850}
+
+* **Public address of this instance** — where students' browsers reach the central
+  instance, e.g. `https://easylab.example.com`. Portals send students there for
+  Microsoft / GitHub / GitLab sign-in. Enter the address alone, without a path. The page
+  shows the address you are currently browsing it on, which is usually the right one.
+  Without a public address, portals offer password sign-in only.
+* **Portal image** — the EasyLab image the portals run. Normally left empty: a released
+  version uses its own release image.
+
+The box at the top of the page says what portals currently get, and what is missing.
+Leave a field empty to use its default (shown under the field). Saving applies to the
+labs that already have a portal too, in the background: a new address reaches them
+within seconds; a new image restarts them, which signs their students out.
+
+### Environment variables
+
+The same two settings can be given as environment variables on the **central** instance.
+They are the **defaults**: a value saved on the page wins over them.
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `EASYLAB_MODE` | `all` or `admin` (see above) | `all` |
-| `EASYLAB_PUBLIC_URL` | The central instance's address as students reach it, e.g. `https://easylab.example.com`. Needed for Microsoft / GitHub / GitLab sign-in on the portals. | unset — portals offer password sign-in only |
-| `EASYLAB_PORTAL_IMAGE` | Image the portals run | `docker.io/yodamad/easylab:v<this version>` |
+| `EASYLAB_MODE` | `all` or `admin` (see above). Not on the page: it takes a restart. | `all` |
+| `EASYLAB_PUBLIC_URL` | Default for **Public address of this instance** | unset — portals offer password sign-in only |
+| `EASYLAB_PORTAL_IMAGE` | Default for **Portal image** | `docker.io/yodamad/easylab:v<this version>` |
 
 With the Helm chart these are `config.mode`, `config.publicUrl` (defaults to the ingress
 host) and `config.portalImage` (defaults to the release's own image) — see
-[Helm](helm.md#in-lab-student-portals).
+[Helm](helm.md#in-lab-student-portals). A Helm install therefore needs nothing set on
+the page.
 
 !!! warning "The lab's cluster must be able to pull the portal image"
     The portal runs the EasyLab image on the **lab's** nodes. If you use a private mirror,
-    make sure those nodes can pull from it. A build without a version (`make dev`,
-    `go run`) has no matching release image: set `EASYLAB_PORTAL_IMAGE` explicitly.
+    make sure those nodes can pull from it.
+
+!!! note "Development builds"
+    The portal is the same program as the admin, started in student mode, so it needs an
+    image built from the same code. A released version uses its own release image
+    automatically. A build without a version (`make dev`, `go run`) has no such image:
+    the wizard option is then greyed out and labs use the central student space. To try
+    a portal from a development build, build and push an image from your code and enter
+    it as the **Portal image** on the Student portals page.
 
 ## How students sign in
 
@@ -88,8 +121,8 @@ host) and `config.portalImage` (defaults to the release's own image) — see
 
     Nothing has to be registered per lab: the callback URLs you configured for
     [Azure AD](azure-ad.md), [GitHub](github.md) and [GitLab](gitlab.md) stay the central
-    instance's. This needs `EASYLAB_PUBLIC_URL`, and the central instance to be reachable
-    when a student signs in.
+    instance's. This needs the [public address](#the-student-portals-page) to be set, and
+    the central instance to be reachable when a student signs in.
 
 Changes to the sign-in settings on the central instance (a provider enabled, password
 sign-in turned off, an allowed organization) reach every portal automatically.

@@ -85,6 +85,8 @@ func TestBuildMux_RoutesPerMode(t *testing.T) {
 		{name: "destroy stack", path: "/api/stacks/destroy", all: true, admin: true},
 		{name: "student portal password", path: "/api/student-portal-password", all: true, admin: true},
 		{name: "GitHub login settings", path: "/api/github-auth-config", all: true, admin: true},
+		{name: "student portals settings page", path: "/admin/student-portals", all: true, admin: true},
+		{name: "student portals settings API", path: "/api/portal-settings", all: true, admin: true},
 	}
 
 	muxes := map[server.Mode]*http.ServeMux{

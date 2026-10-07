@@ -356,13 +356,17 @@ func main() {
 
 	// In-lab student portals mirror this instance's student sign-in settings, and
 	// send students here for the providers only this instance is registered with.
+	// Both the public URL and the portal image default from the environment and
+	// can be overridden from the Student portals admin page (persisted).
 	publicURL := os.Getenv(server.EnvPublicURL)
+	portalSettings := server.NewPortalSettingsStore(*dataDir)
 	handler.SetMode(mode)
 	handler.SetPortalAuth(publicURL, authHandler.StudentAuthSnapshot)
+	handler.SetPortalSettingsStore(portalSettings)
 	authHandler.SetBrokerLabResolver(handler.BrokerPortal)
 	authHandler.SetBrokerOnly(mode == server.ModeAdmin)
-	if publicURL == "" {
-		log.Printf("[STARTUP] %s is not set: in-lab student portals will offer password login only", server.EnvPublicURL)
+	if publicURL == "" && portalSettings.Get().PublicURL == "" {
+		log.Printf("[STARTUP] No public address configured: in-lab student portals will offer password login only. Set it on the Student portals admin page or with %s", server.EnvPublicURL)
 	}
 
 	// Setup routes
@@ -591,6 +595,8 @@ func registerAdminRoutes(mux *http.ServeMux, handler *server.Handler, authHandle
 	mux.HandleFunc("/api/github-auth-config", authHandler.RequireAuth(handler.SaveGitHubAuthConfig))
 	mux.HandleFunc("/admin/gitlab", authHandler.RequireAuth(handler.ServeGitLabAuth))
 	mux.HandleFunc("/api/gitlab-auth-config", authHandler.RequireAuth(handler.SaveGitLabAuthConfig))
+	mux.HandleFunc("/admin/student-portals", authHandler.RequireAuth(handler.ServePortalSettings))
+	mux.HandleFunc("/api/portal-settings", authHandler.RequireAuth(handler.SavePortalSettings))
 	mux.HandleFunc("/api/student-portal-password", authHandler.RequireAuth(handler.GetStudentPortalPassword))
 	mux.HandleFunc("/api/templates/detect-variables", authHandler.RequireAuth(handler.DetectTemplateVariables))
 	mux.HandleFunc("/api/templates/detect-devcontainer", authHandler.RequireAuth(handler.DetectDevcontainer))
