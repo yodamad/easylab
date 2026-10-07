@@ -594,6 +594,7 @@
                         <div class="warning-message" id="dns-manual-warning" style="display: none;">
                             <h3>What you'll need to do</h3>
                             <p>Workspace URLs are <code>{workspace}.{domain}</code>, so once the lab is provisioned, create a wildcard <code>A</code> record for <code id="dns-warning-record">*.your-domain</code> pointing at the lab's ingress IP &mdash; otherwise workspace URLs won't resolve and their certificates will stay pending.</p>
+                            <p>The lab's own student portal is served on the domain itself, which a wildcard record does not cover: also create an <code>A</code> record for <code id="dns-warning-base-record">your-domain</code> pointing at the same IP.</p>
                             <p>Each workspace also requests its own Let's Encrypt certificate, capped at 50 per registered domain per week. Pick &ldquo;Custom domain &mdash; automatic&rdquo; above to get one shared wildcard certificate instead.</p>
                         </div>
 

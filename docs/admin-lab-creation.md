@@ -383,6 +383,10 @@ Picking either custom-domain option reveals:
     same lookup. The wizard shows this same guidance inline as soon as you pick that
     option.
 
+    If the lab has its own [student portal](student-portal.md) (the default), add a
+    second record for the domain itself, `<domain> → <ingressIP>`: the portal is served
+    there, and a wildcard record does not match it.
+
 ![DNS configuration](screens/dns-config.png)
 
 On **Create New Infrastructure**, that question and the domain fields under it are all

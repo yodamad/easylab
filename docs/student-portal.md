@@ -48,11 +48,20 @@ Nothing changes for an existing deployment: without the option, the mode is `all
 
 The portal is served on **the lab's domain itself** — the one you entered when creating
 the lab, e.g. `https://lab.example.com` — while workspaces stay on its subdomains
-(`https://<workspace>.lab.example.com`). There is no extra DNS record to create: that
-name already resolves to the lab's cluster (EasyLab creates the record when it manages
-the lab's DNS, and you created it yourself otherwise), and it is covered by the lab's
-certificate (the wildcard certificate when the lab has a DNS provider, a certificate of
-its own otherwise). A lab without a domain gets `http://<ingress IP>.nip.io`.
+(`https://<workspace>.lab.example.com`). It is covered by the lab's certificate (the
+wildcard certificate when the lab has a DNS provider, a certificate of its own
+otherwise). A lab without a domain gets `http://<ingress IP>.nip.io`.
+
+Which DNS records that takes depends on how the lab's DNS is set up:
+
+| DNS setup chosen in the wizard | Record for the portal (`lab.example.com`) | Records for workspaces |
+|---|---|---|
+| Custom domain — automatic, **Wildcard record** | Created by EasyLab | `*.lab.example.com`, created by EasyLab |
+| Custom domain — automatic, **ExternalDNS** | Created by EasyLab | One per workspace, created by ExternalDNS shortly after it starts — there is no wildcard |
+| Custom domain — **manual** | **You** create `lab.example.com` | **You** create `*.lab.example.com` |
+
+With manual DNS, mind that the wildcard record does not match the domain itself: the
+portal needs its own `A` record, pointing at the same IP.
 
 !!! note "Two labs on one domain"
     Two labs sharing both a namespace and a domain on the same cluster cannot both have a

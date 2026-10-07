@@ -1008,6 +1008,9 @@ function updateDNSManualWarning() {
 
     const domain = domainInput.value.trim();
     record.textContent = domain !== '' ? '*.' + domain : '*.your-domain';
+    // The student portal's record: the domain itself, which the wildcard does not match.
+    const baseRecord = document.getElementById('dns-warning-base-record');
+    if (baseRecord) baseRecord.textContent = domain !== '' ? domain : 'your-domain';
 }
 
 // Fetch Azure VM sizes for the selected location
