@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
@@ -811,6 +812,43 @@ func TestFilterKnownURNs(t *testing.T) {
 			t.Parallel()
 
 			assert.Equal(t, tt.expected, filterKnownURNs(tt.candidates, tt.known))
+		})
+	}
+}
+
+func TestSharedInfraURNs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name               string
+		useExistingCluster bool
+		expectedCount      int
+	}{
+		{
+			name:               "dedicated cluster excludes nothing so the cluster itself is destroyed",
+			useExistingCluster: false,
+			expectedCount:      0,
+		},
+		{
+			name:               "existing cluster preserves shared ingress, TLS and DNS-01 resources",
+			useExistingCluster: true,
+			expectedCount:      10,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			urns := sharedInfraURNs("dev", tt.useExistingCluster)
+			require.Len(t, urns, tt.expectedCount)
+			for _, urn := range urns {
+				assert.True(t, strings.HasPrefix(urn, "urn:pulumi:dev::easylab::kubernetes:"), urn)
+			}
+			if tt.useExistingCluster {
+				assert.Contains(t, urns, "urn:pulumi:dev::easylab::kubernetes:helm.sh/v3:Release::cert-manager")
+				assert.Contains(t, urns, "urn:pulumi:dev::easylab::kubernetes:helm.sh/v3:Release::traefik")
+			}
 		})
 	}
 }

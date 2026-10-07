@@ -1133,68 +1133,31 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 	job, _ := pe.jobManager.GetJob(jobID)
 	job.mu.RLock()
 	stackName := job.Config.StackName
+	useExistingCluster := job.Config.UseExistingCluster
 	job.mu.RUnlock()
 	jobDir := filepath.Join(pe.workDir, jobID)
 
-	// cert-manager and traefik are shared ingress/TLS infrastructure: on a BYO
-	// cluster (LabConfig.UseExistingCluster) they are installed once and reused
-	// by every subsequent lab on that cluster (see the skipClusterIssuer reuse
-	// logic in coder.SetupHTTPS), so tearing them down when any single lab is
-	// destroyed would take down TLS/ingress for every other lab sharing the
-	// cluster. Exclude their Pulumi resources from this destroy so they survive
-	// regardless of which lab is being destroyed or whether cleanup is manual
-	// or automatic. On a dedicated per-lab cluster this has no effect: the
-	// underlying OVH Kubernetes cluster is destroyed anyway, taking everything
-	// running on it down with it.
-	sharedIngressTLSURNs := []string{
-		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:core/v1:Namespace::cert-manager-ns", stackName),
-		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:helm.sh/v3:Release::cert-manager", stackName),
-		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:core/v1:Namespace::traefik-ns", stackName),
-		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:helm.sh/v3:Release::traefik", stackName),
-	}
-
-	// The cert-manager DNS-01 plumbing is shared the same way once a lab is
-	// created with "DNS-01 already set up on this cert-manager" (skipClusterIssuer
-	// in coder.SetupHTTPS): the lab that happens to own these resources (the one
-	// that had skipClusterIssuer=false and actually created them) is not
-	// necessarily the last one destroyed, and every later lab on the same cluster
-	// references them by these same well-known names rather than through its own
-	// Pulumi state. Losing any of these breaks DNS-01 for every lab still relying
-	// on them, not just the one being destroyed — the ClusterIssuer name is fixed
-	// in code (letsencrypt-prod-issuer) regardless of the configured
-	// utils.CoderClusterIssuerName, so this URN is correct even when that name is
-	// overridden. The OVH solver webhook (cert-manager-webhook-ovh-ns/-webhook) is
-	// only present with the OVH DNS provider; Azure uses cert-manager's native
-	// solver and creates no webhook, so those two URNs are absent from an
-	// Azure-DNS or HTTP-01 stack — which is why the filtering below is required
-	// rather than optional.
-	sharedDNS01URNs := []string{
-		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:cert-manager.io/v1:ClusterIssuer::letsencrypt-prod-issuer", stackName),
-		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:core/v1:Secret::dns-credentials-secret", stackName),
-		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:rbac.authorization.k8s.io/v1:Role::cert-manager-webhook-ovh-secret-reader", stackName),
-		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:rbac.authorization.k8s.io/v1:RoleBinding::cert-manager-webhook-ovh-secret-reader", stackName),
-		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:core/v1:Namespace::cert-manager-webhook-ovh-ns", stackName),
-		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:helm.sh/v3:Release::cert-manager-webhook-ovh", stackName),
-	}
-
-	// Pulumi validates every --exclude URN against the stack's state and aborts
-	// the entire destroy with "no resource named '<urn>' found" as soon as one
-	// does not match, so the lists above cannot be passed as-is: a lab that
-	// reuses pre-installed shared infrastructure (installCertManager /
-	// installIngressController = false on a BYO cluster, or no domain at all)
-	// never created most of these resources, and excluding what it does not own
-	// would make exactly those labs impossible to destroy. Keep only the URNs
-	// this stack actually holds.
-	sharedURNs := append(sharedIngressTLSURNs, sharedDNS01URNs...)
-	knownURNs, urnErr := stackResourceURNs(prep.Context, prep.Stack)
-	if urnErr != nil {
-		// Keep the full exclusion list rather than dropping the protection: a
-		// failed destroy is retryable, tearing down cert-manager/traefik for
-		// every other lab sharing the cluster is not.
-		log.Printf("Warning: failed to read stack state for job %s, keeping full exclusion list: %v", jobID, urnErr)
-		pe.jobManager.AppendOutput(jobID, "Warning: could not read stack state to identify shared infrastructure resources.")
-	} else {
-		sharedURNs = filterKnownURNs(sharedURNs, knownURNs)
+	// Shared ingress/TLS/DNS-01 infrastructure is excluded from the destroy on a
+	// BYO cluster only (see sharedInfraURNs). Pulumi validates every --exclude
+	// URN against the stack's state and aborts the entire destroy with "no
+	// resource named '<urn>' found" as soon as one does not match, so the list
+	// cannot be passed as-is: a lab that reuses pre-installed shared
+	// infrastructure (installCertManager / installIngressController = false, or
+	// no domain at all) never created most of these resources, and excluding
+	// what it does not own would make exactly those labs impossible to destroy.
+	// Keep only the URNs this stack actually holds.
+	sharedURNs := sharedInfraURNs(stackName, useExistingCluster)
+	if len(sharedURNs) > 0 {
+		knownURNs, urnErr := stackResourceURNs(prep.Context, prep.Stack)
+		if urnErr != nil {
+			// Keep the full exclusion list rather than dropping the protection: a
+			// failed destroy is retryable, tearing down cert-manager/traefik for
+			// every other lab sharing the cluster is not.
+			log.Printf("Warning: failed to read stack state for job %s, keeping full exclusion list: %v", jobID, urnErr)
+			pe.jobManager.AppendOutput(jobID, "Warning: could not read stack state to identify shared infrastructure resources.")
+		} else {
+			sharedURNs = filterKnownURNs(sharedURNs, knownURNs)
+		}
 	}
 
 	// Run pulumi destroy with streaming output
@@ -1202,8 +1165,10 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 	if len(sharedURNs) > 0 {
 		destroyOpts = append(destroyOpts, optdestroy.Exclude(sharedURNs))
 		pe.jobManager.AppendOutput(jobID, "Running pulumi destroy (preserving shared cert-manager, traefik, and DNS-01 infrastructure)...")
-	} else {
+	} else if useExistingCluster {
 		pe.jobManager.AppendOutput(jobID, "Running pulumi destroy (this stack owns no shared cert-manager, traefik, or DNS-01 resources)...")
+	} else {
+		pe.jobManager.AppendOutput(jobID, "Running pulumi destroy (dedicated cluster: destroying all resources)...")
 	}
 	destroyResult, err := prep.Stack.Destroy(prep.Context, destroyOpts...)
 	if err != nil {
@@ -1274,6 +1239,50 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 	}
 
 	return nil
+}
+
+// sharedInfraURNs returns the URNs of the ingress/TLS/DNS-01 resources that must
+// survive the destroy of a single lab, or nil when the lab runs on its own
+// dedicated cluster.
+//
+// cert-manager and traefik are shared ingress/TLS infrastructure: on a BYO
+// cluster (LabConfig.UseExistingCluster) they are installed once and reused by
+// every subsequent lab on that cluster (see the skipClusterIssuer reuse logic in
+// coder.SetupHTTPS), so tearing them down when any single lab is destroyed would
+// take down TLS/ingress for every other lab sharing the cluster.
+//
+// The cert-manager DNS-01 plumbing is shared the same way once a lab is created
+// with "DNS-01 already set up on this cert-manager": the lab that happens to own
+// these resources is not necessarily the last one destroyed, and every later lab
+// on the same cluster references them by these same well-known names rather than
+// through its own Pulumi state. The ClusterIssuer name is fixed in code
+// (letsencrypt-prod-issuer) regardless of the configured
+// utils.CoderClusterIssuerName, so this URN is correct even when that name is
+// overridden. The OVH solver webhook (cert-manager-webhook-ovh-ns/-webhook) is
+// only present with the OVH DNS provider; Azure uses cert-manager's native
+// solver and creates no webhook.
+//
+// On a dedicated per-lab cluster nothing may be excluded: an excluded resource
+// keeps everything it depends on alive too, and these all depend on the
+// Kubernetes provider, hence on the cluster, its node pool, network and
+// gateway. Excluding them there leaves the whole cloud infrastructure running
+// while the lab is reported destroyed.
+func sharedInfraURNs(stackName string, useExistingCluster bool) []string {
+	if !useExistingCluster {
+		return nil
+	}
+	return []string{
+		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:core/v1:Namespace::cert-manager-ns", stackName),
+		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:helm.sh/v3:Release::cert-manager", stackName),
+		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:core/v1:Namespace::traefik-ns", stackName),
+		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:helm.sh/v3:Release::traefik", stackName),
+		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:cert-manager.io/v1:ClusterIssuer::letsencrypt-prod-issuer", stackName),
+		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:core/v1:Secret::dns-credentials-secret", stackName),
+		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:rbac.authorization.k8s.io/v1:Role::cert-manager-webhook-ovh-secret-reader", stackName),
+		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:rbac.authorization.k8s.io/v1:RoleBinding::cert-manager-webhook-ovh-secret-reader", stackName),
+		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:core/v1:Namespace::cert-manager-webhook-ovh-ns", stackName),
+		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:helm.sh/v3:Release::cert-manager-webhook-ovh", stackName),
+	}
 }
 
 // stackResourceURNs returns the set of resource URNs currently recorded in the
