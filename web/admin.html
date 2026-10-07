@@ -631,7 +631,7 @@
                                 </label>
                             </div>
                             {{if .PortalAvailable}}
-                            <small>Runs the student portal inside the lab's own cluster, at <code>portal.&lt;lab domain&gt;</code>, next to the workspaces it hands out. Students of this lab then keep working even when this admin instance is unreachable. On by default; it can also be turned on or off later from the lab's page.</small>
+                            <small>Runs the student portal inside the lab's own cluster, on the lab's own domain, next to the workspaces it hands out. Students of this lab then keep working even when this admin instance is unreachable. On by default; it can also be turned on or off later from the lab's page.</small>
                             {{else}}
                             <small>Not available on this build: it is a development build, so there is no published EasyLab image of the same version for the portal to run. Students use this instance's student space instead. To try a portal anyway, set a portal image built from this code in <a href="/admin/student-portals">Student portals</a>.</small>
                             {{end}}

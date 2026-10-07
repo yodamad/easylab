@@ -42,8 +42,6 @@ const (
 	// controller's namespace for a lab without a domain (see ensurePortalRBAC).
 	portalIngressAccessSuffix = "-ingress"
 
-	// portalHostLabel is the DNS label the portal is served under: "portal.{domain}".
-	portalHostLabel = "portal"
 	// portalContainerPort is the port the EasyLab server listens on in the image.
 	portalContainerPort = 8080
 	portalContainerName = "portal"
@@ -453,7 +451,13 @@ func (b *Backend) EnsurePortal(ctx context.Context, spec workspace.PortalSpec) (
 		WildcardTLSSecret: spec.WildcardTLSSecret,
 		ClusterIssuer:     spec.ClusterIssuer,
 	})
-	host := workspaceHost(portalHostLabel, routed.Domain)
+	// The portal is served on the lab's domain itself, not a subdomain of it. That
+	// name is the one thing every lab with a domain is sure to have: provisioning
+	// creates its A record and puts it on the wildcard certificate, and a lab with
+	// manually managed DNS has it by definition — whereas a "portal." subdomain only
+	// resolves where a wildcard record happens to exist. Workspaces and the
+	// registry live on subdomains, so nothing else answers there.
+	host := strings.TrimSpace(routed.Domain)
 	if host != "" {
 		owner, err := b.portalHostOwner(ctx, spec.LabID, host)
 		if err != nil {

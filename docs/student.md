@@ -12,9 +12,9 @@ Every student page shows the EasyLab copyright and version in a footer at the bo
 
 !!! note "Which address do I use?"
     Your workshop organiser gives you the address of the student space. It is either a
-    shared one for every lab, or one dedicated to your lab (it then starts with
-    `portal.`). A dedicated one works exactly as described on this page, shows only that
-    lab, and opens straight on the login page. Organisers: see
+    shared one for every lab, or one dedicated to your lab (the lab's own domain). A
+    dedicated one works exactly as described on this page, shows only that lab, and
+    opens straight on the login page. Organisers: see
     [In-lab student portal](student-portal.md).
 
 ## Login

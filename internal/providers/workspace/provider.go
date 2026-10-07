@@ -409,7 +409,7 @@ type PortalSpec struct {
 	// Image is the EasyLab image the portal runs.
 	Image string
 	// Domain, WildcardTLSSecret and ClusterIssuer expose the portal the same way a
-	// workspace is exposed (see Spec): under "portal.{Domain}", with the lab's
+	// workspace is exposed (see Spec): on "{Domain}" itself, with the lab's
 	// wildcard certificate when it has one, else a per-host certificate. An empty
 	// Domain falls back to the backend's own routing (nip.io over plain HTTP).
 	Domain            string

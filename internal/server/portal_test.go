@@ -238,7 +238,7 @@ func TestReconcilePortal_RecordsFailure(t *testing.T) {
 	t.Run("cluster refuses", func(t *testing.T) {
 		t.Setenv(EnvPortalImage, testPortalImage)
 		h, id, fb := newPortalLab(t, nil)
-		fb.portalEnsureErr = fmt.Errorf("portal host portal.lab.example.com is already used by lab job-other")
+		fb.portalEnsureErr = fmt.Errorf("portal host lab.example.com is already used by lab job-other")
 
 		h.reconcilePortal(id)
 		assert.Contains(t, h.portalError(id), "already used")
@@ -255,7 +255,7 @@ func TestReconcilePortal_RecordsFailure(t *testing.T) {
 		display = h.portalDisplayFor(context.Background(), mustJob(t, h, id))
 		assert.True(t, display.Deployed)
 		assert.True(t, display.Ready)
-		assert.Equal(t, "https://portal.lab.example.com", display.URL)
+		assert.Equal(t, "https://lab.example.com", display.URL)
 	})
 }
 
@@ -421,7 +421,7 @@ func TestBrokerPortal(t *testing.T) {
 
 		portalURL, secret, ok := h.BrokerPortal(id)
 		require.True(t, ok)
-		assert.Equal(t, "https://portal.lab.example.com", portalURL)
+		assert.Equal(t, "https://lab.example.com", portalURL)
 		assert.NotEmpty(t, secret)
 	})
 
@@ -433,7 +433,7 @@ func TestBrokerPortal(t *testing.T) {
 
 		portalURL, _, ok := h.BrokerPortal(id)
 		require.True(t, ok)
-		assert.Equal(t, "https://portal.lab.example.com", portalURL)
+		assert.Equal(t, "https://lab.example.com", portalURL)
 	})
 
 	refused := []struct {
@@ -711,7 +711,7 @@ func TestServeLabDetail_StudentPortal(t *testing.T) {
 	}{
 		{
 			name: "deployed portal", enabled: true, publicURL: "https://admin.example.com",
-			contains:     []string{"Student portal &middot; running", "https://portal.lab.example.com/student/login", "Redeploy", "Remove portal"},
+			contains:     []string{"Student portal &middot; running", "https://lab.example.com/student/login", "Redeploy", "Remove portal"},
 			doesNotMatch: []string{"Password sign-in only", "Deploy student portal"},
 		},
 		{

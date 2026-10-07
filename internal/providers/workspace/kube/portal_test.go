@@ -54,7 +54,7 @@ func TestEnsurePortal_CreatesEverything(t *testing.T) {
 
 	url, err := b.EnsurePortal(ctx, spec)
 	require.NoError(t, err)
-	assert.Equal(t, "https://portal.lab.example.com", url)
+	assert.Equal(t, "https://lab.example.com", url)
 
 	name := portalName("lab-1")
 
@@ -95,7 +95,7 @@ func TestEnsurePortal_CreatesEverything(t *testing.T) {
 
 	ing, err := cs.NetworkingV1().Ingresses(portalTestNS).Get(ctx, name, metav1.GetOptions{})
 	require.NoError(t, err)
-	assert.Equal(t, "portal.lab.example.com", ing.Spec.Rules[0].Host)
+	assert.Equal(t, "lab.example.com", ing.Spec.Rules[0].Host)
 	require.Len(t, ing.Spec.TLS, 1)
 	assert.Equal(t, "easylab-wildcard-tls", ing.Spec.TLS[0].SecretName)
 	assert.NotContains(t, ing.Annotations, clusterIssuerAnnotation)
@@ -207,9 +207,9 @@ func TestEnsurePortal_TLSSources(t *testing.T) {
 		wantSecret    string
 		wantIssuer    string
 	}{
-		{name: "wildcard secret wins", wildcard: "wild", clusterIssuer: "letsencrypt", wantURL: "https://portal.lab.example.com", wantSecret: "wild"},
-		{name: "per-host certificate", clusterIssuer: "letsencrypt", wantURL: "https://portal.lab.example.com", wantSecret: portalName("lab-1") + "-tls", wantIssuer: "letsencrypt"},
-		{name: "no certificate source", wantURL: "http://portal.lab.example.com"},
+		{name: "wildcard secret wins", wildcard: "wild", clusterIssuer: "letsencrypt", wantURL: "https://lab.example.com", wantSecret: "wild"},
+		{name: "per-host certificate", clusterIssuer: "letsencrypt", wantURL: "https://lab.example.com", wantSecret: portalName("lab-1") + "-tls", wantIssuer: "letsencrypt"},
+		{name: "no certificate source", wantURL: "http://lab.example.com"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -260,7 +260,7 @@ func TestEnsurePortal_Reconciles(t *testing.T) {
 	spec.Config = map[string][]byte{"state.json": []byte("v2")}
 	url, err := b.EnsurePortal(ctx, spec)
 	require.NoError(t, err)
-	assert.Equal(t, "https://portal.new.example.com", url)
+	assert.Equal(t, "https://new.example.com", url)
 
 	name := portalName("lab-1")
 	dep, err := cs.AppsV1().Deployments(portalTestNS).Get(ctx, name, metav1.GetOptions{})
@@ -269,7 +269,7 @@ func TestEnsurePortal_Reconciles(t *testing.T) {
 
 	ing, err := cs.NetworkingV1().Ingresses(portalTestNS).Get(ctx, name, metav1.GetOptions{})
 	require.NoError(t, err)
-	assert.Equal(t, "portal.new.example.com", ing.Spec.Rules[0].Host)
+	assert.Equal(t, "new.example.com", ing.Spec.Rules[0].Host)
 	require.Len(t, ing.Spec.TLS, 1)
 	assert.Equal(t, "wild", ing.Spec.TLS[0].SecretName)
 
@@ -301,7 +301,7 @@ func TestEnsurePortal_NipIOFallback(t *testing.T) {
 	spec.ClusterIssuer = "letsencrypt"
 	url, err := b.EnsurePortal(ctx, spec)
 	require.NoError(t, err)
-	assert.Equal(t, "http://portal.203.0.113.7.nip.io", url)
+	assert.Equal(t, "http://203.0.113.7.nip.io", url)
 
 	role, err := cs.RbacV1().Roles(ingressControllerNamespace).Get(ctx, portalName("lab-1")+portalIngressAccessSuffix, metav1.GetOptions{})
 	require.NoError(t, err)

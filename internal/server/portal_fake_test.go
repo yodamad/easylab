@@ -41,7 +41,7 @@ func newFakePortalBackend() *fakePortalBackend {
 	return &fakePortalBackend{
 		fakeBackend: fakeBackend{reachable: true},
 		outbox:      map[string]string{},
-		url:         "https://portal.lab.example.com",
+		url:         "https://lab.example.com",
 	}
 }
 

@@ -18,7 +18,7 @@ import (
 const (
 	testBrokerSecret = "0123456789abcdefghijklmn"
 	testBrokerLab    = "job-lab"
-	testPortalURL    = "https://portal.lab.example.com"
+	testPortalURL    = "https://lab.example.com"
 	testAdminURL     = "https://admin.example.com"
 )
 
@@ -270,7 +270,7 @@ func TestBrokeredSignIn_EndToEnd(t *testing.T) {
 	require.Equal(t, http.StatusSeeOther, w.Code)
 	back, err := url.Parse(w.Header().Get("Location"))
 	require.NoError(t, err)
-	assert.Equal(t, "portal.lab.example.com", back.Host)
+	assert.Equal(t, "lab.example.com", back.Host)
 	assert.Equal(t, portalBrokerCallbackPath, back.Path)
 	assert.Empty(t, studentSessionEmails(central))
 	assert.Nil(t, cookieNamed(w, StudentSessionCookieName))

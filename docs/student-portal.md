@@ -11,8 +11,8 @@ inside each lab's own cluster**, next to the workspaces it hands out.
 
 What that changes:
 
-* **Each lab has its own address** for students — `https://portal.<lab domain>` — instead
-  of every lab sharing the central one.
+* **Each lab has its own address** for students — the lab's domain, `https://<lab domain>`
+  — instead of every lab sharing the central one.
 * **A lab keeps working without the admin.** The portal serves students from a copy of
   the lab's configuration stored in its cluster, so they can sign in with the password,
   request and open workspaces while the central instance is down or unreachable.
@@ -46,15 +46,18 @@ Nothing changes for an existing deployment: without the option, the mode is `all
   **Overview** tab has a **Student portal** strip with a **Deploy student portal** button.
   See [Managing labs](admin-lab-management.md#student-portal).
 
-The portal is served at `portal.<lab domain>`, with the same certificate as the lab's
-workspaces (the wildcard certificate when the lab has a DNS provider, a certificate of
-its own otherwise). A lab without a domain gets `http://portal.<ingress IP>.nip.io`, like
-its workspaces.
+The portal is served on **the lab's domain itself** — the one you entered when creating
+the lab, e.g. `https://lab.example.com` — while workspaces stay on its subdomains
+(`https://<workspace>.lab.example.com`). There is no extra DNS record to create: that
+name already resolves to the lab's cluster (EasyLab creates the record when it manages
+the lab's DNS, and you created it yourself otherwise), and it is covered by the lab's
+certificate (the wildcard certificate when the lab has a DNS provider, a certificate of
+its own otherwise). A lab without a domain gets `http://<ingress IP>.nip.io`.
 
 !!! note "Two labs on one domain"
-    Two labs sharing both a namespace and a domain on the same cluster cannot both be
-    served at `portal.<domain>`. The second one is refused, and the lab's page says which
-    lab already holds the address.
+    Two labs sharing both a namespace and a domain on the same cluster cannot both have a
+    portal on that domain. The second one is refused, and the lab's page says which lab
+    already holds the address.
 
 ## Configuration
 
