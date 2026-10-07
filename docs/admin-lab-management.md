@@ -142,18 +142,47 @@ A few things to know when editing before a retry or recreate:
   existing values; leaving them blank when editing a **recreate** means none — you must
   re-enter them there, the same as with **Rerun as-is**.
 * **The lab name (stack name) cannot be changed when editing before a retry.** A retry
-  reuses the same underlying Pulumi stack, so the field is read-only in that mode. It
-  stays editable when editing before a recreate, since recreating always provisions a new
-  stack.
+  redeploys the same lab under the same Pulumi stack name, so the field is read-only in
+  that mode. It stays editable when editing before a recreate, since recreating always
+  provisions a new stack.
 * **Editing before a retry keeps the same lab.** Submitting applies your changes to the
   same failed lab and reruns it — it does not appear as a new entry in the labs list.
   **Editing before a recreate**, like **Rerun as-is**, always creates a new lab entry; the
   destroyed one stays in the list for history.
 * Avoid switching a lab between **Create New Infrastructure** and **Use Existing
-  Cluster** when editing before a **retry** of a stack that has already provisioned real
-  cloud resources — Pulumi would treat the switch as those resources no longer being
-  wanted and destroy them. This is safe to change freely when editing before a
-  **recreate**, since that always starts a fresh stack.
+  Cluster** when editing before a **retry** of a lab whose
+  [rollback failed](#automatic-rollback-of-a-failed-deployment), and which therefore
+  still holds real cloud resources — Pulumi would treat the switch as those resources no
+  longer being wanted and destroy them. This is safe to change freely after a successful
+  rollback, and when editing before a **recreate**, since both start from a fresh stack.
+
+### Automatic rollback of a failed deployment
+
+When a deployment fails — on a first creation, a recreate, or a retry — EasyLab
+immediately destroys whatever that deployment had already created (network, gateway,
+Kubernetes cluster, node pool, Helm releases, DNS records…), so a failed lab does not
+leave orphan resources running and billing. There is nothing to enable.
+
+* The lab stays **running** during the rollback and its output shows the destroy; it
+  turns **failed** once the rollback is over. **Retry** and **Destroy Stack** are only
+  offered from that point.
+* After a successful rollback (`✅ Rollback completed` in the output) nothing is left
+  of the attempt, so a **Retry** redeploys the lab from scratch rather than resuming
+  where it failed. The kubeconfig of the removed cluster is no longer offered for
+  download.
+* On a **Use Existing Cluster** lab, cert-manager, Traefik, the ClusterIssuer and the
+  DNS-01 setup are left in place, exactly as when destroying such a
+  lab: other labs on the same cluster may rely on them.
+* If the rollback itself fails, the lab's error says so (`automatic rollback failed`),
+  the stack state is kept, and the kubeconfig stays available when the cluster exists so
+  you can inspect it. Resources may then still exist: fix the cause and **Retry**, or
+  use **Destroy Stack** to remove them.
+
+!!! note "What a rollback cannot remove"
+    A resource whose creation was interrupted before the cloud provider confirmed it is
+    not known to Pulumi, so the rollback cannot delete it. This is rare — Pulumi warns
+    about a pending operation in the output when it happens — and is worth a check in
+    your provider's console.
 
 ### Templates on a lab
 

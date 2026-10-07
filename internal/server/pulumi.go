@@ -944,30 +944,9 @@ func (pe *PulumiExecutor) Execute(jobID string) error {
 	pe.jobManager.AppendOutput(jobID, "Running pulumi up...")
 	upResult, err := prep.Stack.Up(prep.Context, optup.ProgressStreams(prep.Writer))
 	if err != nil {
-		pe.jobManager.SetError(jobID, fmt.Errorf("pulumi up failed: %w", err))
-
-		// Even if pulumi up failed, try to extract kubeconfig if cluster was created
-		pe.jobManager.AppendOutput(jobID, "Checking for kubeconfig despite deployment failure...")
-		if len(upResult.Outputs) > 0 {
-			pe.extractKubeconfigFromOutputs(jobID, upResult.Outputs)
-		} else {
-			// Try to refresh stack and get outputs directly
-			pe.jobManager.AppendOutput(jobID, "Attempting to refresh stack to get outputs...")
-			if _, refreshErr := prep.Stack.Refresh(prep.Context); refreshErr == nil {
-				if outputs, outErr := prep.Stack.Outputs(prep.Context); outErr == nil {
-					pe.extractKubeconfigFromOutputs(jobID, outputs)
-				} else {
-					pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Could not retrieve stack outputs: %v", outErr))
-				}
-			} else {
-				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Could not refresh stack: %v", refreshErr))
-			}
-		}
-
-		// Persist failed job to disk
-		if saveErr := pe.jobManager.SaveJob(jobID); saveErr != nil {
-			log.Printf("Warning: failed to persist failed job %s: %v", jobID, saveErr)
-		}
+		pe.handleFailedUp(jobID, prep, upResult, err, func() error {
+			return pe.rollbackStack(jobID, prep.Stack, prep.Writer)
+		})
 		return err
 	}
 
@@ -1019,31 +998,9 @@ func (pe *PulumiExecutor) ExecuteRetry(jobID string) error {
 	pe.jobManager.AppendOutput(jobID, "Running pulumi up...")
 	upResult, err := prep.Stack.Up(prep.Context, optup.ProgressStreams(prep.Writer))
 	if err != nil {
-		pe.jobManager.SetError(jobID, fmt.Errorf("pulumi up failed: %w", err))
-
-		// Even if pulumi up failed, try to extract kubeconfig if cluster was created
-		pe.jobManager.AppendOutput(jobID, "Checking for kubeconfig despite deployment failure...")
-		if len(upResult.Outputs) > 0 {
-			pe.extractKubeconfigFromOutputs(jobID, upResult.Outputs)
-		} else {
-			// Try to refresh stack and get outputs directly
-			pe.jobManager.AppendOutput(jobID, "Attempting to refresh stack to get outputs...")
-			if _, refreshErr := prep.Stack.Refresh(prep.Context); refreshErr == nil {
-				if outputs, outErr := prep.Stack.Outputs(prep.Context); outErr == nil {
-					pe.extractKubeconfigFromOutputs(jobID, outputs)
-				} else {
-					pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Could not retrieve stack outputs: %v", outErr))
-				}
-			} else {
-				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Could not refresh stack: %v", refreshErr))
-			}
-		}
-
-		// Persist failed job to disk
-		if saveErr := pe.jobManager.SaveJob(jobID); saveErr != nil {
-			log.Printf("Warning: failed to persist failed job %s: %v", jobID, saveErr)
-			// Don't fail the job if persistence fails
-		}
+		pe.handleFailedUp(jobID, prep, upResult, err, func() error {
+			return pe.rollbackStack(jobID, prep.Stack, prep.Writer)
+		})
 		return err
 	}
 
@@ -1137,39 +1094,8 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 	job.mu.RUnlock()
 	jobDir := filepath.Join(pe.workDir, jobID)
 
-	// Shared ingress/TLS/DNS-01 infrastructure is excluded from the destroy on a
-	// BYO cluster only (see sharedInfraURNs). Pulumi validates every --exclude
-	// URN against the stack's state and aborts the entire destroy with "no
-	// resource named '<urn>' found" as soon as one does not match, so the list
-	// cannot be passed as-is: a lab that reuses pre-installed shared
-	// infrastructure (installCertManager / installIngressController = false, or
-	// no domain at all) never created most of these resources, and excluding
-	// what it does not own would make exactly those labs impossible to destroy.
-	// Keep only the URNs this stack actually holds.
-	sharedURNs := sharedInfraURNs(stackName, useExistingCluster)
-	if len(sharedURNs) > 0 {
-		knownURNs, urnErr := stackResourceURNs(prep.Context, prep.Stack)
-		if urnErr != nil {
-			// Keep the full exclusion list rather than dropping the protection: a
-			// failed destroy is retryable, tearing down cert-manager/traefik for
-			// every other lab sharing the cluster is not.
-			log.Printf("Warning: failed to read stack state for job %s, keeping full exclusion list: %v", jobID, urnErr)
-			pe.jobManager.AppendOutput(jobID, "Warning: could not read stack state to identify shared infrastructure resources.")
-		} else {
-			sharedURNs = filterKnownURNs(sharedURNs, knownURNs)
-		}
-	}
-
 	// Run pulumi destroy with streaming output
-	destroyOpts := []optdestroy.Option{optdestroy.ProgressStreams(prep.Writer)}
-	if len(sharedURNs) > 0 {
-		destroyOpts = append(destroyOpts, optdestroy.Exclude(sharedURNs))
-		pe.jobManager.AppendOutput(jobID, "Running pulumi destroy (preserving shared cert-manager, traefik, and DNS-01 infrastructure)...")
-	} else if useExistingCluster {
-		pe.jobManager.AppendOutput(jobID, "Running pulumi destroy (this stack owns no shared cert-manager, traefik, or DNS-01 resources)...")
-	} else {
-		pe.jobManager.AppendOutput(jobID, "Running pulumi destroy (dedicated cluster: destroying all resources)...")
-	}
+	destroyOpts := pe.destroyOptions(prep.Context, jobID, prep.Stack, prep.Writer, stackName, useExistingCluster)
 	destroyResult, err := prep.Stack.Destroy(prep.Context, destroyOpts...)
 	if err != nil {
 		// Destroy failed - don't continue with stack removal or mark as destroyed
@@ -1239,6 +1165,158 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 	}
 
 	return nil
+}
+
+// destroyOptions builds the options of a pulumi destroy for a job's stack and
+// announces in the job output what the destroy will preserve. It is shared by
+// Destroy and by the rollback of a failed deployment, so both apply the same
+// exclusion rule.
+//
+// Shared ingress/TLS/DNS-01 infrastructure is excluded from the destroy on a
+// BYO cluster only (see sharedInfraURNs). Pulumi validates every --exclude
+// URN against the stack's state and aborts the entire destroy with "no
+// resource named '<urn>' found" as soon as one does not match, so the list
+// cannot be passed as-is: a lab that reuses pre-installed shared
+// infrastructure (installCertManager / installIngressController = false, or
+// no domain at all) never created most of these resources, and excluding
+// what it does not own would make exactly those labs impossible to destroy.
+func (pe *PulumiExecutor) destroyOptions(ctx context.Context, jobID string, stack auto.Stack, writer *jobOutputWriter, stackName string, useExistingCluster bool) []optdestroy.Option {
+	// Keep only the URNs this stack actually holds.
+	sharedURNs := sharedInfraURNs(stackName, useExistingCluster)
+	if len(sharedURNs) > 0 {
+		knownURNs, urnErr := stackResourceURNs(ctx, stack)
+		if urnErr != nil {
+			// Keep the full exclusion list rather than dropping the protection: a
+			// failed destroy is retryable, tearing down cert-manager/traefik for
+			// every other lab sharing the cluster is not.
+			log.Printf("Warning: failed to read stack state for job %s, keeping full exclusion list: %v", jobID, urnErr)
+			pe.jobManager.AppendOutput(jobID, "Warning: could not read stack state to identify shared infrastructure resources.")
+		} else {
+			sharedURNs = filterKnownURNs(sharedURNs, knownURNs)
+		}
+	}
+
+	destroyOpts := []optdestroy.Option{optdestroy.ProgressStreams(writer)}
+	if len(sharedURNs) > 0 {
+		destroyOpts = append(destroyOpts, optdestroy.Exclude(sharedURNs))
+		pe.jobManager.AppendOutput(jobID, "Running pulumi destroy (preserving shared cert-manager, traefik, and DNS-01 infrastructure)...")
+	} else if useExistingCluster {
+		pe.jobManager.AppendOutput(jobID, "Running pulumi destroy (this stack owns no shared cert-manager, traefik, or DNS-01 resources)...")
+	} else {
+		pe.jobManager.AppendOutput(jobID, "Running pulumi destroy (dedicated cluster: destroying all resources)...")
+	}
+	return destroyOpts
+}
+
+// rollbackTimeout is the maximum duration of the rollback of a failed
+// deployment. The rollback gets its own budget rather than what is left of
+// pulumiExecutionTimeout: running out of that one is itself a way to fail.
+const rollbackTimeout = 30 * time.Minute
+
+// rollbackStack destroys what a failed pulumi up left behind, then removes the
+// stack and the job directory so a retry starts from a clean slate. On a BYO
+// cluster the shared ingress/TLS/DNS-01 infrastructure is preserved, exactly as
+// Destroy does (see destroyOptions). An error means resources may remain; the
+// stack state is then left in place so Destroy can finish the job.
+func (pe *PulumiExecutor) rollbackStack(jobID string, stack auto.Stack, writer *jobOutputWriter) error {
+	job, exists := pe.jobManager.GetJob(jobID)
+	if !exists {
+		return fmt.Errorf("job %s not found", jobID)
+	}
+	job.mu.RLock()
+	config := job.Config
+	stackName := config.StackName
+	useExistingCluster := config.UseExistingCluster
+	job.mu.RUnlock()
+	jobDir := filepath.Join(pe.workDir, jobID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), rollbackTimeout)
+	defer cancel()
+
+	destroyOpts := pe.destroyOptions(ctx, jobID, stack, writer, stackName, useExistingCluster)
+	destroyResult, err := stack.Destroy(ctx, destroyOpts...)
+	if err != nil {
+		return fmt.Errorf("pulumi destroy failed: %w", err)
+	}
+	if destroyResult.Summary.ResourceChanges != nil {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Rollback summary: %+v", destroyResult.Summary))
+	}
+
+	// Best-effort from here on, as in Destroy: the resources are gone, only
+	// metadata is left. Force for the same reason too — excluded shared
+	// infrastructure keeps the state non-empty.
+	workspace, wsErr := auto.NewLocalWorkspace(ctx,
+		auto.WorkDir(jobDir),
+		auto.EnvVars(getPulumiEnvVars(config, jobDir)))
+	if wsErr != nil {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to create workspace for stack removal: %v", wsErr))
+	} else if removeErr := workspace.RemoveStack(ctx, stackName, optremove.Force()); removeErr != nil {
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Warning: failed to remove stack from workspace: %v", removeErr))
+	}
+	if err := pe.cleanupJobDirectory(jobID, false); err != nil {
+		log.Printf("Warning: failed to cleanup job directory for %s: %v", jobID, err)
+	}
+
+	return nil
+}
+
+// handleFailedUp settles a job whose pulumi up failed: it rolls back what the
+// deployment created so a failed lab leaves no orphan resources running, then
+// marks the job failed. rollback is a parameter so the job-state handling can be
+// tested without a Pulumi stack; callers pass rollbackStack.
+//
+// The job is only marked failed once the rollback is over. Until then it stays
+// running, which keeps Retry and Destroy out of reach while the stack is busy.
+func (pe *PulumiExecutor) handleFailedUp(jobID string, prep *JobPreparation, upResult auto.UpResult, upErr error, rollback func() error) {
+	upFailure := fmt.Errorf("pulumi up failed: %w", upErr)
+	pe.jobManager.AppendOutput(jobID, fmt.Sprintf("ERROR: %v", upFailure))
+	pe.jobManager.AppendOutput(jobID, "Rolling back the resources created by this deployment...")
+
+	if rollbackErr := rollback(); rollbackErr != nil {
+		log.Printf("Rollback failed for job %s: %v", jobID, rollbackErr)
+		pe.jobManager.AppendOutput(jobID, fmt.Sprintf("ERROR: rollback failed: %v", rollbackErr))
+		pe.jobManager.AppendOutput(jobID, "Resources may still exist in the cloud. Stack state is preserved: use Destroy Stack to remove them.")
+
+		// The cluster may still be up: extract its kubeconfig so it can be inspected.
+		pe.jobManager.AppendOutput(jobID, "Checking for kubeconfig despite deployment failure...")
+		if len(upResult.Outputs) > 0 {
+			pe.extractKubeconfigFromOutputs(jobID, upResult.Outputs)
+		} else {
+			// Try to refresh stack and get outputs directly
+			pe.jobManager.AppendOutput(jobID, "Attempting to refresh stack to get outputs...")
+			if _, refreshErr := prep.Stack.Refresh(prep.Context); refreshErr == nil {
+				if outputs, outErr := prep.Stack.Outputs(prep.Context); outErr == nil {
+					pe.extractKubeconfigFromOutputs(jobID, outputs)
+				} else {
+					pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Could not retrieve stack outputs: %v", outErr))
+				}
+			} else {
+				pe.jobManager.AppendOutput(jobID, fmt.Sprintf("Could not refresh stack: %v", refreshErr))
+			}
+		}
+
+		pe.jobManager.SetError(jobID, fmt.Errorf("%w; automatic rollback failed: %v", upFailure, rollbackErr))
+	} else {
+		useExistingCluster := false
+		if job, exists := pe.jobManager.GetJob(jobID); exists {
+			job.mu.RLock()
+			useExistingCluster = job.Config != nil && job.Config.UseExistingCluster
+			job.mu.RUnlock()
+		}
+		if useExistingCluster {
+			pe.jobManager.AppendOutput(jobID, "✅ Rollback completed: the resources created by this deployment were removed. Shared cert-manager, traefik, and DNS-01 infrastructure on the cluster was left in place.")
+		} else {
+			// The kubeconfig of a cluster that no longer exists is of no use.
+			pe.jobManager.SetKubeconfig(jobID, "")
+			pe.jobManager.AppendOutput(jobID, "✅ Rollback completed: the resources created by this deployment were removed.")
+		}
+		pe.jobManager.SetError(jobID, upFailure)
+	}
+
+	// Persist failed job to disk
+	if saveErr := pe.jobManager.SaveJob(jobID); saveErr != nil {
+		log.Printf("Warning: failed to persist failed job %s: %v", jobID, saveErr)
+	}
 }
 
 // sharedInfraURNs returns the URNs of the ingress/TLS/DNS-01 resources that must

@@ -620,7 +620,7 @@ After you click **Create Lab**, the wizard is replaced by the deployment progres
 
 * When the lab reaches **completed**, a **Go to Lab Administration** button appears next to the status badge. It opens the lab detail page, where you manage workspaces, credentials, and lifecycle (see [Lab management](admin-lab-management.md)).
 * If kubeconfig is available, a **Download Kubeconfig** button is also shown.
-* If the deployment fails, a **Retry Job** button is shown instead.
+* If the deployment fails, EasyLab first **rolls back** whatever the deployment had already created, so a failed lab does not leave cloud resources running. The lab stays **running** while the rollback is in progress — you can follow it in the output — and only then turns **failed**, with a **Retry Job** button. See [Automatic rollback of a failed deployment](admin-lab-management.md#automatic-rollback-of-a-failed-deployment).
 
 ## Dry run (preview before create)
 
