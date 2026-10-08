@@ -413,6 +413,15 @@ Picking either custom-domain option reveals:
 
 ![DNS configuration](screens/dns-config.png)
 
+With **Custom domain — automatic**, the **Saved DNS profile** dropdown lets you reuse
+credentials saved on the [DNS profiles](admin.md#dns-profiles) page instead of typing
+them again. Picking a profile selects its DNS provider, fills in the DNS zone when the
+profile has a default one and the field is still empty, and hides the credential fields.
+Choose **Enter credentials manually** to type them for this lab only. If the dropdown
+reports that saved profiles are locked, [unlock credential storage](admin.md#credential-storage)
+first. When you retry or recreate a lab that was created from a profile, the wizard
+selects that profile again if it still exists.
+
 On **Create New Infrastructure**, that question and the domain fields under it are all
 the step asks. EasyLab is building the cluster, so nothing can already be installed on
 it: there is no ingress controller or cert-manager to reuse, and the single node pool it

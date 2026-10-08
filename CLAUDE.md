@@ -34,6 +34,8 @@ internal/
     handler.go           # HTTP handlers (admin UI, student portal, credentials, labs)
     auth.go              # Authentication (admin password, student login, JWT cookies)
     credentials.go       # Provider credentials management (OVH, extensible)
+    credential_vault.go  # Encrypted credential storage (passphrase or LAB_DATA_ENCRYPTION_KEY) + its admin handlers
+    dns_profiles.go      # Saved DNS credential profiles (stored in the vault) + DNS admin page handlers
     job.go               # Job/lab lifecycle management (create, status, persist)
     pulumi.go            # Pulumi executor (preview, execute, destroy, retry)
     cleanup.go           # Background workspace cleanup goroutine (every 5 min)
@@ -206,7 +208,7 @@ When new visual styles are needed:
 
 ## Security
 
-- Provider credentials (OVH keys, etc.) are stored in-memory only via `CredentialsManager`
+- Provider credentials (OVH keys, etc.) are held in memory by `CredentialsManager` and never written to job files. They and saved DNS profiles are persisted only through `CredentialVault` (`credential_vault.go`), AES-256-GCM, and only under a key that is not on disk beside the data: an explicit `LAB_DATA_ENCRYPTION_KEY` or an admin passphrase held in memory. Never save them under the auto-generated `<dataDir>/.encryption_key`
 - Admin auth uses bcrypt-hashed passwords with cookie-based sessions
 - Student passwords are generated server-side with `crypto/rand`
 - Always sanitize user input in templates with `template.HTMLEscapeString()`
@@ -233,7 +235,7 @@ Documentation is part of the deliverable, not a follow-up task. Any change to a 
 
 | Area | Doc file |
 |------|----------|
-| Admin UI overview, login, provider credentials | `docs/admin.md` |
+| Admin UI overview, login, provider credentials, credential storage, DNS profiles | `docs/admin.md` |
 | Lab creation wizard (infrastructure, workspace templates, HTTPS/DNS, cleaning policies) | `docs/admin-lab-creation.md` |
 | Lab management (labs list, lab detail page, retry/recreate, workspace history, lab credentials) | `docs/admin-lab-management.md` |
 | Student feedback collection and admin feedback view | `docs/feedbacks.md` |

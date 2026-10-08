@@ -48,7 +48,7 @@
             <!-- Provider Credentials Notice -->
             <div id="provider-credentials-notice" class="info-box" style="display: none;">
                 <h3>🔐 Provider Credentials Required</h3>
-                <p>Before creating a lab, please configure your cloud provider API credentials. These credentials will be stored in memory and reused for all lab deployments.</p>
+                <p>Before creating a lab, please configure your cloud provider API credentials. These credentials are reused for all lab deployments.</p>
                 <a href="/credentials" class="btn btn-primary">
                     <span class="btn-icon">⚙️</span> Configure Credentials
                 </a>
@@ -472,6 +472,20 @@
                         <div id="dns-provider-block" style="display: none;">
                             <h3 class="subsection-title">Where is this domain's DNS hosted?</h3>
                             <p class="section-description">EasyLab creates the DNS records and one HTTPS certificate that covers every workspace automatically.</p>
+                            <div class="form-group" id="dns_profile_group">
+                                <label for="dns_profile">Saved DNS profile</label>
+                                <select id="dns_profile" name="dns_profile">
+                                    <option value="">Enter credentials manually</option>
+                                    {{range .DNSProfiles}}
+                                    <option value="{{.ID}}" data-name="{{.Name}}" data-provider="{{.Provider}}" data-zone="{{.Zone}}">{{.Name}} ({{.ProviderLabel}})</option>
+                                    {{end}}
+                                </select>
+                                {{if .DNSProfilesLocked}}
+                                <small>Saved DNS profiles are locked. <a href="/admin/dns">Unlock credential storage</a> to use them.</small>
+                                {{else}}
+                                <small>Reuse credentials saved on the <a href="/admin/dns">DNS profiles</a> page instead of typing them here.</small>
+                                {{end}}
+                            </div>
                             <div class="form-group">
                                 <label for="dns_provider">DNS Provider</label>
                                 <select id="dns_provider" name="dns_provider">

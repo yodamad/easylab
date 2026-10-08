@@ -7735,3 +7735,26 @@ details[open] > .secrets-summary::after {
         display: none;
     }
 }
+
+/* DNS profiles page: Edit / Delete side by side in a table cell */
+.options-table .col-actions {
+    text-align: center;
+    width: 170px;
+}
+
+.dns-profile-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: center;
+    align-items: center;
+}
+
+.dns-profile-actions form {
+    margin: 0;
+}
+
+/* Credential storage card: stacked forms need breathing room */
+.credential-storage form + form,
+.credential-storage details {
+    margin-top: 1rem;
+}

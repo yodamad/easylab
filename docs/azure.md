@@ -103,6 +103,8 @@ Or use the `--env-file` flag:
    - **Subscription ID** — your Azure subscription ID
 4. Click **Save Credentials**
 
+By default the credentials are kept in memory only and cleared when EasyLab restarts. Set up [credential storage](admin.md#credential-storage) to keep them, encrypted, across restarts.
+
 ## Configure Azure Options
 
 After saving credentials, set up default regions and VM sizes:

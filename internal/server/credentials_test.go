@@ -398,3 +398,91 @@ func TestCredentialsManager_GetAzureCredentials_Configured(t *testing.T) {
 		t.Errorf("GetAzureCredentials() ClientID = %q, want client", got.ClientID)
 	}
 }
+
+// Credentials saved from the UI come back after a restart once the vault opens.
+func TestCredentialsManager_VaultRoundTrip(t *testing.T) {
+	dataDir := t.TempDir()
+	vault := openTestVault(t, dataDir, nil)
+	if err := vault.SetPassphrase(testVaultPassphrase); err != nil {
+		t.Fatalf("SetPassphrase() error = %v", err)
+	}
+	cm := &CredentialsManager{credentials: make(map[string]ProviderCredentials)}
+	cm.AttachVault(vault)
+	if err := cm.SetCredentials(testOVHCredentials()); err != nil {
+		t.Fatalf("SetCredentials() error = %v", err)
+	}
+
+	// Restart: nothing in memory until the passphrase is entered.
+	restartedVault := openTestVault(t, dataDir, nil)
+	restarted := &CredentialsManager{credentials: make(map[string]ProviderCredentials)}
+	restarted.AttachVault(restartedVault)
+	if restarted.HasCredentials("ovh") {
+		t.Fatal("credentials available while the vault is locked")
+	}
+
+	// Entered while locked: must be saved on unlock, not replaced by what is saved.
+	azure := &AzureCredentials{ClientID: "c", ClientSecret: "s", TenantID: "t", SubscriptionID: "sub"}
+	if err := restarted.SetCredentials(azure); err != nil {
+		t.Fatalf("SetCredentials() while locked error = %v", err)
+	}
+
+	if err := restartedVault.Unlock(testVaultPassphrase); err != nil {
+		t.Fatalf("Unlock() error = %v", err)
+	}
+	got, err := restarted.GetOVHCredentials()
+	if err != nil {
+		t.Fatalf("GetOVHCredentials() after unlock error = %v", err)
+	}
+	if *got != *testOVHCredentials() {
+		t.Errorf("OVH credentials after unlock = %+v, want %+v", got, testOVHCredentials())
+	}
+	var savedAzure AzureCredentials
+	found, err := restartedVault.GetProviderCredentials("azure", &savedAzure)
+	if err != nil || !found {
+		t.Fatalf("azure credentials entered while locked were not saved on unlock (found=%v, err=%v)", found, err)
+	}
+	if savedAzure != *azure {
+		t.Errorf("saved azure credentials = %+v, want %+v", savedAzure, *azure)
+	}
+
+	// Clearing removes the saved copy too.
+	restarted.ClearCredentials("ovh")
+	var cleared OVHCredentials
+	if found, _ := restartedVault.GetProviderCredentials("ovh", &cleared); found {
+		t.Error("ClearCredentials() left the saved copy in the vault")
+	}
+}
+
+// With LAB_DATA_ENCRYPTION_KEY the vault opens by itself, and what was saved in
+// the UI replaces credentials that came from environment variables.
+func TestCredentialsManager_VaultOverridesEnvironment(t *testing.T) {
+	dataDir := t.TempDir()
+	first := &CredentialsManager{credentials: make(map[string]ProviderCredentials)}
+	first.AttachVault(openTestVault(t, dataDir, testEnvKey(1)))
+	if err := first.SetCredentials(testOVHCredentials()); err != nil {
+		t.Fatalf("SetCredentials() error = %v", err)
+	}
+
+	fromEnv := &OVHCredentials{ApplicationKey: "env", ApplicationSecret: "env", ConsumerKey: "env", ServiceName: "env", Endpoint: "ovh-ca"}
+	restarted := &CredentialsManager{credentials: map[string]ProviderCredentials{"ovh": fromEnv}}
+	restarted.AttachVault(openTestVault(t, dataDir, testEnvKey(1)))
+
+	got, err := restarted.GetOVHCredentials()
+	if err != nil {
+		t.Fatalf("GetOVHCredentials() error = %v", err)
+	}
+	if *got != *testOVHCredentials() {
+		t.Errorf("credentials = %+v, want the saved ones %+v", got, testOVHCredentials())
+	}
+
+	// A manager with no vault behaves exactly as before.
+	plain := &CredentialsManager{credentials: make(map[string]ProviderCredentials)}
+	plain.AttachVault(nil)
+	if err := plain.SetCredentials(testOVHCredentials()); err != nil {
+		t.Fatalf("SetCredentials() without vault error = %v", err)
+	}
+	plain.ClearCredentials("ovh")
+	if plain.HasCredentials("ovh") {
+		t.Error("ClearCredentials() without vault left credentials behind")
+	}
+}

@@ -970,6 +970,20 @@ function handleProviderChange() {
     }
 }
 
+// A saved DNS profile brings its provider and, when it has one, its zone.
+function handleDNSProfileChange() {
+    const profileSelect = document.getElementById('dns_profile');
+    const providerSelect = document.getElementById('dns_provider');
+    if (!profileSelect || !providerSelect) return;
+    const picked = profileSelect.value ? profileSelect.selectedOptions[0] : null;
+    if (picked) {
+        providerSelect.value = picked.dataset.provider;
+        const zoneInput = document.getElementById('dns_zone');
+        if (zoneInput && !zoneInput.value && picked.dataset.zone) zoneInput.value = picked.dataset.zone;
+    }
+    handleDNSProviderChange();
+}
+
 // Show/hide DNS provider-specific credential fields when dns_provider changes.
 function handleDNSProviderChange() {
     const select = document.getElementById('dns_provider');
@@ -985,8 +999,16 @@ function handleDNSProviderChange() {
     // Zone is mandatory once a provider is chosen: without it the A record fails
     // deep inside pulumi up. Keep required in lockstep with visibility.
     if (zoneInput) zoneInput.required = !!provider;
-    if (ovhFields) ovhFields.style.display = provider === 'ovh' ? '' : 'none';
-    if (azureFields) azureFields.style.display = provider === 'azure' ? '' : 'none';
+    // A saved profile supplies the credentials, so there is nothing to type. One
+    // that belongs to another provider than the one now selected is dropped.
+    const profileSelect = document.getElementById('dns_profile');
+    if (profileSelect && profileSelect.value) {
+        const picked = profileSelect.selectedOptions[0];
+        if (!picked || picked.dataset.provider !== provider) profileSelect.value = '';
+    }
+    const usingProfile = !!(profileSelect && profileSelect.value);
+    if (ovhFields) ovhFields.style.display = provider === 'ovh' && !usingProfile ? '' : 'none';
+    if (azureFields) azureFields.style.display = provider === 'azure' && !usingProfile ? '' : 'none';
 
     // ExternalDNS replaces the wildcard record, so it only means anything once a
     // provider is there to create records with.
@@ -1279,6 +1301,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const dnsProviderSelect = document.getElementById('dns_provider');
     if (dnsProviderSelect) {
         dnsProviderSelect.addEventListener('change', handleDNSProviderChange);
+        const dnsProfileSelect = document.getElementById('dns_profile');
+        if (dnsProfileSelect) dnsProfileSelect.addEventListener('change', handleDNSProfileChange);
         // Apply initial state (all DNS fields hidden by default)
         handleDNSProviderChange();
     }
@@ -2056,11 +2080,25 @@ async function applyPrefill(config, templatesYaml, jobId, action) {
         setFieldValue('dns_zone', config.dns_zone);
         wizard.setDNSRecordMode(config.use_external_dns ? 'externaldns' : 'wildcard');
 
+        // Reselect the saved profile the lab was created from, if it still exists.
+        const dnsProfileSelect = document.getElementById('dns_profile');
+        const savedProfile = dnsProfileSelect && config.dns_profile
+            ? Array.from(dnsProfileSelect.options).find(o => o.dataset.name === config.dns_profile && o.dataset.provider === config.dns_provider)
+            : null;
+        if (savedProfile) {
+            dnsProfileSelect.value = savedProfile.value;
+            handleDNSProviderChange();
+        }
+
         const dnsHint = document.getElementById('dns-cred-prefill-hint');
         if (dnsHint) {
-            dnsHint.textContent = action === 'retry'
-                ? "Leave the credential fields below blank to keep the lab's existing DNS credentials."
-                : 'DNS credentials are not carried over when recreating — leave the fields below blank for none, or fill them in again.';
+            if (savedProfile) {
+                dnsHint.textContent = 'DNS credentials come from the saved profile "' + config.dns_profile + '".';
+            } else {
+                dnsHint.textContent = action === 'retry'
+                    ? "Leave the credential fields below blank to keep the lab's existing DNS credentials."
+                    : 'DNS credentials are not carried over when recreating — pick a saved DNS profile, fill the fields in again, or leave them blank for none.';
+            }
             dnsHint.style.display = '';
         }
     }

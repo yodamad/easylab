@@ -163,6 +163,22 @@ func initDataEncryption(dataDir string) error {
 	return nil
 }
 
+// explicitEncryptionKey returns the decoded LAB_DATA_ENCRYPTION_KEY when the
+// operator set it in the environment, and nil when the key in use is the one
+// auto-generated under dataDir. The credential vault is only ever saved to disk
+// under a key that does not sit beside it, so it must tell the two apart.
+func explicitEncryptionKey() []byte {
+	raw := strings.TrimSpace(os.Getenv("LAB_DATA_ENCRYPTION_KEY"))
+	if raw == "" {
+		return nil
+	}
+	key, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nil // initDataEncryption has already rejected it
+	}
+	return key
+}
+
 func main() {
 	// Pulumi SDK v3.243+ calls slog.SetDefault(discardHandler{}) in its init(),
 	// which silently swallows all standard log.Printf output. Restore stderr.
@@ -280,6 +296,13 @@ func main() {
 		log.Printf("[SECURITY] PULUMI_CONFIG_PASSPHRASE is unset or the insecure default \"passphrase\" — set a strong value to protect secrets in Pulumi stack state. Existing stacks remain decryptable.")
 	}
 
+	// Credential vault: provider credentials and DNS profiles saved across
+	// restarts. Attached before the options managers below so they see saved
+	// credentials from the start.
+	credentialVault := server.NewCredentialVault(*dataDir, explicitEncryptionKey())
+	credentialsManager.AttachVault(credentialVault)
+	log.Printf("[STARTUP] Credential storage: %s", credentialVault.Status().State)
+
 	// Initialize OVH options manager (depends on credentialsManager)
 	ovhOptionsStart := time.Now()
 	ovhOptionsManager = server.NewOVHOptionsManager(*dataDir, credentialsManager)
@@ -322,6 +345,7 @@ func main() {
 	handler.SetAdminGroupIDConfigurer(authHandler.SetAdminGroupID)
 	handler.SetClassicAdminLoginConfigurer(authHandler.SetClassicAdminLoginDisabled)
 	handler.SetAuditStore(auditStore)
+	handler.SetCredentialVault(credentialVault)
 	log.Printf("[STARTUP] Handler initialization took %v", time.Since(handlerStart))
 
 	// Apply persisted Azure AD config (overrides env vars if set via UI)
@@ -560,6 +584,16 @@ func registerAdminRoutes(mux *http.ServeMux, handler *server.Handler, authHandle
 		}
 	}))
 	mux.HandleFunc("/api/providers", authHandler.RequireAuth(handler.ListProviders))
+
+	// Saved DNS profiles and the encrypted credential storage behind them
+	mux.HandleFunc("/admin/dns", authHandler.RequireAuth(handler.ServeDNSProfiles))
+	mux.HandleFunc("/api/dns-profiles", authHandler.RequireAuth(handler.SaveDNSProfile))
+	mux.HandleFunc("/api/dns-profiles/fields", authHandler.RequireAuth(handler.DNSProfileFields))
+	mux.HandleFunc("/api/dns-profiles/delete", authHandler.RequireAuth(handler.DeleteDNSProfile))
+	mux.HandleFunc("/api/credential-vault/passphrase", authHandler.RequireAuth(handler.SetVaultPassphrase))
+	mux.HandleFunc("/api/credential-vault/unlock", authHandler.RequireAuth(handler.UnlockVault))
+	mux.HandleFunc("/api/credential-vault/lock", authHandler.RequireAuth(handler.LockVault))
+	mux.HandleFunc("/api/credential-vault/reset", authHandler.RequireAuth(handler.ResetVault))
 
 	// Backward compatibility routes for OVH-specific endpoints
 	mux.HandleFunc("/ovh-credentials", authHandler.RequireAuth(handler.ServeOVHCredentials))

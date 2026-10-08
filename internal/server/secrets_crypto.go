@@ -105,6 +105,69 @@ func decryptSecret(s string) (string, error) {
 	return string(plaintext), nil
 }
 
+// sealWithAEAD encrypts s with an explicit AEAD, in the same
+// encPrefix + base64(nonce‖ciphertext) format as encryptSecret. aad binds the
+// ciphertext to the slot it is stored in, so a value copied into another slot
+// fails to open. Empty input returns empty output.
+func sealWithAEAD(aead cipher.AEAD, s, aad string) (string, error) {
+	if s == "" {
+		return "", nil
+	}
+	if aead == nil {
+		return "", fmt.Errorf("no encryption key available")
+	}
+	nonce := make([]byte, aead.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", fmt.Errorf("failed to generate nonce: %w", err)
+	}
+	ciphertext := aead.Seal(nonce, nonce, []byte(s), []byte(aad))
+	return encPrefix + base64.StdEncoding.EncodeToString(ciphertext), nil
+}
+
+// openWithAEAD reverses sealWithAEAD. Unlike decryptSecret it rejects values
+// without the encPrefix: nothing it reads was ever stored as plaintext.
+func openWithAEAD(aead cipher.AEAD, s, aad string) (string, error) {
+	if s == "" {
+		return "", nil
+	}
+	if aead == nil {
+		return "", fmt.Errorf("no encryption key available")
+	}
+	body, ok := strings.CutPrefix(s, encPrefix)
+	if !ok {
+		return "", fmt.Errorf("value is not encrypted")
+	}
+	raw, err := base64.StdEncoding.DecodeString(body)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode encrypted value: %w", err)
+	}
+	if len(raw) < aead.NonceSize() {
+		return "", fmt.Errorf("encrypted value too short")
+	}
+	nonce, ciphertext := raw[:aead.NonceSize()], raw[aead.NonceSize():]
+	plaintext, err := aead.Open(nil, nonce, ciphertext, []byte(aad))
+	if err != nil {
+		return "", fmt.Errorf("failed to decrypt value: %w", err)
+	}
+	return string(plaintext), nil
+}
+
+// newAES256GCM builds an AES-256-GCM AEAD from a 32-byte key.
+func newAES256GCM(key []byte) (cipher.AEAD, error) {
+	if len(key) != 32 {
+		return nil, fmt.Errorf("key must be 32 bytes (AES-256), got %d", len(key))
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AES cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCM: %w", err)
+	}
+	return gcm, nil
+}
+
 // deriveEncryptionKey derives a 32-byte AES-256 key from email and student password
 func deriveEncryptionKey(email, studentPassword string) []byte {
 	// Combine email and password

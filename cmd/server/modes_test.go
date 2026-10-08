@@ -87,6 +87,14 @@ func TestBuildMux_RoutesPerMode(t *testing.T) {
 		{name: "GitHub login settings", path: "/api/github-auth-config", all: true, admin: true},
 		{name: "student portals settings page", path: "/admin/student-portals", all: true, admin: true},
 		{name: "student portals settings API", path: "/api/portal-settings", all: true, admin: true},
+		{name: "DNS profiles page", path: "/admin/dns", all: true, admin: true},
+		{name: "DNS profiles API", path: "/api/dns-profiles", all: true, admin: true},
+		{name: "DNS profile fields", path: "/api/dns-profiles/fields", all: true, admin: true},
+		{name: "DNS profile delete", path: "/api/dns-profiles/delete", all: true, admin: true},
+		{name: "credential storage passphrase", path: "/api/credential-vault/passphrase", all: true, admin: true},
+		{name: "credential storage unlock", path: "/api/credential-vault/unlock", all: true, admin: true},
+		{name: "credential storage lock", path: "/api/credential-vault/lock", all: true, admin: true},
+		{name: "credential storage reset", path: "/api/credential-vault/reset", all: true, admin: true},
 	}
 
 	muxes := map[server.Mode]*http.ServeMux{

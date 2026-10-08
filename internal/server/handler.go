@@ -70,11 +70,14 @@ type Handler struct {
 	// since computing one walks every job's full event history — cheap
 	// enough for an on-demand admin view, wasteful to repeat within seconds of
 	// the last call (e.g. flipping the project or time-span filter back and forth).
-	statsCache          map[string]statsCacheEntry
-	statsCacheMu        sync.Mutex
-	templates           map[string]*template.Template
-	templatesMu         sync.RWMutex
-	credentialsManager  *CredentialsManager
+	statsCache         map[string]statsCacheEntry
+	statsCacheMu       sync.Mutex
+	templates          map[string]*template.Template
+	templatesMu        sync.RWMutex
+	credentialsManager *CredentialsManager
+	// credentialVault keeps provider credentials and saved DNS profiles across
+	// restarts (see credential_vault.go). Nil unless SetCredentialVault is called.
+	credentialVault     *CredentialVault
 	ovhOptionsManager   *OVHOptionsManager
 	azureOptionsManager *AzureOptionsManager
 	feedbackStore       *FeedbackStore
@@ -1042,6 +1045,7 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 		"admin-feedback.html":     "web/admin-feedback.html",
 		"admin-audit-log.html":    "web/admin-audit-log.html",
 		"credentials.html":        "web/credentials.html",
+		"dns-profiles.html":       "web/dns-profiles.html",
 		"ovh-credentials.html":    "web/ovh-credentials.html", // Keep for backward compatibility
 		"ovh-options.html":        "web/ovh-options.html",
 		"azure-options.html":      "web/azure-options.html",
@@ -1063,8 +1067,10 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 	// Shared partials a page pulls in with {{template "..."}}. They have to be
 	// parsed alongside the page or the define is unknown at execution time.
 	extraPartials := map[string][]string{
-		"admin.html":      {"web/partials/template-editor.html"},
-		"lab-detail.html": {"web/partials/template-editor.html"},
+		"admin.html":        {"web/partials/template-editor.html"},
+		"lab-detail.html":   {"web/partials/template-editor.html"},
+		"credentials.html":  {"web/partials/credential-storage.html"},
+		"dns-profiles.html": {"web/partials/credential-storage.html"},
 	}
 
 	var err error
@@ -1110,6 +1116,8 @@ func (h *Handler) ServeAdminUI(w http.ResponseWriter, r *http.Request) {
 		// to run one from (see portalImage).
 		"PortalAvailable": h.effectivePortalImage() != "",
 	}
+	// Saved DNS profiles the wizard offers in place of typing DNS credentials.
+	data["DNSProfiles"], data["DNSProfilesLocked"] = h.wizardDNSProfiles()
 	if h.ovhOptionsManager != nil {
 		cfg := h.ovhOptionsManager.GetConfig()
 		data["FlavorMinVCPUs"] = cfg.FlavorMinVCPUs
@@ -1191,6 +1199,12 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 	// files to upload.
 	initialConfig := h.createLabConfigFromForm(r, providerCreds)
 	initialConfig.WorkspaceTemplates = templates
+
+	if err := h.applyDNSProfile(r, initialConfig); err != nil {
+		log.Printf("Failed to apply DNS profile: %v", err)
+		h.renderHTMLError(w, "DNS Profile Error", dnsProfileErrorMessage(err), `<a href="/admin/dns" class="btn btn-primary">Open DNS profiles</a>`)
+		return
+	}
 
 	// A DNS-provider selection with no (or a mismatched) zone can only fail deep
 	// inside pulumi up, after minutes of provisioning. Reject it here, before any
@@ -3106,6 +3120,7 @@ func (h *Handler) ServeCredentials(w http.ResponseWriter, r *http.Request) {
 	data := map[string]interface{}{
 		"CurrentCreds": currentCreds,
 		"Provider":     provider,
+		"Storage":      h.credentialStorageView(),
 	}
 
 	h.serveTemplate(w, "credentials.html", data)
@@ -5104,9 +5119,16 @@ func (h *Handler) RetryJobWithConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// A saved DNS profile picked in the edit form wins over both.
+	if err := h.applyDNSProfile(r, editedConfig); err != nil {
+		log.Printf("Failed to apply DNS profile: %v", err)
+		h.renderHTMLError(w, "DNS Profile Error", dnsProfileErrorMessage(err), `<a href="/admin/dns" class="btn btn-primary">Open DNS profiles</a>`)
+		return
+	}
 	if editedConfig.DNSProvider != "" && editedConfig.DNSProvider == originalConfig.DNSProvider &&
 		len(originalConfig.DNSCredentials) > 0 && allValuesEmpty(editedConfig.DNSCredentials) {
 		editedConfig.DNSCredentials = originalConfig.DNSCredentials
+		editedConfig.DNSProfile = originalConfig.DNSProfile
 	}
 
 	// A DNS-provider selection with no (or a mismatched) zone can only fail deep

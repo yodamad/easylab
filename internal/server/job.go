@@ -425,6 +425,10 @@ type LabConfig struct {
 	DNSProvider    string            `json:"dns_provider,omitempty"`
 	DNSZone        string            `json:"dns_zone,omitempty"`
 	DNSCredentials map[string]string `json:"dns_credentials,omitempty"`
+	// DNSProfile is the name of the saved DNS profile DNSCredentials were copied
+	// from, when one was picked in the wizard. Informational: the lab never reads
+	// the profile again.
+	DNSProfile string `json:"dns_profile,omitempty"`
 
 	// UseExternalDNS swaps the wildcard A record for ExternalDNS, which watches the
 	// workspace ingresses and maintains one record per workspace. For zones where a

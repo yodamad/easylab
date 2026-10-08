@@ -1,0 +1,126 @@
+{{define "title"}}DNS profiles{{end}}
+{{define "body-class"}}admin-page{{end}}
+{{define "head-extra"}}
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.0/dist/htmx.min.js" integrity="sha384-wS5l5IKJBvK6sPTKa2WZ1js3d947pvWXbPJ1OmWfEuxLgeHcEbjUUA5i9V5ZkpCw" crossorigin="anonymous"></script>
+{{end}}
+
+{{define "body"}}
+<div class="admin-layout">
+    {{template "admin-sidebar" .}}
+    <div class="admin-main">
+        <div class="admin-page-header">
+            <h1>DNS profiles</h1>
+        </div>
+        <div class="admin-page-body">
+        <div class="admin-content-narrow">
+
+        {{template "credential-storage" .Storage}}
+
+        <section class="form-section" id="dns-profiles-list">
+            <h2>Saved DNS profiles</h2>
+            <p class="section-description">A profile holds the credentials of one DNS account. Pick it in the lab wizard instead of typing them again.</p>
+
+            {{if .Profiles}}
+            <table class="options-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Provider</th>
+                        <th>Default zone</th>
+                        <th>Updated</th>
+                        <th class="col-actions">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Profiles}}
+                    <tr>
+                        <td class="col-name">{{.Name}}</td>
+                        <td>{{.ProviderLabel}}</td>
+                        <td>{{if .Zone}}{{.Zone}}{{else}}—{{end}}</td>
+                        <td>{{.UpdatedAt}}</td>
+                        <td class="col-actions">
+                            {{if $.CanEdit}}
+                            <div class="dns-profile-actions">
+                                <a href="/admin/dns?edit={{.ID}}#dns-profile-form" class="btn btn-secondary btn-sm">Edit</a>
+                                <form hx-post="/api/dns-profiles/delete" hx-target="#dns-profile-response" hx-swap="innerHTML" hx-boost="false" hx-confirm="Delete the DNS profile “{{.Name}}”? Labs already created keep their credentials.">
+                                    <input type="hidden" name="profile_id" value="{{.ID}}">
+                                    <button type="submit" class="btn btn-danger btn-sm" aria-label="Delete {{.Name}}">Delete</button>
+                                </form>
+                            </div>
+                            {{else}}—{{end}}
+                        </td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+            {{else}}
+            <div class="info-box">
+                <p>No DNS profile yet. Add one below.</p>
+            </div>
+            {{end}}
+        </section>
+
+        <div id="dns-profile-response"></div>
+
+        {{if .CanEdit}}
+        <form id="dns-profile-form"
+              method="POST"
+              action="/api/dns-profiles"
+              hx-post="/api/dns-profiles"
+              hx-target="#dns-profile-response"
+              hx-swap="innerHTML"
+              hx-boost="false">
+            <input type="hidden" name="profile_id" value="{{.Edit.ID}}">
+            <div class="form-section">
+                <h2>{{if .Edit.ID}}Edit “{{.Edit.Name}}”{{else}}Add a DNS profile{{end}}</h2>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="profile_name">Name</label>
+                        <input type="text" id="profile_name" name="profile_name" value="{{.Edit.Name}}" maxlength="64" placeholder="Workshops zone" autocomplete="off" required>
+                        <small>How the profile appears in the lab wizard.</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="profile_provider">DNS provider</label>
+                        <select id="profile_provider" name="profile_provider" required
+                                hx-get="/api/dns-profiles/fields"
+                                hx-trigger="change"
+                                hx-target="#dns-profile-fields"
+                                hx-swap="innerHTML">
+                            <option value="">Select a provider&hellip;</option>
+                            {{range .Providers}}
+                            <option value="{{.Name}}" {{if eq .Name $.Edit.Provider}}selected{{end}}>{{.Label}}</option>
+                            {{end}}
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="profile_zone">Default DNS zone (optional)</label>
+                    <input type="text" id="profile_zone" name="profile_zone" value="{{.Edit.Zone}}" placeholder="example.com" autocomplete="off">
+                    <small>Pre-fills the wizard's DNS zone when this profile is picked.</small>
+                </div>
+
+                <div id="dns-profile-fields">{{.FieldsHTML}}</div>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">
+                    <span class="btn-icon">💾</span> {{if .Edit.ID}}Save changes{{else}}Add profile{{end}}
+                </button>
+                {{if .Edit.ID}}
+                <a href="/admin/dns" class="btn btn-secondary">Cancel</a>
+                {{end}}
+            </div>
+        </form>
+        {{else}}
+        <div class="info-box">
+            <p>Unlock or reset credential storage above to add or change DNS profiles.</p>
+        </div>
+        {{end}}
+
+        </div>
+        </div>
+    </div>
+</div>
+{{end}}

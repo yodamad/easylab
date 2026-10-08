@@ -87,7 +87,7 @@ function checkCredentials(provider) {
                 let statusHTML = `
                     <div class="success-message">
                         <h4>✅ Credentials Configured</h4>
-                        <p>${escapeHtml(providerConfig[provider]?.name || provider)} credentials are stored in memory and ready to use.</p>
+                        <p>${escapeHtml(providerConfig[provider]?.name || provider)} credentials are configured and ready to use.</p>
                         <ul>`;
 
                 // Display provider-specific status fields
@@ -101,7 +101,7 @@ function checkCredentials(provider) {
 
                 statusHTML += `
                         </ul>
-                        <p><small>Note: Credentials are stored in memory only and will be cleared on application restart.</small></p>
+                        <p><small>Kept across restarts only when credential storage is set up.</small></p>
                     </div>`;
                 statusContent.innerHTML = statusHTML;
             } else {

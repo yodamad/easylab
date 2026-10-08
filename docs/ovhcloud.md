@@ -10,7 +10,7 @@ This section is dedicated to the OVHcloud configuration. It applies only when yo
 
 OVHcloud API credentials can be set in either of these ways:
 
-1. **Admin UI** — In the header, go to **OVH** → **Credentials** and enter your application key, secret, consumer key, service name, and endpoint. Credentials are stored in memory only and cleared on server restart.
+1. **Admin UI** — In the header, go to **OVH** → **Credentials** and enter your application key, secret, consumer key, service name, and endpoint. By default credentials are kept in memory only and cleared on server restart; set up [credential storage](admin.md#credential-storage) to keep them, encrypted, across restarts.
 2. **Environment variables** — Set the variables listed below before starting EasyLab (e.g. in Docker, Helm, or via an [environment file](docker.md#environment-file) when running the server). If all required OVH variables are set at startup, they are loaded automatically.
 
 ## Configuration keys reference

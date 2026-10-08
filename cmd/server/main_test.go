@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"easylab/internal/server"
 	"encoding/base64"
 	"errors"
@@ -538,5 +539,40 @@ func TestInitDataEncryption_InvalidExplicitKey(t *testing.T) {
 
 	if err := initDataEncryption(tmpDir); err == nil {
 		t.Fatal("initDataEncryption() with invalid base64 key error = nil, want error")
+	}
+}
+
+// Only a key the operator set counts as explicit: the credential vault must
+// never be saved under the key auto-generated beside the data.
+func TestExplicitEncryptionKey(t *testing.T) {
+	key := bytes.Repeat([]byte{7}, 32)
+
+	tests := []struct {
+		name string
+		env  string
+		want []byte
+	}{
+		{name: "unset", env: "", want: nil},
+		{name: "blank", env: "   ", want: nil},
+		{name: "not base64", env: "not base64!", want: nil},
+		{name: "set", env: base64.StdEncoding.EncodeToString(key), want: key},
+		{name: "set with surrounding space", env: " " + base64.StdEncoding.EncodeToString(key) + "\n", want: key},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("LAB_DATA_ENCRYPTION_KEY", tt.env)
+			if got := explicitEncryptionKey(); !bytes.Equal(got, tt.want) {
+				t.Errorf("explicitEncryptionKey() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+
+	// An auto-generated key file is not an explicit key.
+	t.Setenv("LAB_DATA_ENCRYPTION_KEY", "")
+	if err := initDataEncryption(t.TempDir()); err != nil {
+		t.Fatalf("initDataEncryption() error = %v", err)
+	}
+	if got := explicitEncryptionKey(); got != nil {
+		t.Errorf("explicitEncryptionKey() with a generated key file = %v, want nil", got)
 	}
 }
