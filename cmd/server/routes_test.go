@@ -123,6 +123,30 @@ func TestResolveLabRoute(t *testing.T) {
 			want:   routeRemoveTemplate,
 		},
 		{
+			name:   "promote a template",
+			path:   "/api/labs/job-1/templates/go-workshop/promote",
+			method: http.MethodPost,
+			want:   routePromoteTemplate,
+		},
+		{
+			name:   "promote a template on the legacy jobs prefix",
+			path:   "/api/jobs/job-1/templates/go-workshop/promote",
+			method: http.MethodPost,
+			want:   routePromoteTemplate,
+		},
+		{
+			name:   "remove a template named promote is not a promotion",
+			path:   "/api/labs/job-1/templates/promote/remove",
+			method: http.MethodPost,
+			want:   routeRemoveTemplate,
+		},
+		{
+			name:   "promote a template named remove is not a removal",
+			path:   "/api/labs/job-1/templates/remove/promote",
+			method: http.MethodPost,
+			want:   routePromoteTemplate,
+		},
+		{
 			name:   "GET on template remove falls through rather than removing",
 			path:   "/api/labs/job-1/templates/go-workshop/remove",
 			method: http.MethodGet,

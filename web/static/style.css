@@ -7361,6 +7361,77 @@ details[open] > .secrets-summary::after {
     to { opacity: 1; transform: translateY(0); }
 }
 
+/* Promote a template to another lab: the same in-card panel as the remove
+   confirmation, in the primary colour since nothing is deleted. */
+.template-promote-panel {
+    display: none;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.6rem 0.75rem;
+    border-left: 3px solid var(--primary-color);
+    background: color-mix(in srgb, var(--primary-color) 6%, transparent);
+    border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.template-status-card.is-promoting {
+    border-color: var(--primary-color);
+}
+
+.templates-grid:has(.is-promoting) {
+    align-items: start;
+}
+
+.template-status-card.is-promoting .template-remove-row {
+    display: none;
+}
+
+.template-status-card.is-promoting .template-promote-panel {
+    display: flex;
+}
+
+.template-promote-panel .secrets-form-row label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.template-promote-panel .secrets-form-row input,
+.template-promote-panel .secrets-form-row select {
+    width: 100%;
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+.template-promote-bake {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.82rem;
+    color: var(--text);
+}
+
+.template-promote-result {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.template-promote-result > div {
+    margin-bottom: 0;
+    padding: 0.5rem 0.7rem;
+    font-size: 0.82rem;
+    overflow-wrap: anywhere;
+}
+
+.template-promote-result h3 {
+    margin: 0 0 0.25rem;
+    font-size: 0.85rem;
+}
+
+.template-promote-result p {
+    margin: 0;
+}
+
 /* Closed to new students: a dashed outline is the one sign for "closed", on the
    lab badge, the lab strip, the template card and the student picker tile. It
    stays clear of amber (pending, expiring) and grey fill (destroyed); a closed
