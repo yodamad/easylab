@@ -365,6 +365,19 @@
                 <div id="panel-active" role="tabpanel" aria-labelledby="tab-active">
                     {{if .Workspaces}}
                     <div class="workspaces-table-toolbar">
+                        <div class="workspaces-filters">
+                            <input type="search" class="workspaces-filter-input workspaces-filter-search" data-ws-filter="search" placeholder="Search name or owner…" aria-label="Search workspaces by name or owner">
+                            <select class="workspaces-filter-input" data-ws-filter="status" aria-label="Filter workspaces by status">
+                                <option value="">All statuses</option>
+                                {{range .Statuses}}<option value="{{.}}">{{.}}</option>{{end}}
+                            </select>
+                            {{if .Templates}}
+                            <select class="workspaces-filter-input" data-ws-filter="template" aria-label="Filter workspaces by template">
+                                <option value="">All templates</option>
+                                {{range .Templates}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
+                            </select>
+                            {{end}}
+                        </div>
                         <button type="button" id="delete-selected-btn" class="btn btn-danger btn-icon-only tooltip-trigger is-hidden" onclick="deleteSelected()" title="Delete selected workspaces">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -373,7 +386,7 @@
                         </button>
                     </div>
 
-                    <div class="workspace-table-wrapper">
+                    <div class="workspace-table-wrapper" data-ws-results>
                         <table class="workspace-table">
                             <thead>
                                 <tr>
@@ -390,7 +403,7 @@
                             </thead>
                             <tbody>
                                 {{range .Workspaces}}
-                                <tr class="workspace-row workspace-row-status-{{.Status}}" data-workspace-id="{{.ID}}">
+                                <tr class="workspace-row workspace-row-status-{{.Status}}" data-workspace-id="{{.ID}}" data-search="{{.Name}} {{.Owner}}" data-status="{{.Status}}" data-template="{{.Template}}">
                                     <td class="col-checkbox">
                                         <input type="checkbox" class="workspace-checkbox" value="{{.ID}}" id="workspace-{{.ID}}" onchange="updateDeleteButton()" aria-label="Select {{.Name}}">
                                     </td>
@@ -426,6 +439,19 @@
                             </tbody>
                         </table>
                     </div>
+                    <p class="workspaces-no-match is-hidden" data-ws-no-match>No workspaces match these filters.</p>
+                    <div class="pagination workspaces-pagination">
+                        <span class="pagination-info" data-ws-summary></span>
+                        <button type="button" class="btn btn-secondary btn-sm" data-ws-page="prev">← Previous</button>
+                        <span class="pagination-info" data-ws-page-info></span>
+                        <button type="button" class="btn btn-secondary btn-sm" data-ws-page="next">Next →</button>
+                        <select class="workspaces-filter-input" data-ws-page-size aria-label="Workspaces per page">
+                            <option value="10">10 / page</option>
+                            <option value="25" selected>25 / page</option>
+                            <option value="50">50 / page</option>
+                            <option value="100">100 / page</option>
+                        </select>
+                    </div>
                     {{else}}
                     <div class="empty-state">
                         <div class="empty-state-icon">📦</div>
@@ -438,6 +464,20 @@
                 <div id="panel-history" role="tabpanel" aria-labelledby="tab-history" class="is-hidden">
                     {{if .History}}
                     <div class="workspace-history-toolbar">
+                        <div class="workspaces-filters">
+                            <input type="search" class="workspaces-filter-input workspaces-filter-search" data-ws-filter="search" placeholder="Search name or owner…" aria-label="Search history by workspace name or owner">
+                            <select class="workspaces-filter-input" data-ws-filter="action" aria-label="Filter history by action">
+                                <option value="">All actions</option>
+                                <option value="Created">Created</option>
+                                <option value="Deleted">Deleted</option>
+                            </select>
+                            {{if .Templates}}
+                            <select class="workspaces-filter-input" data-ws-filter="template" aria-label="Filter history by template">
+                                <option value="">All templates</option>
+                                {{range .Templates}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
+                            </select>
+                            {{end}}
+                        </div>
                         <button type="button" class="btn btn-secondary btn-sm" onclick="exportWorkspaceHistoryCSV()">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" class="icon">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
@@ -445,9 +485,9 @@
                             Export CSV
                         </button>
                     </div>
-                    <div class="workspace-history-list">
+                    <div class="workspace-history-list" data-ws-results>
                         {{range .History}}
-                        <div class="workspace-history-row" data-action="{{if eq .Action "created"}}Created{{else}}Deleted{{end}}" data-name="{{.Name}}" data-owner="{{.Owner}}" data-template="{{.Template}}" data-at="{{.At}}">
+                        <div class="workspace-history-row" data-action="{{if eq .Action "created"}}Created{{else}}Deleted{{end}}" data-name="{{.Name}}" data-owner="{{.Owner}}" data-template="{{.Template}}" data-at="{{.At}}" data-search="{{.Name}} {{.Owner}}">
                             <span class="workspace-history-badge is-{{.Action}}" aria-hidden="true">{{if eq .Action "created"}}+{{else}}−{{end}}</span>
                             <div class="workspace-history-main">
                                 <span class="workspace-history-name">{{.Name}}</span>
@@ -457,6 +497,19 @@
                             <span class="workspace-history-time">{{.At}}</span>
                         </div>
                         {{end}}
+                    </div>
+                    <p class="workspaces-no-match is-hidden" data-ws-no-match>No history entries match these filters.</p>
+                    <div class="pagination workspaces-pagination">
+                        <span class="pagination-info" data-ws-summary></span>
+                        <button type="button" class="btn btn-secondary btn-sm" data-ws-page="prev">← Previous</button>
+                        <span class="pagination-info" data-ws-page-info></span>
+                        <button type="button" class="btn btn-secondary btn-sm" data-ws-page="next">Next →</button>
+                        <select class="workspaces-filter-input" data-ws-page-size aria-label="History entries per page">
+                            <option value="10">10 / page</option>
+                            <option value="25" selected>25 / page</option>
+                            <option value="50">50 / page</option>
+                            <option value="100">100 / page</option>
+                        </select>
                     </div>
                     {{else}}
                     <div class="empty-state">

@@ -353,7 +353,31 @@ when the lab itself is deleted.
 
 Use **Export CSV**, above the history list, to download the full history as a
 `workspace-history-<lab>.csv` file — handy for record-keeping or sharing usage
-with someone who doesn't have admin access.
+with someone who doesn't have admin access. The export always contains the whole
+history, whatever filters are set on the list.
+
+### Filter and page through workspaces
+
+Both tabs have a filter bar above the list and a pager below it, so a lab with a
+full room of students stays readable:
+
+![Filters and pager on the Active Workspaces tab](screens/workspaces-filters.png){width=850}
+
+* **Search** — matches any part of the workspace name or its owner, ignoring case.
+* **Status** (Active Workspaces) — lists only the statuses workspaces currently have.
+* **Action** (History) — **Created** or **Deleted**.
+* **Template** — one of the lab's templates. Workspaces from before template
+  attribution have no template and only show under **All templates**.
+
+Filters combine, and changing one returns to the first page. The pager shows which
+entries are on screen (*1–10 of 13 (filtered from 63)*), **Previous**/**Next**, and a
+page size of 10, 25 (the default), 50 or 100. The counts on the tabs stay the lab's
+totals. Filters and the page are not kept across a reload or **Refresh**.
+
+Selection follows what is on screen: the header checkbox selects the rows of the
+current page, and a selected workspace is unselected as soon as a filter or a page
+change hides it. **Delete Selected** therefore never deletes a workspace you can't
+see — to bulk-delete more than one page, raise the page size first.
 
 ### Add a template to an existing lab
 

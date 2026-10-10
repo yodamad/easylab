@@ -4060,6 +4060,7 @@ type WorkspaceDisplay struct {
 	Name      string
 	Owner     string
 	Status    string
+	Template  string
 	CreatedAt string
 	UpdatedAt string
 	// CanOpen reports a workspace that is up and has a URL, so an admin can be
@@ -4088,6 +4089,9 @@ type WorkspacesViewModel struct {
 	Templates    []TemplateStatus
 	Unattributed int
 	History      []WorkspaceHistoryDisplay
+	// Statuses lists the distinct statuses among Workspaces, sorted, so the
+	// status filter only offers values that match at least one row.
+	Statuses []string
 	// LabDisabled reports a lab closed to new students; ClosedCount is how many
 	// of Templates are individually closed.
 	LabDisabled bool
@@ -4136,7 +4140,13 @@ func (h *Handler) buildWorkspacesViewModel(ctx context.Context, job *Job) (*Work
 	}
 
 	workspacesDisplay := make([]WorkspaceDisplay, 0, len(workspaces))
+	seenStatuses := make(map[string]bool)
+	statuses := []string{}
 	for _, ws := range workspaces {
+		if ws.Phase != "" && !seenStatuses[ws.Phase] {
+			seenStatuses[ws.Phase] = true
+			statuses = append(statuses, ws.Phase)
+		}
 		createdAt := ""
 		if !ws.CreatedAt.IsZero() {
 			createdAt = ws.CreatedAt.Format("2006-01-02 15:04:05")
@@ -4150,11 +4160,14 @@ func (h *Handler) buildWorkspacesViewModel(ctx context.Context, job *Job) (*Work
 			Name:      ws.Name,
 			Owner:     ownerDisplayName(ws),
 			Status:    ws.Phase,
+			Template:  ws.Template,
 			CreatedAt: createdAt,
 			UpdatedAt: updatedAt,
 			CanOpen:   ws.Ready && ws.OpenURL != "",
 		})
 	}
+
+	sort.Strings(statuses)
 
 	templateStatuses, unattributed := buildTemplateStatus(templates, workspaces, bakedImages)
 	closedCount := 0
@@ -4183,6 +4196,7 @@ func (h *Handler) buildWorkspacesViewModel(ctx context.Context, job *Job) (*Work
 		StackName:    stackName,
 		Workspaces:   workspacesDisplay,
 		Count:        len(workspacesDisplay),
+		Statuses:     statuses,
 		Templates:    templateStatuses,
 		Unattributed: unattributed,
 		History:      history,

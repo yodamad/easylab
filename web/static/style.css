@@ -3746,6 +3746,44 @@ select.loading {
     stroke-width: 2;
 }
 
+/* Filters and pager shared by the Active Workspaces and History lists */
+.workspaces-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-right: auto;
+}
+
+.workspaces-filter-input {
+    height: 2.5rem;
+    padding: 0 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--background);
+    color: inherit;
+    font: inherit;
+    font-size: 0.875rem;
+}
+
+.workspaces-filter-search {
+    width: 16rem;
+    max-width: 100%;
+}
+
+.workspaces-pagination {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.workspaces-no-match {
+    margin: 0;
+    padding: 1.5rem 0;
+    text-align: center;
+    font-size: 0.875rem;
+    color: var(--text-light);
+}
+
 .message-container {
     margin-top: 1.5rem;
     padding: 0 1.5rem;
@@ -7312,6 +7350,8 @@ details[open] > .secrets-summary::after {
 .workspace-history-toolbar {
     display: flex;
     justify-content: flex-end;
+    align-items: center;
+    gap: 0.5rem;
     margin-bottom: 0.75rem;
 }
 
