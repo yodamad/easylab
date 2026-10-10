@@ -516,6 +516,12 @@ main {
     width: auto;
 }
 
+.lifetime-input-unit {
+    align-self: center;
+    color: var(--text-secondary, #6b7280);
+    font-size: 0.875rem;
+}
+
 /* File Upload Styling */
 .file-upload-wrapper {
     position: relative;
@@ -5250,6 +5256,33 @@ select.loading {
     background: #fee2e2;
     color: #991b1b;
     border: 1px solid #fca5a5;
+}
+
+.workspace-ready-status--paused {
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fcd34d;
+}
+
+.btn-workspace-resume {
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    background: #92400e;
+}
+
+.btn-workspace-resume:hover {
+    background: #78350f;
+}
+
+.btn-workspace-resume:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
+.workspace-card-chip--paused {
+    background: #fef3c7;
+    color: #92400e;
 }
 
 .btn-workspace-connect {

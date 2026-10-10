@@ -122,6 +122,11 @@ type Handler struct {
 	// either clears or reproduces it.
 	portalErrors   map[string]string
 	portalErrorsMu sync.RWMutex
+	// idleStrikes holds the workspaces ("labID/workspaceID") the last idle pass
+	// found idle without pausing them yet (see stopIdleWorkspaces). Not persisted:
+	// losing it on restart only delays a pause by one pass.
+	idleStrikes   map[string]bool
+	idleStrikesMu sync.RWMutex
 	// portalURLs caches each lab's portal URL as its last deployment reported it,
 	// so brokering a sign-in does not cost a cluster call. Guarded by portalErrorsMu.
 	portalURLs map[string]string
@@ -803,6 +808,7 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 		workspaceLifetime *= 24
 	}
 	config.WorkspaceLifetimeHours = workspaceLifetime
+	config.WorkspaceIdleTimeoutMinutes = normalizeIdleTimeout(atoiForm(r.FormValue("workspace_idle_timeout_minutes")))
 
 	if labDeletionDateStr := r.FormValue("lab_deletion_date"); labDeletionDateStr != "" {
 		if d, err := time.Parse("2006-01-02", labDeletionDateStr); err == nil {
@@ -2505,6 +2511,14 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		h.recordAudit(email, "student", "workspace.create", labID, ws.Name)
 	}
 
+	// Asking for a workspace that was paused for inactivity brings it back: the
+	// response below already tells the student it is starting.
+	if resumed, rerr := resumeIfStopped(r.Context(), backend, ws); rerr != nil {
+		log.Printf("Failed to resume paused workspace %s in lab %s: %v", ws.Name, labID, rerr)
+	} else if resumed {
+		h.recordAudit(email, "student", "workspace.resume", labID, ws.Name)
+	}
+
 	workspaceURL := ws.URL
 	workspaceName := ws.Name
 	// For a workspace that already existed, the freshly generated password above
@@ -3012,6 +3026,13 @@ func buildWorkspaceStatusHTML(labID, workspaceName, status, workspaceURL string)
 		return `<div class="workspace-ready-status workspace-ready-status--error"><span>❌ Workspace failed to start. Please contact the lab administrator.</span></div>`
 	case "canceled", "canceling":
 		return `<div class="workspace-ready-status workspace-ready-status--error"><span>⚠ Workspace startup was canceled.</span></div>`
+	case workspace.PhaseStopped:
+		// No polling attribute: a paused workspace stays paused until its owner
+		// resumes it, which the page does by POSTing to data-resume-url.
+		resumeURL := fmt.Sprintf("/api/student/workspace/resume?lab_id=%s&workspace_name=%s",
+			url.QueryEscape(labID), url.QueryEscape(workspaceName))
+		return fmt.Sprintf(`<div class="workspace-ready-status workspace-ready-status--paused" data-resume-url="%s"><span>⏸ Workspace paused after inactivity. Your files are kept.</span><button type="button" class="btn-workspace-connect btn-workspace-resume">Resume</button></div>`,
+			template.HTMLEscapeString(resumeURL))
 	default:
 		pollURL := fmt.Sprintf("/api/student/workspace/status?lab_id=%s&workspace_name=%s",
 			url.QueryEscape(labID), url.QueryEscape(workspaceName))
@@ -3869,6 +3890,7 @@ type LabSummary struct {
 	HasKubeconfig             bool
 	IsDestroyed               bool
 	WorkspaceLifetimeHours    int
+	WorkspaceIdleTimeout      int // minutes; 0 = idle workspaces are never paused
 	LabDeletionDate           string
 	LabDeletionDateValue      string
 	LabDeletionTimeValue      string
@@ -3897,6 +3919,7 @@ func buildLabSummary(job *Job) LabSummary {
 	dnsProvider := ""
 	useExistingCluster := false
 	workspaceLifetimeHours := 0
+	workspaceIdleTimeout := 0
 	labDeletionDate := ""
 	labDeletionDateValue := ""
 	labDeletionTimeValue := ""
@@ -3917,6 +3940,7 @@ func buildLabSummary(job *Job) LabSummary {
 		dnsProvider = job.Config.DNSProvider
 		useExistingCluster = job.Config.UseExistingCluster
 		workspaceLifetimeHours = job.Config.WorkspaceLifetimeHours
+		workspaceIdleTimeout = job.Config.WorkspaceIdleTimeoutMinutes
 		if job.Config.LabDeletionDate != nil {
 			labDeletionDate = job.Config.LabDeletionDate.Format("Jan 02, 2006 at 15:04")
 			labDeletionDateValue = job.Config.LabDeletionDate.Format("2006-01-02")
@@ -3949,6 +3973,7 @@ func buildLabSummary(job *Job) LabSummary {
 		HasKubeconfig:             job.Kubeconfig != "",
 		IsDestroyed:               job.Status == JobStatusDestroyed,
 		WorkspaceLifetimeHours:    workspaceLifetimeHours,
+		WorkspaceIdleTimeout:      workspaceIdleTimeout,
 		LabDeletionDate:           labDeletionDate,
 		LabDeletionDateValue:      labDeletionDateValue,
 		LabDeletionTimeValue:      labDeletionTimeValue,
@@ -4748,9 +4773,16 @@ func (h *Handler) UpdateLabLifecycle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	idleTimeout, err := parseIdleTimeout(r)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	h.updateJobConfig(jobID, func(config *LabConfig) {
 		config.WorkspaceLifetimeHours = lifetime
 		config.LabDeletionDate = deletionDate
+		config.WorkspaceIdleTimeoutMinutes = idleTimeout
 	})
 	// Off the response's critical path — see the comment on the SaveJob call in
 	// UploadTemplateToLab for why this is safe to run async.
@@ -4759,7 +4791,7 @@ func (h *Handler) UpdateLabLifecycle(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Failed to persist lifecycle update for lab %s: %v", jobID, err)
 		}
 	}()
-	h.recordAudit(adminActor(r), "admin", "lab.lifecycle_update", jobID, fmt.Sprintf("workspace_lifetime_hours=%d", lifetime))
+	h.recordAudit(adminActor(r), "admin", "lab.lifecycle_update", jobID, fmt.Sprintf("workspace_lifetime_hours=%d workspace_idle_timeout_minutes=%d", lifetime, idleTimeout))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})

@@ -26,7 +26,7 @@ lab's history rather than scanning the global log.
 ## What's tracked
 
 * Lab actions: create, dry run, launch, destroy, retry (with or without an edited configuration), recreate, delete, template upload, template removal, lifecycle edit, closing or reopening a lab to new students (`lab.disable` / `lab.enable`), closing or reopening one template (`lab.template_disable` / `lab.template_enable`, with the template name as detail)
-* Workspace actions: student-initiated creation, student-initiated deletion (**Clear** / **Clear All** on the My Workspaces page), admin-initiated deletion (single, bulk, or as part of removing a template), an admin opening a student's workspace (`workspace.open`)
+* Workspace actions: student-initiated creation, student-initiated deletion (**Clear** / **Clear All** on the My Workspaces page), admin-initiated deletion (single, bulk, or as part of removing a template), an admin opening a student's workspace (`workspace.open`), a workspace being paused for inactivity (`workspace.stop`, role `system`, with the idle timeout as detail) and its owner resuming it (`workspace.resume`)
 * Credential changes: saving OVH or Azure credentials (the credential values themselves are never recorded)
 * [Credential storage](admin.md#credential-storage) actions: setting or changing the passphrase (`credential_vault.set_passphrase` / `credential_vault.change_passphrase`), unlocking (`credential_vault.unlock`), a failed unlock (`credential_vault.unlock_failed`), locking (`credential_vault.lock`) and resetting (`credential_vault.reset`) — never the passphrase
 * [DNS profile](admin.md#dns-profiles) changes: `dns_profile.create`, `dns_profile.update`, `dns_profile.delete`, with the profile name and provider as detail — never its credentials

@@ -608,6 +608,21 @@ Set **Workspace Lifetime** (with a unit of Hours or Days) to automatically delet
 
 Leave the field at `0` or leave it empty to disable automatic workspace cleanup.
 
+#### Pause Idle Workspaces
+
+Set **Pause Idle Workspaces** to a number of minutes to stop paying for workspaces nobody is using — overnight on a multi-day workshop, or after students have left. Unlike the lifetime above, nothing is deleted: the workspace's pod is stopped so it no longer reserves CPU and memory, while its files, URL and password are kept. The student brings it back in one click (see [Paused workspaces](student.md#paused-workspaces)).
+
+How "idle" is decided, and what protects a student who is working:
+
+* A workspace counts as **in use for as long as its IDE is open in a browser**, even if the student is only reading and not typing. It only starts to count as idle once the tab is closed, or the laptop goes to sleep or loses its connection.
+* It is paused only after being found idle for longer than the timeout on **two consecutive checks** of the cleanup service (default every 5 minutes, `CLEANUP_INTERVAL_MINUTES`), so expect the pause between one and two intervals after the timeout.
+* Whenever activity cannot be read — the cluster is unreachable, the workspace does not answer, or its image is not code-server — the workspace is **left running**.
+* A workspace that is still starting, or that was created or resumed less than one timeout ago, is never paused. Neither is an [ephemeral](templates.md) workspace, whose files would not survive it.
+
+The minimum is `10` minutes (a smaller value is raised to it). Choose something **longer than your breaks** — 60 to 90 minutes is a good default — because two things are lost when a workspace is paused: running processes and open terminals. In particular, a long-running command left in a terminal with **no browser attached** looks idle and will be stopped.
+
+Leave the field at `0` or empty to never pause workspaces.
+
 #### Lab Deletion
 
 Set a **Date** (and optionally a **Time**) for the entire lab to be automatically destroyed. When the scheduled date/time is reached, EasyLab runs `pulumi destroy` on the lab without any manual action.

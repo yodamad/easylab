@@ -2127,6 +2127,7 @@ async function applyPrefill(config, templatesYaml, jobId, action) {
     // Step 7: Lifecycle
     setFieldValue('workspace_lifetime_hours', config.workspace_lifetime_hours);
     setFieldValue('workspace_lifetime_unit', 'hours');
+    setFieldValue('workspace_idle_timeout_minutes', config.workspace_idle_timeout_minutes);
     applyPrefillDeletionDate(config.lab_deletion_date);
 
     // Retry reuses the same Pulumi stack, so its name cannot change here, and

@@ -66,3 +66,18 @@ function attachCopyButtonListeners() {
         }
     });
 }
+
+// resumeWorkspace asks the server to start a workspace that was paused for
+// inactivity. resumeUrl comes from the data-resume-url attribute of the status
+// partial. Resolves with the new status partial's HTML, or null when the
+// workspace could not be resumed.
+async function resumeWorkspace(resumeUrl) {
+    try {
+        const resp = await fetch(resumeUrl, { method: 'POST', credentials: 'same-origin' });
+        if (!resp.ok) return null;
+        return await resp.text();
+    } catch (e) {
+        console.error('Failed to resume workspace:', e);
+        return null;
+    }
+}

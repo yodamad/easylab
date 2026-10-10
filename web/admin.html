@@ -686,6 +686,15 @@
                         </div>
 
                         <div class="form-group">
+                            <label for="workspace_idle_timeout_minutes">Pause Idle Workspaces (Optional)</label>
+                            <div class="lifetime-input">
+                                <input type="number" id="workspace_idle_timeout_minutes" name="workspace_idle_timeout_minutes" min="0" placeholder="0">
+                                <span class="lifetime-input-unit">minutes</span>
+                            </div>
+                            <small>Pause a workspace nobody has had open for this long: its files are kept and the student resumes it in one click. Minimum 10; pick something longer than your breaks (60–90). Leave 0 to disable.</small>
+                        </div>
+
+                        <div class="form-group">
                             <label>Lab Deletion (Optional)</label>
                             <div class="form-row">
                                 <div class="form-group">

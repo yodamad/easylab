@@ -222,6 +222,10 @@ func profileFor(string) ideProfile {
 type Backend struct {
 	client    kubernetes.Interface
 	namespace string
+	// healthz overrides how a workspace's /healthz is fetched (see
+	// WorkspaceLastActivity). Nil outside tests: the fake clientset cannot serve
+	// the API server's Service proxy.
+	healthz func(ctx context.Context, name string) ([]byte, error)
 }
 
 // New builds a kube Backend from a kubeconfig file's contents.
@@ -1705,6 +1709,11 @@ func tokenFromDeployment(dep *appsv1.Deployment) string {
 
 // deploymentReadiness derives a readiness phase from a Deployment's status.
 func deploymentReadiness(dep *appsv1.Deployment) (phase string, ready bool) {
+	// Checked first: a Deployment just scaled to zero can still report its old pod
+	// as ready for a moment, and a stopped one would otherwise read as "starting".
+	if isStopped(dep) {
+		return workspace.PhaseStopped, false
+	}
 	if dep.Status.ReadyReplicas >= 1 {
 		return workspace.PhaseRunning, true
 	}
