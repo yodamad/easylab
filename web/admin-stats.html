@@ -9,22 +9,19 @@
     {{template "admin-sidebar" .}}
     <div class="admin-main">
         <div class="admin-page-header">
-            <h1>Lab Stats</h1>
-        </div>
-        <div class="admin-page-body">
-        <div class="admin-content-narrow">
-        <form class="project-selector-form" method="GET" action="/admin/stats">
-            <div>
-                <label for="project_input">Select a Project</label>
+            <h1>Stats</h1>
+            <form class="stats-filters" id="stats-filters" method="GET" action="/admin/stats">
+                <div class="stats-filter">
+                <label for="project_input">Lab</label>
                 <select id="project_input" name="project">
-                    <option value="__all__" {{if or (eq $.SelectedProject "") (eq $.SelectedProject "__all__")}}selected{{end}}>All Projects</option>
+                    <option value="__all__" {{if or (eq $.SelectedProject "") (eq $.SelectedProject "__all__")}}selected{{end}}>All labs</option>
                     {{range .Projects}}
                     <option value="{{.}}" {{if eq . $.SelectedProject}}selected{{end}}>{{.}}</option>
                     {{end}}
                 </select>
-            </div>
-            <div>
-                <label for="range_input">Time Span</label>
+                </div>
+                <div class="stats-filter">
+                <label for="range_input">Period</label>
                 <select id="range_input" name="range">
                     <option value="7d" {{if eq $.SelectedRange "7d"}}selected{{end}}>Last 7 days</option>
                     <option value="1m" {{if eq $.SelectedRange "1m"}}selected{{end}}>Last month</option>
@@ -33,281 +30,87 @@
                     <option value="1y" {{if eq $.SelectedRange "1y"}}selected{{end}}>Last year</option>
                     <option value="all" {{if or (eq $.SelectedRange "") (eq $.SelectedRange "all")}}selected{{end}}>All time</option>
                 </select>
-            </div>
-            <button type="submit">View Stats</button>
-        </form>
+                </div>
+                <noscript><button type="submit" class="btn btn-primary btn-sm">Show</button></noscript>
+            </form>
+        </div>
+        <div class="admin-page-body">
+        <div class="admin-content-narrow stats-page" id="stats-page"
+             data-project="{{if .SelectedProject}}{{.SelectedProject}}{{else}}__all__{{end}}"
+             data-range="{{if .SelectedRange}}{{.SelectedRange}}{{else}}all{{end}}">
 
-        <div class="stats-kpi-grid" id="kpi-grid" style="display:none">
-            <div class="stats-kpi-card stats-kpi-deployed">
-                <span class="stats-kpi-value" id="kpi-deployed">–</span>
-                <span class="stats-kpi-label">Workspaces Used</span>
-            </div>
-            <div class="stats-kpi-card stats-kpi-active">
-                <span class="stats-kpi-value" id="kpi-active">–</span>
-                <span class="stats-kpi-label">Currently Active</span>
-            </div>
-            <div class="stats-kpi-card stats-kpi-failed">
-                <span class="stats-kpi-value" id="kpi-failed">–</span>
-                <span class="stats-kpi-label">Failed</span>
-            </div>
-            <div class="stats-kpi-card stats-kpi-cleaned">
-                <span class="stats-kpi-value" id="kpi-cleaned">–</span>
-                <span class="stats-kpi-label">Workspaces Cleaned</span>
-            </div>
-        </div>
+            <p class="stats-loading" id="stats-loading">Loading stats…</p>
 
-        {{if .SelectedProject}}
-        <div class="chart-card" id="chart-card">
-            <div class="chart-title" id="chart-title">
-                {{if eq .SelectedProject "__all__"}}Workspace activity — All Projects{{else}}Workspace activity for <strong>{{.SelectedProject}}</strong>{{end}}
+            <div class="empty-state" id="stats-error" hidden>
+                <span class="empty-state-icon">⚠️</span>
+                <p>The stats could not be loaded. Reload the page to try again.</p>
             </div>
-            <canvas id="statsChart" data-project="{{.SelectedProject}}" data-range="{{if .SelectedRange}}{{.SelectedRange}}{{else}}all{{end}}"></canvas>
-        </div>
-        <div id="projects-table-container" style="display:none">
-            <div class="chart-title">Per-project breakdown</div>
-            <table class="stats-summary-table">
-                <thead>
-                    <tr>
-                        <th>Project</th>
-                        <th class="col-num">Total</th>
-                        <th class="col-active">Active</th>
-                        <th class="col-failed">Failed</th>
-                    </tr>
-                </thead>
-                <tbody id="projects-table-body"></tbody>
-            </table>
-        </div>
-        {{else}}
-        <div class="chart-card" id="chart-card">
-            <div class="chart-title">Workspace activity — All Projects</div>
-            <canvas id="statsChart" data-project="__all__" data-range="{{if .SelectedRange}}{{.SelectedRange}}{{else}}all{{end}}"></canvas>
-        </div>
-        <div id="projects-table-container" style="display:none">
-            <div class="chart-title">Per-project breakdown</div>
-            <table class="stats-summary-table">
-                <thead>
-                    <tr>
-                        <th>Project</th>
-                        <th class="col-num">Total</th>
-                        <th class="col-active">Active</th>
-                        <th class="col-failed">Failed</th>
-                    </tr>
-                </thead>
-                <tbody id="projects-table-body"></tbody>
-            </table>
-        </div>
-        {{end}}
+
+            <section class="stats-section" id="stats-now" hidden>
+                <h2 class="stats-heading">Right now</h2>
+                <p class="stats-now-line" id="stats-now-line"></p>
+                <p class="stats-now-alert" id="stats-now-alert" hidden></p>
+            </section>
+
+            <section class="stats-section" id="stats-period" hidden>
+                <h2 class="stats-heading" id="stats-period-heading"></h2>
+                <dl class="stats-figures">
+                    <div class="stats-figure">
+                        <dt>Students</dt>
+                        <dd class="stats-figure-value" id="stat-students">–</dd>
+                        <dd class="stats-figure-help">People who opened at least one workspace</dd>
+                    </div>
+                    <div class="stats-figure">
+                        <dt>Workspaces opened</dt>
+                        <dd class="stats-figure-value" id="stat-workspaces">–</dd>
+                        <dd class="stats-figure-help">Every workspace created, including those closed since</dd>
+                    </div>
+                    <div class="stats-figure">
+                        <dt>Labs deployed</dt>
+                        <dd class="stats-figure-value" id="stat-labs">–</dd>
+                        <dd class="stats-figure-help">Labs whose deployment succeeded</dd>
+                    </div>
+                    <div class="stats-figure">
+                        <dt>Average rating</dt>
+                        <dd class="stats-figure-value" id="stat-rating">–</dd>
+                        <dd class="stats-figure-help" id="stat-rating-help">No feedback received</dd>
+                    </div>
+                </dl>
+
+                <div class="stats-chart">
+                    <h3 class="stats-chart-title" id="stats-chart-title">Workspaces opened</h3>
+                    <div class="stats-chart-canvas" id="stats-chart-canvas">
+                        <canvas id="statsChart" role="img" aria-label="Workspaces opened over the selected period"></canvas>
+                    </div>
+                    <p class="stats-empty" id="stats-chart-empty" hidden>No workspace was opened in this period.</p>
+                </div>
+            </section>
+
+            <section class="stats-section" id="stats-labs" hidden>
+                <h2 class="stats-heading">Labs</h2>
+                <p class="stats-section-note" id="stats-labs-note"></p>
+                <div class="stats-table-wrapper" id="stats-labs-table">
+                    <table class="stats-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Lab</th>
+                                <th scope="col">Status</th>
+                                <th scope="col">Deployed</th>
+                                <th scope="col" class="stats-col-num">Students</th>
+                                <th scope="col" class="stats-col-num">Workspaces opened</th>
+                                <th scope="col" class="stats-col-num">Open now</th>
+                                <th scope="col" class="stats-col-num">Rating</th>
+                            </tr>
+                        </thead>
+                        <tbody id="stats-labs-body"></tbody>
+                    </table>
+                </div>
+                <p class="stats-empty" id="stats-labs-empty" hidden>No lab was active in this period. Pick a longer period, or <a href="/admin">create a lab</a>.</p>
+            </section>
         </div>
         </div>
     </div>
 </div>
 
-<script>
-(function() {
-    var canvas = document.getElementById('statsChart');
-    var project = canvas.dataset.project;
-    var range = canvas.dataset.range || 'all';
-
-    function escapeHTML(str) {
-        return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;');
-    }
-
-    function renderSummaryTable(projects) {
-        if (!projects || projects.length === 0) return;
-        var tbody = document.getElementById('projects-table-body');
-        tbody.innerHTML = '';
-        projects.forEach(function(p) {
-            var tr = document.createElement('tr');
-            tr.innerHTML =
-                '<td>' + escapeHTML(p.name) + '</td>' +
-                '<td class="col-num">' + p.total + '</td>' +
-                '<td class="col-active">' + p.active + '</td>' +
-                '<td class="col-failed">' + p.failed + '</td>';
-            tbody.appendChild(tr);
-        });
-        document.getElementById('projects-table-container').style.display = '';
-    }
-
-    function integerTicks(value) {
-        return Number.isInteger(value) ? value : '';
-    }
-
-    fetch('/api/admin/stats?project=' + encodeURIComponent(project) + '&range=' + encodeURIComponent(range))
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            // A single selected lab always has exactly one outcome (it either
-            // succeeded, failed, or was destroyed), so lab-level stats are
-            // trivial there — show workspace-only figures instead. The
-            // all-projects view keeps lab-level figures alongside workspaces.
-            var isSingleProject = project !== '__all__';
-
-            document.getElementById('kpi-deployed').textContent = data.total_workspaces;
-            var activeLabelEl = document.querySelector('.stats-kpi-active .stats-kpi-label');
-            var failedCardEl = document.querySelector('.stats-kpi-failed');
-            if (isSingleProject) {
-                document.getElementById('kpi-active').textContent = Math.max(0, data.total_workspaces - data.total_cleaned);
-                if (activeLabelEl) activeLabelEl.textContent = 'Active Workspaces';
-                if (failedCardEl) failedCardEl.style.display = 'none';
-            } else {
-                document.getElementById('kpi-active').textContent = data.total_active;
-                if (activeLabelEl) activeLabelEl.textContent = 'Currently Active';
-                document.getElementById('kpi-failed').textContent = data.total_failed;
-                if (failedCardEl) failedCardEl.style.display = '';
-            }
-            document.getElementById('kpi-cleaned').textContent = data.total_cleaned;
-            document.getElementById('kpi-grid').style.display = 'grid';
-
-            if (!data.labels || data.labels.length === 0) {
-                var emptyMessage = range === 'all'
-                    ? 'No deployment history found yet.'
-                    : 'No deployment history found for the selected time span.';
-                document.getElementById('chart-card').innerHTML =
-                    '<div class="empty-state"><span class="empty-state-icon">📊</span>' +
-                    '<p>' + escapeHTML(emptyMessage) + '</p></div>';
-                if (data.projects && data.projects.length > 0) {
-                    renderSummaryTable(data.projects);
-                }
-                return;
-            }
-
-            var datasets;
-            var scales;
-            if (isSingleProject) {
-                datasets = [
-                    {
-                        label: 'Workspaces created',
-                        data: data.created,
-                        borderColor: 'rgba(59, 130, 246, 1)',
-                        backgroundColor: 'rgba(59, 130, 246, 0.15)',
-                        borderWidth: 2,
-                        pointRadius: 4,
-                        fill: false,
-                        yAxisID: 'y'
-                    },
-                    {
-                        label: 'Workspaces cleaned',
-                        data: data.cleaned,
-                        borderColor: 'rgba(249, 115, 22, 1)',
-                        backgroundColor: 'rgba(249, 115, 22, 0.15)',
-                        borderWidth: 2,
-                        pointRadius: 4,
-                        fill: false,
-                        yAxisID: 'y'
-                    }
-                ];
-                scales = {
-                    x: {},
-                    y: {
-                        beginAtZero: true,
-                        title: { display: true, text: 'Workspaces' },
-                        ticks: { callback: integerTicks }
-                    }
-                };
-            } else {
-                var labsPerMonth = data.labels.map(function(_, i) {
-                    return data.succeeded[i] + data.failed[i] + data.destroyed[i];
-                });
-                // Active workspaces aren't a per-month delta like created/cleaned —
-                // a workspace made in June and still alive in August is active in
-                // both months — so track it as a running total (created so far
-                // minus cleaned so far) instead of data.created[i]/data.cleaned[i]
-                // directly.
-                var runningCreated = 0;
-                var runningCleaned = 0;
-                var activePerMonth = data.labels.map(function(_, i) {
-                    runningCreated += data.created[i];
-                    runningCleaned += data.cleaned[i];
-                    return Math.max(0, runningCreated - runningCleaned);
-                });
-                datasets = [
-                    {
-                        label: 'Labs',
-                        data: labsPerMonth,
-                        borderColor: 'rgba(34, 197, 94, 1)',
-                        backgroundColor: 'rgba(34, 197, 94, 0.15)',
-                        borderWidth: 2,
-                        pointRadius: 4,
-                        fill: false,
-                        yAxisID: 'y'
-                    },
-                    {
-                        label: 'Workspaces Total',
-                        data: data.created,
-                        borderColor: 'rgba(59, 130, 246, 1)',
-                        backgroundColor: 'rgba(59, 130, 246, 0.15)',
-                        borderWidth: 2,
-                        pointRadius: 4,
-                        fill: false,
-                        yAxisID: 'y2'
-                    },
-                    {
-                        label: 'Workspaces Active',
-                        data: activePerMonth,
-                        borderColor: 'rgba(168, 85, 247, 1)',
-                        backgroundColor: 'rgba(168, 85, 247, 0.15)',
-                        borderWidth: 2,
-                        pointRadius: 4,
-                        fill: false,
-                        yAxisID: 'y2'
-                    },
-                    {
-                        label: 'Workspaces Cleaned',
-                        data: data.cleaned,
-                        borderColor: 'rgba(249, 115, 22, 1)',
-                        backgroundColor: 'rgba(249, 115, 22, 0.15)',
-                        borderWidth: 2,
-                        pointRadius: 4,
-                        fill: false,
-                        yAxisID: 'y2'
-                    }
-                ];
-                scales = {
-                    x: {},
-                    y: {
-                        beginAtZero: true,
-                        title: { display: true, text: 'Labs' },
-                        ticks: { callback: integerTicks }
-                    },
-                    y2: {
-                        beginAtZero: true,
-                        position: 'right',
-                        title: { display: true, text: 'Workspaces' },
-                        ticks: { callback: integerTicks },
-                        grid: { drawOnChartArea: false }
-                    }
-                };
-            }
-
-            new Chart(canvas.getContext('2d'), {
-                type: 'line',
-                data: {
-                    labels: data.labels,
-                    datasets: datasets
-                },
-                options: {
-                    responsive: true,
-                    plugins: {
-                        legend: { position: 'top' }
-                    },
-                    scales: scales
-                }
-            });
-
-            if (data.projects && data.projects.length > 0) {
-                renderSummaryTable(data.projects);
-            }
-        })
-        .catch(function(err) {
-            console.error('Failed to load stats:', err);
-            document.getElementById('chart-card').innerHTML =
-                '<div class="empty-state"><span class="empty-state-icon">⚠️</span>' +
-                '<p>Failed to load stats data.</p></div>';
-        });
-})();
-</script>
-
+<script src="{{asset "/static/admin-stats.js"}}"></script>
 {{end}}

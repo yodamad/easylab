@@ -2475,6 +2475,309 @@ func TestHandler_GetProjectStats_RecomputesAfterTTLExpiry(t *testing.T) {
 	assert.NotEqual(t, w1.Body.Bytes(), w2.Body.Bytes(), "call after TTL expiry should recompute and reflect the newly added job")
 }
 
+// statsOverviewResponse decodes the present-moment, period and per-lab
+// figures of GetProjectStats' response.
+type statsOverviewResponse struct {
+	Granularity     string            `json:"granularity"`
+	Since           string            `json:"since"`
+	TotalWorkspaces int               `json:"total_workspaces"`
+	RunningLabs     int               `json:"running_labs"`
+	OpenWorkspaces  int               `json:"open_workspaces"`
+	FailedLabs      int               `json:"failed_labs"`
+	Students        int               `json:"students"`
+	LabsDeployed    int               `json:"labs_deployed"`
+	FeedbackCount   int               `json:"feedback_count"`
+	AvgRating       float64           `json:"avg_rating"`
+	Labs            []statsLabSummary `json:"labs"`
+}
+
+func getStatsOverview(t *testing.T, h *Handler, project, rangeParam string) statsOverviewResponse {
+	t.Helper()
+	req := httptest.NewRequest("GET", "/api/admin/stats?project="+project+"&range="+rangeParam, nil)
+	w := httptest.NewRecorder()
+	h.GetProjectStats(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp statsOverviewResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	return resp
+}
+
+func TestStatsLabSummary_CountWorkspaces(t *testing.T) {
+	now := time.Now()
+	old := now.AddDate(0, -6, 0)
+	recentOnly := func(at time.Time) bool { return at.After(now.AddDate(0, -1, 0)) }
+	always := func(time.Time) bool { return true }
+	evt := func(at time.Time, action, id, owner string) WorkspaceEvent {
+		return WorkspaceEvent{At: at, Action: action, WorkspaceID: id, Owner: owner}
+	}
+
+	tests := []struct {
+		name           string
+		events         []WorkspaceEvent
+		inRange        func(time.Time) bool
+		wantWorkspaces int
+		wantStudents   int
+		wantOpenNow    int
+	}{
+		{name: "no events", inRange: always},
+		{
+			name: "a student opening two workspaces counts once",
+			events: []WorkspaceEvent{
+				evt(now, WorkspaceEventCreated, "ws-0", "ada@example.com"),
+				evt(now, WorkspaceEventCreated, "ws-1", "Ada@Example.com "),
+				evt(now, WorkspaceEventCreated, "ws-2", "bob@example.com"),
+			},
+			inRange:        always,
+			wantWorkspaces: 3,
+			wantStudents:   2,
+			wantOpenNow:    3,
+		},
+		{
+			name: "a deleted workspace is no longer open but still counts as opened",
+			events: []WorkspaceEvent{
+				evt(now, WorkspaceEventCreated, "ws-0", "ada@example.com"),
+				evt(now, WorkspaceEventCreated, "ws-1", "bob@example.com"),
+				evt(now, WorkspaceEventDeleted, "ws-0", "ada@example.com"),
+			},
+			inRange:        always,
+			wantWorkspaces: 2,
+			wantStudents:   2,
+			wantOpenNow:    1,
+		},
+		{
+			name: "a workspace opened before the period is still open now",
+			events: []WorkspaceEvent{
+				evt(old, WorkspaceEventCreated, "ws-0", "ada@example.com"),
+				evt(now, WorkspaceEventCreated, "ws-1", "bob@example.com"),
+			},
+			inRange:        recentOnly,
+			wantWorkspaces: 1,
+			wantStudents:   1,
+			wantOpenNow:    2,
+		},
+		{
+			name: "an event without an owner counts no student",
+			events: []WorkspaceEvent{
+				evt(now, WorkspaceEventCreated, "ws-0", ""),
+			},
+			inRange:        always,
+			wantWorkspaces: 1,
+			wantStudents:   0,
+			wantOpenNow:    1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var lab statsLabSummary
+			owners := lab.countWorkspaces(tt.events, tt.inRange)
+			assert.Equal(t, tt.wantWorkspaces, lab.Workspaces)
+			assert.Equal(t, tt.wantStudents, lab.Students)
+			assert.Len(t, owners, tt.wantStudents)
+			assert.Equal(t, tt.wantOpenNow, lab.OpenNow)
+		})
+	}
+}
+
+func TestStatsAverageRating(t *testing.T) {
+	tests := []struct {
+		name  string
+		sum   int
+		count int
+		want  float64
+	}{
+		{"no feedback", 0, 0, 0},
+		{"single answer", 4, 1, 4},
+		{"rounds to one decimal", 13, 3, 4.3},
+		{"rounds up", 14, 3, 4.7},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, statsAverageRating(tt.sum, tt.count))
+		})
+	}
+}
+
+func TestSortStatsLabs(t *testing.T) {
+	labs := []statsLabSummary{
+		{Name: "removed", Status: statsLabStatusRemoved},
+		{Name: "destroyed", Status: string(JobStatusDestroyed), CreatedAt: "2026-09-01"},
+		{Name: "running-old", Status: string(JobStatusCompleted), CreatedAt: "2026-08-01"},
+		{Name: "failed", Status: string(JobStatusFailed), CreatedAt: "2026-10-01"},
+		{Name: "running-new", Status: string(JobStatusCompleted), CreatedAt: "2026-10-05"},
+	}
+	sortStatsLabs(labs)
+
+	var names []string
+	for _, lab := range labs {
+		names = append(names, lab.Name)
+	}
+	assert.Equal(t, []string{"running-new", "running-old", "failed", "destroyed", "removed"}, names)
+}
+
+func TestHandler_GetProjectStats_RightNow(t *testing.T) {
+	jm := NewJobManager("")
+
+	running := jm.CreateJob(&LabConfig{StackName: "lab-running"})
+	require.NoError(t, jm.UpdateJobStatus(running, JobStatusCompleted))
+	for _, wsID := range []string{"ws-0", "ws-1", "ws-2"} {
+		require.NoError(t, jm.RecordWorkspaceEvent(running, WorkspaceEventCreated, wsID, wsID, wsID+"@example.com", "default"))
+	}
+	require.NoError(t, jm.RecordWorkspaceEvent(running, WorkspaceEventDeleted, "ws-0", "ws-0", "ws-0@example.com", "default"))
+
+	// A destroyed lab took its workspaces down with it, even though they never
+	// got a deletion event of their own.
+	destroyed := jm.CreateJob(&LabConfig{StackName: "lab-destroyed"})
+	require.NoError(t, jm.RecordWorkspaceEvent(destroyed, WorkspaceEventCreated, "ws-9", "ws-9", "zoe@example.com", "default"))
+	require.NoError(t, jm.UpdateJobStatus(destroyed, JobStatusDestroyed))
+
+	failed := jm.CreateJob(&LabConfig{StackName: "lab-failed"})
+	require.NoError(t, jm.UpdateJobStatus(failed, JobStatusFailed))
+
+	// Still deploying: not a lab yet as far as the stats are concerned.
+	jm.CreateJob(&LabConfig{StackName: "lab-pending"})
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	resp := getStatsOverview(t, h, "__all__", "all")
+
+	assert.Equal(t, 1, resp.RunningLabs)
+	assert.Equal(t, 2, resp.OpenWorkspaces, "only the running lab's undeleted workspaces are open")
+	assert.Equal(t, 1, resp.FailedLabs)
+	assert.Equal(t, 2, resp.LabsDeployed, "the running and the destroyed lab deployed; the failed one did not")
+	assert.Equal(t, 4, resp.Students)
+	assert.Equal(t, 4, resp.TotalWorkspaces)
+
+	require.Len(t, resp.Labs, 3)
+	assert.Equal(t, "lab-running", resp.Labs[0].Name, "running labs are listed first")
+	assert.Equal(t, running, resp.Labs[0].ID)
+	assert.Equal(t, 3, resp.Labs[0].Workspaces)
+	assert.Equal(t, 3, resp.Labs[0].Students)
+	assert.Equal(t, 2, resp.Labs[0].OpenNow)
+	assert.Equal(t, "lab-failed", resp.Labs[1].Name)
+	assert.Equal(t, "lab-destroyed", resp.Labs[2].Name)
+	assert.Equal(t, 0, resp.Labs[2].OpenNow)
+}
+
+func TestHandler_GetProjectStats_StudentsCountedOnceAcrossLabs(t *testing.T) {
+	jm := NewJobManager("")
+	for _, stack := range []string{"lab-a", "lab-b"} {
+		id := jm.CreateJob(&LabConfig{StackName: stack})
+		require.NoError(t, jm.UpdateJobStatus(id, JobStatusCompleted))
+		require.NoError(t, jm.RecordWorkspaceEvent(id, WorkspaceEventCreated, stack+"-ws", stack+"-ws", "ada@example.com", "default"))
+	}
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	all := getStatsOverview(t, h, "__all__", "all")
+	assert.Equal(t, 1, all.Students, "the same student in two labs is one student")
+	assert.Equal(t, 2, all.TotalWorkspaces)
+
+	single := getStatsOverview(t, h, "lab-a", "all")
+	assert.Equal(t, 1, single.RunningLabs, "a single-lab view only counts that lab")
+	require.Len(t, single.Labs, 1)
+	assert.Equal(t, "lab-a", single.Labs[0].Name)
+}
+
+func TestHandler_GetProjectStats_PeriodScopesFigures(t *testing.T) {
+	jm := NewJobManager("")
+
+	oldDestroyed := jm.CreateJob(&LabConfig{StackName: "lab-old"})
+	require.NoError(t, jm.UpdateJobStatus(oldDestroyed, JobStatusDestroyed))
+	oldRunning := jm.CreateJob(&LabConfig{StackName: "lab-old-running"})
+	require.NoError(t, jm.UpdateJobStatus(oldRunning, JobStatusCompleted))
+	longAgo := time.Now().AddDate(0, -8, 0)
+	for _, id := range []string{oldDestroyed, oldRunning} {
+		job, _ := jm.GetJob(id)
+		job.mu.Lock()
+		job.CreatedAt = longAgo
+		job.UpdatedAt = longAgo
+		job.WorkspaceEvents = []WorkspaceEvent{{At: longAgo, Action: WorkspaceEventCreated, WorkspaceID: id + "-ws", Owner: "ada@example.com"}}
+		job.mu.Unlock()
+	}
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	recent := getStatsOverview(t, h, "__all__", "3m")
+	assert.Equal(t, "month", recent.Granularity)
+	assert.Equal(t, time.Now().AddDate(0, -3, 0).Format("2006-01"), recent.Since)
+	assert.Equal(t, 0, recent.Students)
+	assert.Equal(t, 0, recent.LabsDeployed)
+	assert.Equal(t, 1, recent.RunningLabs, "right-now figures ignore the period")
+	assert.Equal(t, 1, recent.OpenWorkspaces, "a workspace opened before the period is still open")
+	require.Len(t, recent.Labs, 1, "a destroyed lab with no activity in the period is left out; a running one stays")
+	assert.Equal(t, "lab-old-running", recent.Labs[0].Name)
+	assert.Equal(t, 0, recent.Labs[0].Workspaces)
+
+	allTime := getStatsOverview(t, h, "__all__", "all")
+	assert.Equal(t, "", allTime.Since)
+	assert.Equal(t, 1, allTime.Students)
+	assert.Equal(t, 2, allTime.LabsDeployed)
+	assert.Len(t, allTime.Labs, 2)
+
+	daily := getStatsOverview(t, h, "__all__", "7d")
+	assert.Equal(t, "day", daily.Granularity)
+}
+
+func TestHandler_GetProjectStats_FeedbackRating(t *testing.T) {
+	jm := NewJobManager("")
+	rated := jm.CreateJob(&LabConfig{StackName: "lab-rated"})
+	require.NoError(t, jm.UpdateJobStatus(rated, JobStatusCompleted))
+	unrated := jm.CreateJob(&LabConfig{StackName: "lab-unrated"})
+	require.NoError(t, jm.UpdateJobStatus(unrated, JobStatusCompleted))
+
+	store, err := NewFeedbackStore(t.TempDir())
+	require.NoError(t, err)
+	for id, rating := range map[string]int{"fb-0": 5, "fb-1": 4, "fb-2": 4} {
+		require.NoError(t, store.Add(Feedback{
+			ID:          id,
+			LabID:       rated,
+			Rating:      rating,
+			SubmittedAt: time.Now(),
+		}))
+	}
+	// Feedback older than the selected period is left out of it.
+	require.NoError(t, store.Add(Feedback{ID: "fb-old", LabID: rated, Rating: 1, SubmittedAt: time.Now().AddDate(-2, 0, 0)}))
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, store)
+
+	recent := getStatsOverview(t, h, "__all__", "3m")
+	assert.Equal(t, 3, recent.FeedbackCount)
+	assert.Equal(t, 4.3, recent.AvgRating)
+	for _, lab := range recent.Labs {
+		if lab.Name == "lab-rated" {
+			assert.Equal(t, 3, lab.FeedbackCount)
+			assert.Equal(t, 4.3, lab.AvgRating)
+		} else {
+			assert.Equal(t, 0, lab.FeedbackCount)
+			assert.Equal(t, 0.0, lab.AvgRating)
+		}
+	}
+
+	allTime := getStatsOverview(t, h, "__all__", "all")
+	assert.Equal(t, 4, allTime.FeedbackCount)
+	assert.Equal(t, 3.5, allTime.AvgRating)
+}
+
+func TestHandler_GetProjectStats_RemovedLabKeepsARow(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "lab-removed"})
+	require.NoError(t, jm.RecordWorkspaceEvent(id, WorkspaceEventCreated, "ws-0", "ws-0", "ada@example.com", "default"))
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusDestroyed))
+	require.NoError(t, jm.RemoveJob(id))
+
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	resp := getStatsOverview(t, h, "__all__", "all")
+
+	require.Len(t, resp.Labs, 1)
+	assert.Equal(t, "lab-removed", resp.Labs[0].Name)
+	assert.Equal(t, statsLabStatusRemoved, resp.Labs[0].Status)
+	assert.Empty(t, resp.Labs[0].ID, "a removed lab has no detail page to link to")
+	assert.Equal(t, 1, resp.Labs[0].Workspaces)
+	assert.Equal(t, 1, resp.LabsDeployed, "a removed lab that had been deployed still counts")
+	assert.Equal(t, 0, resp.RunningLabs)
+}
+
 func TestHandler_ServeAdminStats(t *testing.T) {
 	jm := NewJobManager("")
 	jm.CreateJob(&LabConfig{StackName: "my-stack"})
