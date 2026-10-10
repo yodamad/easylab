@@ -316,8 +316,34 @@
                                 {{else}}
                                 <button type="button" class="btn btn-secondary btn-sm" data-url="/api/labs/{{$ws.LabID}}/templates/{{.Name}}/availability" data-disabled="true" data-done="Closed {{.Name}} to new students" onclick="setAvailability(this)">Close to new students</button>
                                 {{end}}
+                                {{if $ws.PromoteTargets}}<button type="button" class="btn btn-secondary btn-sm template-promote-trigger" onclick="toggleTemplatePromote(this, true)">Promote</button>{{end}}
                                 {{if .Removable}}<button type="button" class="btn btn-secondary btn-sm template-remove-trigger" onclick="toggleTemplateRemove(this, true)">Remove</button>{{end}}
                             </div>
+                            {{if $ws.PromoteTargets}}
+                            <form class="template-promote-panel" aria-label="Promote {{.Name}} to another lab" hx-post="/api/labs/{{$ws.LabID}}/templates/{{.Name}}/promote" hx-target="find .template-promote-result" hx-swap="innerHTML">
+                                <p class="template-remove-text">Copies <strong>{{.Name}}</strong> to another lab. Credentials and baked images stay on this lab.</p>
+                                <div class="secrets-form-row">
+                                    <label>Target lab
+                                        <select name="target_lab_id" required>
+                                            {{range $ws.PromoteTargets}}<option value="{{.ID}}">{{if .StackName}}{{.StackName}}{{else}}{{.ID}}{{end}}</option>{{end}}
+                                        </select>
+                                    </label>
+                                </div>
+                                <div class="secrets-form-row">
+                                    <label>Name on the target lab
+                                        <input type="text" name="target_name" value="{{.Name}}" autocomplete="off" required>
+                                    </label>
+                                </div>
+                                {{if .IsDevcontainer}}
+                                <label class="template-promote-bake"><input type="checkbox" name="bake" value="true" checked> Bake its image on the target lab</label>
+                                {{end}}
+                                <div class="template-promote-result" aria-live="polite"></div>
+                                <div class="template-remove-actions">
+                                    <button type="submit" class="btn btn-primary btn-sm">Promote</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleTemplatePromote(this, false)">Close</button>
+                                </div>
+                            </form>
+                            {{end}}
                             {{if .Removable}}
                             <div class="template-remove-confirm" role="group" aria-label="Remove {{.Name}}">
                                 {{if .HasRunning}}

@@ -685,6 +685,18 @@ function toggleTemplateRemove(button, open) {
     if (focusTarget) focusTarget.focus();
 }
 
+// toggleTemplatePromote opens or closes a template card's promote panel. The
+// panel posts itself with HTMX; closing it clears the last outcome.
+function toggleTemplatePromote(button, open) {
+    var card = button.closest('.template-status-card');
+    card.classList.toggle('is-promoting', open);
+    if (!open) card.querySelector('.template-promote-result').textContent = '';
+    var focusTarget = open
+        ? card.querySelector('.template-promote-panel select')
+        : card.querySelector('.template-remove-row .template-promote-trigger');
+    if (focusTarget) focusTarget.focus();
+}
+
 // setAvailability closes a lab or a template to new students, or reopens it,
 // then reloads onto this tab with the outcome as a toast. Nothing is deleted
 // and the change is reversible, so there is no confirmation step.

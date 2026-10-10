@@ -756,6 +756,7 @@ const (
 	routeRetryJob
 	routeUploadTemplate
 	routeRemoveTemplate
+	routePromoteTemplate
 	routeSetTemplateAvailability
 	routeSetLabAvailability
 	routeBakeTemplate
@@ -807,6 +808,8 @@ func resolveLabRoute(path, method, format string) labRoute {
 	// taken by routeDeleteLab above.
 	case strings.Contains(path, "/templates/") && strings.HasSuffix(path, "/remove") && method == http.MethodPost:
 		return routeRemoveTemplate
+	case strings.Contains(path, "/templates/") && strings.HasSuffix(path, "/promote") && method == http.MethodPost:
+		return routePromoteTemplate
 	// The template form must be matched before the lab-wide one below, which
 	// "/templates/{name}/availability" also ends with.
 	case strings.Contains(path, "/templates/") && strings.HasSuffix(path, "/availability") && method == http.MethodPost:
@@ -869,6 +872,8 @@ func labRequestRouter(h *server.Handler) http.HandlerFunc {
 			h.UploadTemplateToLab(w, r)
 		case routeRemoveTemplate:
 			h.RemoveTemplateFromLab(w, r)
+		case routePromoteTemplate:
+			h.PromoteTemplate(w, r)
 		case routeSetTemplateAvailability:
 			h.SetTemplateAvailability(w, r)
 		case routeSetLabAvailability:

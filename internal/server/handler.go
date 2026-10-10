@@ -4097,6 +4097,9 @@ type WorkspacesViewModel struct {
 	// of Templates are individually closed.
 	LabDisabled bool
 	ClosedCount int
+	// PromoteTargets lists the other labs a template can be promoted to; empty
+	// hides the Promote control.
+	PromoteTargets []PromoteTarget
 }
 
 // buildWorkspacesViewModel assembles the Workspaces & Templates view for a
@@ -4203,6 +4206,8 @@ func (h *Handler) buildWorkspacesViewModel(ctx context.Context, job *Job) (*Work
 		History:      history,
 		LabDisabled:  labDisabled,
 		ClosedCount:  closedCount,
+
+		PromoteTargets: h.promoteTargets(labID),
 	}, nil
 }
 

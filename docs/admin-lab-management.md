@@ -433,6 +433,51 @@ template, which has nothing to bake.
 > use it — see [Pre-baking a devcontainer template](#pre-baking-a-devcontainer-template)
 > above. The **Bake image** button appears on the new template's card once it is added.
 
+### Promote a template to another lab
+
+Once a template works on one lab — a test lab, say, or last edition's — **Promote**
+copies it straight to another lab, without the export, download and upload round
+trip.
+
+Each card in the **Templates on this lab** panel has a **Promote** button. It opens a
+panel inside the card:
+
+* **Target lab** — any other lab that is up. The button is not shown when there is no
+  such lab.
+* **Name on the target lab** — filled in with the template's current name. Change it
+  to promote the template under another name.
+* **Bake its image on the target lab** — shown for a devcontainer template, and
+  checked by default. See below.
+
+Click **Promote**. The panel reports the outcome and links to the target lab, where
+the template now appears like any other. **Close** closes the panel. The template
+stays on this lab, unchanged: promoting copies, it does not move.
+
+Only the template's definition is promoted:
+
+* **A name the target lab already uses is refused**, never overwritten. Promote under
+  another name instead; the target's own template is left as it was. To replace it,
+  promote under a new name, then [close](#close-a-lab-or-a-template-to-new-students)
+  or [remove](#remove-a-template-from-a-lab) the old one once students have moved.
+* **Credentials are not copied.** They live in each lab's cluster (see
+  [Lab credentials](#lab-credentials-private-registries-and-repositories)). If the
+  template names a credential the target lab does not have, the panel lists it: add
+  it in the target lab's **Credentials** panel, under the same name, before students
+  request a workspace. When the target's cluster cannot be reached, the panel lists
+  every credential the template names so you can check them yourself.
+* **A baked image is not copied**, because it is built for one lab. With **Bake its
+  image on the target lab** checked, the bake starts on the target as soon as the
+  template is promoted and its card there opens on a **building** badge. Unchecked,
+  use **Bake image** on the target lab when you are ready — see
+  [Pre-baking a devcontainer template](#pre-baking-a-devcontainer-template).
+* **The copy arrives open to students**, even if the template is closed to new
+  students on this lab.
+* The two templates are independent from then on. Changing or removing one does not
+  affect the other.
+
+The [audit log](audit-log.md) records the promotion on the target lab as
+`lab.template_promote`, with the template's name and the lab it came from.
+
 ### Close a lab or a template to new students
 
 Closing stops new students from joining without touching anyone's work. Use it when a
@@ -466,7 +511,8 @@ What doesn't change:
 * Workspace lifetimes and the lab's deletion date still apply to existing workspaces.
 * A closed template stays [pre-pulled](#image-pre-pull) and keeps its baked image, so
   reopening it is instant.
-* A closed template can still be baked, exported and removed.
+* A closed template can still be baked, exported,
+  [promoted](#promote-a-template-to-another-lab) and removed.
 * Closing every template of a lab has the same effect for students as closing the lab.
 * A lab that is closed when you destroy and recreate it comes back closed.
 
