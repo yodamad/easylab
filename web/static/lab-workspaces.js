@@ -1,3 +1,8 @@
+// Checkboxes of the rows currently on screen. Filtering and paging hide rows
+// with .is-hidden and uncheck them, so a bulk delete never reaches a workspace
+// the admin cannot see.
+const VISIBLE_WORKSPACE_CHECKBOXES = '.workspace-row:not(.is-hidden) .workspace-checkbox';
+
 // Delete a single workspace
 function deleteWorkspace(workspaceId, workspaceName) {
     if (!confirm(`Are you sure you want to delete workspace "${workspaceName}"? This action cannot be undone.`)) {
@@ -89,7 +94,7 @@ function deleteSelected() {
 // Toggle select all checkboxes
 function toggleSelectAll() {
     const selectAllCheckbox = document.getElementById('select-all-checkbox');
-    const checkboxes = document.querySelectorAll('.workspace-checkbox');
+    const checkboxes = document.querySelectorAll(VISIBLE_WORKSPACE_CHECKBOXES);
     const selectAllIcon = document.getElementById('select-all-icon');
     
     if (checkboxes.length === 0) {
@@ -126,8 +131,12 @@ function updateDeleteButton() {
     const deleteBtn = document.getElementById('delete-selected-btn');
     const selectAllCheckbox = document.getElementById('select-all-checkbox');
     const selectAllIcon = document.getElementById('select-all-icon');
-    const allCheckboxes = document.querySelectorAll('.workspace-checkbox');
-    
+    const allCheckboxes = document.querySelectorAll(VISIBLE_WORKSPACE_CHECKBOXES);
+
+    if (!deleteBtn) {
+        return;
+    }
+
     if (checkboxes.length > 0) {
         deleteBtn.classList.remove('is-hidden');
         const tooltip = deleteBtn.querySelector('.tooltip');
@@ -139,8 +148,8 @@ function updateDeleteButton() {
     }
 
     // Update select all checkbox and icon state
-    if (selectAllCheckbox && allCheckboxes.length > 0) {
-        const allChecked = checkboxes.length === allCheckboxes.length;
+    if (selectAllCheckbox) {
+        const allChecked = allCheckboxes.length > 0 && checkboxes.length === allCheckboxes.length;
         selectAllCheckbox.checked = allChecked;
         
         if (selectAllIcon) {
@@ -172,6 +181,105 @@ function switchWorkspacesTab(name) {
         tab.setAttribute('aria-selected', isSelected ? 'true' : 'false');
         panel.classList.toggle('is-hidden', !isSelected);
     });
+}
+
+// Filtering and pagination for the Active Workspaces and History lists. Both
+// are fully rendered server-side, so this only shows and hides rows: a filter
+// control is matched against the row's data-* attribute of the same name
+// (data-ws-filter="status" against data-status), "search" as a substring and
+// the others exactly.
+const DEFAULT_WORKSPACE_PAGE_SIZE = 25;
+const workspaceLists = {};
+
+function initWorkspaceList(key, rowSelector) {
+    const panel = document.getElementById(`panel-${key}`);
+    if (!panel) {
+        return;
+    }
+    const rows = Array.from(panel.querySelectorAll(rowSelector));
+    if (rows.length === 0) {
+        return;
+    }
+
+    const list = { panel, rows, page: 1 };
+    workspaceLists[key] = list;
+
+    const resetAndRender = () => {
+        list.page = 1;
+        renderWorkspaceList(key);
+    };
+    panel.querySelectorAll('[data-ws-filter], [data-ws-page-size]').forEach(control => {
+        control.addEventListener(control.tagName === 'INPUT' ? 'input' : 'change', resetAndRender);
+    });
+    panel.querySelectorAll('[data-ws-page]').forEach(button => {
+        button.addEventListener('click', () => {
+            list.page += button.dataset.wsPage === 'next' ? 1 : -1;
+            renderWorkspaceList(key);
+        });
+    });
+
+    renderWorkspaceList(key);
+}
+
+function renderWorkspaceList(key) {
+    const list = workspaceLists[key];
+    if (!list) {
+        return;
+    }
+    const panel = list.panel;
+
+    const filters = Array.from(panel.querySelectorAll('[data-ws-filter]'))
+        .map(control => ({ name: control.dataset.wsFilter, value: control.value.trim().toLowerCase() }))
+        .filter(filter => filter.value);
+    const matching = list.rows.filter(row => filters.every(filter => {
+        const value = (row.dataset[filter.name] || '').toLowerCase();
+        return filter.name === 'search' ? value.includes(filter.value) : value === filter.value;
+    }));
+
+    const sizeControl = panel.querySelector('[data-ws-page-size]');
+    const size = (sizeControl && parseInt(sizeControl.value, 10)) || DEFAULT_WORKSPACE_PAGE_SIZE;
+    const totalPages = Math.max(1, Math.ceil(matching.length / size));
+    list.page = Math.min(Math.max(1, list.page), totalPages);
+    const start = (list.page - 1) * size;
+    const visible = new Set(matching.slice(start, start + size));
+
+    list.rows.forEach(row => {
+        const isVisible = visible.has(row);
+        row.classList.toggle('is-hidden', !isVisible);
+        if (!isVisible) {
+            const checkbox = row.querySelector('.workspace-checkbox');
+            if (checkbox) {
+                checkbox.checked = false;
+            }
+        }
+    });
+
+    const results = panel.querySelector('[data-ws-results]');
+    if (results) {
+        results.classList.toggle('is-hidden', matching.length === 0);
+    }
+    const noMatch = panel.querySelector('[data-ws-no-match]');
+    if (noMatch) {
+        noMatch.classList.toggle('is-hidden', matching.length > 0);
+    }
+    const summary = panel.querySelector('[data-ws-summary]');
+    if (summary) {
+        const filtered = matching.length !== list.rows.length ? ` (filtered from ${list.rows.length})` : '';
+        summary.textContent = matching.length === 0
+            ? `0 of ${list.rows.length}`
+            : `${start + 1}–${start + visible.size} of ${matching.length}${filtered}`;
+    }
+    const pageInfo = panel.querySelector('[data-ws-page-info]');
+    if (pageInfo) {
+        pageInfo.textContent = `Page ${list.page} of ${totalPages}`;
+    }
+    panel.querySelectorAll('[data-ws-page]').forEach(button => {
+        button.disabled = button.dataset.wsPage === 'next' ? list.page >= totalPages : list.page <= 1;
+    });
+
+    if (key === 'active') {
+        updateDeleteButton();
+    }
 }
 
 // Quote a CSV field only when it needs it (contains a comma, quote, or newline),
@@ -247,6 +355,9 @@ document.addEventListener('DOMContentLoaded', function() {
     checkboxes.forEach(checkbox => {
         checkbox.addEventListener('change', updateDeleteButton);
     });
+
+    initWorkspaceList('active', '.workspace-row');
+    initWorkspaceList('history', '.workspace-history-row');
 });
 
 // A git credential has no server field: basic auth is sent to whatever host the

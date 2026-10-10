@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -4060,6 +4061,7 @@ type WorkspaceDisplay struct {
 	Name      string
 	Owner     string
 	Status    string
+	Template  string
 	CreatedAt string
 	UpdatedAt string
 	// CanOpen reports a workspace that is up and has a URL, so an admin can be
@@ -4088,6 +4090,9 @@ type WorkspacesViewModel struct {
 	Templates    []TemplateStatus
 	Unattributed int
 	History      []WorkspaceHistoryDisplay
+	// Statuses lists the distinct statuses among Workspaces, sorted, so the
+	// status filter only offers values that match at least one row.
+	Statuses []string
 	// LabDisabled reports a lab closed to new students; ClosedCount is how many
 	// of Templates are individually closed.
 	LabDisabled bool
@@ -4136,7 +4141,13 @@ func (h *Handler) buildWorkspacesViewModel(ctx context.Context, job *Job) (*Work
 	}
 
 	workspacesDisplay := make([]WorkspaceDisplay, 0, len(workspaces))
+	seenStatuses := make(map[string]bool)
+	statuses := []string{}
 	for _, ws := range workspaces {
+		if ws.Phase != "" && !seenStatuses[ws.Phase] {
+			seenStatuses[ws.Phase] = true
+			statuses = append(statuses, ws.Phase)
+		}
 		createdAt := ""
 		if !ws.CreatedAt.IsZero() {
 			createdAt = ws.CreatedAt.Format("2006-01-02 15:04:05")
@@ -4150,11 +4161,14 @@ func (h *Handler) buildWorkspacesViewModel(ctx context.Context, job *Job) (*Work
 			Name:      ws.Name,
 			Owner:     ownerDisplayName(ws),
 			Status:    ws.Phase,
+			Template:  ws.Template,
 			CreatedAt: createdAt,
 			UpdatedAt: updatedAt,
 			CanOpen:   ws.Ready && ws.OpenURL != "",
 		})
 	}
+
+	sort.Strings(statuses)
 
 	templateStatuses, unattributed := buildTemplateStatus(templates, workspaces, bakedImages)
 	closedCount := 0
@@ -4183,6 +4197,7 @@ func (h *Handler) buildWorkspacesViewModel(ctx context.Context, job *Job) (*Work
 		StackName:    stackName,
 		Workspaces:   workspacesDisplay,
 		Count:        len(workspacesDisplay),
+		Statuses:     statuses,
 		Templates:    templateStatuses,
 		Unattributed: unattributed,
 		History:      history,
@@ -5572,6 +5587,87 @@ func (h *Handler) statsCacheStore(cacheKey string, data []byte) {
 	h.statsCache[cacheKey] = statsCacheEntry{data: data, computedAt: time.Now()}
 }
 
+// statsLabStatusRemoved is the status shown for labs deleted from the admin
+// list, whose history only survives in the stats archive.
+const statsLabStatusRemoved = "removed"
+
+// statsLabSummary is one row of the stats page's labs table. Students,
+// Workspaces, FeedbackCount and AvgRating are scoped to the selected time
+// span; OpenNow is the present-moment count.
+type statsLabSummary struct {
+	ID            string  `json:"id,omitempty"`
+	Name          string  `json:"name"`
+	Status        string  `json:"status"`
+	CreatedAt     string  `json:"created_at,omitempty"`
+	Students      int     `json:"students"`
+	Workspaces    int     `json:"workspaces"`
+	OpenNow       int     `json:"open_now"`
+	FeedbackCount int     `json:"feedback_count"`
+	AvgRating     float64 `json:"avg_rating"`
+}
+
+// countWorkspaces fills the lab's Workspaces, Students and OpenNow from its
+// workspace events and returns the distinct owners who opened a workspace
+// within the time span, so the caller can de-duplicate students across labs.
+// OpenNow is every workspace created and not deleted since, whatever the span.
+func (l *statsLabSummary) countWorkspaces(events []WorkspaceEvent, inRange func(time.Time) bool) map[string]struct{} {
+	owners := make(map[string]struct{})
+	open := make(map[string]struct{})
+	for _, evt := range events {
+		switch evt.Action {
+		case WorkspaceEventCreated:
+			open[evt.WorkspaceID] = struct{}{}
+			if !inRange(evt.At) {
+				continue
+			}
+			l.Workspaces++
+			if owner := strings.ToLower(strings.TrimSpace(evt.Owner)); owner != "" {
+				owners[owner] = struct{}{}
+			}
+		case WorkspaceEventDeleted:
+			delete(open, evt.WorkspaceID)
+		}
+	}
+	l.Students = len(owners)
+	l.OpenNow = len(open)
+	return owners
+}
+
+// statsAverageRating returns the mean rating rounded to one decimal, or 0
+// when there is no feedback.
+func statsAverageRating(sum, count int) float64 {
+	if count == 0 {
+		return 0
+	}
+	return math.Round(float64(sum)/float64(count)*10) / 10
+}
+
+// sortStatsLabs orders the labs table: running labs first, then failed ones,
+// then destroyed and removed labs, most recently deployed first within each.
+func sortStatsLabs(labs []statsLabSummary) {
+	rank := func(status string) int {
+		switch JobStatus(status) {
+		case JobStatusCompleted:
+			return 0
+		case JobStatusFailed:
+			return 1
+		case JobStatusDestroyed:
+			return 2
+		default:
+			return 3
+		}
+	}
+	sort.SliceStable(labs, func(i, j int) bool {
+		if ri, rj := rank(labs[i].Status), rank(labs[j].Status); ri != rj {
+			return ri < rj
+		}
+		if labs[i].CreatedAt != labs[j].CreatedAt {
+			return labs[i].CreatedAt > labs[j].CreatedAt
+		}
+		return labs[i].Name < labs[j].Name
+	})
+}
+
 func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	if project == "" {
@@ -5620,6 +5716,23 @@ func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 		Created         []int            `json:"created"`
 		Cleaned         []int            `json:"cleaned"`
 		Projects        []projectSummary `json:"projects,omitempty"`
+
+		// Granularity ("day" or "month") and Since (the earliest bucket key of
+		// the selected time span, "" for all time) let the page fill the gaps
+		// between Labels, so a quiet day still shows up as an empty bar.
+		Granularity string `json:"granularity"`
+		Since       string `json:"since"`
+		// RunningLabs/OpenWorkspaces/FailedLabs describe the present moment and
+		// ignore the selected time span.
+		RunningLabs    int `json:"running_labs"`
+		OpenWorkspaces int `json:"open_workspaces"`
+		FailedLabs     int `json:"failed_labs"`
+		// The remaining figures are scoped to the selected time span.
+		Students      int               `json:"students"`
+		LabsDeployed  int               `json:"labs_deployed"`
+		FeedbackCount int               `json:"feedback_count"`
+		AvgRating     float64           `json:"avg_rating"`
+		Labs          []statsLabSummary `json:"labs"`
 	}
 
 	// isRealDeployment returns true for completed, failed, or destroyed jobs (excludes dry-runs and in-progress).
@@ -5640,6 +5753,17 @@ func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 	perProject := make(map[string]*projectSummary)
 
 	var resp statsResponse
+	resp.Granularity = "month"
+	if bucketFormat == "2006-01-02" {
+		resp.Granularity = "day"
+	}
+	resp.Since = cutoff
+	resp.Labs = []statsLabSummary{}
+	inRange := func(t time.Time) bool {
+		return cutoff == "" || t.Format(bucketFormat) >= cutoff
+	}
+	students := make(map[string]struct{})
+	var ratingSum int
 
 	jobs := h.jobManager.GetAllJobs()
 	// GetAllJobs returns newest-first; iterate in reverse for chronological order.
@@ -5708,7 +5832,58 @@ func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 				buckets[evtKey].cleaned++
 			}
 		}
+
+		lab := statsLabSummary{
+			ID:        job.ID,
+			Name:      stackName,
+			Status:    string(job.Status),
+			CreatedAt: job.CreatedAt.Format("2006-01-02"),
+		}
+		deployedInRange := inRange(job.CreatedAt)
+		labStudents := lab.countWorkspaces(events, inRange)
+		for owner := range labStudents {
+			students[owner] = struct{}{}
+		}
+		switch job.Status {
+		case JobStatusCompleted:
+			resp.RunningLabs++
+			resp.OpenWorkspaces += lab.OpenNow
+		case JobStatusFailed:
+			resp.FailedLabs++
+			lab.OpenNow = 0
+		case JobStatusDestroyed:
+			// The cluster is gone, and its workspaces with it — whether or not
+			// each one got a deletion event before the lab was destroyed.
+			lab.OpenNow = 0
+		}
+		if deployedInRange && job.Status != JobStatusFailed {
+			resp.LabsDeployed++
+		}
+		if h.feedbackStore != nil {
+			entries, err := h.feedbackStore.GetByLab(job.ID)
+			if err != nil {
+				log.Printf("GetProjectStats: failed to load feedback for lab %s: %v", job.ID, err)
+			}
+			labRatingSum := 0
+			for _, e := range entries {
+				if !inRange(e.SubmittedAt) {
+					continue
+				}
+				lab.FeedbackCount++
+				labRatingSum += e.Rating
+			}
+			lab.AvgRating = statsAverageRating(labRatingSum, lab.FeedbackCount)
+			resp.FeedbackCount += lab.FeedbackCount
+			ratingSum += labRatingSum
+		}
+		// A lab that is still up (or stuck failed) is always listed; a destroyed
+		// one only when it did something within the selected time span.
+		if job.Status != JobStatusDestroyed || deployedInRange || lab.Workspaces > 0 || lab.FeedbackCount > 0 {
+			resp.Labs = append(resp.Labs, lab)
+		}
 	}
+	resp.Students = len(students)
+	resp.AvgRating = statsAverageRating(ratingSum, resp.FeedbackCount)
 
 	// Merge in preserved history from jobs removed via DeleteLab, so deleting
 	// an old destroyed/failed lab doesn't erase its contribution to past
@@ -5730,6 +5905,28 @@ func (h *Handler) GetProjectStats(w http.ResponseWriter, r *http.Request) {
 		buckets[key].created += archived.Created
 		buckets[key].cleaned += archived.Cleaned
 	}
+	// Removed labs keep one row per stack name in the labs table. The archive
+	// holds no owners, so their student count is unknown.
+	for name := range h.jobManager.ArchivedProjectTotals() {
+		if project != "__all__" && name != project {
+			continue
+		}
+		removed := statsLabSummary{Name: name, Status: statsLabStatusRemoved}
+		active := false
+		for month, archived := range h.jobManager.ArchivedMonthlyStats(name) {
+			t, err := time.Parse("2006-01", month)
+			if err != nil || !inRange(t) {
+				continue
+			}
+			active = true
+			removed.Workspaces += archived.Created
+			resp.LabsDeployed += archived.Destroyed
+		}
+		if active {
+			resp.Labs = append(resp.Labs, removed)
+		}
+	}
+	sortStatsLabs(resp.Labs)
 	if project == "__all__" {
 		for name, totals := range h.jobManager.ArchivedProjectTotals() {
 			ps, ok := perProject[name]

@@ -4,50 +4,68 @@ title: Stats
 ---
 # Stats Dashboard
 
-Navigate to **Stats** (accessible from the header or `/admin/stats`) to see aggregated deployment metrics.
+Navigate to **Stats** (in the sidebar, or `/admin/stats`) to see how your labs are used. The page answers three questions, top to bottom: what is running right now, what happened over a period, and how each lab did.
 
-Figures are cached for up to 30 seconds per project/time-span combination, so a just-completed change (a lab finishing, a workspace being created or cleaned) may take up to 30 seconds to appear here.
+Figures are cached for up to 30 seconds per lab/period combination, so a just-completed change (a lab finishing, a workspace being created or closed) may take up to 30 seconds to appear here.
 
-## Project selector
+## Lab and period filters
 
-Use the **Select a Project** dropdown to scope the view to a single lab stack name, or choose **All Projects** for a combined view. The two views show different figures:
+Two dropdowns sit in the page header. The page reloads as soon as you change one.
 
-- **A single project** — a lab stack has exactly one outcome (it succeeded, failed, or was destroyed), so lab-level counts aren't useful there. The page shows **workspace-only** figures for that lab instead.
-- **All Projects** — figures combine both lab-level and workspace-level counts across every tracked lab.
+![Stats lab and period filters](screens/stats-time-span.png){width=700}
 
-## Time span selector
+- **Lab** — **All labs** (default), or a single lab stack name to scope every figure on the page to that lab.
+- **Period** — **Last 7 days**, **Last month**, **Last 3 months**, **Last 6 months**, **Last year**, or **All time** (default). The period applies to the period figures, the chart and the labs table, but never to the **Right now** line.
 
-Use the **Time Span** dropdown next to the project selector to limit the KPI cards and activity chart to a trailing window: **Last 7 days**, **Last month**, **Last 3 months**, **Last 6 months**, **Last year**, or **All time** (default). **Last 7 days** and **Last month** plot one point per day; longer windows (and **All time**) plot one point per month. Historical data from a deleted lab (see below) is only preserved at month granularity, so under a daily view it's attributed to the 1st of its month. The **Per-project breakdown** table always shows all-time totals regardless of the selected time span.
+The month-based periods start at the beginning of a calendar month: on 10 October, **Last 3 months** covers 1 July to today.
 
-![Stats time span selector](screens/stats-time-span.png){width=700}
+## Right now
 
-## KPI cards
+One sentence says how many labs are running and how many workspaces are open in them. A running lab is a deployed lab whose cluster is still up — the thing that costs money. This line ignores the selected period.
 
-Four summary cards are shown at the top of the page:
+![Right now](screens/stats-now.png){width=700}
 
-![Stats KPI cards](screens/stats-kpi.png){width=700}
+- A workspace is **open** when it was created and has not been closed since, in a lab that is still running. Destroying a lab closes all its workspaces.
+- If a lab failed to deploy, a red notice says how many did. Open the failed lab from the [labs table](#labs) to retry or remove it.
 
-All four cards are scoped to the selected **Time Span** (see above) in addition to the selected project.
+## Period figures
 
-| Card | All Projects | Single project |
-|------|--------------|----------------|
-| **Workspaces Used** | Total workspaces created within the selected time span, across all tracked jobs, whether or not a lab has an auto-expiry lifetime configured | Same, scoped to this lab |
-| **Currently Active** | Number of completed (live) labs created within the selected time span | Renamed **Active Workspaces**: workspaces created minus workspaces cleaned for this lab, within the selected time span |
-| **Failed** | Number of labs that ended in a failed state within the selected time span | Hidden (not meaningful for a single lab) |
-| **Workspaces Cleaned** | Count of workspaces deleted within the selected time span, whether automatically by the cleanup service or manually by an admin/student | Same, scoped to this lab |
+Four figures cover the selected period:
 
-Figures are preserved even after an old destroyed or failed lab is removed
-from the admin list — deleting a lab drops it from the labs list, but its
-historical contribution to these KPIs and to the activity chart below
-remains.
+![Period figures and activity chart](screens/stats-kpi.png){width=700}
 
-## Activity chart
+| Figure | What it counts |
+|--------|----------------|
+| **Students** | People who opened at least one workspace. Someone who attends two labs, or opens two workspaces, counts once. |
+| **Workspaces opened** | Every workspace created, including those closed since — whether closed by the cleanup service, an admin or the student. |
+| **Labs deployed** | Labs deployed during the period whose deployment succeeded, including labs destroyed since. Failed deployments are not counted. |
+| **Average rating** | The mean of the 1–5 ratings students gave during the period, with the number of answers. See [Feedback](feedbacks.md). |
 
-- **All Projects**: four lines — **Labs** (labs succeeded, failed, or destroyed in that data point's period, left axis) plus three workspace lines on the right axis: **Workspaces Total** (created in that period), **Workspaces Active** (a running total: workspaces created so far minus workspaces cleaned so far, i.e. how many were alive as of that point), and **Workspaces Cleaned** (cleaned in that period). A destroyed lab is counted against the period it was destroyed in, not the period it was created in. The period is a day or a month depending on the selected time span — see above.
-- **Single project**: two lines, both on the same axis — **Workspaces created** and **Workspaces cleaned** for that lab.
+### Activity chart
 
-## Per-project breakdown
+Below the figures, a bar chart shows **workspaces opened** over the period: one bar per day for **Last 7 days** and **Last month**, one bar per month for longer periods. A day or month without activity is shown as an empty slot. Hover a bar for its exact count. The bars add up to the **Workspaces opened** figure.
 
-When **All Projects** is selected, a summary table is shown below the chart listing each project with its total, active, and failed lab counts.
+## Labs
 
-![Per-project stats breakdown](screens/stats-projects.png){width=700}
+The table lists one row per lab:
+
+![Labs table](screens/stats-projects.png){width=700}
+
+| Column | Meaning |
+|--------|---------|
+| **Lab** | The lab's stack name. Click it to open the lab. |
+| **Status** | **Running** (deployed and up), **Failed** (deployment failed), **Destroyed** (torn down), or **Removed** (deleted from the labs list). |
+| **Deployed** | The date the lab was created. |
+| **Students** | People who opened a workspace in this lab during the period. |
+| **Workspaces opened** | Workspaces created in this lab during the period. |
+| **Open now** | Workspaces currently open, for running labs only. Not affected by the period. |
+| **Rating** | Average rating and number of answers during the period. Click it to read the lab's feedback. |
+
+Running labs come first, then failed ones, then destroyed and removed labs, most recent first. Running and failed labs are always listed; a destroyed or removed lab is listed only if it was deployed or used during the selected period.
+
+### Removed labs
+
+Deleting an old destroyed or failed lab drops it from the labs list, but not from the stats: its workspaces still count in **Workspaces opened**, in the chart, and in **Labs deployed**. The lab keeps a **Removed** row here, grouped by stack name. Two things are lost on removal:
+
+- **Students** — who opened the workspaces is no longer known, so removed labs show `–` and are left out of the **Students** figure.
+- **Day-level detail** — history is kept per month, so under a daily chart a removed lab's workspaces are shown on the 1st of their month.
