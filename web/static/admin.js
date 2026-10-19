@@ -1055,10 +1055,12 @@ function loadAzureVMSizes() {
         });
 }
 
-// Check credentials status and show/hide disclaimer
+// Check credentials status and show/hide disclaimer. Provider credentials are
+// only needed to provision new infrastructure, so the notice stays hidden until
+// "Create New Infrastructure" is picked — on a freshly opened wizard no cluster
+// mode is chosen yet, and BYOK mode never uses them.
 function checkCredentialsStatus() {
-    // Skip credentials check in BYOK mode
-    if (wizard.useExistingCluster) {
+    if (!wizard.clusterModeSelected || wizard.useExistingCluster) {
         const notice = document.getElementById('provider-credentials-notice');
         if (notice) notice.style.display = 'none';
         return;
