@@ -8,6 +8,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"easylab/internal/providers/workspace"
 )
 
 // studentWorkspacesTimeout bounds each lab's cluster lookup when listing a
@@ -30,6 +32,9 @@ type studentWorkspace struct {
 	// is scheduled.
 	DeletionAt string `json:"deletion_at"`
 	Ready      bool   `json:"ready"`
+	// Paused reports a workspace stopped for inactivity, which its owner resumes
+	// by opening it.
+	Paused bool `json:"paused"`
 	// TeacherAccessedAt is when an admin last opened the workspace, "" if never.
 	TeacherAccessedAt string `json:"teacher_accessed_at"`
 
@@ -141,6 +146,7 @@ func (h *Handler) ListStudentWorkspaces(w http.ResponseWriter, r *http.Request) 
 					Template:      ws.Template,
 					CreatedAt:     ws.CreatedAt.Format(time.RFC3339),
 					Ready:         ws.Ready,
+					Paused:        ws.Phase == workspace.PhaseStopped,
 					createdAt:     ws.CreatedAt,
 				}
 				if deletionAt := workspaceDeletionTime(ws.CreatedAt, l.lifetimeHours, l.labDeletionDate); deletionAt != nil {

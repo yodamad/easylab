@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"easylab/coder"
+	"easylab/ingress"
 	"easylab/utils"
 
 	"github.com/stretchr/testify/assert"
@@ -107,7 +107,7 @@ func TestReconcilePortal_Deploys(t *testing.T) {
 		{
 			name:         "DNS provider serves the portal from the wildcard certificate",
 			config:       &LabConfig{StackName: "workshop", Domain: "lab.example.com", DNSProvider: "ovh", ClusterIssuerName: "custom-issuer"},
-			wantWildcard: coder.WildcardTLSSecretName,
+			wantWildcard: ingress.WildcardTLSSecretName,
 			wantIssuer:   "custom-issuer",
 		},
 		{

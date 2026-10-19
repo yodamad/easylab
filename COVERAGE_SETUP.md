@@ -25,7 +25,7 @@ To focus on critical business logic, the following are excluded from backend cov
 **Included (Critical Packages):**
 - `./internal/...` - Core server logic (handlers, auth, jobs, pulumi)
 - `./utils/...` - Utility functions (config, git, logging)
-- `./coder/...` - Coder integration logic
+- `./ingress/...` - Ingress / TLS / external-dns setup
 - `./ovh/...` - OVH cloud provider integration
 - `./k8s/...` - Kubernetes integration
 
@@ -148,7 +148,7 @@ Both backend and frontend coverage are configured to focus on critical applicati
 
 | Component | Included | Excluded |
 |-----------|----------|----------|
-| **Backend** | Internal packages (server, utils, coder, ovh, k8s) | Main entry points (main.go, cmd/server/main.go) |
+| **Backend** | Internal packages (server, utils, ingress, ovh, k8s) | Main entry points (main.go, cmd/server/main.go) |
 | **Frontend** | Web application JavaScript code | Test files, configs, helpers, fixtures |
 
 This approach ensures coverage metrics reflect actual business logic quality rather than including thin wrappers and test infrastructure.

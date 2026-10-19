@@ -22,7 +22,7 @@
 
 ---
 
-EasyLab streamlines cloud infrastructure lab management for **educators**, **workshop organizers**, and **DevOps teams**. It automates provisioning of Kubernetes clusters and development workspaces based on [Coder](https://coder.com/) on any cloud with [Pulumi](https://www.pulumi.com/).
+EasyLab streamlines cloud infrastructure lab management for **educators**, **workshop organizers**, and **DevOps teams**. It automates provisioning of Kubernetes clusters and self-managed **code-server** development workspaces on any cloud with [Pulumi](https://www.pulumi.com/).
 
 📑 **[Full documentation](https://docs.easylab.yodamad.fr)** • Currently supports **OVHcloud** (more providers coming soon)
 
@@ -60,7 +60,6 @@ See the [documentation](https://docs.easylab.yodamad.fr) for [Docker](https://do
 | Resource | Description |
 |----------|-------------|
 | [docs.easylab.yodamad.fr](https://docs.easylab.yodamad.fr) | Admin, student, deployment & OVHcloud guides |
-| [Coder templates samples](https://gitlab.com/yodamad-workshops/coder-templates) | Sample Coder templates for workshops |
 | [TESTING.md](TESTING.md) | Testing documentation |
 | [COVERAGE_SETUP.md](COVERAGE_SETUP.md) | Code coverage setup |
 
@@ -78,5 +77,5 @@ MIT License — see [LICENSE](LICENSE) for details.
 ---
 
 <p align="center">
-  Built with <a href="https://www.ovhcloud.com/">OVHcloud</a>, <a href="https://www.pulumi.com/">Pulumi</a>, <a href="https://coder.com/">Coder</a>, <a href="https://go.dev/">Go</a>, <a href="https://kubernetes.io/">Kubernetes</a>
+  Built with <a href="https://www.ovhcloud.com/">OVHcloud</a>, <a href="https://www.pulumi.com/">Pulumi</a>, <a href="https://go.dev/">Go</a>, <a href="https://kubernetes.io/">Kubernetes</a>
 </p>

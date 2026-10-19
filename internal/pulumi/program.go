@@ -2,7 +2,7 @@ package pulumi
 
 import (
 	"easylab/azure"
-	"easylab/coder"
+	"easylab/ingress"
 	"easylab/k8s"
 	"easylab/ovh"
 	"easylab/utils"
@@ -34,8 +34,8 @@ func resolveKubeconfigPath(relOrAbs, jobDir string) (string, error) {
 
 // CreateLabProgram creates a Pulumi RunFunc that implements the lab infrastructure.
 // It handles only declarative resource creation (cloud infra, Helm charts).
-// Imperative operations (Coder user creation, template upload) are performed
-// after Stack.Up() returns — see PulumiExecutor.initCoderAndTemplates().
+// Imperative operations (workspace and template provisioning) are performed
+// after Stack.Up() returns, by the workspace backend.
 func CreateLabProgram(jobDir string) pulumi.RunFunc {
 	return func(ctx *pulumi.Context) error {
 		useExisting := utils.K8sConfigOptional(ctx, utils.K8sUseExistingCluster)
@@ -143,12 +143,12 @@ func CreateLabProgram(jobDir string) pulumi.RunFunc {
 		// server falls back to plain HTTP via nip.io on the LoadBalancer IP, which
 		// still needs the controller. The workspace namespace is passed through
 		// because the wildcard certificate has to be created inside it.
-		_, ingressIP, httpsErr := coder.SetupHTTPS(ctx, k8sProvider, kubeconfigOut, workspaceNs)
+		_, ingressIP, httpsErr := ingress.SetupHTTPS(ctx, k8sProvider, kubeconfigOut, workspaceNs)
 		if httpsErr != nil {
 			return fmt.Errorf("failed to setup HTTPS ingress: %w", httpsErr)
 		}
 		ctx.Export("ingressIP", ingressIP)
-		if domain := utils.CoderConfigOptional(ctx, utils.CoderDomain); domain != "" {
+		if domain := utils.LabConfigOptional(ctx, utils.LabDomain); domain != "" {
 			ctx.Export("domain", pulumi.String(domain))
 		}
 

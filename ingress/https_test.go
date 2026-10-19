@@ -1,4 +1,4 @@
-package coder
+package ingress
 
 import (
 	"testing"
@@ -52,7 +52,7 @@ func TestSubdomainOf(t *testing.T) {
 			want:   "notexample.com",
 		},
 		{
-			// The coder:wildcardDomain override is entered as a full wildcard FQDN
+			// The lab:wildcardDomain override is entered as a full wildcard FQDN
 			// and reduced to a record name the same way.
 			name:   "wildcard override is reduced to a wildcard record name",
 			domain: "*.lab.example.com",

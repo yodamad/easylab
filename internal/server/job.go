@@ -344,6 +344,10 @@ type LabConfig struct {
 	WorkspaceTemplates     []WorkspaceTemplate `json:"workspace_templates,omitempty"`
 	WorkspaceLifetimeHours int                 `json:"workspace_lifetime_hours,omitempty"`
 	LabDeletionDate        *time.Time          `json:"lab_deletion_date,omitempty"`
+	// WorkspaceIdleTimeoutMinutes pauses a workspace nobody has used for this long
+	// (its files are kept and its owner resumes it from the student pages). 0
+	// disables it; see minWorkspaceIdleTimeoutMinutes for the lower bound.
+	WorkspaceIdleTimeoutMinutes int `json:"workspace_idle_timeout_minutes,omitempty"`
 
 	// BakedImages records each devcontainer template's most recent successful
 	// pre-bake, keyed by template name. Deliberately NOT part of WorkspaceTemplate/

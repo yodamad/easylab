@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"easylab/internal/providers/workspace"
 )
@@ -27,10 +28,40 @@ type fakeBackend struct {
 	routingDomain string
 	routingScheme string
 
+	// Idle management (workspace.IdleManager). activity maps a workspace ID to
+	// when it was last used; a workspace with no entry reads as never used.
+	activity    map[string]time.Time
+	activityErr error
+	stopErr     error
+	startErr    error
+
 	callsMu     sync.Mutex
 	DeleteCalls []string
 	Ensured     []workspace.Spec
 	ListCalls   int
+	StopCalls   []string
+	StartCalls  []string
+}
+
+func (f *fakeBackend) WorkspaceLastActivity(_ context.Context, name string) (time.Time, error) {
+	if f.activityErr != nil {
+		return time.Time{}, f.activityErr
+	}
+	return f.activity[name], nil
+}
+
+func (f *fakeBackend) StopWorkspace(_ context.Context, name string) error {
+	f.callsMu.Lock()
+	f.StopCalls = append(f.StopCalls, name)
+	f.callsMu.Unlock()
+	return f.stopErr
+}
+
+func (f *fakeBackend) StartWorkspace(_ context.Context, name string) error {
+	f.callsMu.Lock()
+	f.StartCalls = append(f.StartCalls, name)
+	f.callsMu.Unlock()
+	return f.startErr
 }
 
 func (f *fakeBackend) EnsureWorkspace(_ context.Context, spec workspace.Spec) (workspace.Workspace, error) {

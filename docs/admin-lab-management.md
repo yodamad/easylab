@@ -77,8 +77,8 @@ lab, organized into tabs at the top:
   content is unchanged, only where you reach it moved.
 * **Feedback** — a compact summary (average rating, most recent comments) with a link to
   the full [feedback page](feedbacks.md) for this lab.
-* **Lifecycle & Cleanup** — an inline form for the workspace lifetime and lab deletion
-  date/time (this replaces the old **Edit Lifecycle** modal), plus a history table of
+* **Lifecycle & Cleanup** — an inline form for the workspace lifetime, the idle
+  timeout after which unused workspaces are paused, and the lab deletion date/time (this replaces the old **Edit Lifecycle** modal), plus a history table of
   every automatic cleanup sweep that has run.
 * **Activity** — this lab's entries from the [audit log](audit-log.md), filtered to just
   this lab.
@@ -568,12 +568,21 @@ recreating the lab — this replaces the old **Edit Lifecycle** modal:
 ![Edit Lifecycle](screens/edit-lifecycle.png){width=450}
 
 > **Note:** this screenshot still shows the old modal and needs retaking against the
-> inline form described here.
+> inline form described here, which also has the **Pause Idle Workspaces** field.
 
 * Change the workspace lifetime value/unit, or clear it (`0` or empty) to disable
   automatic workspace cleanup.
+* Set, change, or clear **Pause Idle Workspaces** (minutes, `0` or empty to disable, 
+  otherwise at least `10`). See
+  [Pause Idle Workspaces](admin-lab-creation.md#pause-idle-workspaces) for how idleness
+  is decided and what protects a student who is working. Disabling it does not resume
+  workspaces that are already paused — their owners do, from the student pages.
 * Set, change, or clear the lab's scheduled deletion date and time. A cleared date
   disables scheduled lab deletion; a date must be in the future.
+
+A paused workspace stays in the lab's workspace list with a ⏸ **stopped** status, which
+is also available in the status filter. It still counts against the workspace lifetime
+and is deleted with the lab like any other.
 
 On save, a toast confirms the update and the page refreshes to show the new values —
 including the cleanup history table further down this section, which records every

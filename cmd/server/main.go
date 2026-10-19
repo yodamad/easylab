@@ -517,6 +517,7 @@ func registerStudentRoutes(mux *http.ServeMux, handler *server.Handler, authHand
 	mux.HandleFunc("/api/student/workspace/request", authHandler.RequireStudentAuth(handler.RequestWorkspace))
 	mux.HandleFunc("/api/student/workspace/status", authHandler.RequireStudentAuth(handler.WorkspaceStatus))
 	mux.HandleFunc("/api/student/workspace/open", authHandler.RequireStudentAuth(handler.OpenWorkspace))
+	mux.HandleFunc("/api/student/workspace/resume", authHandler.RequireStudentAuth(handler.ResumeWorkspace))
 	mux.HandleFunc("/api/student/workspace/delete", authHandler.RequireStudentAuth(handler.DeleteStudentWorkspace))
 	mux.HandleFunc("/api/student/workspace/access", authHandler.RequireStudentAuth(handler.WorkspaceTeacherAccess))
 	mux.HandleFunc("/api/student/feedback", authHandler.RequireStudentAuth(handler.SubmitFeedback))
@@ -761,7 +762,7 @@ const (
 	routeSetLabAvailability
 	routeBakeTemplate
 	routeBakeTemplateStatus
-	routeCoderCredentials
+	routeLabEndpointInfo
 	routeKubeconfig
 	routeRecreateCredentials
 	routeUpdateLabLifecycle
@@ -826,8 +827,8 @@ func resolveLabRoute(path, method, format string) labRoute {
 		return routeBakeTemplate
 	case strings.HasSuffix(path, "/recreate-credentials") && method == http.MethodGet:
 		return routeRecreateCredentials
-	case strings.HasSuffix(path, "/coder-credentials") && method == http.MethodGet:
-		return routeCoderCredentials
+	case strings.HasSuffix(path, "/endpoint-info") && method == http.MethodGet:
+		return routeLabEndpointInfo
 	case strings.HasSuffix(path, "/kubeconfig"):
 		return routeKubeconfig
 	case strings.HasSuffix(path, "/lifecycle") && method == http.MethodPost:
@@ -884,8 +885,8 @@ func labRequestRouter(h *server.Handler) http.HandlerFunc {
 			h.BakeTemplateStatus(w, r)
 		case routeRecreateCredentials:
 			h.ServeRecreateCredentials(w, r)
-		case routeCoderCredentials:
-			h.GetCoderCredentials(w, r)
+		case routeLabEndpointInfo:
+			h.GetLabEndpointInfo(w, r)
 		case routeKubeconfig:
 			h.DownloadKubeconfig(w, r)
 		case routeJobStatusJSON:

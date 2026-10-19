@@ -389,18 +389,17 @@ function retryLab(labId) {
 }
 
 // ---------------------------------------------------------------------------
-// Lab Endpoint Info (was the "coder-credentials" modal, now an inline
-// <details> panel in the Overview section)
+// Lab Endpoint Info — an inline <details> panel in the Overview section
 // ---------------------------------------------------------------------------
 
-const _loadedCoderCredentials = {};
+const _loadedLabEndpointInfo = {};
 
-function loadCoderCredentials(labId) {
-    if (_loadedCoderCredentials[labId]) return;
+function loadLabEndpointInfo(labId) {
+    if (_loadedLabEndpointInfo[labId]) return;
 
-    const loading = document.getElementById('coder-credentials-loading');
-    const errorEl = document.getElementById('coder-credentials-error');
-    const fields = document.getElementById('coder-credentials-fields');
+    const loading = document.getElementById('endpoint-info-loading');
+    const errorEl = document.getElementById('endpoint-info-error');
+    const fields = document.getElementById('endpoint-info-fields');
     if (!loading || !errorEl || !fields) return;
 
     loading.style.display = 'block';
@@ -408,7 +407,7 @@ function loadCoderCredentials(labId) {
     errorEl.textContent = '';
     fields.style.display = 'none';
 
-    fetch('/api/labs/' + encodeURIComponent(labId) + '/coder-credentials')
+    fetch('/api/labs/' + encodeURIComponent(labId) + '/endpoint-info')
         .then(function (response) {
             if (!response.ok) {
                 if (response.status === 404) return Promise.reject('Lab not found.');
@@ -418,13 +417,13 @@ function loadCoderCredentials(labId) {
             return response.json();
         })
         .then(function (data) {
-            _loadedCoderCredentials[labId] = true;
+            _loadedLabEndpointInfo[labId] = true;
             loading.style.display = 'none';
-            const urlEl = document.getElementById('coder-cred-url');
+            const urlEl = document.getElementById('endpoint-url');
             // An empty base URL means workspaces are only reachable in-cluster.
             urlEl.value = data.url || '';
             urlEl.placeholder = 'Not exposed (in-cluster only)';
-            const nsEl = document.getElementById('coder-cred-namespace');
+            const nsEl = document.getElementById('endpoint-namespace');
             if (nsEl) nsEl.value = data.namespace || '';
             fields.style.display = 'block';
         })
@@ -435,7 +434,7 @@ function loadCoderCredentials(labId) {
         });
 }
 
-function copyCoderCredToClipboard(inputId, copyBtn) {
+function copyEndpointToClipboard(inputId, copyBtn) {
     var input = document.getElementById(inputId);
     if (!input || !input.value) return;
     copyToClipboard(input.value, copyBtn);

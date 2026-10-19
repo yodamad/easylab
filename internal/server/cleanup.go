@@ -85,6 +85,7 @@ func (h *Handler) StartWorkspaceCleanup(ctx context.Context) {
 			return
 		case <-ticker.C:
 			h.cleanupExpiredWorkspaces()
+			h.stopIdleWorkspaces()
 			h.cleanupExpiredLabs()
 			h.reconcilePrepulls()
 			h.reconcilePortals()

@@ -363,3 +363,28 @@ if (typeof htmx !== 'undefined') {
         });
     });
 }
+
+// A paused workspace's status block carries a Resume button instead of polling:
+// resuming swaps in the "starting" block the server answers with, which puts the
+// page back on the ordinary status polling.
+document.addEventListener('click', async function(event) {
+    const btn = event.target.closest('.btn-workspace-resume');
+    if (!btn) return;
+    const statusEl = btn.closest('[data-resume-url]');
+    if (!statusEl) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Resuming...';
+    const html = await resumeWorkspace(statusEl.getAttribute('data-resume-url'));
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html || '';
+    const newEl = tmp.firstElementChild;
+    if (!newEl || !newEl.classList.contains('workspace-ready-status')) {
+        btn.disabled = false;
+        btn.textContent = 'Resume';
+        alert('The workspace could not be resumed. Please try again.');
+        return;
+    }
+    statusEl.replaceWith(newEl);
+    startWorkspaceStatusPolling();
+});

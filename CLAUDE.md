@@ -58,7 +58,7 @@ internal/
     variables.go         # Terraform .tf file parser — extracts variable definitions from ZIP uploads
   pulumi/
     program.go           # Pulumi program builder
-coder/
+ingress/
   https.go               # HTTPS/TLS setup: ingress-nginx, cert-manager, DNS-01/HTTP-01 ACME
   externaldns.go         # external-dns setup
 k8s/
@@ -95,7 +95,7 @@ CRITICAL: Do NOT modify, refactor, rename, or restructure existing files unless 
 - Refactor or "improve" existing working code on own initiative
 - Rename functions, variables, types, packages, or files without being asked
 - Change API routes, request/response contracts, or HTTP status codes
-- Alter Pulumi infrastructure code (`main.go`, `ovh/`, `k8s/`, `coder/`, `templates/`)
+- Alter Pulumi infrastructure code (`main.go`, `ovh/`, `k8s/`, `ingress/`, `templates/`)
 - Edit CI/CD pipelines (`.gitlab-ci.yml`, `.github/`), `Dockerfile`, or `docker-compose.yml`
 - Add, remove, or upgrade Go or npm dependencies without explicit approval
 - Change authentication or security logic (`internal/server/auth.go`)
@@ -118,14 +118,14 @@ CRITICAL: Do NOT modify, refactor, rename, or restructure existing files unless 
 - HTML templates use a base/child pattern: `web/base.html` defines layout, page templates define blocks (`title`, `content`, `scripts`). Serve via `handler.serveTemplate()`.
 - HTTP handlers live in `internal/server/` — use `net/http.HandlerFunc` and `http.ServeMux`. Do NOT introduce external routers (no gorilla/mux, no chi).
 - HTMX drives all dynamic UI — prefer `hx-get`, `hx-post`, `hx-target`, `hx-swap` over writing custom JavaScript. JS files in `web/static/` are only for page-specific logic that HTMX cannot handle (e.g. encryption, cookie management).
-- Pulumi programs are pure Go — infrastructure changes go in `ovh/`, `k8s/`, or `coder/`. The `templates/` directory is a self-contained Pulumi project copied into job workspaces. Cloud provider selection (OVH vs. Azure) is a hardcoded branch in `internal/pulumi/program.go`, not a registry — there are only two providers and no active plan for a third, so keep it that way rather than adding registry indirection speculatively.
+- Pulumi programs are pure Go — infrastructure changes go in `ovh/`, `k8s/`, or `ingress/`. The `templates/` directory is a self-contained Pulumi project copied into job workspaces. Cloud provider selection (OVH vs. Azure) is a hardcoded branch in `internal/pulumi/program.go`, not a registry — there are only two providers and no active plan for a third, so keep it that way rather than adding registry indirection speculatively.
 - **DNS provider registry**: DNS providers (`internal/providers/dns/`) implement a `dns.Provider` interface for cert-manager DNS-01 challenges and A-record creation, self-registering via `init()` (see `internal/providers/dns/ovh/`, `internal/providers/dns/azure/`) and dispatched through `internal/providers/dns/registry.go`. Add a new DNS provider by implementing the interface and registering it — this one *is* a real, live registry, unlike cloud provider selection above.
-- **Workspace backend registry**: `internal/providers/workspace/` defines the `Backend` interface for provisioning student IDE workspaces on a Kubernetes cluster, registered via `registry.go`. The `kube` backend (`internal/providers/workspace/kube/`) is the default and only backend today — it provisions one code-server workspace per student directly via client-go (Deployment + Service + Ingress + optional PVC), replacing the former Coder-based workspace layer.
+- **Workspace backend registry**: `internal/providers/workspace/` defines the `Backend` interface for provisioning student IDE workspaces on a Kubernetes cluster, registered via `registry.go`. The `kube` backend (`internal/providers/workspace/kube/`) is the default and only backend today — it provisions one code-server workspace per student directly via client-go (Deployment + Service + Ingress + optional PVC).
 - **Feedback system**: `internal/server/feedback.go` manages student ratings/comments (1–5 rating, difficulty, recommendation, free text) via `FeedbackStore` persisted to JSON. Admin view at `/admin/feedback?lab_id=`.
 - **Workspace cleanup**: `internal/server/cleanup.go` runs a background goroutine every 5 minutes that probes the lab's cluster API reachability, enforces `WorkspaceLifetimeHours` per job, and records cleanup events for the stats dashboard.
 - **Stats dashboard**: `ServeAdminStats` / `GetProjectStats` in `handler.go` aggregate deployment KPIs and monthly time-series data from job history (workspace snapshots + cleanup events).
 - **BYO Kubernetes**: `LabConfig.UseExistingCluster` + `ExternalKubeconfig` fields allow skipping OVH provisioning when a cluster already exists.
-- **HTTPS/TLS**: `coder/https.go` handles ingress-nginx and cert-manager installation, DNS-01/HTTP-01 ACME challenge setup, wildcard domains, and LoadBalancer IP resolution for OVHcloud.
+- **HTTPS/TLS**: `ingress/https.go` handles ingress-nginx and cert-manager installation, DNS-01/HTTP-01 ACME challenge setup, wildcard domains, and LoadBalancer IP resolution for OVHcloud.
 - **Terraform variable detection**: `internal/tfparse/variables.go` parses Terraform `.tf` files from ZIP uploads to extract variable definitions used by the `DetectTemplateVariables` handler.
 - **HTMX response helpers**: Use `writeToast()` for success/error toast notifications in HTMX responses; use `writeJSONError()` for JSON API error responses. Both are defined in `handler.go`.
 

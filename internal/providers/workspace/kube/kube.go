@@ -80,7 +80,7 @@ const (
 	nipDomainSuffix = "nip.io"
 
 	// Well-known Traefik ingress controller location. These mirror the defaults
-	// coder.SetupHTTPS installs into; a lab that pre-installs the controller
+	// ingress.SetupHTTPS installs into; a lab that pre-installs the controller
 	// elsewhere simply gets no nip.io fallback (workspace stays in-cluster).
 	ingressControllerNamespace = "traefik"
 	ingressControllerService   = "traefik"
@@ -222,6 +222,10 @@ func profileFor(string) ideProfile {
 type Backend struct {
 	client    kubernetes.Interface
 	namespace string
+	// healthz overrides how a workspace's /healthz is fetched (see
+	// WorkspaceLastActivity). Nil outside tests: the fake clientset cannot serve
+	// the API server's Service proxy.
+	healthz func(ctx context.Context, name string) ([]byte, error)
 }
 
 // New builds a kube Backend from a kubeconfig file's contents.
@@ -1431,7 +1435,7 @@ func (b *Backend) createIngress(ctx context.Context, name string, labels map[str
 	// Websocket / long-lived IDE connections and unbounded request bodies need no
 	// per-Ingress annotation under Traefik (unlike nginx): it streams bodies
 	// unbounded by default, and the client-facing idle timeout is configured
-	// chart-wide in coder.SetupHTTPS's Traefik install instead.
+	// chart-wide in ingress.SetupHTTPS's Traefik install instead.
 	annotations := map[string]string{}
 
 	tlsSecret, clusterIssuer := workspaceTLS(name, spec)
@@ -1705,6 +1709,11 @@ func tokenFromDeployment(dep *appsv1.Deployment) string {
 
 // deploymentReadiness derives a readiness phase from a Deployment's status.
 func deploymentReadiness(dep *appsv1.Deployment) (phase string, ready bool) {
+	// Checked first: a Deployment just scaled to zero can still report its old pod
+	// as ready for a moment, and a stopped one would otherwise read as "starting".
+	if isStopped(dep) {
+		return workspace.PhaseStopped, false
+	}
 	if dep.Status.ReadyReplicas >= 1 {
 		return workspace.PhaseRunning, true
 	}

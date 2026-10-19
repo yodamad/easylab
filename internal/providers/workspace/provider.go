@@ -1,7 +1,7 @@
 // Package workspace defines the backend abstraction for provisioning student
-// IDE workspaces on a Kubernetes cluster. It replaces the former Coder-based
-// workspace layer: each student gets a self-managed set of Kubernetes resources
-// (Deployment + Service + Ingress + PVC) running a code-server image.
+// IDE workspaces on a Kubernetes cluster. Each student gets a self-managed set
+// of Kubernetes resources (Deployment + Service + Ingress + PVC) running a
+// code-server image.
 //
 // Backends are registered by name (see registry.go) and instantiated per-lab
 // from the lab's kubeconfig, so handlers never hardcode backend selection.
@@ -20,6 +20,9 @@ const (
 	PhaseAgentsStarting = "agents_starting"
 	PhaseRunning        = "running"
 	PhaseFailed         = "agents_failed"
+	// PhaseStopped is a workspace paused by StopWorkspace: its pod is gone but its
+	// volume, Service and Ingress are kept, so StartWorkspace brings it back as it was.
+	PhaseStopped = "stopped"
 )
 
 // Workspace is a single student IDE environment running on the cluster.
@@ -238,6 +241,25 @@ type Backend interface {
 	// in which case the backend resolves its fallback). An empty returned domain
 	// means workspaces are reachable only from inside the cluster.
 	Routing(ctx context.Context, labDomain string) (domain, scheme string)
+}
+
+// IdleManager is implemented by backends that can pause a workspace nobody is
+// using and bring it back on demand. Optional and deliberately separate from
+// Backend, like ImagePrepuller below — callers type-assert for it.
+type IdleManager interface {
+	// WorkspaceLastActivity reports when the workspace's IDE was last in use. A
+	// zero time with a nil error means it has not been used since it (re)started.
+	// An error means activity is unknown: callers must treat that as "in use" and
+	// never pause a workspace on it.
+	WorkspaceLastActivity(ctx context.Context, name string) (time.Time, error)
+	// StopWorkspace pauses the workspace: its pod is removed while its volume,
+	// Service and Ingress are kept. It refuses a workspace without a persistent
+	// volume, whose files would not survive. Stopping a stopped workspace is not
+	// an error.
+	StopWorkspace(ctx context.Context, name string) error
+	// StartWorkspace resumes a workspace paused by StopWorkspace. Starting a
+	// running workspace is not an error.
+	StartWorkspace(ctx context.Context, name string) error
 }
 
 // Secret types reported by ListAuthSecrets.

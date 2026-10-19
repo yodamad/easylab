@@ -24,7 +24,7 @@ test.describe('Admin End-to-End Flow', () => {
     await expect(page.locator('.progress-step .step-label:has-text("Network")')).toBeVisible();
     await expect(page.locator('.progress-step .step-label:has-text("Kubernetes")')).toBeVisible();
     await expect(page.locator('.progress-step .step-label:has-text("Node Pool")')).toBeVisible();
-    await expect(page.locator('.progress-step .step-label:has-text("Coder")')).toBeVisible();
+    await expect(page.locator('.progress-step .step-label:has-text("Workspace")')).toBeVisible();
   });
 
   test('should show step 1 - Pulumi Configuration', async ({ page }) => {
@@ -70,11 +70,9 @@ test.describe('Admin End-to-End Flow', () => {
     await expect(page.locator('label:has-text("Node Pool Name")')).toBeVisible();
     await page.locator('button:has-text("Next")').click();
 
-    // Step 5 - Coder
+    // Step 5 - Workspace
     await page.waitForSelector('.wizard-step[data-step="5"].active', { timeout: 5000 });
-    await expect(page.locator('h2:has-text("Coder Configuration")')).toBeVisible();
-    await expect(page.locator('label:has-text("Admin Email")')).toBeVisible();
-    await expect(page.locator('label:has-text("Admin Password")')).toBeVisible();
+    await expect(page.locator('h2:has-text("Workspace Configuration")')).toBeVisible();
   });
 
   test('should go back through wizard steps', async ({ page }) => {
@@ -127,7 +125,7 @@ test.describe('Admin End-to-End Flow', () => {
 
     // Step 5 - should show Dry Run and Create Lab buttons
     await page.waitForSelector('.wizard-step[data-step="5"].active', { timeout: 5000 });
-    await expect(page.locator('h2:has-text("Coder Configuration")')).toBeVisible();
+    await expect(page.locator('h2:has-text("Workspace Configuration")')).toBeVisible();
     await expect(page.locator('button:has-text("Dry Run")')).toBeVisible();
     await expect(page.locator('button:has-text("Create Lab")')).toBeVisible();
   });

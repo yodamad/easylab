@@ -416,8 +416,8 @@
                             <div class="form-row">
                                 <div class="form-group">
                                     <label for="domain">Domain Name</label>
-                                    <input type="text" id="domain" name="domain" placeholder="coder.example.com">
-                                    <small>FQDN used for workspace HTTPS, e.g. <code>coder.example.com</code>.</small>
+                                    <input type="text" id="domain" name="domain" placeholder="lab.example.com">
+                                    <small>FQDN used for workspace HTTPS, e.g. <code>lab.example.com</code>.</small>
                                 </div>
                                 <div class="form-group">
                                     <label for="acme_email">Contact email</label>
@@ -617,7 +617,7 @@
                             <div class="template-advanced-body">
                                 <div class="form-group">
                                     <label for="wildcard_domain">Wildcard Domain (Optional)</label>
-                                    <input type="text" id="wildcard_domain" name="wildcard_domain" placeholder="*.coder.example.com">
+                                    <input type="text" id="wildcard_domain" name="wildcard_domain" placeholder="*.lab.example.com">
                                     <small>Overrides the wildcard record derived from the domain above. Leave blank unless you need a different base.</small>
                                 </div>
                             </div>
@@ -683,6 +683,15 @@
                                 </select>
                             </div>
                             <small>Auto-delete workspaces after this duration. Leave 0 to disable.</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="workspace_idle_timeout_minutes">Pause Idle Workspaces (Optional)</label>
+                            <div class="lifetime-input">
+                                <input type="number" id="workspace_idle_timeout_minutes" name="workspace_idle_timeout_minutes" min="0" placeholder="0">
+                                <span class="lifetime-input-unit">minutes</span>
+                            </div>
+                            <small>Pause a workspace nobody has had open for this long: its files are kept and the student resumes it in one click. Minimum 10; pick something longer than your breaks (60–90). Leave 0 to disable.</small>
                         </div>
 
                         <div class="form-group">

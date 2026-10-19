@@ -115,6 +115,10 @@ function renderWorkspaceCard(info, labId) {
         ? `<span class="workspace-card-chip"><span class="workspace-card-chip-key">Lab</span>${labDisplay}</span>`
         : '';
 
+    const pausedChip = info.paused
+        ? `<span class="workspace-card-chip workspace-card-chip--paused" title="Paused after inactivity. Open it to resume — your files are kept.">⏸ Paused</span>`
+        : '';
+
     const expiryPill = deletionAt ? `
                 <div class="workspace-expiry-pill" title="This workspace is deleted automatically">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="workspace-expiry-icon" aria-hidden="true">
@@ -133,7 +137,7 @@ function renderWorkspaceCard(info, labId) {
             <div class="workspace-card-header" onclick="toggleWorkspaceCard('${safeLab}')">
                 <div class="workspace-card-heading">
                     <h3 class="workspace-card-title">${safeName}</h3>
-                    <div class="workspace-card-subtitle">${labChip}${templateChip}</div>
+                    <div class="workspace-card-subtitle">${labChip}${templateChip}${pausedChip}</div>
                 </div>
                 <div class="workspace-card-header-actions">
                     <button onclick="event.stopPropagation(); openCodeServer('${escapeHtmlAttr(info.lab_id)}', '${escapeHtmlAttr(info.workspace_name)}')" class="student-btn student-btn-small workspace-card-open" title="Open code-server">Open Code Server</button>
@@ -188,8 +192,20 @@ async function openCodeServer(labId, workspaceName) {
         const tmp = document.createElement('div');
         tmp.innerHTML = html;
         const link = tmp.querySelector('a.btn-workspace-connect');
+        const paused = tmp.querySelector('[data-resume-url]');
         if (link) {
             window.open(link.href, '_blank');
+        } else if (paused) {
+            // Paused for inactivity: start it again. It takes a moment to come
+            // back, so the student opens it with a second click rather than
+            // through a window opened later, which browsers block as a pop-up.
+            const resumed = await resumeWorkspace(paused.getAttribute('data-resume-url'));
+            if (resumed) {
+                alert('This workspace was paused after a period of inactivity. It is starting again with all your files — open it again in a moment.');
+                loadAllWorkspaceInfos();
+            } else {
+                alert('The workspace could not be resumed. Please try again.');
+            }
         } else {
             alert('Workspace is not ready yet. Please wait for it to start and try again.');
         }

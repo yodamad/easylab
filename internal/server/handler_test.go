@@ -1524,7 +1524,6 @@ func TestCreateLabConfigFromForm_BasicOVH(t *testing.T) {
 		"stack_name":        {"my-stack"},
 		"template_0_name":   {"my-template"},
 		"template_0_source": {"git"},
-		"coder_admin_email": {"admin@example.com"},
 		"provider":          {"ovh"},
 		"network_region":    {"GRA7"},
 	}

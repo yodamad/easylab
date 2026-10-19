@@ -32,7 +32,7 @@ COVERAGE_HTML=$(COVERAGE_DIR)/coverage.html
 COVERAGE_THRESHOLD=50
 # Coverage packages - focus on critical business logic, exclude main entry points
 # See .coverignore for details on what's excluded and why
-COVERAGE_PKGS=./internal/... ./utils/... ./coder/...
+COVERAGE_PKGS=./internal/... ./utils/... ./ingress/...
 
 .PHONY: all build clean test test-all test-backend test-frontend test-verbose test-race coverage coverage-html coverage-check coverage-frontend coverage-all coverage-report coverage-pkg deps deps-all deps-update npm-install npm-update lint help server run-server dev npm-test-ui npm-test-headed npm-test-debug npm-test-chaos npm-test-chaos-headed npm-test-chaos-network npm-test-chaos-server npm-test-chaos-ui npm-test-chaos-api ci ci-coverage helm-lint helm-template
 

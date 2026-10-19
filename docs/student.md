@@ -115,6 +115,8 @@ Collapsed, each card shows:
 * **Lab** and **Template** — the lab and workspace template this environment was created from, shown as small chips
 * **Auto-deletion date** — when your workspace will be deleted automatically, shown as an amber *"⏳ Auto-deletes …"* badge with the date and hour. It only appears when the lab schedules a deletion (either a per-workspace lifetime or a lab-wide end date); if the lab sets no expiry, no badge is shown. Save anything you want to keep before this time.
 
+* **Paused badge** — an amber *"⏸ Paused"* chip when the workspace was paused after a period of inactivity (see [Paused workspaces](#paused-workspaces) below).
+
 * **Teacher access note** — if a teacher opened your workspace (to check your work or help you debug), the card says *"A teacher opened this workspace on …"* with the date and time of the latest time they did. Nothing is shown when no teacher has opened it.
 
 Expand the card to reveal the rest:
@@ -124,6 +126,21 @@ Expand the card to reveal the rest:
 * **Created at** — when the workspace was created
 
 An **Open Code Server** button is available on each card header — you don't need to expand the card to use it. Click it to open your code-server directly in a new tab — EasyLab resolves the workspace URL automatically so you don't need to copy it manually, and signs you in for you, so you land straight in the IDE without typing a password. The card does not show the workspace's connection token: if you open the workspace URL directly, code-server asks for the token you were given when you requested the workspace.
+
+### Paused workspaces
+
+The organiser can have workspaces that nobody is using paused automatically. A workspace counts as in use for as long as its code-server tab is open, so this only happens after you have closed the tab — or your laptop has been asleep or offline — for a while.
+
+A paused workspace keeps **all its files**, its URL and its password; its card shows an amber *"⏸ Paused"* chip:
+
+![A paused workspace on My Workspaces](screens/student-workspace-paused.png){width=700}
+
+To bring it back:
+
+* On **My Workspaces**, click **Open Code Server**. A message tells you the workspace is starting again; click **Open Code Server** once more a moment later to get in.
+* On **Request a workspace**, a paused workspace shows *"⏸ Workspace paused after inactivity"* with a **Resume** button. Requesting the same template again resumes it too.
+
+What does not survive a pause is anything that was *running*: open terminals and the commands in them. If you need to leave a long command running, keep the code-server tab open.
 
 ### Managing workspaces
 

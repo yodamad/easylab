@@ -495,7 +495,7 @@ type JobPreparation struct {
 
 // pulumiExecutionTimeout is the maximum duration for a full Pulumi operation
 // (stack init + up/preview). This prevents jobs from hanging indefinitely when
-// downstream operations (e.g. Coder template processing) get stuck.
+// downstream operations (e.g. workspace template processing) get stuck.
 const pulumiExecutionTimeout = 45 * time.Minute
 
 // prepareJob handles all common setup logic for Pulumi operations
@@ -1326,7 +1326,7 @@ func (pe *PulumiExecutor) handleFailedUp(jobID string, prep *JobPreparation, upR
 // cert-manager and traefik are shared ingress/TLS infrastructure: on a BYO
 // cluster (LabConfig.UseExistingCluster) they are installed once and reused by
 // every subsequent lab on that cluster (see the skipClusterIssuer reuse logic in
-// coder.SetupHTTPS), so tearing them down when any single lab is destroyed would
+// ingress.SetupHTTPS), so tearing them down when any single lab is destroyed would
 // take down TLS/ingress for every other lab sharing the cluster.
 //
 // The cert-manager DNS-01 plumbing is shared the same way once a lab is created
@@ -1335,7 +1335,7 @@ func (pe *PulumiExecutor) handleFailedUp(jobID string, prep *JobPreparation, upR
 // on the same cluster references them by these same well-known names rather than
 // through its own Pulumi state. The ClusterIssuer name is fixed in code
 // (letsencrypt-prod-issuer) regardless of the configured
-// utils.CoderClusterIssuerName, so this URN is correct even when that name is
+// utils.LabClusterIssuerName, so this URN is correct even when that name is
 // overridden. The OVH solver webhook (cert-manager-webhook-ovh-ns/-webhook) is
 // only present with the OVH DNS provider; Azure uses cert-manager's native
 // solver and creates no webhook.
@@ -1484,7 +1484,7 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 		// BYOK mode: workspace namespace + kubeconfig path
 		commands = []configCommand{
 			{"k8s:useExistingCluster", "true", false},
-			{"coder:namespace", workspaceNamespace, false},
+			{"lab:namespace", workspaceNamespace, false},
 		}
 
 		// The kubeconfig file path is relative to the job directory
@@ -1502,7 +1502,7 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 			{"nodepool:minNodeCount", fmt.Sprintf("%d", config.NodePoolMinNodeCount), false},
 			{"nodepool:maxNodeCount", fmt.Sprintf("%d", config.NodePoolMaxNodeCount), false},
 			{"k8s:clusterName", prefixedK8sClusterName, false},
-			{"coder:namespace", workspaceNamespace, false},
+			{"lab:namespace", workspaceNamespace, false},
 		}
 	} else {
 		// OVH mode (default): full infrastructure config with gateway/private network
@@ -1525,7 +1525,7 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 			{"nodepool:minNodeCount", fmt.Sprintf("%d", config.NodePoolMinNodeCount), false},
 			{"nodepool:maxNodeCount", fmt.Sprintf("%d", config.NodePoolMaxNodeCount), false},
 			{"k8s:clusterName", prefixedK8sClusterName, false},
-			{"coder:namespace", workspaceNamespace, false},
+			{"lab:namespace", workspaceNamespace, false},
 		}
 
 		if config.NetworkID != "" {
@@ -1538,40 +1538,40 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 	// controller's LoadBalancer IP.
 	// Only emit when false (skip install). Absent = install (backward compat with old jobs).
 	if config.InstallNginxIngress != nil && !*config.InstallNginxIngress {
-		commands = append(commands, configCommand{"coder:installNginxIngress", "false", false})
+		commands = append(commands, configCommand{"lab:installNginxIngress", "false", false})
 		if config.NginxIngressNamespace != "" {
-			commands = append(commands, configCommand{"coder:nginxIngressNamespace", config.NginxIngressNamespace, false})
+			commands = append(commands, configCommand{"lab:nginxIngressNamespace", config.NginxIngressNamespace, false})
 		}
 		if config.NginxIngressServiceName != "" {
-			commands = append(commands, configCommand{"coder:nginxIngressServiceName", config.NginxIngressServiceName, false})
+			commands = append(commands, configCommand{"lab:nginxIngressServiceName", config.NginxIngressServiceName, false})
 		}
 	} else if len(config.TraefikNodeSelector) > 0 {
 		if b, err := json.Marshal(config.TraefikNodeSelector); err == nil {
-			commands = append(commands, configCommand{"coder:traefikNodeSelector", string(b), false})
+			commands = append(commands, configCommand{"lab:traefikNodeSelector", string(b), false})
 		}
 	}
 
 	// HTTPS / TLS configuration — only meaningful when a domain is set.
 	if config.Domain != "" {
 		commands = append(commands,
-			configCommand{"coder:domain", config.Domain, false},
-			configCommand{"coder:acmeEmail", config.AcmeEmail, false},
+			configCommand{"lab:domain", config.Domain, false},
+			configCommand{"lab:acmeEmail", config.AcmeEmail, false},
 		)
 		if config.WildcardDomain != "" {
-			commands = append(commands, configCommand{"coder:wildcardDomain", config.WildcardDomain, false})
+			commands = append(commands, configCommand{"lab:wildcardDomain", config.WildcardDomain, false})
 		}
 		if config.InstallCertManager != nil && !*config.InstallCertManager {
-			commands = append(commands, configCommand{"coder:installCertManager", "false", false})
+			commands = append(commands, configCommand{"lab:installCertManager", "false", false})
 			if config.CertManagerNamespace != "" {
-				commands = append(commands, configCommand{"coder:certManagerNamespace", config.CertManagerNamespace, false})
+				commands = append(commands, configCommand{"lab:certManagerNamespace", config.CertManagerNamespace, false})
 			}
 		} else if len(config.CertManagerNodeSelector) > 0 {
 			if b, err := json.Marshal(config.CertManagerNodeSelector); err == nil {
-				commands = append(commands, configCommand{"coder:certManagerNodeSelector", string(b), false})
+				commands = append(commands, configCommand{"lab:certManagerNodeSelector", string(b), false})
 			}
 		}
 		if config.ClusterIssuerName != "" {
-			commands = append(commands, configCommand{"coder:clusterIssuerName", config.ClusterIssuerName, false})
+			commands = append(commands, configCommand{"lab:clusterIssuerName", config.ClusterIssuerName, false})
 		}
 	}
 

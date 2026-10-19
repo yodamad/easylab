@@ -109,7 +109,7 @@ func (p *AzureDNSProvider) CreateARecord(
 	// the v3 SDKs — they also stamp the plugin version on every registration
 	// instead of letting the engine pick the newest installed plugin.
 	ttl := 300.0
-	_, err := azuredns.NewRecordSet(ctx, "coder-dns-a-record-"+safe, &azuredns.RecordSetArgs{
+	_, err := azuredns.NewRecordSet(ctx, "lab-dns-a-record-"+safe, &azuredns.RecordSetArgs{
 		ZoneName:              pulumi.String(zone),
 		ResourceGroupName:     pulumi.String(resourceGroup),
 		RelativeRecordSetName: pulumi.String(subdomain),

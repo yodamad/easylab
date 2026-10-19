@@ -15,7 +15,7 @@ documentation. When in doubt, ASK before changing.
 - Refactor or "improve" existing working code on their own initiative
 - Rename functions, variables, types, packages, or files without being asked
 - Change API routes, request/response contracts, or HTTP status codes
-- Alter Pulumi infrastructure code (main.go, ovh/, k8s/, coder/, templates/)
+- Alter Pulumi infrastructure code (main.go, ovh/, k8s/, ingress/, templates/)
 - Edit CI/CD pipelines (.gitlab-ci.yml, .github/), Dockerfile, or docker-compose.yml
 - Add, remove, or upgrade Go or npm dependencies without explicit approval
 - Change authentication or security logic (internal/server/auth.go)

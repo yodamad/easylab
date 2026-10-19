@@ -354,7 +354,7 @@ A full-featured template using most of the schema:
 ```yaml
 workspace_templates:
   - name: full-stack
-    image: codercom/enterprise-base:ubuntu
+    image: ghcr.io/myorg/full-stack:latest
     git_repo: https://gitlab.com/yodamad/workshop.git
     git_branch: main
     git_folder: exercises

@@ -19,7 +19,7 @@
 # COVERAGE_THRESHOLD:
 - ./internal/...                    # Core server logic (handlers, auth, jobs, pulumi)
 - ./utils/...                       # Utility functions (config, git, logging)
-- ./coder/...                       # Coder integration logic
+- ./ingress/...                     # Ingress / TLS / external-dns setup
 
 ### Not currently covered or enforced
 # ./ovh/..., ./azure/..., and ./k8s/... provision real infrastructure via the
