@@ -320,6 +320,21 @@ func (c *capturingBakeBackend) EnsureBakeJob(_ context.Context, req workspace.Ba
 	return nil
 }
 
+// awaitBakedTemplates returns the templates the backend was asked to bake, once there
+// are n of them. The Job is created on its own goroutine — after whatever it pushes to
+// is ready, see launchBake — so there is nothing to assert the moment a request or an
+// automatic bake returns.
+func awaitBakedTemplates(t *testing.T, cb *capturingBakeBackend, n int) []string {
+	t.Helper()
+	if n == 0 {
+		// Nothing to wait for: leave a bake that must not happen time to show up.
+		time.Sleep(50 * time.Millisecond)
+		return cb.bakedTemplates()
+	}
+	require.Eventually(t, func() bool { return len(cb.bakedTemplates()) >= n }, 2*time.Second, 5*time.Millisecond)
+	return cb.bakedTemplates()
+}
+
 func TestBakeTemplate_BakesRepoWhenTemplateHasOne(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -348,6 +363,7 @@ func TestBakeTemplate_BakesRepoWhenTemplateHasOne(t *testing.T) {
 
 			rec := postBake(h, id, "go-workshop")
 			assert.Contains(t, rec.Body.String(), "building", "body: %s", rec.Body.String())
+			awaitBakedTemplates(t, cb, 1)
 
 			cb.mu.Lock()
 			defer cb.mu.Unlock()
@@ -399,6 +415,107 @@ func TestRequestWorkspace_PropagatesBakedRepo(t *testing.T) {
 			assert.Equal(t, tt.repoBaked, dc.PrebuiltRepo)
 		})
 	}
+}
+
+// inClusterBakeBackend is a capturingBakeBackend that also hosts the in-cluster
+// registry, so a bake on it goes through the wait-for-the-registry path.
+type inClusterBakeBackend struct {
+	*capturingBakeBackend
+
+	ready   chan struct{} // closed once the registry is "up"
+	waitErr error         // when set, the registry never comes up
+}
+
+func newInClusterBakeBackend() *inClusterBakeBackend {
+	return &inClusterBakeBackend{
+		capturingBakeBackend: &capturingBakeBackend{
+			fakeBackend:      &fakeBackend{reachable: true},
+			fakeBakeProvider: &fakeBakeProvider{jobStatus: workspace.BakeStateFailed},
+		},
+		ready: make(chan struct{}),
+	}
+}
+
+func (f *inClusterBakeBackend) EnsureBuildCache(context.Context) (string, error) {
+	return "easylab-registry-cache.workshops.svc.cluster.local:5000/cache", nil
+}
+
+func (f *inClusterBakeBackend) EnsureRegistryIngress(_ context.Context, domain, _, _ string) (string, error) {
+	return "easylab-registry-cache." + domain, nil
+}
+
+func (f *inClusterBakeBackend) BakedImageRepo(labID, template, domain string) (string, string) {
+	path := "/baked/" + labID + "/" + template
+	return "easylab-registry-cache.workshops.svc.cluster.local:5000" + path,
+		"easylab-registry-cache." + domain + path + ":latest"
+}
+
+func (f *inClusterBakeBackend) WaitForBuildCache(ctx context.Context) error {
+	if f.waitErr != nil {
+		return f.waitErr
+	}
+	select {
+	case <-f.ready:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// inClusterBakeLab returns a lab whose single template bakes to the in-cluster
+// registry — which needs a domain, so the registry can be exposed over HTTPS.
+func inClusterBakeLab(t *testing.T, h *Handler, jm *JobManager) string {
+	t.Helper()
+	id := bakeLab(t, jm, WorkspaceTemplate{
+		Name:         "go-workshop",
+		GitRepo:      "https://gitlab.com/org/workshop.git",
+		Devcontainer: &DevcontainerConfig{Enabled: true, UseInClusterCache: true},
+	})
+	h.updateJobConfig(id, func(c *LabConfig) { c.Domain = "lab.example.com" })
+	return id
+}
+
+// The bug this guards: provisioning the in-cluster registry is an API write, not a
+// running registry. A bake Job created while it is still starting pushes into
+// nothing — and envbuilder's push failing does not fail its build, so the Job exits
+// 0 with an empty repository, which the repo-layer append then dies on. This bit
+// hardest on the automatic bakes, where the registry and the bake are created back
+// to back.
+func TestStartBake_WaitsForTheInClusterRegistry(t *testing.T) {
+	h, jm := newUploadTestHandler(t)
+	cb := newInClusterBakeBackend()
+	h.newWorkspaceBackend = func(_, _ string) (workspace.Backend, error) { return cb, nil }
+	id := inClusterBakeLab(t, h, jm)
+
+	rec := postBake(h, id, "go-workshop")
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+
+	// The admin's request is answered without waiting for the registry, and the card
+	// already reads as building — but no Job exists yet.
+	assert.Contains(t, rec.Body.String(), "building")
+	assert.Empty(t, awaitBakedTemplates(t, cb.capturingBakeBackend, 0), "the bake must not start before the registry serves")
+
+	close(cb.ready)
+	assert.Equal(t, []string{"go-workshop"}, awaitBakedTemplates(t, cb.capturingBakeBackend, 1))
+}
+
+// A registry that never comes up must fail the bake with a reason on the template's
+// card, not leave it building until the bake timeout.
+func TestStartBake_RegistryNeverReady(t *testing.T) {
+	h, jm := newUploadTestHandler(t)
+	cb := newInClusterBakeBackend()
+	cb.waitErr = errors.New("registry cache easylab-registry-cache did not become ready: context deadline exceeded")
+	h.newWorkspaceBackend = func(_, _ string) (workspace.Backend, error) { return cb, nil }
+	id := inClusterBakeLab(t, h, jm)
+
+	rec := postBake(h, id, "go-workshop")
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+
+	require.Eventually(t, func() bool {
+		return strings.Contains(h.renderBakeStatus(id, "go-workshop"), "status-failed")
+	}, 2*time.Second, 5*time.Millisecond)
+	assert.Contains(t, h.renderBakeStatus(id, "go-workshop"), "registry")
+	assert.Empty(t, cb.bakedTemplates(), "a bake that cannot push anywhere must not be started")
 }
 
 func TestSanitizeRepoSegment(t *testing.T) {

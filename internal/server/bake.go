@@ -83,11 +83,31 @@ func bakeRegistryReadyInterval() time.Duration {
 	return 10 * time.Second
 }
 
+// bakeRegistryWaitTimeout bounds how long a bake waits for the in-cluster registry to
+// come up before giving up, configurable via BAKE_REGISTRY_WAIT_MINUTES env var. The
+// default covers a cold start — the registry's volume being provisioned and its pod
+// pulling its image on a brand-new cluster — without leaving a bake "building" for the
+// whole bakeTimeout when the registry can never start at all (no default StorageClass,
+// unschedulable pod).
+func bakeRegistryWaitTimeout() time.Duration {
+	if v := os.Getenv("BAKE_REGISTRY_WAIT_MINUTES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return time.Duration(n) * time.Minute
+		}
+	}
+	return 5 * time.Minute
+}
+
 // autoBakeStartTimeout bounds how long an automatic bake may take to *start*
-// (provisioning and exposing the in-cluster registry, creating the Job) — there is
-// no admin request whose context would otherwise bound it. The build itself is
-// bounded separately, by bakeTimeout.
+// (provisioning and exposing the in-cluster registry) — there is no admin request
+// whose context would otherwise bound it. Waiting for that registry and creating the
+// Job are bounded separately (bakeRegistryWaitTimeout, bakeJobCreateTimeout), since
+// they run off the caller's context; the build itself by bakeTimeout.
 const autoBakeStartTimeout = 2 * time.Minute
+
+// bakeJobCreateTimeout bounds the API calls that create the bake Job, which no longer
+// run on the caller's context — see launchBake.
+const bakeJobCreateTimeout = 2 * time.Minute
 
 var repoSegmentInvalid = regexp.MustCompile(`[^a-z0-9-]`)
 
@@ -228,6 +248,9 @@ func (h *Handler) startBake(ctx context.Context, jobID, templateName string) err
 	var destRepo, pullRepo string
 	var pushInsecure, pullInsecure bool
 	var pullRegistryAuthSecret string
+	// Set only when the push goes to the in-cluster registry: what launchBake must
+	// wait for before the bake Job can push anything.
+	var registry workspace.RegistryCacheProvider
 	if useInCluster {
 		rc, ok := backend.(workspace.RegistryCacheProvider)
 		if !ok {
@@ -247,6 +270,7 @@ func (h *Handler) startBake(ctx context.Context, jobID, templateName string) err
 			log.Printf("startBake: failed to expose registry for lab %s: %v", jobID, err)
 			return errors.New("Could not expose the in-cluster registry over HTTPS.")
 		}
+		registry = rc
 		destRepo, pullRepo = rc.BakedImageRepo(jobID, templateName, domain)
 		// envbuilder pushes over the registry's internal, plain-HTTP address — it is
 		// a userspace HTTP client, unaffected by the missing TLS there. The kubelet's
@@ -292,22 +316,59 @@ func (h *Handler) startBake(ctx context.Context, jobID, templateName string) err
 		Devcontainer:  dc,
 		BakeRepo:      repoBaked,
 	}
-	if err := bp.EnsureBakeJob(ctx, req); err != nil {
-		log.Printf("startBake: failed to start bake for lab %s template %s: %v", jobID, templateName, err)
-		return errors.New("Could not start the bake job.")
-	}
-
 	key := jobID + "/" + templateName
 	h.bakeStatusesMu.Lock()
 	h.bakeStatuses[key] = &bakeStatus{State: "building", Started: time.Now()}
 	h.bakeStatusesMu.Unlock()
 
 	go func() {
+		if err := h.launchBake(jobID, templateName, bp, registry, req); err != nil {
+			h.bakeStatusesMu.Lock()
+			h.bakeStatuses[key] = &bakeStatus{State: "failed", Error: err.Error()}
+			h.bakeStatusesMu.Unlock()
+			return
+		}
 		h.bakeExecSem <- struct{}{}
 		defer func() { <-h.bakeExecSem }()
 		h.awaitBake(jobID, templateName, bp, pullRepo, pullInsecure, pullRegistryAuthSecret, repoBaked)
 	}()
 
+	return nil
+}
+
+// launchBake creates the bake Job, but not before whatever it pushes to can accept
+// the push. For the in-cluster registry that is not a given the moment startBake has
+// asked for it: EnsureBuildCache is a write to the API server, and the registry it
+// describes still has to have its volume provisioned and its pod started — or, when
+// its credentials were just reconciled, restarted. A push into that window fails
+// without failing envbuilder's build, so the Job exits 0 having pushed nothing and
+// the repo-layer append that follows dies on a base image that was never there
+// ("Error: pulling <repo>:latest: GET http://easylab-registry-cache…").
+//
+// This is what the automatic bakes need most: a lab created with "Bake devcontainer
+// images automatically" provisions the registry and bakes back to back, with no admin
+// in between to absorb the delay the way a manual click does.
+//
+// It deliberately runs off the caller's context — an admin's HTTP request is long over
+// by the time a cold registry is up, and autoBakeStartTimeout bounds only the start.
+// The returned error is shown on the template's card, so it is written for an admin.
+func (h *Handler) launchBake(jobID, templateName string, bp workspace.BakeProvider, registry workspace.RegistryCacheProvider, req workspace.BakeRequest) error {
+	if registry != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), bakeRegistryWaitTimeout())
+		err := registry.WaitForBuildCache(ctx)
+		cancel()
+		if err != nil {
+			log.Printf("launchBake: in-cluster registry never became ready for lab %s template %s: %v", jobID, templateName, err)
+			return errors.New("the in-cluster registry never became ready, so the bake was not started")
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), bakeJobCreateTimeout)
+	defer cancel()
+	if err := bp.EnsureBakeJob(ctx, req); err != nil {
+		log.Printf("launchBake: failed to start bake for lab %s template %s: %v", jobID, templateName, err)
+		return errors.New("could not start the bake job")
+	}
 	return nil
 }
 

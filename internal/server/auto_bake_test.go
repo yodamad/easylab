@@ -122,7 +122,7 @@ func TestAutoBakeLab(t *testing.T) {
 
 			h.autoBakeLab(id)
 
-			assert.ElementsMatch(t, tt.expected, cb.bakedTemplates())
+			assert.ElementsMatch(t, tt.expected, awaitBakedTemplates(t, cb, len(tt.expected)))
 		})
 	}
 }
@@ -142,7 +142,7 @@ func TestAutoBakeLab_RunsBeforeLabIsCompleted(t *testing.T) {
 
 	h.autoBakeLab(id)
 
-	assert.Equal(t, []string{"go"}, cb.bakedTemplates())
+	assert.Equal(t, []string{"go"}, awaitBakedTemplates(t, cb, 1))
 	assert.Contains(t, h.renderBakeStatus(id, "go"), "building")
 }
 
@@ -159,7 +159,7 @@ func TestAutoBakeTemplates_RecordsWhyABakeCouldNotStart(t *testing.T) {
 
 	h.autoBakeTemplates(id, []string{"no-cache", "go"}, "system", "system")
 
-	assert.Equal(t, []string{"go"}, cb.bakedTemplates(), "one template failing to start must not stop the next")
+	assert.Equal(t, []string{"go"}, awaitBakedTemplates(t, cb, 1), "one template failing to start must not stop the next")
 	status := h.renderBakeStatus(id, "no-cache")
 	assert.Contains(t, status, "status-failed")
 	assert.Contains(t, status, "cache registry")

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -337,6 +338,99 @@ func TestIsOwnRegistryHost(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, tt.expected, isOwnRegistryHost(tt.host))
 		})
+	}
+}
+
+// A bake must not start pushing before the registry is actually up: envbuilder's push
+// failing does not fail its build, so a bake started into a registry that is still
+// being provisioned (or is restarting onto a new htpasswd) exits 0 having pushed
+// nothing, and the repo-layer append then dies pulling a base image that is not there.
+func TestWaitForBuildCache(t *testing.T) {
+	tests := []struct {
+		name string
+		// status mutates the registry Deployment EnsureBuildCache created, to the
+		// shape the controller would be reporting at that moment.
+		status func(dep *appsv1.Deployment)
+		ready  bool
+	}{
+		{
+			name:   "one ready pod of the current generation",
+			status: func(dep *appsv1.Deployment) { dep.Status = readyRegistryStatus(dep) },
+			ready:  true,
+		},
+		{
+			name:   "never created",
+			status: nil,
+		},
+		{
+			name:   "just created, no pod yet",
+			status: func(dep *appsv1.Deployment) {},
+		},
+		{
+			name: "rollout not observed yet: the ready pod is the one being replaced",
+			status: func(dep *appsv1.Deployment) {
+				dep.Generation = 2
+				dep.Status = readyRegistryStatus(dep)
+				dep.Status.ObservedGeneration = 1
+			},
+		},
+		{
+			name: "recreate rollout in flight, old pod still terminating",
+			status: func(dep *appsv1.Deployment) {
+				dep.Status = readyRegistryStatus(dep)
+				dep.Status.Replicas = 2
+				dep.Status.ReadyReplicas = 1
+				dep.Status.UpdatedReplicas = 1
+			},
+		},
+		{
+			name: "pod scheduled but not serving yet",
+			status: func(dep *appsv1.Deployment) {
+				dep.Status = readyRegistryStatus(dep)
+				dep.Status.ReadyReplicas = 0
+				dep.Status.UnavailableReplicas = 1
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			b, cs := newTestBackend()
+			if tt.status != nil {
+				_, err := b.EnsureBuildCache(context.Background())
+				require.NoError(t, err)
+				dep := registryDeployment(t, cs)
+				tt.status(dep)
+				_, err = cs.AppsV1().Deployments("workshops").Update(context.Background(), dep, metav1.UpdateOptions{})
+				require.NoError(t, err)
+			}
+
+			// Short enough that the cases that must wait end on the deadline rather
+			// than on a second poll: what is asserted is whether waiting happens at
+			// all, not how long it lasts.
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+			err := b.WaitForBuildCache(ctx)
+
+			if tt.ready {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err, "a registry that is not serving must not be reported as ready")
+			assert.ErrorIs(t, err, context.DeadlineExceeded)
+		})
+	}
+}
+
+// readyRegistryStatus is what the Deployment controller reports for dep once its
+// single pod is running and ready.
+func readyRegistryStatus(dep *appsv1.Deployment) appsv1.DeploymentStatus {
+	return appsv1.DeploymentStatus{
+		ObservedGeneration: dep.Generation,
+		Replicas:           *dep.Spec.Replicas,
+		UpdatedReplicas:    *dep.Spec.Replicas,
+		ReadyReplicas:      *dep.Spec.Replicas,
+		AvailableReplicas:  *dep.Spec.Replicas,
 	}
 }
 

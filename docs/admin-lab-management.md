@@ -256,6 +256,15 @@ updates on its own; it turns into a **baked _(date)_** badge once done, or shows
 failure if it did not succeed. Building runs as a one-off job in the lab's cluster,
 entirely separate from any student's workspace — no one waits on it.
 
+A template that uses the in-cluster registry has one more step in front of the build:
+on a lab's first bake that registry is created from scratch, and its storage and pod
+take a minute or so to come up on a new cluster. EasyLab waits for it to actually
+serve before starting the build, so the **building** badge can sit there a short while
+before anything is being built — pushing into a registry that is still starting would
+otherwise produce an image with nothing in it. A registry that never comes up (no
+default storage class, an unschedulable pod) ends the bake as **failed** with that
+reason, rather than after the full build timeout.
+
 #### Baking automatically
 
 You do not have to click **Bake image** yourself. **Bake devcontainer images

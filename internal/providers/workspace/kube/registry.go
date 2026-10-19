@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 	appsv1 "k8s.io/api/apps/v1"
@@ -34,6 +35,11 @@ const (
 	// registryCacheDiskSize is generous enough to hold several devcontainer
 	// images' worth of cached layers without needing to be configurable.
 	registryCacheDiskSize = "10Gi"
+	// registryReadyPollInterval is how often WaitForBuildCache re-reads the
+	// registry's Deployment: short enough that an already-running registry barely
+	// delays a bake, long enough not to hammer the API server across the minutes a
+	// cold start (volume provisioning, image pull) can take.
+	registryReadyPollInterval = 3 * time.Second
 
 	// registryAuthSecretName is the kubernetes.io/dockerconfigjson Secret holding the
 	// registry's generated credentials, with one entry per host it is reached under
@@ -98,6 +104,66 @@ func (b *Backend) EnsureBuildCache(ctx context.Context) (string, error) {
 	}
 
 	return b.registryInternalHost() + "/cache", nil
+}
+
+// WaitForBuildCache blocks until the registry's Deployment reports the pod of its
+// current generation running and ready, polling every registryReadyPollInterval
+// until then or until ctx expires.
+//
+// The Deployment is the only readiness signal available here: the registry's Service
+// address resolves inside the lab's cluster, and the EasyLab server is not
+// necessarily in it. That is enough — the pod carries a TCP readiness probe on the
+// registry port, so "one ready pod of the current generation" means the registry is
+// accepting connections with the htpasswd EnsureBuildCache just reconciled.
+//
+// Reading the generation back is what distinguishes a registry that is up from one
+// that is about to be restarted: a credentials change rolls the Deployment, and
+// until the controller has observed that change its status still describes the old
+// pod, which is on its way out.
+func (b *Backend) WaitForBuildCache(ctx context.Context) error {
+	ticker := time.NewTicker(registryReadyPollInterval)
+	defer ticker.Stop()
+	for {
+		ready, err := b.registryCacheReady(ctx)
+		// An expired ctx fails the lookup too; the select below reports that as the
+		// timeout it is, rather than as a broken cluster.
+		if err != nil && ctx.Err() == nil {
+			return err
+		}
+		if ready {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("registry cache %s did not become ready: %w", registryCacheName, ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+// registryCacheReady reports whether every replica of the registry Deployment is the
+// current generation's and ready. A Deployment that does not exist yet is not an
+// error: it is simply not ready, and the caller's deadline bounds the wait.
+func (b *Backend) registryCacheReady(ctx context.Context) (bool, error) {
+	dep, err := b.client.AppsV1().Deployments(b.namespace).Get(ctx, registryCacheName, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to look up registry cache deployment: %w", err)
+	}
+	want := int32(1)
+	if dep.Spec.Replicas != nil {
+		want = *dep.Spec.Replicas
+	}
+	st := dep.Status
+	// Replicas counts the old pod too while it terminates, which is exactly the
+	// window a Recreate rollout must not be mistaken for readiness in.
+	return st.ObservedGeneration >= dep.Generation &&
+		st.Replicas == want &&
+		st.UpdatedReplicas == want &&
+		st.ReadyReplicas == want &&
+		st.UnavailableReplicas == 0, nil
 }
 
 // registryInternalHost is the registry's in-cluster Service address, host:port.

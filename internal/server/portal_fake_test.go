@@ -131,7 +131,7 @@ func (f *fakePortalBackend) AppendPortalOutbox(_ context.Context, _ string, reco
 	return nil
 }
 
-// The three methods below make it a workspace.RegistryCacheProvider, so tests can
+// The four methods below make it a workspace.RegistryCacheProvider, so tests can
 // see whether the admin provisioned the build cache on the portal's behalf.
 func (f *fakePortalBackend) EnsureBuildCache(context.Context) (string, error) {
 	f.portalMu.Lock()
@@ -139,6 +139,8 @@ func (f *fakePortalBackend) EnsureBuildCache(context.Context) (string, error) {
 	f.buildCacheCalls++
 	return "registry.local/cache", nil
 }
+
+func (f *fakePortalBackend) WaitForBuildCache(context.Context) error { return nil }
 
 func (f *fakePortalBackend) EnsureRegistryIngress(context.Context, string, string, string) (string, error) {
 	return "", nil

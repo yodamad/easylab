@@ -291,6 +291,15 @@ type RegistryCacheProvider interface {
 	// wherever its registry is used (a build's cache, a baked image pull), so callers
 	// never name a Secret for it.
 	EnsureBuildCache(ctx context.Context) (repo string, err error)
+	// WaitForBuildCache blocks until the registry EnsureBuildCache asked for is
+	// actually serving. Provisioning it is a write to the API server, not a running
+	// registry: the first bake of a lab creates its volume and pod from scratch, and
+	// a credentials change restarts it, either of which takes anywhere from seconds
+	// to minutes. Anything that pushes to it must wait first — envbuilder's push
+	// failing does not fail its build, so a bake started into that window exits 0
+	// having pushed nothing. Returns ctx's error if it expires first; bounding the
+	// wait is the caller's job.
+	WaitForBuildCache(ctx context.Context) error
 	// EnsureRegistryIngress provisions (idempotently) an Ingress exposing the
 	// in-cluster registry under domain, using the same TLS material a workspace
 	// Ingress would (WildcardTLSSecret when set, else a per-host cert via
