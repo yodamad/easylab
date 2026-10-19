@@ -1,4 +1,4 @@
-package coder
+package ingress
 
 import (
 	"fmt"
@@ -31,7 +31,7 @@ import (
 // certificate must live there, because an ingress can only reference a TLS secret
 // in its own namespace. It may be nil when the namespace is not managed here.
 //
-// If coder:domain is not set, only the ingress controller is installed: the
+// If lab:domain is not set, only the ingress controller is installed: the
 // server then exposes workspaces over plain HTTP via nip.io on the returned
 // LoadBalancer IP, so the controller is still required, but there is no domain to
 // certify.
@@ -41,33 +41,33 @@ func SetupHTTPS(
 	kubeconfigOut pulumi.StringOutput,
 	workspaceNs *k8score.Namespace,
 ) (*helmv3.Release, pulumi.StringOutput, error) {
-	domain := utils.CoderConfigOptional(ctx, utils.CoderDomain)
+	domain := utils.LabConfigOptional(ctx, utils.LabDomain)
 
-	acmeEmail := utils.CoderConfigOptional(ctx, utils.CoderAcmeEmail)
+	acmeEmail := utils.LabConfigOptional(ctx, utils.LabAcmeEmail)
 
-	clusterIssuerName := utils.CoderConfigOptional(ctx, utils.CoderClusterIssuerName)
+	clusterIssuerName := utils.LabConfigOptional(ctx, utils.LabClusterIssuerName)
 	if clusterIssuerName == "" {
 		clusterIssuerName = utils.DefaultClusterIssuerName
 	}
 
 	// Absent config key means "install" (default). Explicit "false" means skip (pre-installed).
-	installCertManager := utils.CoderConfigOptional(ctx, utils.CoderInstallCertManager) != "false"
-	// CoderInstallNginxIngress/CoderNginxIngressNamespace/CoderNginxIngressServiceName
+	installCertManager := utils.LabConfigOptional(ctx, utils.LabInstallCertManager) != "false"
+	// LabInstallNginxIngress/LabNginxIngressNamespace/LabNginxIngressServiceName
 	// are historical Pulumi config key names (kept for backward compat with
 	// already-provisioned stacks) that now gate the ingress controller generically —
 	// the controller itself is Traefik, not nginx.
-	installIngressController := utils.CoderConfigOptional(ctx, utils.CoderInstallNginxIngress) != "false"
+	installIngressController := utils.LabConfigOptional(ctx, utils.LabInstallNginxIngress) != "false"
 
 	// Configurable namespace / service names (fall back to well-known defaults).
-	certManagerNsName := utils.CoderConfigOptional(ctx, utils.CoderCertManagerNamespace)
+	certManagerNsName := utils.LabConfigOptional(ctx, utils.LabCertManagerNamespace)
 	if certManagerNsName == "" {
 		certManagerNsName = "cert-manager"
 	}
-	ingressNsName := utils.CoderConfigOptional(ctx, utils.CoderNginxIngressNamespace)
+	ingressNsName := utils.LabConfigOptional(ctx, utils.LabNginxIngressNamespace)
 	if ingressNsName == "" {
 		ingressNsName = "traefik"
 	}
-	ingressServiceName := utils.CoderConfigOptional(ctx, utils.CoderNginxIngressServiceName)
+	ingressServiceName := utils.LabConfigOptional(ctx, utils.LabNginxIngressServiceName)
 	if ingressServiceName == "" {
 		ingressServiceName = "traefik"
 	}
@@ -85,7 +85,7 @@ func SetupHTTPS(
 		}
 
 		certManagerValues := pulumi.Map{"installCRDs": pulumi.Bool(true)}
-		if ns := utils.CoderNodeSelectorFromConfig(ctx, utils.CoderCertManagerNodeSelector); len(ns) > 0 {
+		if ns := utils.LabNodeSelectorFromConfig(ctx, utils.LabCertManagerNodeSelector); len(ns) > 0 {
 			certManagerValues["nodeSelector"] = nodeSelectorMap(ns)
 		}
 
@@ -137,7 +137,7 @@ func SetupHTTPS(
 				},
 			},
 		}
-		if ns := utils.CoderNodeSelectorFromConfig(ctx, utils.CoderTraefikNodeSelector); len(ns) > 0 {
+		if ns := utils.LabNodeSelectorFromConfig(ctx, utils.LabTraefikNodeSelector); len(ns) > 0 {
 			traefikValues["nodeSelector"] = nodeSelectorMap(ns)
 		}
 
@@ -281,13 +281,13 @@ func SetupHTTPS(
 		// does not need it is ExternalDNS, which creates a record per workspace
 		// ingress instead.
 		//
-		// coder:wildcardDomain used to be the switch that turned this record on,
+		// lab:wildcardDomain used to be the switch that turned this record on,
 		// which meant a lab could be deployed with a domain and no way to reach any
 		// workspace. It is now an override of the record name for the labs that set
 		// it, and the record is created either way.
 		if !useExternalDNS {
 			wildcardRecord := wildcardOf(subdomain)
-			if override := utils.CoderConfigOptional(ctx, utils.CoderWildcardDomain); override != "" {
+			if override := utils.LabConfigOptional(ctx, utils.LabWildcardDomain); override != "" {
 				wildcardRecord = subdomainOf(override, zone)
 			}
 			if aErr := dnsProvider.CreateARecord(ctx, zone, wildcardRecord, ingressIP, certDeps); aErr != nil {
@@ -337,7 +337,7 @@ func SetupHTTPS(
 	// Per-student workspace ingresses are created at runtime by the server. With a
 	// DNS provider they share the wildcard certificate created below; without one
 	// each requests its own certificate through the ClusterIssuer above. No shared
-	// Coder ingress is created here either way.
+	// workspace ingress is created here either way.
 	//
 	// The wildcard certificate needs a DNS-01 challenge — Let's Encrypt does not
 	// issue wildcards over HTTP-01 — so it is only possible with a DNS provider.
@@ -417,7 +417,7 @@ func wildcardOf(subdomain string) string {
 // workspaceNamespace returns the namespace student workspaces run in. It mirrors
 // the default in k8s.InitNamespace, which is what actually creates it.
 func workspaceNamespace(ctx *pulumi.Context) string {
-	if ns := utils.CoderConfigOptional(ctx, utils.CoderNamespace); ns != "" {
+	if ns := utils.LabConfigOptional(ctx, utils.LabNamespace); ns != "" {
 		return ns
 	}
 	return "workshops"

@@ -79,7 +79,7 @@ func KubeconfigFromFile(kubeconfigPath string) (pulumi.StringOutput, error) {
 }
 
 func InitNamespace(ctx *pulumi.Context, provider *k8s.Provider) (*k8score.Namespace, error) {
-	nsName := utils.CoderConfigOptional(ctx, utils.CoderNamespace)
+	nsName := utils.LabConfigOptional(ctx, utils.LabNamespace)
 	if nsName == "" {
 		nsName = "workshops"
 	}

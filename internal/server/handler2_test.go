@@ -596,13 +596,13 @@ func TestHandler_RequestWorkspace_MissingEmail(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.RequestWorkspace(w, req)
 	// "invalid" is not a valid email, should fail
-	// Can't easily test the success case without Coder
+	// Can't easily test the success case without a workspace backend
 }
 
 // The lab's public base URL is resolved through the workspace backend: a lab with
 // no domain of its own is exposed via nip.io on the ingress LoadBalancer IP, which
 // is only known at runtime.
-func TestGetCoderCredentials_BaseURL(t *testing.T) {
+func TestGetLabEndpointInfo_BaseURL(t *testing.T) {
 	tests := []struct {
 		name          string
 		labDomain     string
@@ -629,9 +629,9 @@ func TestGetCoderCredentials_BaseURL(t *testing.T) {
 			h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
 			useFakeBackend(h, &fakeBackend{routingDomain: tt.routingDomain, routingScheme: tt.routingScheme})
 
-			req := httptest.NewRequest(http.MethodGet, "/api/labs/"+id+"/coder-credentials", nil)
+			req := httptest.NewRequest(http.MethodGet, "/api/labs/"+id+"/endpoint-info", nil)
 			w := httptest.NewRecorder()
-			h.GetCoderCredentials(w, req)
+			h.GetLabEndpointInfo(w, req)
 
 			require.Equal(t, http.StatusOK, w.Code)
 			var body map[string]string

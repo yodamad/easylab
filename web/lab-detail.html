@@ -162,26 +162,26 @@
                 </div>
 
                 {{if eq .Lab.Status "completed"}}
-                <details class="secrets-section" ontoggle="if (this.open) loadCoderCredentials('{{.Lab.ID}}')">
+                <details class="secrets-section" ontoggle="if (this.open) loadLabEndpointInfo('{{.Lab.ID}}')">
                     <summary class="secrets-summary">
                         <span class="secrets-summary-title">Lab Endpoint Info</span>
                         <span class="secrets-summary-hint">Workspace base URL and namespace for this lab's cluster</span>
                     </summary>
-                    <div id="coder-credentials-loading">Loading…</div>
-                    <div id="coder-credentials-error" class="error-message" style="display: none;"></div>
-                    <div id="coder-credentials-fields" class="credentials-modal-fields" style="display: none;">
+                    <div id="endpoint-info-loading">Loading…</div>
+                    <div id="endpoint-info-error" class="error-message" style="display: none;"></div>
+                    <div id="endpoint-info-fields" class="credentials-modal-fields" style="display: none;">
                         <div class="credentials-modal-row">
-                            <label for="coder-cred-url">Workspace base URL</label>
+                            <label for="endpoint-url">Workspace base URL</label>
                             <div class="credentials-modal-value-wrap">
-                                <input type="text" id="coder-cred-url" readonly class="credentials-modal-input">
-                                <button type="button" class="btn btn-secondary credentials-copy-btn" onclick="copyCoderCredToClipboard('coder-cred-url', this)" title="Copy">Copy</button>
+                                <input type="text" id="endpoint-url" readonly class="credentials-modal-input">
+                                <button type="button" class="btn btn-secondary credentials-copy-btn" onclick="copyEndpointToClipboard('endpoint-url', this)" title="Copy">Copy</button>
                             </div>
                         </div>
                         <div class="credentials-modal-row">
-                            <label for="coder-cred-namespace">Namespace</label>
+                            <label for="endpoint-namespace">Namespace</label>
                             <div class="credentials-modal-value-wrap">
-                                <input type="text" id="coder-cred-namespace" readonly class="credentials-modal-input">
-                                <button type="button" class="btn btn-secondary credentials-copy-btn" onclick="copyCoderCredToClipboard('coder-cred-namespace', this)" title="Copy">Copy</button>
+                                <input type="text" id="endpoint-namespace" readonly class="credentials-modal-input">
+                                <button type="button" class="btn btn-secondary credentials-copy-btn" onclick="copyEndpointToClipboard('endpoint-namespace', this)" title="Copy">Copy</button>
                             </div>
                         </div>
                     </div>

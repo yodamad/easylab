@@ -71,7 +71,7 @@ cd "$PROJECT_ROOT"
 
 # Coverage packages - focus on critical business logic, exclude main entry points
 # See .coverignore for details on what's excluded and why
-COVERAGE_PKGS="./internal/... ./utils/... ./coder/... ./ovh/... ./k8s/..."
+COVERAGE_PKGS="./internal/... ./utils/... ./ingress/... ./ovh/... ./k8s/..."
 
 BACKEND_COVERAGE="0.0"
 if command_exists go; then
@@ -176,7 +176,7 @@ EasyLab Coverage Report
 Generated: $(date)
 
 Coverage Scope:
-- Backend: Critical packages only (internal, utils, coder, ovh, k8s)
+- Backend: Critical packages only (internal, utils, ingress, ovh, k8s)
 - Backend Exclusions: Main entry points (main.go, cmd/server/main.go)
 - Frontend: Web application code only (excludes tests, configs, helpers)
 - See .coverignore for detailed exclusion list

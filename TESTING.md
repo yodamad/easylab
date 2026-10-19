@@ -109,7 +109,6 @@ internal/server/
 | `TestJobManager_AppendOutput` | Tests output logging |
 | `TestJobManager_SetError` | Tests error setting |
 | `TestJobManager_SetKubeconfig` | Tests kubeconfig storage |
-| `TestJobManager_SetCoderConfig` | Tests Coder config storage |
 | `TestJobManager_GetAllJobs` | Tests job listing with sorting |
 | `TestJobManager_RemoveJob` | Tests job removal |
 | `TestJobManager_SaveJob` | Tests job persistence |
@@ -510,7 +509,7 @@ The unified report shows:
 **Backend Key functions with 100% coverage:**
 - `hashPassword`, `generateToken`, `createSession`, `validateSession`, `deleteSession`
 - `SetCredentials`, `GetCredentials`, `HasCredentials`, `ClearCredentials`, `loadCredentialsFromEnv`
-- `NewHandler`, `NewJobManager`, `CreateJob`, `GetJob`, `UpdateJobStatus`, `AppendOutput`, `SetError`, `SetKubeconfig`, `SetCoderConfig`, `GetAllJobs`
+- `NewHandler`, `NewJobManager`, `CreateJob`, `GetJob`, `UpdateJobStatus`, `AppendOutput`, `SetError`, `SetKubeconfig`, `GetAllJobs`
 
 **Frontend Coverage Notes:**
 - Coverage is collected during Playwright E2E test execution

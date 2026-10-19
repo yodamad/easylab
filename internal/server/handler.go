@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"easylab/coder"
+	"easylab/ingress"
 	dnsregistry "easylab/internal/providers/dns"
 	"easylab/utils"
 
@@ -886,7 +886,7 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 // validateDNSConfig rejects a DNS-provider selection that cannot produce a valid
 // A record: a missing zone, or a domain that does not sit inside the zone. Without
 // this check the empty/mismatched zone only surfaces as an OVH 404 deep inside
-// pulumi up (coder/https.go strips the zone off the domain to derive the subdomain).
+// pulumi up (ingress/https.go strips the zone off the domain to derive the subdomain).
 func validateDNSConfig(cfg *LabConfig) error {
 	if cfg.DNSProvider == "" {
 		return nil
@@ -1664,19 +1664,17 @@ func (h *Handler) DownloadKubeconfig(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(kubeconfig))
 }
 
-// GetCoderCredentials returns the lab's public workspace base URL and the
-// namespace student workspaces run in for a completed lab. The route keeps its
-// historical name/path for backward compatibility; it no longer returns any
-// Coder admin credentials (Coder has been removed).
-func (h *Handler) GetCoderCredentials(w http.ResponseWriter, r *http.Request) {
+// GetLabEndpointInfo returns the lab's public workspace base URL and the
+// namespace student workspaces run in for a completed lab.
+func (h *Handler) GetLabEndpointInfo(w http.ResponseWriter, r *http.Request) {
 	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(pathParts) < 4 || pathParts[0] != "api" || pathParts[3] != "coder-credentials" {
-		log.Printf("Invalid path for lab credentials: %s", r.URL.Path)
+	if len(pathParts) < 4 || pathParts[0] != "api" || pathParts[3] != "endpoint-info" {
+		log.Printf("Invalid path for lab endpoint info: %s", r.URL.Path)
 		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
 	}
 	if pathParts[1] != "jobs" && pathParts[1] != "labs" {
-		log.Printf("Invalid path for lab credentials: %s", r.URL.Path)
+		log.Printf("Invalid path for lab endpoint info: %s", r.URL.Path)
 		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
 	}
@@ -2451,7 +2449,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	// soon as the pod is up. Without a DNS provider there is no wildcard certificate
 	// (it needs a DNS-01 challenge), and ClusterIssuer above stays the fallback.
 	if dnsProvider != "" {
-		spec.WildcardTLSSecret = coder.WildcardTLSSecretName
+		spec.WildcardTLSSecret = ingress.WildcardTLSSecretName
 	}
 
 	if baked, ok := bakedImages[selected.Name]; spec.Devcontainer != nil && ok {
@@ -5259,11 +5257,10 @@ func allValuesEmpty(m map[string]string) bool {
 	return true
 }
 
-// buildWorkspaceName creates a valid Coder workspace name from lab name, labID,
-// and template name. Coder enforces a maximum of 32 characters and the pattern
+// buildWorkspaceName creates a valid workspace name from lab name, labID, and
+// template name, within a maximum of 32 characters and the pattern
 // ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,30}[a-zA-Z0-9])?$.
 //
-// Workspace names are unique per user in Coder, so username is not needed.
 // The resulting format is: {labName}-{templateName}-{shortLabID}
 // where shortLabID is the last 10 characters of labID for uniqueness.
 // If the full name exceeds 32 chars the lab name is truncated first, then the

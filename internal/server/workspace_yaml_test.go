@@ -46,7 +46,7 @@ func TestParseWorkspaceTemplatesYAML(t *testing.T) {
 			input: `workspace_templates:
   - name: go-workshop
     ide: code-server
-    image: codercom/enterprise-base:ubuntu
+    image: ubuntu:24.04
     git_repo: https://github.com/org/workshop
     git_branch: main
     git_folder: exercises
@@ -65,7 +65,7 @@ func TestParseWorkspaceTemplatesYAML(t *testing.T) {
 			expected: []WorkspaceTemplate{{
 				Name:          "go-workshop",
 				IDE:           "code-server",
-				Image:         "codercom/enterprise-base:ubuntu",
+				Image:         "ubuntu:24.04",
 				GitRepo:       "https://github.com/org/workshop",
 				GitBranch:     "main",
 				GitFolder:     "exercises",
@@ -432,7 +432,7 @@ func TestMarshalWorkspaceTemplatesYAML_RoundTrip(t *testing.T) {
 		{
 			Name:          "go-workshop",
 			IDE:           "code-server",
-			Image:         "codercom/enterprise-base:ubuntu",
+			Image:         "ubuntu:24.04",
 			GitRepo:       "https://github.com/org/workshop",
 			GitBranch:     "main",
 			CPU:           "2",

@@ -4510,7 +4510,7 @@ select.loading {
     }
 }
 
-/* Coder credentials modal */
+/* Credentials modal */
 .credentials-modal-overlay {
     display: none;
     position: fixed;

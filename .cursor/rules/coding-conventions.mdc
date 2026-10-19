@@ -14,7 +14,7 @@ globs:
 - HTMX drives all dynamic UI — prefer hx-get, hx-post, hx-target, hx-swap over
   writing custom JavaScript. JS files in web/static/ are only for page-specific logic
   that HTMX cannot handle (e.g. encryption, cookie management).
-- Pulumi programs are pure Go — infrastructure changes go in ovh/, k8s/, or coder/.
+- Pulumi programs are pure Go — infrastructure changes go in ovh/, k8s/, or ingress/.
   The templates/ directory is a self-contained Pulumi project copied into job workspaces.
 
 ## Error handling

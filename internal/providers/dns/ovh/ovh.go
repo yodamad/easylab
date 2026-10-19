@@ -147,7 +147,7 @@ func (p *OVHDNSProvider) CreateARecord(
 		return fmt.Errorf("failed to create OVH DNS provider: %w", err)
 	}
 
-	resourceName := "coder-dns-a-record-" + safe
+	resourceName := "lab-dns-a-record-" + safe
 	_, err = ovhdomain.NewZoneRecord(ctx, resourceName, &ovhdomain.ZoneRecordArgs{
 		Zone:      pulumi.String(zone),
 		Subdomain: pulumi.String(subdomain),

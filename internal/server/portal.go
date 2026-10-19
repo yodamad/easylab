@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"easylab/coder"
+	"easylab/ingress"
 	"easylab/internal/providers/workspace"
 	"easylab/utils"
 )
@@ -257,7 +257,7 @@ func (h *Handler) deployPortal(job *Job, pd workspace.PortalDeployer, backend wo
 		// Same rule as a workspace (see RequestWorkspace): a lab with a DNS provider
 		// got a wildcard certificate at provisioning, and the portal is served from it.
 		if job.Config.DNSProvider != "" {
-			spec.WildcardTLSSecret = coder.WildcardTLSSecretName
+			spec.WildcardTLSSecret = ingress.WildcardTLSSecretName
 		}
 	}
 	job.mu.RUnlock()

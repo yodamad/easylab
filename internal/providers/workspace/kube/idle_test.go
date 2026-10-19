@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -55,6 +56,37 @@ func TestParseHealthz(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assert.True(t, tt.expected.Equal(got), "got %v, want %v", got, tt.expected)
+		})
+	}
+}
+
+func TestReadHealthz(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{name: "real payload", input: `{"status":"alive","lastHeartbeat":1}`},
+		{name: "empty", input: ""},
+		{name: "exactly the limit", input: strings.Repeat("a", healthzMaxBytes)},
+		{name: "one byte over the limit is refused", input: strings.Repeat("a", healthzMaxBytes+1), wantErr: true},
+		{name: "far over the limit is refused", input: strings.Repeat("a", 1<<20), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := readHealthz(strings.NewReader(tt.input))
+
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Nil(t, got)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.input, string(got))
 		})
 	}
 }

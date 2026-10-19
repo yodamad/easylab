@@ -198,7 +198,7 @@ configuration in a git repository.
 ```yaml
 workspace_templates:
   - name: go-workshop
-    image: codercom/enterprise-base:ubuntu
+    image: ghcr.io/myorg/go-workshop:latest
     git_repo: https://gitlab.com/user/workshop.git
     git_branch: main
     git_folder: exercises

@@ -1,7 +1,7 @@
 // Package workspace defines the backend abstraction for provisioning student
-// IDE workspaces on a Kubernetes cluster. It replaces the former Coder-based
-// workspace layer: each student gets a self-managed set of Kubernetes resources
-// (Deployment + Service + Ingress + PVC) running a code-server image.
+// IDE workspaces on a Kubernetes cluster. Each student gets a self-managed set
+// of Kubernetes resources (Deployment + Service + Ingress + PVC) running a
+// code-server image.
 //
 // Backends are registered by name (see registry.go) and instantiated per-lab
 // from the lab's kubeconfig, so handlers never hardcode backend selection.

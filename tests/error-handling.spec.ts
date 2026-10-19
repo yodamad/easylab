@@ -103,30 +103,6 @@ test.describe('Error Handling - Form Validation', () => {
     await expect(page.locator('.wizard-step.active')).toBeVisible();
   });
 
-  test('should validate required email field in wizard', async ({ page }) => {
-    await page.goto('/admin');
-
-    // Navigate to step 5 (Coder) with all required fields
-    await page.locator('button:has-text("Next")').click();
-    await page.locator('input#network_id').fill('test-network');
-    await page.locator('button:has-text("Next")').click();
-    await page.waitForSelector('.wizard-step[data-step="3"].active', { timeout: 5000 });
-    await page.locator('button:has-text("Next")').click();
-    await page.waitForSelector('.wizard-step[data-step="4"].active', { timeout: 5000 });
-    await page.locator('button:has-text("Next")').click();
-    await page.waitForSelector('.wizard-step[data-step="5"].active', { timeout: 5000 });
-
-    // Clear the admin email (required field)
-    const emailInput = page.locator('input#coder_admin_email');
-    await emailInput.clear();
-
-    // Try to submit - should fail due to HTML5 validation
-    await page.locator('button:has-text("Create Lab")').click();
-
-    // Should still be on step 5
-    await expect(page.locator('h2:has-text("Coder Configuration")')).toBeVisible();
-  });
-
   test('should handle invalid CIDR mask format gracefully', async ({ page }) => {
     await page.goto('/admin');
 

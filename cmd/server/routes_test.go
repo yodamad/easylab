@@ -186,10 +186,10 @@ func TestResolveLabRoute(t *testing.T) {
 			want:   routeJobStatus,
 		},
 		{
-			name:   "coder credentials",
-			path:   "/api/labs/job-1/coder-credentials",
+			name:   "lab endpoint info",
+			path:   "/api/labs/job-1/endpoint-info",
 			method: http.MethodGet,
-			want:   routeCoderCredentials,
+			want:   routeLabEndpointInfo,
 		},
 		{name: "kubeconfig", path: "/api/labs/job-1/kubeconfig", method: http.MethodGet, want: routeKubeconfig},
 		{

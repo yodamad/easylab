@@ -2,7 +2,7 @@ package server
 
 import (
 	"context"
-	"easylab/coder"
+	"easylab/ingress"
 	"easylab/internal/providers/workspace"
 	"easylab/utils"
 	"errors"
@@ -241,7 +241,7 @@ func (h *Handler) startBake(ctx context.Context, jobID, templateName string) err
 		}
 		wildcardTLSSecret := ""
 		if dnsProvider != "" {
-			wildcardTLSSecret = coder.WildcardTLSSecretName
+			wildcardTLSSecret = ingress.WildcardTLSSecretName
 		}
 		if _, err := rc.EnsureRegistryIngress(ctx, domain, wildcardTLSSecret, clusterIssuerName); err != nil {
 			log.Printf("startBake: failed to expose registry for lab %s: %v", jobID, err)

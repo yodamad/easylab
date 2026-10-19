@@ -6,8 +6,8 @@ globs:
 # EasyLab — Lab-as-Code Platform
 
 EasyLab is a Go web application that provisions cloud-based lab environments
-using Pulumi IaC on OVHcloud. It deploys Kubernetes clusters with Coder workspaces
-for workshop participants.
+using Pulumi IaC on OVHcloud. It deploys Kubernetes clusters with self-managed
+code-server workspaces for workshop participants.
 
 Two main entry points:
 1. A Pulumi program (main.go) for infrastructure provisioning
@@ -19,7 +19,7 @@ Two main entry points:
 - HTMX for dynamic UI interactions (no frontend framework)
 - Pulumi SDK v3 for infrastructure as code (Go-based programs)
 - OVHcloud provider for cloud resources (network, k8s, node pools)
-- Coder SDK for workspace and template management
+- client-go (Kubernetes API) for self-managed student IDE workspaces
 - net/http with http.ServeMux for routing (no external router)
 - Playwright for E2E frontend testing
 - Makefile for build, test, and CI tasks
@@ -30,7 +30,7 @@ Two main entry points:
 ## Folder structure
 
 ```
-main.go                  # Pulumi IaC entry point (OVH infra + k8s + Coder setup)
+main.go                  # Pulumi IaC entry point (OVH infra + k8s setup)
 cmd/
   server/
     main.go              # Web server entry point (HTTP server with graceful shutdown)
@@ -47,8 +47,9 @@ internal/
     ovh/                 # OVH-specific provider implementation
   pulumi/
     program.go           # Pulumi program builder
-coder/
-  coder.go               # Coder API client (users, workspaces, templates)
+ingress/
+  https.go               # HTTPS/TLS setup: ingress-nginx, cert-manager, ACME
+  externaldns.go         # external-dns setup
 k8s/
   k8s.go                 # Kubernetes provider, namespace, external IP
   helm.go                # Helm release management
@@ -61,7 +62,7 @@ utils/
 templates/               # Pulumi template code (copied into job workspaces)
   main.go
   go.mod / go.sum
-  coder/ k8s/ ovh/ utils/
+  ingress/ k8s/ ovh/ utils/
 web/
   base.html              # Shared HTML base template
   index.html             # Homepage

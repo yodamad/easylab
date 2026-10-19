@@ -761,7 +761,7 @@ const (
 	routeSetLabAvailability
 	routeBakeTemplate
 	routeBakeTemplateStatus
-	routeCoderCredentials
+	routeLabEndpointInfo
 	routeKubeconfig
 	routeRecreateCredentials
 	routeUpdateLabLifecycle
@@ -824,8 +824,8 @@ func resolveLabRoute(path, method, format string) labRoute {
 		return routeBakeTemplate
 	case strings.HasSuffix(path, "/recreate-credentials") && method == http.MethodGet:
 		return routeRecreateCredentials
-	case strings.HasSuffix(path, "/coder-credentials") && method == http.MethodGet:
-		return routeCoderCredentials
+	case strings.HasSuffix(path, "/endpoint-info") && method == http.MethodGet:
+		return routeLabEndpointInfo
 	case strings.HasSuffix(path, "/kubeconfig"):
 		return routeKubeconfig
 	case strings.HasSuffix(path, "/lifecycle") && method == http.MethodPost:
@@ -880,8 +880,8 @@ func labRequestRouter(h *server.Handler) http.HandlerFunc {
 			h.BakeTemplateStatus(w, r)
 		case routeRecreateCredentials:
 			h.ServeRecreateCredentials(w, r)
-		case routeCoderCredentials:
-			h.GetCoderCredentials(w, r)
+		case routeLabEndpointInfo:
+			h.GetLabEndpointInfo(w, r)
 		case routeKubeconfig:
 			h.DownloadKubeconfig(w, r)
 		case routeJobStatusJSON:

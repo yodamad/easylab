@@ -160,7 +160,7 @@ func CloneFolderFromGitAndZipIt(repoUrl string, folder string, branch string) (s
 }
 
 // ZipTerraformFile creates a zip archive from a single .tf file
-// The zip will contain the .tf file at the root level, which is the expected structure for Coder templates
+// The zip will contain the .tf file at the root level, which is the expected structure for workspace templates
 func ZipTerraformFile(tfFilePath string) (string, error) {
 	// Create zip file in the same directory as the .tf file
 	zipFilePath := strings.TrimSuffix(tfFilePath, filepath.Ext(tfFilePath)) + ".zip"

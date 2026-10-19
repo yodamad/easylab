@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"time"
 
 	"easylab/internal/providers/workspace"
@@ -23,6 +24,9 @@ const (
 	healthzPath = "healthz"
 	// healthzAlive is the status code-server reports while its heartbeat is fresh.
 	healthzAlive = "alive"
+	// healthzMaxBytes caps how much of a /healthz answer is read. The real payload
+	// is under a hundred bytes.
+	healthzMaxBytes = 4 << 10
 )
 
 // healthzResponse is code-server's /healthz payload. Its heartbeat is refreshed
@@ -52,7 +56,27 @@ func (b *Backend) WorkspaceLastActivity(ctx context.Context, name string) (time.
 
 // proxyHealthz fetches a workspace's /healthz through the API server.
 func (b *Backend) proxyHealthz(ctx context.Context, name string) ([]byte, error) {
-	return b.client.CoreV1().Services(b.namespace).ProxyGet("http", name, servicePort, healthzPath, nil).DoRaw(ctx)
+	stream, err := b.client.CoreV1().Services(b.namespace).ProxyGet("http", name, servicePort, healthzPath, nil).Stream(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer stream.Close()
+	return readHealthz(stream)
+}
+
+// readHealthz reads a /healthz body, refusing one larger than healthzMaxBytes.
+// The answer comes from inside the student's own container, where they have a
+// shell and can put anything they like on that port: reading it unbounded would
+// let one workspace exhaust this process's memory.
+func readHealthz(r io.Reader) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r, healthzMaxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read healthz response: %w", err)
+	}
+	if len(body) > healthzMaxBytes {
+		return nil, fmt.Errorf("healthz response exceeds %d bytes", healthzMaxBytes)
+	}
+	return body, nil
 }
 
 // parseHealthz turns a /healthz payload into a last-activity time. A body that

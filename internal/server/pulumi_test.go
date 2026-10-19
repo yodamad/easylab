@@ -440,18 +440,18 @@ func TestGetConfigCommands_Azure(t *testing.T) {
 func TestGetConfigCommands_WithDomain(t *testing.T) {
 	pe := &PulumiExecutor{}
 	cfg := &LabConfig{
-		Domain:    "coder.example.com",
+		Domain:    "lab.example.com",
 		AcmeEmail: "acme@example.com",
 	}
 	cmds := pe.getConfigCommands(cfg)
 	found := false
 	for _, c := range cmds {
-		if c.key == "coder:domain" {
+		if c.key == "lab:domain" {
 			found = true
 		}
 	}
 	if !found {
-		t.Error("getConfigCommands() with domain should contain coder:domain")
+		t.Error("getConfigCommands() with domain should contain lab:domain")
 	}
 }
 
@@ -464,7 +464,7 @@ func TestGetConfigCommands_DNSAlreadyConfigured(t *testing.T) {
 		{
 			name: "flag set with a DNS provider emits dns:alreadyConfigured",
 			cfg: &LabConfig{
-				Domain:               "coder.example.com",
+				Domain:               "lab.example.com",
 				DNSProvider:          "ovh",
 				DNSZone:              "example.com",
 				DNSAlreadyConfigured: true,
@@ -474,7 +474,7 @@ func TestGetConfigCommands_DNSAlreadyConfigured(t *testing.T) {
 		{
 			name: "unset by default",
 			cfg: &LabConfig{
-				Domain:      "coder.example.com",
+				Domain:      "lab.example.com",
 				DNSProvider: "ovh",
 				DNSZone:     "example.com",
 			},
@@ -511,9 +511,9 @@ func TestGetConfigCommands_ClusterIssuerName(t *testing.T) {
 		wantSeen bool
 	}{
 		{
-			name: "override emits coder:clusterIssuerName",
+			name: "override emits lab:clusterIssuerName",
 			cfg: &LabConfig{
-				Domain:             "coder.example.com",
+				Domain:             "lab.example.com",
 				AcmeEmail:          "acme@example.com",
 				InstallCertManager: &installCertM,
 				ClusterIssuerName:  "letsencrypt-ovh",
@@ -522,9 +522,9 @@ func TestGetConfigCommands_ClusterIssuerName(t *testing.T) {
 			wantSeen: true,
 		},
 		{
-			name: "unset by default (coder/https.go falls back to letsencrypt-prod)",
+			name: "unset by default (ingress/https.go falls back to letsencrypt-prod)",
 			cfg: &LabConfig{
-				Domain:    "coder.example.com",
+				Domain:    "lab.example.com",
 				AcmeEmail: "acme@example.com",
 			},
 			wantSeen: false,
@@ -540,16 +540,16 @@ func TestGetConfigCommands_ClusterIssuerName(t *testing.T) {
 			var gotVal string
 			seen := false
 			for _, c := range cmds {
-				if c.key == "coder:clusterIssuerName" {
+				if c.key == "lab:clusterIssuerName" {
 					seen = true
 					gotVal = c.value
 				}
 			}
 			if seen != tt.wantSeen {
-				t.Errorf("coder:clusterIssuerName present = %v, want %v", seen, tt.wantSeen)
+				t.Errorf("lab:clusterIssuerName present = %v, want %v", seen, tt.wantSeen)
 			}
 			if seen && gotVal != tt.wantVal {
-				t.Errorf("coder:clusterIssuerName = %q, want %q", gotVal, tt.wantVal)
+				t.Errorf("lab:clusterIssuerName = %q, want %q", gotVal, tt.wantVal)
 			}
 		})
 	}
@@ -568,7 +568,7 @@ func TestGetConfigCommands_NodeSelectors(t *testing.T) {
 		{
 			name: "installing traefik and cert-manager emits node selectors",
 			cfg: &LabConfig{
-				Domain:                  "coder.example.com",
+				Domain:                  "lab.example.com",
 				AcmeEmail:               "acme@example.com",
 				InstallNginxIngress:     &installTrue,
 				InstallCertManager:      &installTrue,
@@ -581,7 +581,7 @@ func TestGetConfigCommands_NodeSelectors(t *testing.T) {
 		{
 			name: "nil install pointer (backward-compat default) still emits node selectors",
 			cfg: &LabConfig{
-				Domain:                  "coder.example.com",
+				Domain:                  "lab.example.com",
 				AcmeEmail:               "acme@example.com",
 				TraefikNodeSelector:     map[string]string{"pool": "infra"},
 				CertManagerNodeSelector: map[string]string{"pool": "infra"},
@@ -592,7 +592,7 @@ func TestGetConfigCommands_NodeSelectors(t *testing.T) {
 		{
 			name: "reusing existing controllers suppresses node selectors",
 			cfg: &LabConfig{
-				Domain:                  "coder.example.com",
+				Domain:                  "lab.example.com",
 				AcmeEmail:               "acme@example.com",
 				InstallNginxIngress:     &installFalse,
 				InstallCertManager:      &installFalse,
@@ -605,7 +605,7 @@ func TestGetConfigCommands_NodeSelectors(t *testing.T) {
 		{
 			name: "no node selectors configured emits nothing",
 			cfg: &LabConfig{
-				Domain:    "coder.example.com",
+				Domain:    "lab.example.com",
 				AcmeEmail: "acme@example.com",
 			},
 			wantTraefikKey:     "",
@@ -621,18 +621,18 @@ func TestGetConfigCommands_NodeSelectors(t *testing.T) {
 
 			var gotTraefik, gotCertManager string
 			for _, c := range cmds {
-				if c.key == "coder:traefikNodeSelector" {
+				if c.key == "lab:traefikNodeSelector" {
 					gotTraefik = c.value
 				}
-				if c.key == "coder:certManagerNodeSelector" {
+				if c.key == "lab:certManagerNodeSelector" {
 					gotCertManager = c.value
 				}
 			}
 			if gotTraefik != tt.wantTraefikKey {
-				t.Errorf("coder:traefikNodeSelector = %q, want %q", gotTraefik, tt.wantTraefikKey)
+				t.Errorf("lab:traefikNodeSelector = %q, want %q", gotTraefik, tt.wantTraefikKey)
 			}
 			if gotCertManager != tt.wantCertManagerKey {
-				t.Errorf("coder:certManagerNodeSelector = %q, want %q", gotCertManager, tt.wantCertManagerKey)
+				t.Errorf("lab:certManagerNodeSelector = %q, want %q", gotCertManager, tt.wantCertManagerKey)
 			}
 		})
 	}

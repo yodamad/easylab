@@ -89,13 +89,6 @@ const wizard = {
             certExisting.addEventListener('click', () => this.setCertManagerMode('existing'));
         }
 
-        const githubEnable = document.getElementById('github-login-enable-btn');
-        const githubDisable = document.getElementById('github-login-disable-btn');
-        if (githubEnable && githubDisable) {
-            githubEnable.addEventListener('click', () => this.setGithubLoginEnabled(true));
-            githubDisable.addEventListener('click', () => this.setGithubLoginEnabled(false));
-        }
-
         const addTraefikNodeSelector = document.getElementById('btn-add-traefik-nodeselector');
         if (addTraefikNodeSelector) {
             addTraefikNodeSelector.addEventListener('click', () => {
@@ -177,7 +170,7 @@ const wizard = {
         if (domainFields) domainFields.style.display = mode === 'quickstart' ? 'none' : '';
         if (dnsProviderBlock) dnsProviderBlock.style.display = mode === 'auto' ? '' : 'none';
         if (manualGuidance) manualGuidance.style.display = mode === 'manual' ? '' : 'none';
-        // cert-manager is a no-op with no domain (coder/https.go skips it entirely),
+        // cert-manager is a no-op with no domain (ingress/https.go skips it entirely),
         // so hide the toggle rather than leave a dead control on screen.
         if (certManagerGroup) certManagerGroup.style.display = mode === 'quickstart' ? 'none' : '';
 
@@ -206,8 +199,8 @@ const wizard = {
     },
 
     // The Wildcard Domain override only ever takes effect for "Custom domain —
-    // automatic" with the "Wildcard record" DNS strategy: coder/https.go reads
-    // coder:wildcardDomain solely inside that branch. It is a silent no-op in
+    // automatic" with the "Wildcard record" DNS strategy: ingress/https.go reads
+    // lab:wildcardDomain solely inside that branch. It is a silent no-op in
     // every other mode, so show it only where it can actually do something.
     updateWildcardOverrideVisibility() {
         const advanced = document.getElementById('dns-advanced-options');
@@ -239,7 +232,7 @@ const wizard = {
     // On "Create New Infrastructure" the ingress/cert-manager reuse toggles are
     // hidden (nothing can already be installed on a cluster that does not exist
     // yet), so state what gets installed instead. cert-manager is only part of it
-    // once a domain is set — coder/https.go skips it entirely in quick start mode.
+    // once a domain is set — ingress/https.go skips it entirely in quick start mode.
     updateInstallNote() {
         const note = document.getElementById('new-infra-install-note');
         const ingressOnly = document.getElementById('install-note-ingress-only');
@@ -302,17 +295,6 @@ const wizard = {
         externalBtn.classList.toggle('selected', mode === 'externaldns');
         hidden.value = mode === 'externaldns' ? 'true' : 'false';
         this.updateWildcardOverrideVisibility();
-    },
-
-    setGithubLoginEnabled(enabled) {
-        const enableBtn = document.getElementById('github-login-enable-btn');
-        const disableBtn = document.getElementById('github-login-disable-btn');
-        const hidden = document.getElementById('coder_github_login_enabled');
-        if (!enableBtn || !disableBtn || !hidden) return;
-
-        enableBtn.classList.toggle('selected', enabled);
-        disableBtn.classList.toggle('selected', !enabled);
-        hidden.value = enabled ? 'true' : 'false';
     },
 
     setClusterMode(useExisting) {
@@ -1251,12 +1233,6 @@ function startPolling() {
 document.addEventListener('DOMContentLoaded', function() {
     wizard.init();
 
-    // Auto-generate DB password on load so users don't need to touch the Advanced section
-    const dbPasswordInput = document.getElementById('coder_db_password');
-    if (dbPasswordInput && !dbPasswordInput.value) {
-        dbPasswordInput.value = generateSecurePassword(16);
-    }
-
     // Live stack name preview
     const stackNameInput = document.getElementById('stack_name');
     const stackNamePreview = document.getElementById('stack-name-preview');
@@ -1275,16 +1251,6 @@ document.addEventListener('DOMContentLoaded', function() {
             const input = document.getElementById(targetId);
             if (input) {
                 input.value = generateSecurePassword(12);
-            }
-        });
-    });
-
-    document.querySelectorAll('.btn-generate-password-coder').forEach(function(btn) {
-        btn.addEventListener('click', function() {
-            const targetId = this.getAttribute('data-target');
-            const input = document.getElementById(targetId);
-            if (input) {
-                input.value = generateSecurePassword(20);
             }
         });
     });

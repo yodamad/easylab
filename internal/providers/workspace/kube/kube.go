@@ -80,7 +80,7 @@ const (
 	nipDomainSuffix = "nip.io"
 
 	// Well-known Traefik ingress controller location. These mirror the defaults
-	// coder.SetupHTTPS installs into; a lab that pre-installs the controller
+	// ingress.SetupHTTPS installs into; a lab that pre-installs the controller
 	// elsewhere simply gets no nip.io fallback (workspace stays in-cluster).
 	ingressControllerNamespace = "traefik"
 	ingressControllerService   = "traefik"
@@ -1435,7 +1435,7 @@ func (b *Backend) createIngress(ctx context.Context, name string, labels map[str
 	// Websocket / long-lived IDE connections and unbounded request bodies need no
 	// per-Ingress annotation under Traefik (unlike nginx): it streams bodies
 	// unbounded by default, and the client-facing idle timeout is configured
-	// chart-wide in coder.SetupHTTPS's Traefik install instead.
+	// chart-wide in ingress.SetupHTTPS's Traefik install instead.
 	annotations := map[string]string{}
 
 	tlsSecret, clusterIssuer := workspaceTLS(name, spec)

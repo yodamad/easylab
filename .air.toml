@@ -28,7 +28,7 @@ tmp_dir = "tmp"
   # File extensions to watch
   include_ext = ["go", "tpl", "tmpl", "html", "css"]
   # Additional directories to watch
-  include_dir = ["cmd", "internal", "utils", "web", "coder", "k8s", "ovh"]
+  include_dir = ["cmd", "internal", "utils", "web", "ingress", "k8s", "ovh"]
   # File patterns to include
   include_file = []
   # Kill delay

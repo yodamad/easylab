@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
@@ -105,60 +104,27 @@ func K8sConfigOptional(ctx *pulumi.Context, key string) string {
 	return config.New(ctx, K8sGroup).Get(key)
 }
 
-// Coder config group
-const CoderGroup = "coder"
-const CoderAdminEmail = "adminEmail"
-const CoderAdminPassword = "adminPassword"
-const CoderVersion = "version"
-const CoderDbUser = "dbUser"
-const CoderDbPassword = "dbPassword"
-const CoderDbName = "dbName"
-const CoderTemplateName = "templateName"
-const CoderNamespace = "namespace"
-const CoderTemplateFilePath = "templateFilePath"
-const CoderTemplateSource = "templateSource"
-const CoderTemplateGitRepo = "templateGitRepo"
-const CoderTemplateGitFolder = "templateGitFolder"
-const CoderTemplateGitBranch = "templateGitBranch"
-const CoderDomain = "domain"
-const CoderAcmeEmail = "acmeEmail"
-const CoderWildcardDomain = "wildcardDomain"
-const CoderInstallNginxIngress = "installNginxIngress"
-const CoderInstallCertManager = "installCertManager"
-const CoderNginxIngressNamespace = "nginxIngressNamespace"
-const CoderNginxIngressServiceName = "nginxIngressServiceName"
-const CoderCertManagerNamespace = "certManagerNamespace"
-const CoderTraefikNodeSelector = "traefikNodeSelector"
-const CoderCertManagerNodeSelector = "certManagerNodeSelector"
-const CoderClusterIssuerName = "clusterIssuerName"
+// Lab config group: the workspace namespace plus the ingress/TLS settings that
+// ingress.SetupHTTPS reads.
+const LabGroup = "lab"
+const LabNamespace = "namespace"
+const LabDomain = "domain"
+const LabAcmeEmail = "acmeEmail"
+const LabWildcardDomain = "wildcardDomain"
+const LabInstallNginxIngress = "installNginxIngress"
+const LabInstallCertManager = "installCertManager"
+const LabNginxIngressNamespace = "nginxIngressNamespace"
+const LabNginxIngressServiceName = "nginxIngressServiceName"
+const LabCertManagerNamespace = "certManagerNamespace"
+const LabTraefikNodeSelector = "traefikNodeSelector"
+const LabCertManagerNodeSelector = "certManagerNodeSelector"
+const LabClusterIssuerName = "clusterIssuerName"
 
 // DefaultClusterIssuerName is the ClusterIssuer name EasyLab creates and
-// requests certificates from when CoderClusterIssuerName is not set. Override
-// it with CoderClusterIssuerName when reusing an existing cert-manager (see
+// requests certificates from when LabClusterIssuerName is not set. Override
+// it with LabClusterIssuerName when reusing an existing cert-manager (see
 // DNSAlreadyConfigured) whose ClusterIssuer was created under a different name.
 const DefaultClusterIssuerName = "letsencrypt-prod"
-const CoderGithubLoginEnabled = "githubLoginEnabled"
-const CoderSessionDuration = "sessionDuration"             // maps to CODER_SESSION_DURATION (e.g. "24h")
-const CoderDormancyThreshold = "dormancyThreshold"         // maps to CODER_DORMANCY_THRESHOLD (e.g. "168h")
-const CoderMaxAdminTokenLifetime = "maxAdminTokenLifetime" // maps to CODER_MAX_ADMIN_TOKEN_LIFETIME (e.g. "720h")
-
-// DefaultCoderAdminTokenLifetime is the fallback lifetime for the long-lived Coder
-// admin API token minted at provisioning (and on refresh). 30 days keeps a lab
-// usable for its whole lifetime without hitting Coder's session-token expiry.
-const DefaultCoderAdminTokenLifetime = 720 * time.Hour
-
-// CoderAdminTokenLifetime resolves the desired admin token lifetime from the
-// CODER_ADMIN_TOKEN_LIFETIME env var (a Go duration string, e.g. "720h"),
-// falling back to DefaultCoderAdminTokenLifetime. The value must not exceed the
-// Coder deployment's CODER_MAX_ADMIN_TOKEN_LIFETIME or CreateToken is rejected.
-func CoderAdminTokenLifetime() time.Duration {
-	if v := os.Getenv("CODER_ADMIN_TOKEN_LIFETIME"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			return d
-		}
-	}
-	return DefaultCoderAdminTokenLifetime
-}
 
 // DNS provider config group
 const DNSGroup = "dns"
@@ -185,13 +151,9 @@ const DNSAzureResourceGroup = "azureResourceGroup"
 const DNSAzureClientId = "azureClientId"
 const DNSAzureClientSecret = "azureClientSecret"
 
-func CoderConfig(ctx *pulumi.Context, key string) string {
-	return getConfig(ctx, CoderGroup, key)
-}
-
-// CoderConfigOptional returns an optional config value (empty string if not set)
-func CoderConfigOptional(ctx *pulumi.Context, key string) string {
-	return config.New(ctx, CoderGroup).Get(key)
+// LabConfigOptional returns an optional lab: config value (empty string if not set)
+func LabConfigOptional(ctx *pulumi.Context, key string) string {
+	return config.New(ctx, LabGroup).Get(key)
 }
 
 // DNSConfigOptional returns an optional dns: config value (empty string if not set)
@@ -199,11 +161,11 @@ func DNSConfigOptional(ctx *pulumi.Context, key string) string {
 	return config.New(ctx, DNSGroup).Get(key)
 }
 
-// CoderNodeSelectorFromConfig reads a JSON-encoded map[string]string node
-// selector from the given coder: config key (e.g. CoderTraefikNodeSelector or
-// CoderCertManagerNodeSelector). Returns nil if not set or invalid.
-func CoderNodeSelectorFromConfig(ctx *pulumi.Context, key string) map[string]string {
-	val := CoderConfigOptional(ctx, key)
+// LabNodeSelectorFromConfig reads a JSON-encoded map[string]string node
+// selector from the given lab: config key (e.g. LabTraefikNodeSelector or
+// LabCertManagerNodeSelector). Returns nil if not set or invalid.
+func LabNodeSelectorFromConfig(ctx *pulumi.Context, key string) map[string]string {
+	val := LabConfigOptional(ctx, key)
 	if val == "" {
 		return nil
 	}
@@ -212,57 +174,4 @@ func CoderNodeSelectorFromConfig(ctx *pulumi.Context, key string) map[string]str
 		return nil
 	}
 	return selector
-}
-
-const CoderTemplatesKey = "templates"
-
-// CoderTemplateConfig holds the configuration for a single Coder template.
-type CoderTemplateConfig struct {
-	Name      string            `json:"name"`
-	Source    string            `json:"source"`
-	FilePath  string            `json:"file_path,omitempty"`
-	GitRepo   string            `json:"git_repo,omitempty"`
-	GitFolder string            `json:"git_folder,omitempty"`
-	GitBranch string            `json:"git_branch,omitempty"`
-	Variables map[string]string `json:"variables,omitempty"`
-}
-
-// GetCoderTemplatesFromConfig reads the coder:templates JSON config and returns the template list.
-// Returns nil if not set or empty. For backward compatibility, returns a single-template slice
-// when legacy single-template config is present.
-func GetCoderTemplatesFromConfig(ctx *pulumi.Context) []CoderTemplateConfig {
-	cfg := config.New(ctx, CoderGroup)
-	val := cfg.Get(CoderTemplatesKey)
-	if val == "" {
-		name := CoderConfigOptional(ctx, CoderTemplateName)
-		if name == "" {
-			return nil
-		}
-		source := CoderConfigOptional(ctx, CoderTemplateSource)
-		filePath := CoderConfigOptional(ctx, CoderTemplateFilePath)
-		gitRepo := CoderConfigOptional(ctx, CoderTemplateGitRepo)
-		gitFolder := CoderConfigOptional(ctx, CoderTemplateGitFolder)
-		gitBranch := CoderConfigOptional(ctx, CoderTemplateGitBranch)
-		if gitBranch == "" {
-			gitBranch = "main"
-		}
-		if source == "" && filePath != "" {
-			source = "upload"
-		} else if source == "" && gitRepo != "" {
-			source = "git"
-		}
-		return []CoderTemplateConfig{{
-			Name:      name,
-			Source:    source,
-			FilePath:  filePath,
-			GitRepo:   gitRepo,
-			GitFolder: gitFolder,
-			GitBranch: gitBranch,
-		}}
-	}
-	var templates []CoderTemplateConfig
-	if err := json.Unmarshal([]byte(val), &templates); err != nil {
-		return nil
-	}
-	return templates
 }
