@@ -34,8 +34,9 @@ validation instead of silently shipping a lab without its image.
 | Key | Type | Notes |
 |---|---|---|
 | `name` | string | **Required.** Shown in the student template selector; unique per lab. |
-| `ide` | string | **Legacy — omit it.** Workspaces always run code-server. Older labs carrying `openvscode` still load; the value is rewritten to `code-server`. |
-| `image` | string | Container image override. Defaults to `codercom/code-server:latest`. |
+| `ide` | string | `code-server` (the default — omit it) or `openchamber` for an AI-agent workspace. See [AI labs with OpenChamber](#ai-labs-with-openchamber). Older labs carrying `openvscode` still load; the value is rewritten to `code-server`. |
+| `image` | string | Container image override. Defaults to `codercom/code-server:latest`; **required** when `ide: openchamber`. |
+| `home_dir` | string | `ide: openchamber` only — the home directory inside your own image, where the workspace volume is mounted and below which the repo is cloned (`<home_dir>/project`). Defaults to upstream's `/home/openchamber`. See [If your image is not built from upstream's Dockerfile](#if-your-image-is-not-built-from-upstreams-dockerfile). |
 | `git_repo` | string | Cloned into the workspace on first start, into an empty workspace only. |
 | `git_branch` | string | Clones a single branch. Default branch when unset. |
 | `git_folder` | string | Subfolder of the repo the IDE opens. Repo root when unset. |
@@ -790,6 +791,214 @@ kubelet fetches the new image while an unchanged one still hits the node cache.
 (If the registry does not report a digest, EasyLab falls back to the tag and logs it —
 the bake still works, without that guarantee.)
 
+## AI labs with OpenChamber
+
+For a workshop about *working with an AI coding agent*, set `ide: openchamber`.
+[OpenChamber](https://github.com/openchamber/openchamber) is an MIT-licensed web UI
+around the [OpenCode](https://opencode.ai) agent: agent chats, several models run in
+parallel on the same task in their own git worktrees, inline diff review, session
+goals, and GitHub issue/PR flows. Each student gets their own instance, on their own
+subdomain, exactly like a code-server workspace.
+
+### You supply the image
+
+OpenChamber publishes no official container image, so `image` is **required** for
+these templates — there is no default to fall back to. Build one from
+[upstream's `Dockerfile`](https://github.com/openchamber/openchamber/blob/main/Dockerfile),
+push it to a registry your cluster can reach, and pin the tag:
+
+```bash
+git clone https://github.com/openchamber/openchamber.git
+cd openchamber
+docker build -t registry.example.com/easylab/openchamber:1.11-opencode2.0 .
+docker push registry.example.com/easylab/openchamber:1.11-opencode2.0
+```
+
+Pin an exact tag rather than `:latest`. Workspace pods pull with
+`imagePullPolicy: IfNotPresent`, so a mutable tag means different students can end up
+on different builds depending on what their node already cached.
+
+The image must honour the following things EasyLab relies on:
+
+| Contract | Why |
+|---|---|
+| Serves HTTP on port **3000** | the Service and the readiness probe target it |
+| Reads `OPENCHAMBER_UI_PASSWORD` | EasyLab sets it to the student's own workspace password |
+| Signs its browser session with `OPENCODE_JWT_SECRET` (a standard HS256 JWT in the `oc_ui_session` cookie) | EasyLab sets a random secret per workspace and uses it to sign the student in when they click **Open**; leave it unset in the template's `env` |
+| Honours `OPENCHAMBER_HOST` (EasyLab sets `0.0.0.0`) | the CLI binds `127.0.0.1` by default, and a loopback bind means the pod never becomes Ready |
+| Runs as **uid/gid 1000** | the volume is provisioned with `fsGroup: 1000`, and the init containers that seed the home and clone the repo hand their work to that uid |
+| Starts the server **with no arguments** | EasyLab passes none: the image's own entrypoint/`CMD` is what starts OpenChamber |
+| Has `openchamber` on `PATH`, starting in the foreground on port 3000 | **only** when the template also sets `startup_script` or `dotfiles_repo` — see the warning below |
+
+!!! warning "`startup_script` replaces the image's start command"
+    A template with a `startup_script` (or a `dotfiles_repo`) runs its setup and then
+    `exec openchamber` in the same shell — which is how an exported API key reaches
+    the agent, and also means the image's own entrypoint and `CMD` are bypassed. So
+    with either key set, the image needs `openchamber` on `PATH`, and running it bare
+    must stay in the foreground and listen on 3000.
+
+    **Upstream's image does not satisfy this**: it starts OpenChamber from its
+    entrypoint script (`bun packages/web/bin/cli.js`) and installs no `openchamber`
+    command. Add one when you build, before the `USER` line:
+
+    ```dockerfile
+    RUN printf '#!/bin/sh\nexec bun /home/openchamber/packages/web/bin/cli.js "$@"\n' \
+          > /usr/local/bin/openchamber && chmod +x /usr/local/bin/openchamber
+    ```
+
+    If your own image's `CMD` passes flags it needs — `--foreground`, say — put those
+    in the wrapper too, since nothing passes them for you. Templates with neither key
+    set are unaffected: they run the image exactly as `docker run` would.
+
+### If your image is not built from upstream's Dockerfile
+
+Upstream's image puts the home at `/home/openchamber`, which is what EasyLab assumes.
+An image built on another base keeps that base's home — one built on the `node`
+image, for instance, stays at `/home/node`. Set `home_dir` so EasyLab mounts the
+volume where the IDE actually keeps its state:
+
+```yaml
+    ide: openchamber
+    image: your-registry/your-openchamber:1.2.3
+    home_dir: /home/node
+```
+
+`home_dir` decides two things: where the persistent volume is mounted, and where
+`git_repo` is cloned (always `<home_dir>/project`). Get it wrong and nothing fails
+loudly — the workspace comes up, but the agent's chats and sessions live outside the
+volume and are gone after every restart. Check it against the image:
+
+```bash
+docker inspect --format '{{.Config.User}} {{json .Config.Env}}' your-registry/your-openchamber:1.2.3
+docker run --rm your-registry/your-openchamber:1.2.3 sh -c 'echo $HOME'
+```
+
+`home_dir` only applies to `ide: openchamber`; a code-server template is rejected for
+setting it, since that image is EasyLab's own and its home is fixed.
+
+Smoke-test the image before using it in a lab:
+
+```bash
+docker run --rm -p 3000:3000 \
+  -e OPENCHAMBER_UI_PASSWORD=test -e OPENCHAMBER_HOST=0.0.0.0 \
+  registry.example.com/easylab/openchamber:1.11-opencode2.0
+# then open http://localhost:3000 — it must ask for a password
+
+# and, if any template will set startup_script or dotfiles_repo:
+docker run --rm --entrypoint sh registry.example.com/easylab/openchamber:1.11-opencode2.0 \
+  -c 'command -v openchamber'
+```
+
+### A sample lab
+
+```yaml
+workspace_templates:
+  - name: ai-pair-programming
+    description: Drive an AI agent on a real repository
+    ide: openchamber
+    image: registry.example.com/easylab/openchamber:1.11-opencode2.0
+    git_repo: https://gitlab.com/your-org/ai-workshop.git
+    git_branch: main
+    cpu: 500m
+    cpu_limit: "2"
+    memory: 2Gi
+    disk_size: 10Gi
+    mounts:
+      - type: secret
+        name: ai-provider-key
+        path: /etc/easylab/ai
+    startup_script: |
+      export ANTHROPIC_API_KEY="$(cat /etc/easylab/ai/key)"
+```
+
+Create the Secret in the workspace namespace once, before the lab starts:
+
+```bash
+kubectl -n workshops create secret generic ai-provider-key \
+  --from-literal=key=sk-ant-...
+```
+
+The repository is cloned to `~/project`, a directory owned by the student so the
+agent can create git worktrees beside it (which is how OpenChamber runs several
+models on one task).
+
+### How the model key reaches the agent
+
+OpenChamber ships no models: OpenCode needs a provider key. The template decides how
+it arrives, and the three options differ in what they expose:
+
+1. **A Secret plus `startup_script`** — what the sample above does, and the right
+   choice for a controlled workshop. `startup_script` runs in the same shell that
+   then starts OpenChamber, so an `export` there reaches the agent. The key lives in
+   the cluster and never touches the lab's job file. This is the one option that
+   needs `openchamber` on the image's `PATH` — see the warning under
+   [You supply the image](#you-supply-the-image).
+2. **`env:` directly** — works, and is the thing to avoid. Template env values are
+   persisted in the lab's job file, returned by the jobs API and included in the
+   templates export. EasyLab warns when an `env` key looks like a credential.
+3. **Nothing at all** — each student signs in to their own provider from
+   OpenChamber's settings on first use. The right default for a public workshop: no
+   shared spend, and no key of yours in anyone else's pod.
+
+Be clear-eyed about a shared key: every student has a terminal in their own pod, so
+anyone in the room can read it and keep using it after the workshop. Use a dedicated
+key with a spend cap, and rotate it when the lab is destroyed.
+
+To pin the model and lock the agent down, commit an `opencode.json` to the workshop
+repository — the key is read from the variable the startup script exported:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "anthropic/claude-sonnet-4-5",
+  "provider": { "anthropic": { "options": { "apiKey": "{env:ANTHROPIC_API_KEY}" } } },
+  "permissions": [
+    { "action": "shell", "resource": "*", "effect": "ask" },
+    { "action": "shell", "resource": "git push *", "effect": "deny" },
+    { "action": "read", "resource": "*.env", "effect": "deny" }
+  ]
+}
+```
+
+A `.openchamber/project.json` in the same repository gives every student the same
+setup commands and one-click actions:
+
+```json
+{
+  "version": 1,
+  "setupWorktree": ["npm ci"],
+  "setupWorktreeWait": true,
+  "projectActions": [
+    { "id": "test", "name": "Tests", "command": "npm test" }
+  ]
+}
+```
+
+### What to tell participants
+
+- **Add the project on first login.** OpenChamber registers projects from its own UI
+  only, so step one of the lab is **+** → `~/project`. One click, once.
+- **There is no password to type.** Clicking **Open** signs the participant in: EasyLab
+  mints OpenChamber's session cookie itself and redirects into the workspace. Only in
+  a fallback (a workspace created before this existed, or an admin opening it from a
+  host outside the lab's domain) is the password shown on a page with a copy button.
+  It still works, and OpenChamber remembers the browser afterwards.
+- **Don't build exercises around the preview / dev-server feature.** It can only open
+  a dev server running on the viewer's own machine, not one inside a remote
+  workspace. Exercises should land on tests, diffs and commits.
+
+### Differences from a code-server template
+
+| | Behaviour |
+|---|---|
+| `extensions`, `vscode_settings`, `git_folder`, `devcontainer` | **Rejected** at validation — they are VS Code concepts, or need an injectable server bundle OpenChamber does not ship |
+| `env: OPENCHAMBER_UI_PASSWORD` | Rejected: EasyLab sets it to the student's own password |
+| `env: OPENCODE_JWT_SECRET` | **Rejected.** EasyLab generates it per workspace and uses it to sign the student in automatically. A value you chose would be shared by every student's workspace built from the template, so one student's session would be valid on all of them. |
+| `home_dir` | OpenChamber-only, because the image is yours and so is its home. Rejected on a code-server template |
+| Idle auto-pause | **Does not apply.** OpenChamber publishes no activity signal, and an agent run continues with nobody watching, so EasyLab never auto-pauses these workspaces whatever `workspace_idle_timeout_minutes` says. Bound them with `workspace_lifetime_hours`, or pause by hand. |
+| Changing `image` later | Re-seeds the student's home, because OpenChamber and the `opencode` CLI live inside it. Everything else in the home is kept. |
+| Everything else | `git_repo`, `startup_script`, `dotfiles_repo`, resources, `disk_size`, `storage_class`, `ephemeral`, sidecars, `mounts`, `env`, `node_selector`, `image_pull_secrets` all behave as they do for code-server |
+
 ## Reusing a lab's templates
 
 Use **Export Templates YAML** on the [labs list](admin-lab-management.md#manage-your-labs) to
@@ -834,4 +1043,6 @@ another lab, optionally under a new name. See
 | A workspace pod's pull error names a `*.traefik.default` (or similar auto-generated) certificate, not the registry's own hostname | Traefik never received a real certificate for that host and fell back to serving its own internal default one — the `ClusterIssuer`/`CertificateRequest` never actually completed. This is the same failure as the row above, just observed from the workspace pod's own pull error instead of the bake status; the fix is the same (fix the certificate, then **Rebuild** — a stale pre-fix bake record is cleared automatically once a rebuild confirms the pull path is still broken). Note that the registry's Ingress no longer needs to be recreated to pick up corrected HTTPS settings: it is reconciled on the next bake, as workspace Ingresses are — see [Certificates repair themselves](admin-lab-management.md#certificates-repair-themselves). |
 | A pull from the in-cluster registry fails with `401 Unauthorized` / `authentication required` | The registry requires authentication, and EasyLab adds its credentials to every workspace it creates — but a workspace created *before* the registry was secured has none. It keeps running while its node has the image cached; if its pod lands on a fresh node, the pull fails. Delete and recreate that workspace. If new workspaces fail too, check the `easylab-registry-cache-auth` and `easylab-registry-cache-htpasswd` Secrets exist in the workspace namespace: EasyLab recreates either one on the next bake or workspace request, and restarts the registry to pick up a new password. |
 | A bake fails and the `bake-repo` container's log shows a `crane append` error | Appending the repository snapshot to the pushed image failed. `kubectl logs -n <workspace namespace> -l easylab.io/bake-template=<template> -c bake-repo` has the cause. A `404`/`MANIFEST_UNKNOWN` on the base image means the build's own push never landed — check the `bake` container's log; envbuilder's push failing does not fail its build. A `401` means credentials that can push the build but not the extra layer, and a TLS error means an external `cache_repo` served over plain HTTP without `insecure: true`. |
+| An OpenChamber pod crashes with `node: bad option: --bind-addr` (or any other code-server flag) | That workspace is running the **code-server** profile against your OpenChamber image, so it was handed code-server's start arguments. Either the template's `ide` is not `openchamber` — check the saved YAML, since the form builder does not set `ide` — or the workspace predates the fix: a workspace's pod is built once, at creation, and `Request a workspace` returns an existing one untouched. Have the student **Clear** it (or delete it from the lab detail page) and request it again. |
+| An OpenChamber workspace loses the agent's chats and sessions on every restart | `home_dir` does not match the image's real home, so the volume is mounted somewhere OpenChamber never writes — see [If your image is not built from upstream's Dockerfile](#if-your-image-is-not-built-from-upstreams-dockerfile). Fix the template, then recreate the workspace: the mount path is fixed when the pod is created. |
 | A bake fails with "the in-cluster registry never became ready" | The registry EasyLab hosts in the lab's cluster did not start within `BAKE_REGISTRY_WAIT_MINUTES` (5 by default), so nothing was baked — a bake pushing into a registry that is still starting would silently produce an empty image. `kubectl get deploy,pod,pvc -n <workspace namespace> -l app.kubernetes.io/name=easylab-registry-cache` shows why: usually a pending `PersistentVolumeClaim` (no default StorageClass on a bring-your-own cluster) or a pod that cannot be scheduled. **Rebuild** once it is up. |

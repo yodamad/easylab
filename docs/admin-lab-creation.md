@@ -99,9 +99,12 @@ private network EasyLab creates — any ID that is free in your OVHcloud project
 
 ### Configure workspaces
 
-Student workspaces run as **code-server** pods provisioned directly on the
-lab's Kubernetes cluster — there is no separate IDE server or database to
-configure. On the **Workspace** step you only set:
+Student workspaces run as pods provisioned directly on the lab's Kubernetes
+cluster — there is no separate IDE server or database to configure. They run
+**code-server** by default, or **OpenChamber** for a lab about working with an AI
+coding agent (set per template with `ide:` — see
+[AI labs with OpenChamber](templates.md#ai-labs-with-openchamber)). On the
+**Workspace** step you only set:
 
 * **Workspace Namespace** (optional) — the Kubernetes namespace student
   workspaces are created in. Defaults to `workshops`.
@@ -193,7 +196,11 @@ A template can also build its workspace from a workshop repository's
 At the top of the **Templates** step, pick **Paste YAML** to edit the lab's
 workspace templates directly instead of filling in the form — useful for labs
 with several templates, for reusing a previous workshop, or for keeping the
-configuration in a git repository.
+configuration in a git repository. It is also the only place to set `ide:` (and
+`home_dir:`, which goes with it), so an
+[OpenChamber template](templates.md#ai-labs-with-openchamber) is written here
+rather than in the form. A template saved from the form carries no `ide:` at all,
+so editing an OpenChamber template there turns it back into a code-server one.
 
 ```yaml
 workspace_templates:
@@ -615,13 +622,31 @@ Set **Pause Idle Workspaces** to a number of minutes to stop paying for workspac
 How "idle" is decided, and what protects a student who is working:
 
 * A workspace counts as **in use for as long as its IDE is open in a browser**, even if the student is only reading and not typing. It only starts to count as idle once the tab is closed, or the laptop goes to sleep or loses its connection.
-* It is paused only after being found idle for longer than the timeout on **two consecutive checks** of the cleanup service (default every 5 minutes, `CLEANUP_INTERVAL_MINUTES`), so expect the pause between one and two intervals after the timeout.
+* It is paused only after being found idle for longer than the timeout on **two consecutive checks**. Idle checks run on their own short interval (default every minute, `IDLE_CHECK_INTERVAL_MINUTES`) — not on the slower workspace-cleanup interval — so expect the pause within a minute or two of the timeout.
 * Whenever activity cannot be read — the cluster is unreachable, the workspace does not answer, or its image is not code-server — the workspace is **left running**.
 * A workspace that is still starting, or that was created or resumed less than one timeout ago, is never paused. Neither is an [ephemeral](templates.md) workspace, whose files would not survive it.
+* This setting **does not apply to [OpenChamber](templates.md#ai-labs-with-openchamber) workspaces** (`ide: openchamber`), whatever you set it to. OpenChamber publishes no activity signal, and browser activity would be the wrong one anyway: an agent keeps working with nobody watching, so a pause would interrupt real work. Bound those labs with the workspace lifetime above, or pause them by hand from the lab's workspace list.
 
 The minimum is `10` minutes (a smaller value is raised to it). Choose something **longer than your breaks** — 60 to 90 minutes is a good default — because two things are lost when a workspace is paused: running processes and open terminals. In particular, a long-running command left in a terminal with **no browser attached** looks idle and will be stopped.
 
 Leave the field at `0` or empty to never pause workspaces.
+
+!!! tip "A workspace that is not pausing"
+    Whenever an idle check leaves something running, the server logs one summary line per lab accounting for every workspace, for example:
+
+    ```
+    [idle] job lab-42 (60 min timeout), 12 workspace(s): paused 1, awaiting a second reading 2, stop failed 0, activity unreadable 0, activity not reported by the IDE 0, in use 8, within grace period 1, not running 0, no volume to keep 0
+    ```
+
+    `in use` is the usual answer, and almost always means an IDE tab is still open somewhere (see the first bullet above). `activity unreadable` means the workspace did not answer the check — the preceding `[idle] leaving workspace … alone:` line says why — and those are deliberately left running. You can read the same signal the check reads with:
+
+    ```bash
+    kubectl get --raw "/api/v1/namespaces/workshops/services/http:<workspace-name>:80/proxy/healthz"
+    ```
+
+    `{"status":"alive"}` means a connection to the IDE is still open, so the workspace counts as in use; `"expired"` reports the last activity timestamp the timeout is measured from.
+
+    `activity not reported by the IDE` counts OpenChamber workspaces, which are never auto-paused (see the bullet above). Because that is a permanent property of the lab rather than something that changed, it is not on its own a reason to log the line — a lab whose templates are all OpenChamber simply logs nothing.
 
 #### Lab Deletion
 

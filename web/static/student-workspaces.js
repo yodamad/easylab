@@ -115,6 +115,14 @@ function renderWorkspaceCard(info, labId) {
         ? `<span class="workspace-card-chip"><span class="workspace-card-chip-key">Lab</span>${labDisplay}</span>`
         : '';
 
+    // The open button names the IDE the workspace actually runs. "ide" is absent
+    // for a workspace listed by an older server, which means code-server — whose
+    // label is left exactly as it was, so documented screenshots stay accurate.
+    const openLabel = info.ide === 'openchamber' ? 'Open OpenChamber' : 'Open Code Server';
+    const openTitle = info.ide === 'openchamber' ? 'Open OpenChamber' : 'Open code-server';
+    const safeOpenLabel = escapeHtml(openLabel);
+    const safeOpenTitle = escapeHtmlAttr(openTitle);
+
     const pausedChip = info.paused
         ? `<span class="workspace-card-chip workspace-card-chip--paused" title="Paused after inactivity. Open it to resume — your files are kept.">⏸ Paused</span>`
         : '';
@@ -140,7 +148,7 @@ function renderWorkspaceCard(info, labId) {
                     <div class="workspace-card-subtitle">${labChip}${templateChip}${pausedChip}</div>
                 </div>
                 <div class="workspace-card-header-actions">
-                    <button onclick="event.stopPropagation(); openCodeServer('${escapeHtmlAttr(info.lab_id)}', '${escapeHtmlAttr(info.workspace_name)}')" class="student-btn student-btn-small workspace-card-open" title="Open code-server">Open Code Server</button>
+                    <button onclick="event.stopPropagation(); openCodeServer('${escapeHtmlAttr(info.lab_id)}', '${escapeHtmlAttr(info.workspace_name)}')" class="student-btn student-btn-small workspace-card-open" title="${safeOpenTitle}">${safeOpenLabel}</button>
                     <button class="collapsible-toggle" type="button" aria-label="Toggle workspace details" aria-expanded="false">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="chevron-icon">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
@@ -183,6 +191,10 @@ function renderWorkspaceCard(info, labId) {
     `;
 }
 
+// openCodeServer opens a workspace of any IDE — the name predates there being
+// more than one, and is kept because it is referenced from inline onclick
+// handlers. It reads the status partial and follows its open link, which the
+// server points at the entry page appropriate to that workspace's IDE.
 async function openCodeServer(labId, workspaceName) {
     const statusUrl = `/api/student/workspace/status?lab_id=${encodeURIComponent(labId)}&workspace_name=${encodeURIComponent(workspaceName)}`;
     try {

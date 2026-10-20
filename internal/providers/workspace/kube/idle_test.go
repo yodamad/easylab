@@ -94,30 +94,70 @@ func TestReadHealthz(t *testing.T) {
 func TestWorkspaceLastActivity(t *testing.T) {
 	t.Parallel()
 
+	// The probe resolves the workspace's IDE from its Deployment, so every case
+	// here needs one to exist.
+	ensure := func(t *testing.T, ide string) (*Backend, workspace.Workspace) {
+		t.Helper()
+		b, _ := newTestBackend()
+		spec := workspace.Spec{LabID: "job-1", Owner: "alice", IDE: ide, DiskSize: "5Gi", Domain: "lab.example.com", Token: "secret-token"}
+		if ide == workspace.IDEOpenChamber {
+			spec.Image = "registry.example.com/openchamber:1"
+		}
+		ws, err := b.EnsureWorkspace(context.Background(), spec)
+		require.NoError(t, err)
+		return b, ws
+	}
+
 	t.Run("reads the workspace's own healthz", func(t *testing.T) {
 		t.Parallel()
-		b, _ := newTestBackend()
+		b, ws := ensure(t, workspace.IDECodeServer)
 		var asked string
 		b.healthz = func(_ context.Context, name string) ([]byte, error) {
 			asked = name
 			return []byte(`{"status":"alive","lastHeartbeat":1}`), nil
 		}
 
-		got, err := b.WorkspaceLastActivity(context.Background(), "ws-1")
+		got, err := b.WorkspaceLastActivity(context.Background(), ws.ID)
 
 		require.NoError(t, err)
-		assert.Equal(t, "ws-1", asked)
+		assert.Equal(t, ws.ID, asked)
 		assert.WithinDuration(t, time.Now(), got, time.Minute)
 	})
 
 	t.Run("a failed probe is an error, not idleness", func(t *testing.T) {
 		t.Parallel()
-		b, _ := newTestBackend()
+		b, ws := ensure(t, workspace.IDECodeServer)
 		b.healthz = func(context.Context, string) ([]byte, error) { return nil, errors.New("no endpoints") }
 
-		_, err := b.WorkspaceLastActivity(context.Background(), "ws-1")
+		_, err := b.WorkspaceLastActivity(context.Background(), ws.ID)
 
 		require.Error(t, err)
+	})
+
+	t.Run("an IDE with no activity endpoint is reported as unsupported, unprobed", func(t *testing.T) {
+		t.Parallel()
+		b, ws := ensure(t, workspace.IDEOpenChamber)
+		probed := false
+		b.healthz = func(context.Context, string) ([]byte, error) {
+			probed = true
+			return []byte(`{"status":"alive"}`), nil
+		}
+
+		got, err := b.WorkspaceLastActivity(context.Background(), ws.ID)
+
+		require.ErrorIs(t, err, workspace.ErrActivityUnsupported)
+		assert.True(t, got.IsZero())
+		assert.False(t, probed, "an IDE with no activity endpoint must not be probed at one")
+	})
+
+	t.Run("a missing workspace is an error", func(t *testing.T) {
+		t.Parallel()
+		b, _ := newTestBackend()
+
+		_, err := b.WorkspaceLastActivity(context.Background(), "ws-gone")
+
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, workspace.ErrActivityUnsupported)
 	})
 }
 
@@ -159,6 +199,44 @@ func TestStopAndStartWorkspace(t *testing.T) {
 	assert.NotEqual(t, workspace.PhaseStopped, resumed.Phase)
 
 	require.NoError(t, b.StartWorkspace(ctx, ws.ID), "starting twice is not an error")
+}
+
+func TestListWorkspaces_ReportsEphemeral(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		spec      workspace.Spec
+		ephemeral bool
+	}{
+		{
+			name: "volume-backed workspace can be paused",
+			spec: workspace.Spec{LabID: "job-1", Owner: "alice", DiskSize: "5Gi"},
+		},
+		{
+			name:      "ephemeral workspace would lose its files",
+			spec:      workspace.Spec{LabID: "job-1", Owner: "bob", Ephemeral: true},
+			ephemeral: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			b, _ := newTestBackend()
+			ctx := context.Background()
+			created, err := b.EnsureWorkspace(ctx, tt.spec)
+			require.NoError(t, err)
+
+			got, err := b.GetWorkspace(ctx, created.ID)
+			require.NoError(t, err)
+			assert.Equal(t, tt.ephemeral, got.Ephemeral)
+
+			list, err := b.ListWorkspaces(ctx, tt.spec.LabID)
+			require.NoError(t, err)
+			require.Len(t, list, 1)
+			assert.Equal(t, tt.ephemeral, list[0].Ephemeral)
+		})
+	}
 }
 
 func TestStopWorkspace_Refusals(t *testing.T) {

@@ -8027,3 +8027,29 @@ details[open] > .secrets-summary::after {
 .credential-storage details {
     margin-top: 1rem;
 }
+
+/* Workspace handoff page (OpenChamber): the password is shown for the student to
+   copy, since EasyLab cannot post it to a login endpoint the way it does for
+   code-server. Served standalone by OpenWorkspace, outside the base template. */
+.workspace-handoff {
+    max-width: 32rem;
+    margin: 4rem auto;
+    padding: 0 1rem;
+}
+
+.workspace-handoff-token {
+    width: 100%;
+    font-family: 'JetBrains Mono', 'Monaco', 'Menlo', monospace;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    background: var(--surface);
+    color: var(--text);
+}
+
+.workspace-handoff-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-top: 1rem;
+}

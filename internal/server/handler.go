@@ -1166,6 +1166,9 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 	for _, warn := range gitCredentialWarnings(templates) {
 		log.Printf("Workspace template warning (%s): %s", warn.Key, warn.Message)
 	}
+	for _, warn := range providerKeyWarnings(templates) {
+		log.Printf("Workspace template warning (%s): %s", warn.Key, warn.Message)
+	}
 
 	// Credentials the admin entered in the wizard. Parsed here so a mistake fails
 	// before any job exists; held aside and applied once the cluster is up (a lab
@@ -2328,7 +2331,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate the code-server password shown to the student. It stays within
+	// Generate the IDE password shown to the student. It stays within
 	// [0-9a-zA-Z-] (see GenerateWorkspaceToken) — plenty of entropy, and safe to
 	// carry through the shell-quoted container bootstrap.
 	password, err := GenerateWorkspaceToken()
@@ -2415,6 +2418,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		Template:         selected.Name,
 		IDE:              selected.IDE,
 		Image:            selected.Image,
+		HomeDir:          selected.HomeDir,
 		GitRepo:          selected.GitRepo,
 		GitBranch:        selected.GitBranch,
 		GitFolder:        selected.GitFolder,
@@ -2575,7 +2579,7 @@ func (h *Handler) WorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 	job, exists := h.jobManager.GetJob(labID)
 	if !exists {
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, "unknown", ""))
+		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, "unknown", "", ""))
 		return
 	}
 
@@ -2587,7 +2591,7 @@ func (h *Handler) WorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 
 	if status != JobStatusCompleted || kubeconfig == "" {
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, "checking", ""))
+		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, "checking", "", ""))
 		return
 	}
 
@@ -2595,7 +2599,7 @@ func (h *Handler) WorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("WorkspaceStatus: failed to build backend for lab %s: %v", labID, err)
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, "checking", ""))
+		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, "checking", "", ""))
 		return
 	}
 
@@ -2604,7 +2608,7 @@ func (h *Handler) WorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 	if err != nil || ws.Owner != owner {
 		log.Printf("[debug] WorkspaceStatus: lookup/authz failed workspace=%s owner=%s error=%v", workspaceName, owner, err)
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, "checking", ""))
+		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, "checking", "", ""))
 		return
 	}
 
@@ -2626,7 +2630,7 @@ func (h *Handler) WorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprint(w, buildWorkspaceStatusHTML(labID, ws.Name, readiness, wsURL))
+	fmt.Fprint(w, buildWorkspaceStatusHTML(labID, ws.Name, readiness, wsURL, ws.IDE))
 }
 
 // dnsPropagationGrace bounds how long the student UI holds the "ready" signal back
@@ -2727,10 +2731,158 @@ var autoLoginPage = template.Must(template.New("workspaceAutoLogin").Parse(`<!DO
 </body>
 </html>`))
 
-// OpenWorkspace logs the student into their code-server workspace: rather than
-// redirecting to code-server's login page, it serves a self-submitting form that
-// POSTs the workspace token to /login, so the student lands in the IDE without
-// retyping the password shown in the portal.
+// workspaceHandoffPage hands the student their workspace password and a link
+// into it, for a workspace EasyLab cannot sign them into on their behalf.
+//
+// It is the fallback for OpenChamber, which is signed into by planting its
+// session cookie (see plantOpenChamberSession) rather than by posting a password
+// the way code-server is. That needs a cookie domain covering both EasyLab and
+// the workspace, which an admin UI on an unrelated host does not have, and a
+// session secret, which a workspace created before EasyLab recorded one does not
+// have. Either way the password still works: OpenChamber signs in once and then
+// remembers the device, so this is a once-per-lab step.
+var workspaceHandoffPage = template.Must(template.New("workspaceHandoff").Parse(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your workspace is ready</title>
+<link rel="stylesheet" href="{{.StyleURL}}">
+</head>
+<body>
+<main class="workspace-handoff">
+<h1>Your workspace is ready</h1>
+<p>{{.IDEName}} will ask for a password once. Copy it, then continue — it remembers this browser afterwards.</p>
+<p><label for="token">Workspace password</label>
+<input id="token" type="text" value="{{.Token}}" readonly class="workspace-handoff-token"></p>
+<div class="workspace-handoff-actions">
+<button type="button" id="copy" class="btn">Copy password</button>
+<a class="btn" href="{{.OpenURL}}" rel="noopener noreferrer">Continue to your workspace</a>
+</div>
+</main>
+<script>
+document.getElementById('copy').addEventListener('click', function () {
+  var field = document.getElementById('token');
+  field.select();
+  navigator.clipboard.writeText(field.value).then(function () {
+    document.getElementById('copy').textContent = 'Copied';
+  }).catch(function () {
+    document.getElementById('copy').textContent = 'Press Ctrl+C to copy';
+  });
+});
+</script>
+</body>
+</html>`))
+
+// serveWorkspaceEntry lands a caller in a workspace the way its IDE allows:
+// a password posted to code-server's login endpoint, a session cookie planted
+// for OpenChamber, and the password handed over only where neither is possible.
+// No secret ever travels in a URL — they go in a response body or a cookie, both
+// served only to the student who owns the workspace (or to an audited admin).
+func (h *Handler) serveWorkspaceEntry(w http.ResponseWriter, r *http.Request, ws workspace.Workspace, logPrefix, labID string) {
+	if ws.IDE == workspace.IDEOpenChamber {
+		if h.plantOpenChamberSession(w, r, ws, logPrefix, labID) {
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := workspaceHandoffPage.Execute(w, struct {
+			OpenURL  string
+			Token    string
+			IDEName  string
+			StyleURL string
+		}{OpenURL: ws.OpenURL, Token: ws.Token, IDEName: ideDisplayName(ws.IDE), StyleURL: assetURL("/static/style.css")}); err != nil {
+			log.Printf("%s: failed to render workspace handoff page for lab %s: %v", logPrefix, labID, err)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	// ws.OpenURL is the workspace base URL (ending in "/"); code-server's login
+	// endpoint lives at /login. Serve the self-submitting form there so the token
+	// is posted on the student's behalf instead of asked for on the login page.
+	loginURL := strings.TrimRight(ws.OpenURL, "/") + "/login"
+	if err := autoLoginPage.Execute(w, struct {
+		LoginURL string
+		Token    string
+	}{LoginURL: loginURL, Token: ws.Token}); err != nil {
+		log.Printf("%s: failed to render auto-login page for lab %s: %v", logPrefix, labID, err)
+	}
+}
+
+// plantOpenChamberSession signs the caller into an OpenChamber workspace by
+// setting the session cookie here and redirecting them into it, so they never
+// meet its password prompt. It reports whether it responded: false leaves the
+// caller to fall back to workspaceHandoffPage, for a workspace with no recorded
+// session secret or a request host the cookie's domain could not be set from.
+//
+// See internal/server/openchamber_session.go for why minting the session here
+// is equivalent to signing in, and for the cookie's domain scoping.
+func (h *Handler) plantOpenChamberSession(w http.ResponseWriter, r *http.Request, ws workspace.Workspace, logPrefix, labID string) bool {
+	// Each of these falls back to handing the password over, which looks to the
+	// student exactly like the seamless path never shipped — so say which gate
+	// closed, or there is no way to tell the two apart from the outside.
+	if ws.SessionSecret == "" {
+		log.Printf("%s: workspace %s in lab %s has no recorded session secret, serving the password handoff instead "+
+			"(created before EasyLab recorded one, so recreate it to sign students in automatically)", logPrefix, ws.Name, labID)
+		return false
+	}
+
+	target, err := url.Parse(ws.OpenURL)
+	if err != nil || target.Host == "" {
+		log.Printf("%s: unusable workspace URL for lab %s: %v", logPrefix, labID, err)
+		return false
+	}
+
+	domain, ok := openChamberCookieDomain(r.Host, target.Host)
+	if !ok {
+		log.Printf("%s: cannot plant a session for workspace %s in lab %s: this server is reached at %q, which is not under "+
+			"the workspace's own domain (%s), so a cookie set here would never be sent there — serving the password handoff "+
+			"instead. Signing students in automatically needs EasyLab served from the lab's domain, as the in-lab student "+
+			"portal is", logPrefix, ws.Name, labID, r.Host, target.Host)
+		return false
+	}
+
+	token, err := openChamberSessionToken(ws.SessionSecret, time.Now(), openChamberSessionTTL)
+	if err != nil {
+		log.Printf("%s: %v (lab %s)", logPrefix, err, labID)
+		return false
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:  openChamberSessionCookie,
+		Value: token,
+		Path:  "/",
+		// Scoped to the lab domain, not this host, so the workspace is sent it.
+		Domain: domain,
+		MaxAge: int(openChamberSessionTTL.Seconds()),
+		// The session is the IDE's to read, never a script's.
+		HttpOnly: true,
+		// Follows the workspace's own scheme: a lab without TLS (the nip.io
+		// fallback) is served over plain HTTP, where a Secure cookie would never
+		// be sent and the student would land on the password prompt instead.
+		Secure: target.Scheme == "https",
+		// Lax, not Strict: the student arrives by a top-level redirect from
+		// EasyLab's host, and the cookie has to be sent on it.
+		SameSite: http.SameSiteLaxMode,
+	})
+	// See Other, so an admin's POST to the open endpoint is followed with a GET.
+	http.Redirect(w, r, ws.OpenURL, http.StatusSeeOther)
+	return true
+}
+
+// ideDisplayName is the IDE's name as a student should read it.
+func ideDisplayName(ide string) string {
+	if ide == workspace.IDEOpenChamber {
+		return "OpenChamber"
+	}
+	return "code-server"
+}
+
+// OpenWorkspace lands the student in their workspace. For code-server it serves
+// a self-submitting form that POSTs the workspace token to /login, so the
+// student does not retype the password shown in the portal; for an IDE with no
+// login endpoint it hands over the password instead (see serveWorkspaceEntry).
 func (h *Handler) OpenWorkspace(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -2778,17 +2930,7 @@ func (h *Handler) OpenWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ws.OpenURL is the workspace base URL (ending in "/"); code-server's login
-	// endpoint lives at /login. Serve the self-submitting form there so the token
-	// is posted on the student's behalf instead of asked for on the login page.
-	loginURL := strings.TrimRight(ws.OpenURL, "/") + "/login"
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := autoLoginPage.Execute(w, struct {
-		LoginURL string
-		Token    string
-	}{LoginURL: loginURL, Token: ws.Token}); err != nil {
-		log.Printf("OpenWorkspace: failed to render auto-login page for lab %s: %v", labID, err)
-	}
+	h.serveWorkspaceEntry(w, r, ws, "OpenWorkspace", labID)
 }
 
 // OpenWorkspaceAsAdmin handles POST /api/labs/{id}/workspaces/{workspace_id}/open:
@@ -2860,14 +3002,7 @@ func (h *Handler) OpenWorkspaceAsAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 	h.recordAudit(adminActor(r), "admin", "workspace.open", labID, wsName)
 
-	loginURL := strings.TrimRight(ws.OpenURL, "/") + "/login"
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := autoLoginPage.Execute(w, struct {
-		LoginURL string
-		Token    string
-	}{LoginURL: loginURL, Token: ws.Token}); err != nil {
-		log.Printf("OpenWorkspaceAsAdmin: failed to render auto-login page for lab %s: %v", labID, err)
-	}
+	h.serveWorkspaceEntry(w, r, ws, "OpenWorkspaceAsAdmin", labID)
 }
 
 // WorkspaceTeacherAccess handles GET /api/student/workspace/access: it tells the
@@ -3012,12 +3147,16 @@ func (h *Handler) DeleteStudentWorkspace(w http.ResponseWriter, r *http.Request)
 
 // buildWorkspaceStatusHTML returns an HTML partial for the workspace readiness indicator.
 // When the workspace is running, the returned HTML has no HTMX polling attributes so polling stops.
-func buildWorkspaceStatusHTML(labID, workspaceName, status, workspaceURL string) string {
+//
+// ide names the IDE on the open button. It is only read on the running branch,
+// which is the only one that has a workspace to name: callers that run before
+// the lookup pass "", which reads as the default IDE.
+func buildWorkspaceStatusHTML(labID, workspaceName, status, workspaceURL, ide string) string {
 	switch status {
 	case "running":
 		if workspaceURL != "" {
-			return fmt.Sprintf(`<div class="workspace-ready-status workspace-ready-status--ready"><span>✅ Workspace is ready!</span><a href="%s" target="_blank" class="btn-workspace-connect">Open in code-server</a></div>`,
-				template.HTMLEscapeString(workspaceURL))
+			return fmt.Sprintf(`<div class="workspace-ready-status workspace-ready-status--ready"><span>✅ Workspace is ready!</span><a href="%s" target="_blank" class="btn-workspace-connect">Open in %s</a></div>`,
+				template.HTMLEscapeString(workspaceURL), template.HTMLEscapeString(ideDisplayName(ide)))
 		}
 		return `<div class="workspace-ready-status workspace-ready-status--ready"><span>✅ Workspace is ready!</span></div>`
 	case "failed", "agents_failed":

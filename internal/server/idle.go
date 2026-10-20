@@ -2,12 +2,14 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"easylab/internal/providers/workspace"
@@ -51,6 +53,39 @@ func parseIdleTimeout(r *http.Request) (int, error) {
 	return minutes, nil
 }
 
+// idleOutcome counts what one lab's idle pass did with each of its workspaces,
+// so a single summary line can account for every workspace left running. A line
+// per workspace would be a line a minute per student, so this is logged only
+// when the pass actually found something idle (see worthLogging).
+type idleOutcome struct {
+	notReady    atomic.Int32 // building, starting, or already paused
+	inGrace     atomic.Int32 // created or resumed less than one timeout ago
+	ephemeral   atomic.Int32 // no persistent volume: pausing would lose the files
+	inUse       atomic.Int32 // last activity more recent than the timeout
+	unreadable  atomic.Int32 // activity could not be read, so treated as in use
+	unsupported atomic.Int32 // the workspace's IDE reports no activity at all
+	firstPass   atomic.Int32 // idle, waiting for a second consecutive reading
+	paused      atomic.Int32
+	failed      atomic.Int32
+}
+
+// worthLogging reports whether this pass found anything that would explain a
+// workspace not being paused. A lab whose students are all working says nothing.
+//
+// unsupported is deliberately not in the sum: an IDE that reports no activity
+// reports none on every pass forever, so counting it here would turn a permanent
+// property of the lab into a log line every couple of minutes. Admins learn it
+// from the lab's own settings instead (see docs/admin-lab-management.md).
+func (o *idleOutcome) worthLogging() bool {
+	return o.firstPass.Load()+o.paused.Load()+o.failed.Load()+o.unreadable.Load() > 0
+}
+
+func (o *idleOutcome) String() string {
+	return fmt.Sprintf("paused %d, awaiting a second reading %d, stop failed %d, activity unreadable %d, activity not reported by the IDE %d, in use %d, within grace period %d, not running %d, no volume to keep %d",
+		o.paused.Load(), o.firstPass.Load(), o.failed.Load(), o.unreadable.Load(), o.unsupported.Load(),
+		o.inUse.Load(), o.inGrace.Load(), o.notReady.Load(), o.ephemeral.Load())
+}
+
 // stopIdleWorkspaces pauses the workspaces of every lab with an idle timeout
 // that nobody has used for longer than it.
 //
@@ -59,6 +94,10 @@ func parseIdleTimeout(r *http.Request) (int, error) {
 // activity, a workspace that is not fully up is never a candidate, and one idle
 // reading is not enough — a workspace is only paused when it was already found
 // idle on the previous pass too, on a fresh reading taken right before the stop.
+//
+// That second reading is why this runs on idleCheckInterval rather than the
+// cleanup tick: the wait it adds beyond the admin's configured timeout is one
+// interval, so it has to be short.
 func (h *Handler) stopIdleWorkspaces() {
 	// Strikes only carry from one pass to the very next: a lab this pass skips
 	// (unreachable cluster, listing error) starts over rather than being paused on
@@ -79,7 +118,15 @@ func (h *Handler) stopIdleWorkspaces() {
 		}
 		job.mu.RUnlock()
 
-		if status != JobStatusCompleted || kubeconfig == "" || timeoutMinutes <= 0 {
+		// A lab with no idle timeout, or one that is not up, is not something the
+		// admin is waiting on — stay quiet about those. Everything past this point
+		// is a lab that asked for pausing, so a reason is logged whenever one of
+		// its workspaces is left running.
+		if timeoutMinutes <= 0 || status != JobStatusCompleted {
+			continue
+		}
+		if kubeconfig == "" {
+			log.Printf("[idle] skipping job %s: lab has no kubeconfig", job.ID)
 			continue
 		}
 
@@ -90,6 +137,7 @@ func (h *Handler) stopIdleWorkspaces() {
 		}
 		idler, ok := backend.(workspace.IdleManager)
 		if !ok {
+			log.Printf("[idle] skipping job %s: %T cannot pause workspaces", job.ID, backend)
 			continue
 		}
 
@@ -110,13 +158,27 @@ func (h *Handler) stopIdleWorkspaces() {
 		}
 
 		timeout := time.Duration(timeoutMinutes) * time.Minute
+		var outcome idleOutcome
 		var wg sync.WaitGroup
 		sem := make(chan struct{}, cleanupDeleteConcurrency())
 		for _, ws := range workspaces {
-			// Not ready means building, starting or already paused. A recent
-			// UpdatedAt means just created or just resumed: the student has not
-			// had a full timeout to come back to it yet.
-			if !ws.Ready || time.Since(ws.UpdatedAt) <= timeout {
+			// Not ready means building, starting or already paused.
+			if !ws.Ready {
+				outcome.notReady.Add(1)
+				continue
+			}
+			// A recent UpdatedAt means just created or just resumed: the student
+			// has not had a full timeout to come back to it yet.
+			if time.Since(ws.UpdatedAt) <= timeout {
+				outcome.inGrace.Add(1)
+				continue
+			}
+			// StopWorkspace would refuse this one anyway — its files live in an
+			// EmptyDir and would not survive the pause. Skipping it here rather
+			// than attempting the stop keeps a failure the admin cannot act on out
+			// of the log on every single pass.
+			if ws.Ephemeral {
+				outcome.ephemeral.Add(1)
 				continue
 			}
 
@@ -126,14 +188,27 @@ func (h *Handler) stopIdleWorkspaces() {
 				defer wg.Done()
 				defer func() { <-sem }()
 
-				if !workspaceIsIdle(idler, ws, timeout) {
+				idle, err := workspaceIsIdle(idler, ws, timeout)
+				switch {
+				// An IDE with no activity signal can never be shown to be idle, so
+				// it is never a candidate. No strike is recorded, so the
+				// two-reading gate below cannot fire for it however long the lab
+				// runs — the workspace is bounded by its lifetime and by manual
+				// pause instead.
+				case errors.Is(err, workspace.ErrActivityUnsupported):
+					outcome.unsupported.Add(1)
+					return
+				case err != nil:
+					outcome.unreadable.Add(1)
+					return
+				case !idle:
+					outcome.inUse.Add(1)
 					return
 				}
 				key := job.ID + "/" + ws.ID
 				if !previous[key] {
-					h.idleStrikesMu.Lock()
-					h.idleStrikes[key] = true
-					h.idleStrikesMu.Unlock()
+					outcome.firstPass.Add(1)
+					h.recordIdleStrike(key)
 					return
 				}
 
@@ -143,30 +218,52 @@ func (h *Handler) stopIdleWorkspaces() {
 				stopCancel()
 				if stopErr != nil {
 					log.Printf("[idle] failed to pause workspace %s: %v", ws.ID, stopErr)
+					outcome.failed.Add(1)
+					// Keep the strike so the next pass retries the stop, rather
+					// than starting the two-reading count over from scratch.
+					h.recordIdleStrike(key)
 					return
 				}
+				outcome.paused.Add(1)
 				h.recordAudit("system", "system", "workspace.stop", job.ID, fmt.Sprintf("%s: auto-pause, idle for more than %d min", ws.Name, timeoutMinutes))
 			}(ws)
 		}
 		wg.Wait()
+		if outcome.worthLogging() {
+			log.Printf("[idle] job %s (%d min timeout), %d workspace(s): %s", job.ID, timeoutMinutes, len(workspaces), &outcome)
+		}
 	}
 }
 
+// recordIdleStrike remembers that a workspace read as idle on this pass, so the
+// next one can pause it.
+func (h *Handler) recordIdleStrike(key string) {
+	h.idleStrikesMu.Lock()
+	h.idleStrikes[key] = true
+	h.idleStrikesMu.Unlock()
+}
+
 // workspaceIsIdle reports whether a running workspace has gone unused for longer
-// than timeout. Activity that cannot be read is not idleness.
-func workspaceIsIdle(idler workspace.IdleManager, ws workspace.Workspace, timeout time.Duration) bool {
+// than timeout. Activity that cannot be read is not idleness: the error is
+// returned so the caller leaves the workspace alone and can say why.
+func workspaceIsIdle(idler workspace.IdleManager, ws workspace.Workspace, timeout time.Duration) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), clusterOperationTimeout)
 	defer cancel()
 	last, err := idler.WorkspaceLastActivity(ctx, ws.ID)
 	if err != nil {
-		log.Printf("[idle] leaving workspace %s alone: %v", ws.ID, err)
-		return false
+		// An IDE that reports no activity is not a failed reading: it would log
+		// here for every workspace on every pass, saying nothing new each time.
+		// The caller counts it instead.
+		if !errors.Is(err, workspace.ErrActivityUnsupported) {
+			log.Printf("[idle] leaving workspace %s alone: %v", ws.ID, err)
+		}
+		return false, err
 	}
 	// Never used since it started: count from when it came up instead.
 	if last.Before(ws.UpdatedAt) {
 		last = ws.UpdatedAt
 	}
-	return time.Since(last) > timeout
+	return time.Since(last) > timeout, nil
 }
 
 // resumeIfStopped starts ws again when it was paused for inactivity, and
@@ -247,5 +344,5 @@ func (h *Handler) ResumeWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprint(w, buildWorkspaceStatusHTML(labID, ws.Name, "resuming", ""))
+	fmt.Fprint(w, buildWorkspaceStatusHTML(labID, ws.Name, "resuming", "", ws.IDE))
 }

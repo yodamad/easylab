@@ -11,7 +11,9 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"path"
 	"regexp"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -23,7 +25,21 @@ const workspaceTemplatesYAMLSkeleton = `# Workspace templates for this lab. Each
 # can pick on their dashboard. Only "name" is required — uncomment what you need.
 workspace_templates:
   - name: default
+    # ide: code-server                           # or openchamber, for AI/agent labs:
+    #                                             # an OpenChamber + OpenCode workspace.
+    #                                             # openchamber requires image, and rejects
+    #                                             # extensions, vscode_settings, git_folder
+    #                                             # and devcontainer. Its workspaces are
+    #                                             # never auto-paused (no activity signal).
     # image: codercom/code-server:latest         # overrides the IDE's default image
+    # home_dir: /home/openchamber                # openchamber only: the home inside your own
+    #                                             # image. The volume is mounted here and the
+    #                                             # repo is cloned to <home_dir>/project, so it
+    #                                             # must match the image (upstream's Dockerfile
+    #                                             # gives /home/openchamber, a node base keeps
+    #                                             # /home/node). Wrong, and the agent's chats
+    #                                             # live outside the volume and are lost on
+    #                                             # every restart.
     # git_repo: https://gitlab.com/user/repo.git # cloned into the workspace on first start
     # git_branch: main
     # git_folder: exercises                      # subfolder opened in the IDE
@@ -269,8 +285,11 @@ func validateWorkspaceTemplates(templates []WorkspaceTemplate) error {
 
 		// IDEOpenVSCode is still accepted so labs saved before OpenVSCode support
 		// was removed keep loading; normalizeIDE rewrites it to code-server.
-		if t.IDE != "" && t.IDE != workspace.IDEOpenVSCode && t.IDE != workspace.IDECodeServer {
-			return fmt.Errorf("%s: ide must be %q, got %q", where, workspace.IDECodeServer, t.IDE)
+		if t.IDE != "" && t.IDE != workspace.IDEOpenVSCode && t.IDE != workspace.IDECodeServer && t.IDE != workspace.IDEOpenChamber {
+			return fmt.Errorf("%s: ide must be %q or %q, got %q", where, workspace.IDECodeServer, workspace.IDEOpenChamber, t.IDE)
+		}
+		if err := validateIDEFeatures(where, t); err != nil {
+			return err
 		}
 		if t.GitRepo != "" && !validateURL(t.GitRepo) {
 			return fmt.Errorf("%s: git_repo %q is not a valid URL", where, t.GitRepo)
@@ -300,6 +319,95 @@ func validateWorkspaceTemplates(templates []WorkspaceTemplate) error {
 	}
 	return nil
 }
+
+// validateIDEFeatures rejects template keys the chosen IDE cannot honour.
+//
+// Each one is refused rather than ignored for the same reason the rest of this
+// file refuses dead config: a lab author who lists VS Code extensions for an
+// OpenChamber workspace has misunderstood what they are configuring, and a
+// workshop is a bad place to find that out. Only openchamber has restrictions
+// today; code-server honours everything, so it takes this function's zero path.
+func validateIDEFeatures(where string, t WorkspaceTemplate) error {
+	// home_dir exists because OpenChamber's image is the lab's, so its home is
+	// too. For an IDE whose image EasyLab controls the home is already known, and
+	// honouring an override there would mount the volume somewhere the IDE does
+	// not keep its state.
+	if home := strings.TrimSpace(t.HomeDir); home != "" {
+		if t.IDE != workspace.IDEOpenChamber {
+			return fmt.Errorf("%s: home_dir only applies to ide %q, whose image the lab supplies — %s runs a known image with a fixed home", where, workspace.IDEOpenChamber, workspace.IDECodeServer)
+		}
+		if err := validateHomeDir(where, home); err != nil {
+			return err
+		}
+	}
+
+	if t.IDE != workspace.IDEOpenChamber {
+		return nil
+	}
+	// OpenChamber publishes no official image, so there is no sensible default to
+	// fall back to (see kube.DefaultImageForIDE).
+	if strings.TrimSpace(t.Image) == "" {
+		return fmt.Errorf("%s: ide %q requires image — OpenChamber publishes no official image, so the lab must name the one to run", where, workspace.IDEOpenChamber)
+	}
+	if len(t.Extensions) > 0 {
+		return fmt.Errorf("%s: extensions needs a VS Code-based ide — %q installs none", where, workspace.IDEOpenChamber)
+	}
+	if len(t.VSCodeSettings) > 0 {
+		return fmt.Errorf("%s: vscode_settings needs a VS Code-based ide — %q reads none", where, workspace.IDEOpenChamber)
+	}
+	if t.Devcontainer != nil && t.Devcontainer.Enabled {
+		return fmt.Errorf("%s: devcontainer needs an ide that ships a relocatable server bundle to inject into the built image — %q does not", where, workspace.IDEOpenChamber)
+	}
+	if strings.TrimSpace(t.GitFolder) != "" {
+		return fmt.Errorf("%s: git_folder needs an ide that opens a folder on start — %q opens the project from its own UI", where, workspace.IDEOpenChamber)
+	}
+	// Both of these are per-workspace secrets EasyLab generates and owns.
+	for key := range t.Env {
+		switch strings.ToUpper(strings.TrimSpace(key)) {
+		// The access secret is appended after the template's env (see
+		// createDeployment), so a template setting it would be overwritten with the
+		// password the student was actually given.
+		case openChamberPasswordEnv:
+			return fmt.Errorf("%s: env %s is set by EasyLab to the student's own workspace password — remove it", where, openChamberPasswordEnv)
+		// This one a template's env *would* win, and every workspace built from the
+		// template would sign its sessions with the same key — which is what keeps
+		// one student's session from opening another's workspace.
+		case openChamberSessionSecretEnv:
+			return fmt.Errorf("%s: env %s signs each student's own session and EasyLab generates one per workspace — a shared value would let one student's session open another's workspace, so remove it", where, openChamberSessionSecretEnv)
+		}
+	}
+	return nil
+}
+
+// validateHomeDir checks a home_dir is usable as a mount path. The workspace
+// volume is mounted there and the repo is cloned into a child of it, so a
+// relative or unclean path would be rejected by the kubelet — after the lab is
+// saved and a student has asked for a workspace — rather than here.
+func validateHomeDir(where, home string) error {
+	if !strings.HasPrefix(home, "/") {
+		return fmt.Errorf("%s: home_dir %q must be an absolute path: it is where the workspace volume is mounted inside the image", where, home)
+	}
+	cleaned := path.Clean(home)
+	if cleaned != home {
+		return fmt.Errorf("%s: home_dir %q must be a plain absolute path, with no trailing slash and no . or .. segments (did you mean %q?)", where, home, cleaned)
+	}
+	if cleaned == "/" {
+		return fmt.Errorf("%s: home_dir cannot be /: mounting the workspace volume over the root filesystem would hide everything the image ships", where)
+	}
+	return nil
+}
+
+// openChamberPasswordEnv is the variable OpenChamber reads its UI password from.
+// EasyLab owns it (see openChamberProfile.authEnv in the kube backend), so a
+// template may not set it.
+const openChamberPasswordEnv = "OPENCHAMBER_UI_PASSWORD"
+
+// openChamberSessionSecretEnv is the variable OpenChamber signs its browser
+// sessions with. EasyLab generates one per workspace (see openChamberEnv in the
+// kube backend) and mints the student's session with it, so a template may not
+// set it: one value across a template's workspaces would make their sessions
+// interchangeable.
+const openChamberSessionSecretEnv = "OPENCODE_JWT_SECRET"
 
 // validateVSCodeSettings checks the settings encode to valid JSON, since they
 // are written verbatim as the IDE's settings.json — a file VS Code would
@@ -412,6 +520,58 @@ func gitCredentialWarnings(templates []WorkspaceTemplate) []devcontainer.Warning
 		}
 	}
 	return out
+}
+
+// providerKeyWarnings flags what looks like an AI provider key set directly in a
+// template's env. Like gitCredentialWarnings it warns rather than rejects: it
+// works, and an admin may well accept the exposure for a one-afternoon lab. What
+// it costs is confidentiality — env values are persisted to the lab's job file,
+// returned by the jobs API and included in the templates export — so the admin
+// is told, and decides. The alternative is a Secret under mounts: plus a
+// startup_script that exports it, which keeps the key in the cluster.
+func providerKeyWarnings(templates []WorkspaceTemplate) []devcontainer.Warning {
+	var out []devcontainer.Warning
+	for _, t := range templates {
+		where := strings.TrimSpace(t.Name)
+		if where == "" {
+			where = "template"
+		}
+		for _, key := range sortedKeys(t.Env) {
+			if !looksLikeCredentialEnv(key) {
+				continue
+			}
+			out = append(out, devcontainer.Warning{
+				Key: "env",
+				Message: fmt.Sprintf("%s: env %s looks like a credential. It is stored in the lab's job file, returned by the jobs API and included in the templates export. Mount it from a Secret and export it in startup_script instead.",
+					where, key),
+			})
+		}
+	}
+	return out
+}
+
+// looksLikeCredentialEnv reports whether an environment variable name is one
+// secrets are conventionally passed in. It is a heuristic feeding a warning, not
+// a gate, so a false positive costs the admin one sentence.
+func looksLikeCredentialEnv(key string) bool {
+	k := strings.ToUpper(strings.TrimSpace(key))
+	for _, suffix := range []string{"_API_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "APIKEY"} {
+		if strings.HasSuffix(k, suffix) {
+			return true
+		}
+	}
+	return k == "API_KEY" || k == "TOKEN"
+}
+
+// sortedKeys returns a map's keys in a stable order, so warnings come out the
+// same way every time rather than in Go's randomized map order.
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // urlEmbedsCredential reports whether a git URL carries a secret in its userinfo.
@@ -625,6 +785,9 @@ func (h *Handler) ValidateWorkspaceTemplatesYAML(w http.ResponseWriter, r *http.
 	// Warnings ride the success toast: these are things that work but cost the
 	// admin something they would not otherwise be told about.
 	for _, warn := range gitCredentialWarnings(templates) {
+		msg += " — " + warn.Message
+	}
+	for _, warn := range providerKeyWarnings(templates) {
 		msg += " — " + warn.Message
 	}
 	writeToast(w, true, template.HTMLEscapeString(msg))

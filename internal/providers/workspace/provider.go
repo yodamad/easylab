@@ -1,7 +1,7 @@
 // Package workspace defines the backend abstraction for provisioning student
 // IDE workspaces on a Kubernetes cluster. Each student gets a self-managed set
-// of Kubernetes resources (Deployment + Service + Ingress + PVC) running a
-// code-server image.
+// of Kubernetes resources (Deployment + Service + Ingress + PVC) running one of
+// the IDE bases named by the IDE* constants below.
 //
 // Backends are registered by name (see registry.go) and instantiated per-lab
 // from the lab's kubeconfig, so handlers never hardcode backend selection.
@@ -9,8 +9,17 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+// ErrActivityUnsupported is what IdleManager.WorkspaceLastActivity returns for a
+// workspace whose IDE publishes no last-activity signal (see IDEOpenChamber).
+// It is deliberately distinct from a probe that failed: the idle pass must count
+// it as "this IDE does not report activity" and leave the workspace alone,
+// rather than treat it as the unknown-activity-means-in-use fallback, which
+// would read like a broken probe every pass.
+var ErrActivityUnsupported = errors.New("workspace IDE does not report activity")
 
 // Readiness phases. These mirror the strings the student UI already renders in
 // buildWorkspaceStatusHTML (internal/server/handler.go), so the polling contract
@@ -45,12 +54,21 @@ type Workspace struct {
 	// URL is the base workspace URL (shown to the student; no auth token).
 	URL string `json:"url"`
 	// OpenURL is the redirect target that lands the student in the IDE. It is the
-	// base URL: the student authenticates with Token on the code-server login page.
+	// base URL: the student is signed in before they get there, by a token posted
+	// to the IDE's login page on code-server or a session cookie planted for them
+	// on OpenChamber (see OpenWorkspace in internal/server/handler.go).
 	OpenURL string `json:"open_url"`
-	// Token is the IDE access secret (the code-server password). It is a
-	// per-student secret and is never serialized to admin APIs.
+	// Token is the IDE access secret (the code-server password, OpenChamber's UI
+	// password). It is a per-student secret and is never serialized to admin APIs.
 	Token string `json:"-"`
-	// IDE is the IDE base this workspace runs. Always "code-server".
+	// SessionSecret is the key the IDE signs its own browser sessions with, for an
+	// IDE that works that way: OpenChamber's OPENCODE_JWT_SECRET, which EasyLab
+	// sets itself. Holding it lets the server mint a session and hand the student a
+	// signed-in browser instead of the IDE's password prompt. Empty for an IDE with
+	// no such key, and for a workspace created before it was recorded — the caller
+	// falls back to handing the password over. Never serialized, like Token.
+	SessionSecret string `json:"-"`
+	// IDE is the IDE base this workspace runs: one of the IDE* constants below.
 	IDE string `json:"ide"`
 	// Template is the workspace template this environment was created from. It is
 	// empty for workspaces created before template attribution was added.
@@ -61,6 +79,13 @@ type Workspace struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	// Ready reports whether the workspace is fully up and serving.
 	Ready bool `json:"ready"`
+	// Ephemeral reports that the workspace keeps its files in an EmptyDir rather
+	// than on a volume of its own (see Spec.Ephemeral), so stopping its pod would
+	// lose the student's work. StopWorkspace refuses such a workspace, and the
+	// idle pass does not offer it one. False is the safe default: a backend that
+	// does not report this gets the same attempt-and-refuse it always did.
+	// Not serialized — it describes storage, not state the UI polls for.
+	Ephemeral bool `json:"-"`
 	// Phase is one of the Phase* constants above.
 	Phase string `json:"phase"`
 	// Created reports whether this call to EnsureWorkspace actually created the
@@ -76,8 +101,16 @@ const (
 	// IDEOpenVSCode is a legacy value kept for backward compatibility only.
 	// OpenVSCode Server support was removed; labs and saved YAML carrying this
 	// value are normalized to IDECodeServer rather than rejected.
-	IDEOpenVSCode  = "openvscode"
-	IDECodeServer  = "code-server"
+	IDEOpenVSCode = "openvscode"
+	IDECodeServer = "code-server"
+	// IDEOpenChamber runs OpenChamber, a web UI around the OpenCode AI coding
+	// agent, for labs about working with agents. It is not a VS Code derivative:
+	// extensions, user settings and devcontainer builds do not apply to it, and
+	// it publishes no activity signal, so such workspaces are never auto-paused
+	// (see ErrActivityUnsupported). A template choosing it must set its own image
+	// — OpenChamber publishes no official one — and, when that image is not built
+	// from upstream's Dockerfile, its own Spec.HomeDir to match it.
+	IDEOpenChamber = "openchamber"
 	DefaultIDEKind = IDECodeServer
 )
 
@@ -163,8 +196,16 @@ type Spec struct {
 	OwnerEmail string // student's login email, stored as an annotation for display only
 	Template   string // template name — part of the workspace identity (one workspace per template)
 
-	IDE         string            // IDE base; only "code-server" is supported (empty = default)
-	Image       string            // container image override (empty = IDE default)
+	IDE   string // IDE base; one of the IDE* constants (empty = DefaultIDEKind)
+	Image string // container image override (empty = the IDE's default, where it has one)
+	// HomeDir names the home directory inside Image, for an IDE that has no
+	// official image and whose home therefore depends on whichever one the lab
+	// brings (see IDEOpenChamber). It decides where the persistent volume is
+	// mounted and where GitRepo is cloned, so a value that does not match the
+	// image leaves the IDE's own state on an ephemeral filesystem. Empty means
+	// the IDE's default home, which is the only accepted value for an IDE whose
+	// image EasyLab controls.
+	HomeDir     string
 	GitRepo     string            // optional git repo cloned into the workspace on first start
 	GitBranch   string            // optional branch to clone (default branch when empty)
 	GitFolder   string            // optional subfolder the IDE opens (repo root when empty)
@@ -250,7 +291,9 @@ type IdleManager interface {
 	// WorkspaceLastActivity reports when the workspace's IDE was last in use. A
 	// zero time with a nil error means it has not been used since it (re)started.
 	// An error means activity is unknown: callers must treat that as "in use" and
-	// never pause a workspace on it.
+	// never pause a workspace on it. ErrActivityUnsupported is that same
+	// never-pause answer for an IDE that has no activity signal at all, reported
+	// separately so the caller can say so instead of logging a probe failure.
 	WorkspaceLastActivity(ctx context.Context, name string) (time.Time, error)
 	// StopWorkspace pauses the workspace: its pod is removed while its volume,
 	// Service and Ingress are kept. It refuses a workspace without a persistent

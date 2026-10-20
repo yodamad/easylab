@@ -586,6 +586,8 @@ recreating the lab — this replaces the old **Edit Lifecycle** modal:
   [Pause Idle Workspaces](admin-lab-creation.md#pause-idle-workspaces) for how idleness
   is decided and what protects a student who is working. Disabling it does not resume
   workspaces that are already paused — their owners do, from the student pages.
+  It has no effect on [OpenChamber](templates.md#ai-labs-with-openchamber) templates,
+  which are never auto-paused; pause those from the workspace list below when you need to.
 * Set, change, or clear the lab's scheduled deletion date and time. A cleared date
   disables scheduled lab deletion; a date must be in the future.
 

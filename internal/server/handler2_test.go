@@ -684,6 +684,148 @@ func TestHandler_OpenWorkspace_AutoLoginForm(t *testing.T) {
 	assert.NotContains(t, body, "login?")
 }
 
+// openChamberOpen drives OpenWorkspace for an OpenChamber workspace, with the
+// request Host overridden when host is non-empty.
+func openChamberOpen(t *testing.T, ws workspace.Workspace, host string) *httptest.ResponseRecorder {
+	t.Helper()
+	ws.Name, ws.Owner, ws.IDE = "ws-student", "student", workspace.IDEOpenChamber
+	h, id := openWorkspaceHandler(t, ws)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/student/workspace/open?lab_id="+id+"&workspace_name=ws-student", nil)
+	if host != "" {
+		req.Host = host
+	}
+	req = req.WithContext(context.WithValue(req.Context(), studentEmailContextKey, "student@example.com"))
+	w := httptest.NewRecorder()
+	h.OpenWorkspace(w, req)
+	return w
+}
+
+// A recorded session secret lets EasyLab sign the student in: it plants the
+// OpenChamber session cookie and redirects, and the password is never shown.
+func TestHandler_OpenWorkspace_OpenChamberSeamlessSignIn(t *testing.T) {
+	w := openChamberOpen(t, workspace.Workspace{
+		OpenURL: "https://ws.example.com/", Token: "secret-token-123", SessionSecret: "deadbeef",
+	}, "")
+
+	require.Equal(t, http.StatusSeeOther, w.Code)
+	assert.Equal(t, "https://ws.example.com/", w.Header().Get("Location"))
+
+	var session *http.Cookie
+	for _, c := range w.Result().Cookies() {
+		if c.Name == openChamberSessionCookie {
+			session = c
+		}
+	}
+	require.NotNil(t, session, "the oc_ui_session cookie must be planted")
+	assert.Equal(t, "oc_ui_session", session.Name)
+	assert.Equal(t, "example.com", session.Domain)
+	assert.Equal(t, "/", session.Path)
+	assert.True(t, session.HttpOnly)
+	assert.True(t, session.Secure)
+	assert.Equal(t, http.SameSiteLaxMode, session.SameSite)
+	assert.Equal(t, int(openChamberSessionTTL.Seconds()), session.MaxAge)
+	assert.Len(t, strings.Split(session.Value, "."), 3, "the cookie carries a JWT")
+
+	// The password is neither in the body nor the cookie.
+	assert.NotContains(t, w.Body.String(), "secret-token-123")
+	assert.NotEqual(t, "secret-token-123", session.Value)
+	assert.NotContains(t, session.Value, "secret-token-123")
+	assert.NotContains(t, w.Header().Get("Location"), "secret-token-123")
+}
+
+// The cookie only travels over the scheme the workspace is served on: a Secure
+// cookie would never be sent to the nip.io plain-HTTP fallback.
+func TestHandler_OpenWorkspace_OpenChamberSeamlessSignIn_HTTPNotSecure(t *testing.T) {
+	w := openChamberOpen(t, workspace.Workspace{
+		OpenURL: "http://ws.example.com/", Token: "secret-token-123", SessionSecret: "deadbeef",
+	}, "")
+
+	require.Equal(t, http.StatusSeeOther, w.Code)
+	cookies := w.Result().Cookies()
+	require.Len(t, cookies, 1)
+	assert.Equal(t, openChamberSessionCookie, cookies[0].Name)
+	assert.False(t, cookies[0].Secure)
+	assert.True(t, cookies[0].HttpOnly)
+}
+
+// Where EasyLab cannot plant the cookie it falls back to handing over the
+// password: no recorded secret (older workspace), or a request host outside the
+// lab domain (admin UI on another domain).
+func TestHandler_OpenWorkspace_OpenChamberHandoffFallback(t *testing.T) {
+	tests := []struct {
+		name string
+		ws   workspace.Workspace
+		host string
+	}{
+		{
+			name: "no session secret recorded",
+			ws:   workspace.Workspace{OpenURL: "https://ws.example.com/", Token: "secret-token-123"},
+		},
+		{
+			name: "request host outside the lab domain",
+			ws:   workspace.Workspace{OpenURL: "https://ws.example.com/", Token: "secret-token-123", SessionSecret: "deadbeef"},
+			host: "easylab.internal",
+		},
+		{
+			name: "whitespace-only session secret",
+			ws:   workspace.Workspace{OpenURL: "https://ws.example.com/", Token: "secret-token-123", SessionSecret: "  "},
+		},
+		{
+			name: "single-label lab domain",
+			ws:   workspace.Workspace{OpenURL: "https://ws.intranet/", Token: "secret-token-123", SessionSecret: "deadbeef"},
+			host: "lab.intranet",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := openChamberOpen(t, tt.ws, tt.host)
+
+			require.Equal(t, http.StatusOK, w.Code)
+			assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
+			assert.Empty(t, w.Result().Cookies(), "no session cookie on the fallback path")
+			body := w.Body.String()
+			assert.Contains(t, body, "OpenChamber")
+			assert.Contains(t, body, `href="`+tt.ws.OpenURL+`"`)
+			// The password is there for the student to copy, in the body of a page
+			// only its owner is served...
+			assert.Contains(t, body, "secret-token-123")
+			// ...and never posted to code-server's route, which OpenChamber does not have.
+			assert.NotContains(t, body, "/login")
+			assert.NotContains(t, body, `method="POST"`)
+			// Never in a URL, for either IDE.
+			assert.NotContains(t, body, "?password=")
+			assert.NotContains(t, body, "token=secret-token-123")
+		})
+	}
+}
+
+// TestBuildWorkspaceStatusHTML_IDELabel pins that the open button names the IDE
+// the workspace actually runs, and that a workspace listed without one (an older
+// server, or a call made before the lookup) still reads as code-server.
+func TestBuildWorkspaceStatusHTML_IDELabel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		ide  string
+		want string
+	}{
+		{name: "default", ide: "", want: "Open in code-server"},
+		{name: "code-server", ide: workspace.IDECodeServer, want: "Open in code-server"},
+		{name: "openchamber", ide: workspace.IDEOpenChamber, want: "Open in OpenChamber"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := buildWorkspaceStatusHTML("lab-1", "ws-1", "running", "https://ws.example.com/", tt.ide)
+
+			assert.Contains(t, got, tt.want)
+		})
+	}
+}
+
 // A student may only open their own workspace; a foreign owner yields no page and
 // never leaks the token.
 func TestHandler_OpenWorkspace_WrongOwner(t *testing.T) {

@@ -24,6 +24,22 @@ func cleanupInterval() time.Duration {
 	return 5 * time.Minute
 }
 
+// idleCheckInterval returns how often idle workspaces are looked at, configurable
+// via IDLE_CHECK_INTERVAL_MINUTES. Deliberately much shorter than
+// cleanupInterval: pausing needs two consecutive idle readings (see
+// stopIdleWorkspaces), so this interval is what an admin actually waits beyond
+// the timeout they configured — on the 5-minute cleanup tick a 10-minute timeout
+// did not pause until 20 minutes had passed. Deleting an expired workspace needs
+// no such second reading, which is why that one stays on the slower tick.
+func idleCheckInterval() time.Duration {
+	if v := os.Getenv("IDLE_CHECK_INTERVAL_MINUTES"); v != "" {
+		if mins, err := strconv.Atoi(v); err == nil && mins > 0 {
+			return time.Duration(mins) * time.Minute
+		}
+	}
+	return time.Minute
+}
+
 // deletionRetryMaxRetries returns the maximum number of deletion retry attempts,
 // configurable via CLEANUP_DELETE_MAX_RETRIES env var. Defaults to 3.
 func deletionRetryMaxRetries() int {
@@ -74,21 +90,29 @@ func cleanupDeleteConcurrency() int {
 // StartWorkspaceCleanup starts a background goroutine that periodically deletes
 // workspaces that have exceeded their configured lifetime and destroys labs past
 // their scheduled deletion date.
+// The idle pass runs on its own, much shorter ticker (see idleCheckInterval) but
+// from this same goroutine, so it is still serialized with the rest of cleanup
+// and needs no extra locking around the jobs it walks.
 func (h *Handler) StartWorkspaceCleanup(ctx context.Context) {
 	interval := cleanupInterval()
+	idleInterval := idleCheckInterval()
 	log.Printf("[cleanup] cleanup batch interval: %v (set CLEANUP_INTERVAL_MINUTES to override)", interval)
+	log.Printf("[idle] idle check interval: %v (set IDLE_CHECK_INTERVAL_MINUTES to override)", idleInterval)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	idleTicker := time.NewTicker(idleInterval)
+	defer idleTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			h.cleanupExpiredWorkspaces()
-			h.stopIdleWorkspaces()
 			h.cleanupExpiredLabs()
 			h.reconcilePrepulls()
 			h.reconcilePortals()
+		case <-idleTicker.C:
+			h.stopIdleWorkspaces()
 		}
 	}
 }
