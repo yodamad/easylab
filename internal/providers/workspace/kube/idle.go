@@ -20,7 +20,9 @@ var _ workspace.IdleManager = (*Backend)(nil)
 const (
 	// servicePort is the port every workspace Service listens on (see createService).
 	servicePort = "80"
-	// healthzPath is code-server's unauthenticated health endpoint.
+	// healthzPath is code-server's unauthenticated health endpoint. It is what
+	// codeServerProfile.activityPath names; an IDE without such an endpoint
+	// leaves that field empty.
 	healthzPath = "healthz"
 	// healthzAlive is the status code-server reports while its heartbeat is fresh.
 	healthzAlive = "alive"
@@ -38,11 +40,25 @@ type healthzResponse struct {
 	LastHeartbeat int64  `json:"lastHeartbeat"` // epoch milliseconds; 0 = never
 }
 
-// WorkspaceLastActivity asks the workspace's code-server when it was last in
-// use. It goes through the API server's Service proxy rather than the workspace's
-// public URL: that works with nothing but the lab's kubeconfig, whether or not
-// this process can reach the lab's ingress.
+// WorkspaceLastActivity asks the workspace's IDE when it was last in use. It
+// goes through the API server's Service proxy rather than the workspace's public
+// URL: that works with nothing but the lab's kubeconfig, whether or not this
+// process can reach the lab's ingress.
+//
+// An IDE that publishes no activity endpoint reports
+// workspace.ErrActivityUnsupported instead of being probed at a path it does not
+// serve. OpenChamber is one: it has no health route, and browser activity would
+// be the wrong signal for it anyway — an agent run continues with no tab
+// attached, so a liveness-shaped probe would pause work in progress.
 func (b *Backend) WorkspaceLastActivity(ctx context.Context, name string) (time.Time, error) {
+	dep, err := b.getDeployment(ctx, name)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if profileFor(dep.Annotations[annotationIDE]).activityPath == "" {
+		return time.Time{}, workspace.ErrActivityUnsupported
+	}
+
 	probe := b.healthz
 	if probe == nil {
 		probe = b.proxyHealthz

@@ -35,6 +35,14 @@ func runningWorkspace(id string, upFor time.Duration) workspace.Workspace {
 	}
 }
 
+// ephemeralWorkspace is a running workspace whose files are not on a volume of
+// its own, so pausing it would lose them.
+func ephemeralWorkspace(id string, upFor time.Duration) workspace.Workspace {
+	ws := runningWorkspace(id, upFor)
+	ws.Ephemeral = true
+	return ws
+}
+
 func usedAgo(fb *fakeBackend, id string, ago time.Duration) {
 	fb.activity = map[string]time.Time{id: time.Now().Add(-ago)}
 }
@@ -46,6 +54,7 @@ func TestStopIdleWorkspaces(t *testing.T) {
 	active := func(fb *fakeBackend) { usedAgo(fb, "ws-1", 5*time.Minute) }
 	neverUsed := func(fb *fakeBackend) { fb.activity = nil }
 	probeFails := func(fb *fakeBackend) { fb.activityErr = errors.New("proxy unavailable") }
+	noActivitySignal := func(fb *fakeBackend) { fb.activityErr = workspace.ErrActivityUnsupported }
 	unreachable := func(fb *fakeBackend) { fb.reachable = false }
 	reachable := func(fb *fakeBackend) { fb.reachable = true }
 	both := func(steps ...func(*fakeBackend)) func(*fakeBackend) {
@@ -148,6 +157,24 @@ func TestStopIdleWorkspaces(t *testing.T) {
 			workspace: runningWorkspace("ws-1", 2*time.Hour),
 			passes:    []func(*fakeBackend){idle, unreachable, both(idle, reachable)},
 		},
+		{
+			// Its files live in an EmptyDir, so a pause would lose them. Never
+			// offered a stop at all, rather than attempted and refused on
+			// every pass.
+			name:      "a workspace with no volume to keep is never paused",
+			timeout:   idleTestTimeoutMinutes,
+			workspace: ephemeralWorkspace("ws-1", 2*time.Hour),
+			passes:    []func(*fakeBackend){idle, idle, idle},
+		},
+		{
+			// An OpenChamber workspace: its IDE publishes no activity signal, so
+			// it can never be shown to be idle. No strike is ever recorded, so
+			// the two-reading gate cannot fire however many passes run.
+			name:      "an IDE that reports no activity at all is never paused",
+			timeout:   idleTestTimeoutMinutes,
+			workspace: runningWorkspace("ws-1", 2*time.Hour),
+			passes:    []func(*fakeBackend){noActivitySignal, noActivitySignal, noActivitySignal},
+		},
 	}
 
 	for _, tt := range tests {
@@ -168,6 +195,35 @@ func TestStopIdleWorkspaces(t *testing.T) {
 			assert.Equal(t, tt.wantStops, fb.StopCalls)
 		})
 	}
+}
+
+func TestStopIdleWorkspaces_FailedStopRetriesOnTheNextPass(t *testing.T) {
+	t.Parallel()
+
+	jm := NewJobManager("")
+	idleLab(jm, idleTestTimeoutMinutes)
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	fb := &fakeBackend{
+		reachable:  true,
+		workspaces: []workspace.Workspace{runningWorkspace("ws-1", 2*time.Hour)},
+		activity:   map[string]time.Time{"ws-1": time.Now().Add(-time.Hour)},
+		stopErr:    errors.New("the API server said no"),
+	}
+	useFakeBackend(h, fb)
+
+	// Two passes to earn the stop, then a third: a stop that failed must not
+	// send the workspace back to the start of the two-reading count.
+	h.stopIdleWorkspaces()
+	h.stopIdleWorkspaces()
+	h.stopIdleWorkspaces()
+
+	assert.Equal(t, []string{"ws-1", "ws-1"}, fb.StopCalls)
+
+	// And once the cluster accepts it, the workspace is paused and left alone.
+	fb.stopErr = nil
+	h.stopIdleWorkspaces()
+	h.stopIdleWorkspaces()
+	assert.Equal(t, []string{"ws-1", "ws-1", "ws-1"}, fb.StopCalls)
 }
 
 func TestStopIdleWorkspaces_OnlyTheIdleOnes(t *testing.T) {
@@ -347,7 +403,7 @@ func TestResumeWorkspace(t *testing.T) {
 func TestBuildWorkspaceStatusHTML_Stopped(t *testing.T) {
 	t.Parallel()
 
-	html := buildWorkspaceStatusHTML("lab 1", "ws&1", workspace.PhaseStopped, "")
+	html := buildWorkspaceStatusHTML("lab 1", "ws&1", workspace.PhaseStopped, "", "")
 
 	assert.Contains(t, html, "workspace-ready-status--paused")
 	assert.Contains(t, html, "btn-workspace-resume")

@@ -145,10 +145,18 @@ type WorkspaceTemplate struct {
 	// would otherwise be pinned to one node and lost on a reschedule anyway.
 	StorageClass string `json:"storage_class,omitempty"`
 
-	// IDE selects the workspace IDE base. Only "code-server" is supported, so this
-	// is optional and normally left empty; the retired "openvscode" value is still
-	// accepted from older labs and normalized away.
+	// IDE selects the workspace IDE base: "code-server" (the default, so this is
+	// normally left empty) or "openchamber" for an AI-agent lab, which requires
+	// Image and rejects the VS Code-specific keys below. The retired "openvscode"
+	// value is still accepted from older labs and normalized away.
 	IDE string `json:"ide,omitempty"`
+	// HomeDir names the home directory inside Image. It only applies to an IDE
+	// with no official image, where the home is a property of whichever image the
+	// lab brings rather than of EasyLab: "openchamber" defaults to upstream's
+	// /home/openchamber, and an image built on another base (the node image keeps
+	// /home/node) needs this set to match, or the IDE's own state lands outside
+	// the persistent volume. The workshop repo is cloned to <home_dir>/project.
+	HomeDir string `json:"home_dir,omitempty"`
 	// StartupScript runs (best-effort) in the workspace container before the IDE
 	// starts — install tools, configure the shell, run a bootstrap.
 	StartupScript string `json:"startup_script,omitempty"`

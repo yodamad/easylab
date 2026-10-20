@@ -27,7 +27,9 @@ type studentWorkspace struct {
 	WorkspaceURL  string `json:"workspace_url"`
 	Email         string `json:"email"`
 	Template      string `json:"template,omitempty"`
-	CreatedAt     string `json:"created_at"`
+	// IDE is the workspace's IDE base, so the card can name what it opens.
+	IDE       string `json:"ide,omitempty"`
+	CreatedAt string `json:"created_at"`
 	// DeletionAt is when the workspace is automatically deleted, "" when nothing
 	// is scheduled.
 	DeletionAt string `json:"deletion_at"`
@@ -144,6 +146,7 @@ func (h *Handler) ListStudentWorkspaces(w http.ResponseWriter, r *http.Request) 
 					WorkspaceURL:  ws.URL,
 					Email:         email,
 					Template:      ws.Template,
+					IDE:           ws.IDE,
 					CreatedAt:     ws.CreatedAt.Format(time.RFC3339),
 					Ready:         ws.Ready,
 					Paused:        ws.Phase == workspace.PhaseStopped,

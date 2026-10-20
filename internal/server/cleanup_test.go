@@ -284,6 +284,28 @@ func TestCleanupInterval_ZeroEnvVar(t *testing.T) {
 	assert.Equal(t, 5*time.Minute, cleanupInterval())
 }
 
+// --- idleCheckInterval tests ---
+
+func TestIdleCheckInterval(t *testing.T) {
+	tests := []struct {
+		name     string
+		env      string
+		expected time.Duration
+	}{
+		{name: "default", env: "", expected: time.Minute},
+		{name: "env var", env: "3", expected: 3 * time.Minute},
+		{name: "invalid env var falls back", env: "not-a-number", expected: time.Minute},
+		{name: "zero falls back", env: "0", expected: time.Minute},
+		{name: "negative falls back", env: "-2", expected: time.Minute},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("IDLE_CHECK_INTERVAL_MINUTES", tt.env)
+			assert.Equal(t, tt.expected, idleCheckInterval())
+		})
+	}
+}
+
 // --- deletionRetryMaxRetries tests ---
 
 func TestDeletionRetryMaxRetries_Default(t *testing.T) {

@@ -83,7 +83,7 @@ Then, you'll get all information needed to connect to your workspace!
 
 Just use the provided link and credentials to connect to your workspace. A **View my workspaces →** link takes you to the My Workspaces page, where the new workspace is already listed.
 
-The **connection token** is the password code-server asks for when you open the workspace URL directly. It is shown here, when you request the workspace; the My Workspaces page does not display it. You rarely need it: **Open Code Server** on the My Workspaces page signs you in for you.
+The **connection token** is the password your workspace asks for when you open its URL directly. It is shown here, when you request the workspace; the My Workspaces page does not display it. With code-server you rarely need it — **Open Code Server** on the My Workspaces page signs you in for you. **Open OpenChamber** does the same on an [OpenChamber](#openchamber-workspaces) workspace; you only need the token if you open the URL directly, or in the rare case the [password page](#openchamber-workspaces) is shown.
 
 !!! info "Waiting for DNS"
     Right after a workspace starts you may briefly see *"Workspace is up — waiting for DNS to propagate..."*. On a lab with a public domain, the workspace address is created in DNS when the environment is provisioned and can take up to a minute to become resolvable. EasyLab holds back the **Open** button until the address actually resolves, so you are not handed a link that fails with `DNS_PROBE_FINISHED_NXDOMAIN`. When the button turns green, the workspace is reachable.
@@ -121,15 +121,42 @@ Collapsed, each card shows:
 
 Expand the card to reveal the rest:
 
-* **Workspace URL** — direct link to your code-server workspace (with a copy button)
+* **Workspace URL** — direct link to your workspace (with a copy button)
 * **Email** — the email you are signed in with (with a copy button)
 * **Created at** — when the workspace was created
 
-An **Open Code Server** button is available on each card header — you don't need to expand the card to use it. Click it to open your code-server directly in a new tab — EasyLab resolves the workspace URL automatically so you don't need to copy it manually, and signs you in for you, so you land straight in the IDE without typing a password. The card does not show the workspace's connection token: if you open the workspace URL directly, code-server asks for the token you were given when you requested the workspace.
+An **Open Code Server** button is available on each card header — you don't need to expand the card to use it (on an [OpenChamber](#openchamber-workspaces) workspace it reads **Open OpenChamber**). Click it to open the workspace in a new tab — EasyLab resolves the workspace URL automatically so you don't need to copy it manually. It also signs you in, on code-server and on OpenChamber, so you land straight in the IDE without typing a password. The card does not show the workspace's connection token: if you open the workspace URL directly, you are asked for the token you were given when you requested the workspace.
+
+### OpenChamber workspaces
+
+On a lab about working with AI agents, your workspace runs
+[OpenChamber](https://github.com/openchamber/openchamber) instead of code-server: a
+web interface for running and reviewing an AI coding agent's work.
+
+Two things work differently:
+
+* **You are signed in for you.** Click **Open OpenChamber** and you land straight in
+  OpenChamber, already signed in — there is no password to copy or paste, exactly as
+  with code-server.
+* **Add your project on first login.** Your workshop repository is already cloned,
+  but OpenChamber does not open it by itself. Click **+** (or *Add project* in the
+  command palette) and pick `~/project`. You only do this once.
+
+Your agent chats, plans and files all live on the workspace's own volume, so they
+survive a restart.
+
+!!! info "When you are still shown the password"
+    In rare cases EasyLab cannot sign you in automatically: the workspace was created
+    before this was supported, or an admin opens it from a page that is not on the
+    lab's domain. **Open OpenChamber** then shows a page with the workspace password,
+    a **Copy password** button and a link through to your workspace. Paste the password
+    at OpenChamber's login prompt once; it works as it always did, and OpenChamber
+    remembers your browser afterwards. The same password is what you type if you open
+    the workspace URL directly instead of using the button.
 
 ### Paused workspaces
 
-The organiser can have workspaces that nobody is using paused automatically. A workspace counts as in use for as long as its code-server tab is open, so this only happens after you have closed the tab — or your laptop has been asleep or offline — for a while.
+The organiser can have workspaces that nobody is using paused automatically. A workspace counts as in use for as long as its code-server tab is open, so this only happens after you have closed the tab — or your laptop has been asleep or offline — for a while. OpenChamber workspaces are never paused automatically, so an agent you leave working keeps going.
 
 A paused workspace keeps **all its files**, its URL and its password; its card shows an amber *"⏸ Paused"* chip:
 

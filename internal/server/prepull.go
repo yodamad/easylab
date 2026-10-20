@@ -29,7 +29,13 @@ func prepullRequestFor(templates []WorkspaceTemplate, baked map[string]BakedImag
 			}
 			req.Images = append(req.Images, kube.DefaultImage)
 		} else if image == "" {
-			image = kube.DefaultImage
+			// Only the IDE's own default, which is empty for an IDE that has none
+			// (validation requires those templates to name an image, so this is
+			// reached only by a lab saved before that rule). The pre-pull set drops
+			// blanks, so an empty default simply contributes nothing — rather than
+			// sending every node off to pull code-server for a template that will
+			// never run it.
+			image = kube.DefaultImageForIDE(t.IDE)
 		}
 		req.Images = append(req.Images, image)
 

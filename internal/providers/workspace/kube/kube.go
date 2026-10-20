@@ -1,11 +1,13 @@
 // Package kube implements the workspace.Backend interface by provisioning one
-// code-server workspace per student directly on a Kubernetes cluster using
-// client-go. Each workspace is a Deployment + Service + Ingress (+ optional PVC),
-// labeled so it can be listed and cleaned up per lab.
+// IDE workspace per student directly on a Kubernetes cluster using client-go.
+// Each workspace is a Deployment + Service + Ingress (+ optional PVC), labeled
+// so it can be listed and cleaned up per lab. Which IDE a workspace runs, and
+// which template features that IDE honours, is an ideProfile.
 package kube
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/hex"
@@ -60,6 +62,12 @@ const (
 	// workspaceContainerName is the reserved name of the IDE container (sidecars
 	// may not reuse it).
 	workspaceContainerName = "workspace"
+
+	// openChamberSessionSecretEnv names the key OpenChamber signs its browser
+	// session tokens with. EasyLab sets it (see openChamberEnv) and reads it back
+	// (see sessionSecretFromDeployment) so the server can mint a session of its
+	// own and spare the student OpenChamber's password prompt.
+	openChamberSessionSecretEnv = "OPENCODE_JWT_SECRET"
 
 	labelManagedBy       = "app.kubernetes.io/managed-by"
 	labelLabID           = "easylab.io/lab-id"
@@ -176,16 +184,26 @@ const (
 
 var dns1123Invalid = regexp.MustCompile(`[^a-z0-9-]`)
 
-// ideProfile captures the image/port/paths/binaries the IDE is started from. It
-// stays a struct rather than a set of constants because devcontainerProfile
-// returns a copy with serverBin retargeted at the injected /ide bundle.
+// ideProfile captures the image/port/paths/binaries the IDE is started from, and
+// which of a template's features that IDE can honour. It stays a struct rather
+// than a set of constants because devcontainerProfile returns a copy with
+// serverBin retargeted at the injected /ide bundle.
 type ideProfile struct {
 	kind         string
-	defaultImage string
+	defaultImage string // "" means the template must set its own image
 	port         int32
 	workspaceDir string // folder the IDE opens / git repo clones into
 	homeDir      string // the IDE user's home; workspaceDir lives under it
 	serverBin    string // path to the IDE binary (for exec + extension install)
+
+	// authEnv is the environment variable the IDE reads its access secret
+	// (Spec.Token) from.
+	authEnv string
+
+	// activityPath is the IDE's last-activity endpoint, fetched through the API
+	// server's Service proxy by WorkspaceLastActivity. Empty means the IDE
+	// publishes no activity signal, so its workspaces are never auto-paused.
+	activityPath string
 
 	// bundleRoot is the self-contained IDE install inside defaultImage, written as
 	// a shell expression evaluated in that image; bundleBin is the launcher's path
@@ -195,9 +213,36 @@ type ideProfile struct {
 	// the tree is copied whole and these two stay consistent.
 	bundleRoot string
 	bundleBin  string
+
+	// Feature support. Templates are validated against these before they are
+	// saved (see validateIDEFeatures in internal/server/workspace_yaml.go), so a
+	// false here is a backstop rather than the error message an admin sees.
+	supportsDevcontainer bool // the IDE ships a relocatable bundle ideInjectInit can copy
+	supportsExtensions   bool // serverBin --install-extension means something
+	supportsUserSettings bool // the IDE reads a VS Code-style settings.json
+
+	// homeOverridable marks an IDE whose image EasyLab does not control, so homeDir
+	// above is only the most likely value and a template may name the one its own
+	// image actually uses (see Spec.HomeDir and profileForSpec).
+	homeOverridable bool
+
+	// homeCarriesRuntime marks an IDE whose own installation lives inside homeDir,
+	// i.e. under the persistent volume. Such a home must be re-seeded when the
+	// template's image changes, or the student keeps running the old install
+	// forever (see homeSeedInit).
+	homeCarriesRuntime bool
+
+	// startArgs returns the arguments that start the IDE server. A profile
+	// without one starts under the image's entrypoint with no arguments, and is
+	// exec'd as bare serverBin when setup steps wrap the start (see
+	// buildBootstrap).
+	startArgs func(spec workspace.Spec, p ideProfile) []string
+	// profileEnv returns environment the IDE needs beyond authEnv. It is applied
+	// before Spec.Env, so a template can still override it.
+	profileEnv func(spec workspace.Spec, p ideProfile) ([]corev1.EnvVar, error)
 }
 
-// codeServerProfile is the only supported IDE base.
+// codeServerProfile is the default IDE base.
 var codeServerProfile = ideProfile{
 	kind:         workspace.IDECodeServer,
 	defaultImage: DefaultImage,
@@ -205,17 +250,97 @@ var codeServerProfile = ideProfile{
 	workspaceDir: "/home/coder/project",
 	homeDir:      "/home/coder",
 	serverBin:    "code-server",
+	authEnv:      "PASSWORD",
+	activityPath: healthzPath,
 	// The .deb installs the self-contained bundle here; /usr/bin/code-server is
 	// a small wrapper around bin/code-server inside it, which is what serverBin
 	// reaches through PATH in plain mode.
-	bundleRoot: "/usr/lib/code-server",
-	bundleBin:  "bin/code-server",
+	bundleRoot:           "/usr/lib/code-server",
+	bundleBin:            "bin/code-server",
+	supportsDevcontainer: true,
+	supportsExtensions:   true,
+	supportsUserSettings: true,
+	startArgs:            codeServerStartArgs,
 }
 
-// profileFor returns the IDE profile for a kind. Only code-server is supported;
-// the legacy "openvscode" value (and anything else) resolves to it as well.
-func profileFor(string) ideProfile {
-	return codeServerProfile
+// openChamberProfile runs OpenChamber, a web UI around the OpenCode AI coding
+// agent, for labs about driving agents rather than editing by hand.
+//
+// It differs from code-server in four ways that matter here: it has no official
+// image (so defaultImage is empty and a template must name one), it reads its
+// password and bind address from the environment rather than flags, it publishes
+// no activity endpoint, and its own install — including the opencode CLI under
+// NPM_CONFIG_PREFIX — lives inside the home directory the volume mounts over.
+// The workshop repo is cloned to a direct child of the home rather than into
+// OpenChamber's own workspaces/ directory: gitCloneInit creates the clone
+// directory as root and chowns only that directory, so a nested path would leave
+// the parent root-owned and the student unable to create a sibling worktree in
+// it — which is exactly what OpenChamber's multi-run does.
+//
+// homeDir is upstream's (its Dockerfile creates uid 1000 "openchamber" with that
+// home), but it is only a default: having no official image means the home comes
+// with whichever image the lab brings, so homeOverridable lets a template say
+// otherwise — an image built on the node base, for one, keeps its home at
+// /home/node.
+//
+// serverBin is likewise the image's to provide, and is only reached in wrapped
+// mode (a startup script or dotfiles repo), where the setup shell execs it in
+// place of the image's own entrypoint. Upstream's image starts OpenChamber from
+// its entrypoint script and installs no "openchamber" command, so a lab using
+// those keys has to add one — documented in docs/templates.md rather than
+// guessed at here, since only the image's author knows how it starts.
+var openChamberProfile = ideProfile{
+	kind:               workspace.IDEOpenChamber,
+	defaultImage:       "",
+	port:               3000,
+	workspaceDir:       "/home/openchamber/project",
+	homeDir:            "/home/openchamber",
+	serverBin:          "openchamber",
+	authEnv:            "OPENCHAMBER_UI_PASSWORD",
+	activityPath:       "",
+	homeOverridable:    true,
+	homeCarriesRuntime: true,
+	startArgs:          func(workspace.Spec, ideProfile) []string { return nil },
+	profileEnv:         openChamberEnv,
+}
+
+// profileFor returns the IDE profile for a kind. Anything unrecognized — the
+// retired "openvscode" value, an empty string, a kind written by a newer build —
+// resolves to code-server, which is what those workspaces are actually running.
+func profileFor(kind string) ideProfile {
+	switch kind {
+	case workspace.IDEOpenChamber:
+		return openChamberProfile
+	default:
+		return codeServerProfile
+	}
+}
+
+// profileForSpec resolves the IDE profile a workspace is built from: the kind's
+// profile, with the template's own home directory applied where that IDE allows
+// one. It is what createResources uses; profileFor stays the lookup for the
+// paths that only need the kind (toWorkspace, the idle probe), which read the
+// IDE back from an annotation and have no Spec to hand.
+//
+// The project directory follows the home rather than staying put, so the clone
+// lands inside the volume and under the student's own uid wherever the home is.
+func profileForSpec(spec workspace.Spec) ideProfile {
+	p := profileFor(spec.IDE)
+	home := strings.TrimRight(strings.TrimSpace(spec.HomeDir), "/")
+	if home == "" || !p.homeOverridable {
+		return p
+	}
+	p.workspaceDir = path.Join(home, path.Base(p.workspaceDir))
+	p.homeDir = home
+	return p
+}
+
+// DefaultImageForIDE returns the image an IDE's workspaces run when a template
+// names none, or "" when that IDE has no default and the template must. It lets
+// the server enumerate a lab's images (see internal/server/prepull.go) without
+// reaching for code-server's default on a template that never runs it.
+func DefaultImageForIDE(ide string) string {
+	return profileFor(ide).defaultImage
 }
 
 // Backend is a client-go backed workspace.Backend scoped to one cluster + namespace.
@@ -425,8 +550,17 @@ func (b *Backend) Reachable(ctx context.Context) bool {
 // createResources creates the PVC (optional), Deployment, Service and Ingress.
 func (b *Backend) createResources(ctx context.Context, name string, spec workspace.Spec, scheme string) error {
 	labels := b.labels(spec.LabID, spec.Owner, name)
-	p := profileFor(spec.IDE)
+	p := profileForSpec(spec)
 	size, hasPVC := workspaceDisk(spec)
+
+	// Devcontainer mode injects the IDE from a relocatable bundle in its own
+	// image (see ideInjectInit); an IDE that ships no such bundle cannot be built
+	// this way. Validation rejects the combination when the template is saved —
+	// refuse here too rather than building a pod that CrashLoops for every
+	// student on the template at once.
+	if spec.Devcontainer != nil && !p.supportsDevcontainer {
+		return fmt.Errorf("the %s IDE does not support devcontainer workspaces", p.kind)
+	}
 
 	if hasPVC {
 		if err := b.createPVC(ctx, name, labels, size, spec.StorageClass); err != nil {
@@ -490,6 +624,13 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 	if image == "" {
 		image = p.defaultImage
 	}
+	// An IDE with no default image (OpenChamber publishes none) is unusable
+	// without one. Templates are validated for this before they are saved, so
+	// reaching here means a lab persisted by an older build: fail with something
+	// an admin can act on rather than creating a Deployment with no image.
+	if strings.TrimSpace(image) == "" {
+		return fmt.Errorf("workspace template has no image and the %s IDE has no default: set an image on the template", p.kind)
+	}
 
 	// Both clone modes below reference the secret rather than reading it, so a bad
 	// reference would otherwise surface only as a stuck pod.
@@ -499,12 +640,21 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 		}
 	}
 
+	// The IDE's own environment comes first, so a template's Env can override it;
+	// the access secret comes last, so a template cannot shadow the password the
+	// student was handed.
 	env := []corev1.EnvVar{}
+	if p.profileEnv != nil {
+		profileEnv, err := p.profileEnv(spec, p)
+		if err != nil {
+			return err
+		}
+		env = append(env, profileEnv...)
+	}
 	for k, v := range spec.Env {
 		env = append(env, corev1.EnvVar{Name: k, Value: v})
 	}
-	// code-server authenticates via the PASSWORD env var.
-	env = append(env, corev1.EnvVar{Name: "PASSWORD", Value: spec.Token})
+	env = append(env, corev1.EnvVar{Name: p.authEnv, Value: spec.Token})
 
 	container := corev1.Container{
 		Name:  workspaceContainerName,
@@ -619,7 +769,7 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 		// Ordered before the clone, which creates the project directory inside the
 		// home the seeding is there to populate.
 		if seedHome {
-			initContainers = append(initContainers, homeSeedInit(image, p.homeDir))
+			initContainers = append(initContainers, homeSeedInit(image, p.homeDir, p.homeCarriesRuntime))
 		}
 		// Likewise ordered before the clone, which fills one of the directories
 		// this creates.
@@ -750,10 +900,53 @@ func openFolder(spec workspace.Spec, p ideProfile) string {
 	return p.workspaceDir
 }
 
-// ideStartArgs returns the args that start the IDE server. The folder to open is
-// code-server's positional argument.
+// ideStartArgs returns the args that start the IDE server, as the profile
+// defines them. A profile without startArgs starts under the image's own
+// entrypoint with no arguments.
 func ideStartArgs(spec workspace.Spec, p ideProfile) []string {
+	if p.startArgs == nil {
+		return nil
+	}
+	return p.startArgs(spec, p)
+}
+
+// codeServerStartArgs binds code-server to the pod's port and opens the
+// student's folder, which is code-server's positional argument.
+func codeServerStartArgs(spec workspace.Spec, p ideProfile) []string {
 	return []string{"--bind-addr", fmt.Sprintf("0.0.0.0:%d", p.port), "--auth", "password", openFolder(spec, p)}
+}
+
+// openChamberEnv is OpenChamber's environment beyond its password.
+//
+// OPENCHAMBER_HOST is load-bearing, not cosmetic: the CLI binds 127.0.0.1 by
+// default, and the readiness probe is a TCP dial from the kubelet, so a
+// loopback bind means the pod never goes Ready and the student waits forever.
+// Upstream's Docker entrypoint sets it, but the image is the admin's, so we set
+// it ourselves rather than depending on theirs.
+//
+// OPENCODE_JWT_SECRET signs the UI's own auth tokens. Left unset, OpenChamber
+// generates one per start, so every pod restart — including an idle pause and
+// resume — signs the student out. A per-workspace value keeps them signed in:
+// it is stable for the workspace's life, because EnsureWorkspace returns early
+// once the Deployment exists and scaling 0->1 reuses the pod template.
+func openChamberEnv(_ workspace.Spec, _ ideProfile) ([]corev1.EnvVar, error) {
+	secret, err := randomSecretHex()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate OpenChamber session secret: %w", err)
+	}
+	return []corev1.EnvVar{
+		{Name: "OPENCHAMBER_HOST", Value: "0.0.0.0"},
+		{Name: openChamberSessionSecretEnv, Value: secret},
+	}, nil
+}
+
+// randomSecretHex returns 256 bits of randomness, hex-encoded.
+func randomSecretHex() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("failed to read random bytes: %w", err)
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 // buildBootstrap returns the container command/args. When a startup script,
@@ -780,15 +973,23 @@ func setupSteps(spec workspace.Spec, p ideProfile) string {
 	if repo := strings.TrimSpace(spec.DotfilesRepo); repo != "" {
 		fmt.Fprintf(&b, "if git clone %s \"$HOME/.dotfiles\"; then for s in install.sh setup.sh bootstrap.sh; do [ -x \"$HOME/.dotfiles/$s\" ] && \"$HOME/.dotfiles/$s\" && break; done; fi\n", shellQuote(repo))
 	}
-	if line := userSettingsStep(spec.VSCodeSettings); line != "" {
-		b.WriteString(line)
-	}
-	for _, ext := range spec.Extensions {
-		ext = strings.TrimSpace(ext)
-		if ext == "" {
-			continue
+	// Settings and extensions are VS Code concepts. An IDE that has no notion of
+	// them skips both rather than running a flag its binary does not know:
+	// validation rejects the combination up front, so this is the backstop for a
+	// lab saved before that rule existed.
+	if p.supportsUserSettings {
+		if line := userSettingsStep(spec.VSCodeSettings); line != "" {
+			b.WriteString(line)
 		}
-		fmt.Fprintf(&b, "%s --install-extension %s || true\n", p.serverBin, shellQuote(ext))
+	}
+	if p.supportsExtensions {
+		for _, ext := range spec.Extensions {
+			ext = strings.TrimSpace(ext)
+			if ext == "" {
+				continue
+			}
+			fmt.Fprintf(&b, "%s --install-extension %s || true\n", p.serverBin, shellQuote(ext))
+		}
 	}
 	return b.String()
 }
@@ -813,7 +1014,9 @@ func userSettingsStep(settings map[string]any) string {
 		shellQuote(string(content)))
 }
 
-// ideExecLine returns the line that execs the IDE with its start args, shell-quoted.
+// ideExecLine returns the line that execs the IDE with its start args,
+// shell-quoted. An IDE started purely from its environment contributes no args,
+// so this is just "exec <serverBin>" for it.
 func ideExecLine(spec workspace.Spec, p ideProfile) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "exec %s", p.serverBin)
@@ -1251,8 +1454,21 @@ func imagePullSecrets(names []string) []corev1.LocalObjectReference {
 // home behind forever, while a returning student's populated volume is never
 // touched. An image with no homeDir of its own just gets the marker, which
 // leaves the volume as the empty home it would have had anyway.
-func homeSeedInit(image, homeDir string) corev1.Container {
+//
+// For an IDE whose own installation lives inside the home (homeCarriesRuntime —
+// OpenChamber keeps both itself and the opencode CLI there), the marker is tied
+// to the image instead. Otherwise pointing the template at a newer image would
+// be silently a no-op on every existing volume: the student would keep running
+// the install their home was first seeded with, which is the opposite of what
+// changing the image means. code-server keeps the plain marker, since its
+// bundle lives in /usr and a re-seed there would only overwrite a returning
+// student's shell configuration for nothing.
+func homeSeedInit(image, homeDir string, versioned bool) corev1.Container {
 	marker := homeSeedMountPath + "/.easylab-home-seeded"
+	if versioned {
+		sum := sha1.Sum([]byte(image))
+		marker += "-" + hex.EncodeToString(sum[:])[:12]
+	}
 	script := fmt.Sprintf(`if [ ! -e %s ]; then if [ -d %s ]; then cp -a %s/. %s/; fi; touch %s; fi`,
 		marker, homeDir, homeDir, homeSeedMountPath, marker)
 	return corev1.Container{
@@ -1559,32 +1775,37 @@ func (b *Backend) reconcileIngressTLS(ctx context.Context, name string, spec wor
 // toWorkspace maps a Deployment (plus routing context) to a workspace.Workspace.
 func (b *Backend) toWorkspace(dep *appsv1.Deployment, domain, token string) workspace.Workspace {
 	phase, ready := deploymentReadiness(dep)
-	// Deployments created before OpenVSCode support was removed still carry the
-	// legacy annotation; report them as what they are now driven by rather than
-	// leaking the retired value into the API.
-	ide := workspace.DefaultIDEKind
+	// Report the IDE the workspace is actually driven by, which is what the
+	// student UI branches on to open it. Going through profileFor normalizes on
+	// the way out: a Deployment created before OpenVSCode support was removed
+	// still carries the retired annotation, and resolves to code-server here
+	// rather than leaking that value into the API.
+	ide := profileFor(dep.Annotations[annotationIDE]).kind
 	host := workspaceHost(dep.Name, domain)
 	// URL is the base workspace URL (shown to the student). OpenURL is the redirect
-	// target — the same URL, since the student enters Token on code-server's login page.
+	// target — the same URL, since the student authenticates with Token on the
+	// IDE's own login page.
 	url, openURL := "", ""
 	if host != "" {
 		url = fmt.Sprintf("%s://%s/", schemeFromDeployment(dep), host)
 		openURL = url
 	}
 	return workspace.Workspace{
-		ID:         dep.Name,
-		Name:       dep.Name,
-		Owner:      dep.Labels[labelOwner],
-		OwnerEmail: dep.Annotations[annotationOwnerEmail],
-		URL:        url,
-		OpenURL:    openURL,
-		Token:      token,
-		IDE:        ide,
-		Template:   dep.Annotations[annotationTemplate],
-		CreatedAt:  dep.CreationTimestamp.Time,
-		UpdatedAt:  deploymentUpdatedAt(dep),
-		Ready:      ready,
-		Phase:      phase,
+		ID:            dep.Name,
+		Name:          dep.Name,
+		Owner:         dep.Labels[labelOwner],
+		OwnerEmail:    dep.Annotations[annotationOwnerEmail],
+		URL:           url,
+		OpenURL:       openURL,
+		Token:         token,
+		SessionSecret: sessionSecretFromDeployment(dep),
+		IDE:           ide,
+		Template:      dep.Annotations[annotationTemplate],
+		CreatedAt:     dep.CreationTimestamp.Time,
+		UpdatedAt:     deploymentUpdatedAt(dep),
+		Ready:         ready,
+		Ephemeral:     !hasPersistentVolume(dep),
+		Phase:         phase,
 	}
 }
 
@@ -1705,6 +1926,31 @@ func schemeFromDeployment(dep *appsv1.Deployment) string {
 // tokenFromDeployment returns the workspace access token stored at create time.
 func tokenFromDeployment(dep *appsv1.Deployment) string {
 	return dep.Annotations[annotationToken]
+}
+
+// sessionSecretFromDeployment returns the key the IDE signs its own browser
+// sessions with, read back off the container that runs it. It is deliberately
+// read from the pod template rather than mirrored into an annotation: the
+// container's environment is the value that is actually in force, and a
+// template that overrode it would otherwise leave the two disagreeing.
+//
+// Returns "" for an IDE that has no such key (code-server authenticates with
+// the password itself) and for a workspace created before the IDE set one.
+func sessionSecretFromDeployment(dep *appsv1.Deployment) string {
+	secret := ""
+	for _, c := range dep.Spec.Template.Spec.Containers {
+		if c.Name != workspaceContainerName {
+			continue
+		}
+		// Last write wins, as it does for the kubelet: a duplicated name in the
+		// pod template takes the value the container will actually see.
+		for _, e := range c.Env {
+			if e.Name == openChamberSessionSecretEnv {
+				secret = e.Value
+			}
+		}
+	}
+	return secret
 }
 
 // deploymentReadiness derives a readiness phase from a Deployment's status.
