@@ -95,9 +95,44 @@ func prepullResources() corev1.ResourceRequirements {
 	}
 }
 
+// prepullExcludeAffinity keeps the pre-pull off nodes carrying every label in
+// exclude. A DaemonSet's NodeSelector can only say where to run, so the opposite
+// takes node affinity: one term per label, each requiring that label to differ.
+// Terms are OR-ed, so a node is kept as soon as one label does not match — which
+// is exactly "not (l1 and l2 and ...)". A node missing the label entirely
+// satisfies NotIn, so only the excluded pool is left out.
+func prepullExcludeAffinity(exclude map[string]string) *corev1.Affinity {
+	if len(exclude) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(exclude))
+	for key := range exclude {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	terms := make([]corev1.NodeSelectorTerm, 0, len(exclude))
+	for _, key := range keys {
+		terms = append(terms, corev1.NodeSelectorTerm{
+			MatchExpressions: []corev1.NodeSelectorRequirement{{
+				Key:      key,
+				Operator: corev1.NodeSelectorOpNotIn,
+				Values:   []string{exclude[key]},
+			}},
+		})
+	}
+	return &corev1.Affinity{
+		NodeAffinity: &corev1.NodeAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+				NodeSelectorTerms: terms,
+			},
+		},
+	}
+}
+
 // prepullDaemonSet builds the desired DaemonSet for a lab's image set. images and
 // pullSecrets must already be normalized (see sortedUnique).
-func (b *Backend) prepullDaemonSet(labID string, images, pullSecrets []string, nodeSelector map[string]string) (*appsv1.DaemonSet, error) {
+func (b *Backend) prepullDaemonSet(labID string, images, pullSecrets []string, nodeSelector, excludeNodeSelector map[string]string) (*appsv1.DaemonSet, error) {
 	name := prepullName(labID)
 	labels := map[string]string{
 		labelManagedBy: managedByValue,
@@ -106,10 +141,11 @@ func (b *Backend) prepullDaemonSet(labID string, images, pullSecrets []string, n
 	}
 
 	hashInput, err := json.Marshal(struct {
-		Images       []string          `json:"images"`
-		PullSecrets  []string          `json:"pull_secrets"`
-		NodeSelector map[string]string `json:"node_selector"`
-	}{images, pullSecrets, nodeSelector})
+		Images              []string          `json:"images"`
+		PullSecrets         []string          `json:"pull_secrets"`
+		NodeSelector        map[string]string `json:"node_selector"`
+		ExcludeNodeSelector map[string]string `json:"exclude_node_selector"`
+	}{images, pullSecrets, nodeSelector, excludeNodeSelector})
 	if err != nil {
 		return nil, fmt.Errorf("failed to hash pre-pull spec: %w", err)
 	}
@@ -161,6 +197,7 @@ func (b *Backend) prepullDaemonSet(labID string, images, pullSecrets []string, n
 					AutomountServiceAccountToken: &automount,
 					ImagePullSecrets:             imagePullSecrets(pullSecrets),
 					NodeSelector:                 nodeSelector,
+					Affinity:                     prepullExcludeAffinity(excludeNodeSelector),
 					InitContainers:               initContainers,
 					Containers: []corev1.Container{{
 						Name:            "pause",
@@ -181,8 +218,8 @@ func (b *Backend) prepullDaemonSet(labID string, images, pullSecrets []string, n
 // EnsurePrepull creates or updates the lab's pre-pull DaemonSet so every matching
 // node already holds the images its workspaces start from — otherwise the first
 // student on each node (and every node the autoscaler adds) waits for the pull.
-// It is idempotent and only updates when the image set, pull secrets or node
-// selector actually changed. An empty image list removes the DaemonSet.
+// It is idempotent and only updates when the image set, pull secrets or either
+// node selector actually changed. An empty image list removes the DaemonSet.
 func (b *Backend) EnsurePrepull(ctx context.Context, labID string, req workspace.PrepullRequest) error {
 	images := sortedUnique(req.Images)
 	if len(images) == 0 {
@@ -192,7 +229,15 @@ func (b *Backend) EnsurePrepull(ctx context.Context, labID string, req workspace
 	if len(nodeSelector) == 0 {
 		nodeSelector = nil
 	}
-	desired, err := b.prepullDaemonSet(labID, images, prepullPullSecrets(images, req.PullSecrets), nodeSelector)
+	// Excluding a pool only matters while pulls would otherwise reach every node:
+	// a workspace node selector already says where they happen, and combining the
+	// two could leave the pre-pull nowhere to run (the pinned pool excluded by its
+	// own labels) instead of merely narrowing it.
+	excludeNodeSelector := req.ExcludeNodeSelector
+	if nodeSelector != nil || len(excludeNodeSelector) == 0 {
+		excludeNodeSelector = nil
+	}
+	desired, err := b.prepullDaemonSet(labID, images, prepullPullSecrets(images, req.PullSecrets), nodeSelector, excludeNodeSelector)
 	if err != nil {
 		return err
 	}

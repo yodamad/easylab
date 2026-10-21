@@ -117,7 +117,9 @@ server on one and student workspaces on another:
    pool=workspaces`).
 2. **Pin the EasyLab server** by setting `nodeSelector` (and `tolerations`, if the
    pool is tainted) in the Helm chart's values — see
-   [Helm Chart Deployment](helm.md#key-values).
+   [Helm Chart Deployment](helm.md#key-values). This also keeps the labs'
+   [image pre-pull](admin-lab-management.md#image-pre-pull) off that pool, so
+   workspace images are not cached on nodes that never run a workspace.
 3. **Pin student workspaces** by setting the **Node Selector** field on each
    workspace template (under **Advanced options**, see above) to match the
    workspace pool's label, e.g. key `pool`, value `workspaces`.

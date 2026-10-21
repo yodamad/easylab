@@ -8,6 +8,36 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestServerNodeSelector(t *testing.T) {
+	// t.Setenv forbids t.Parallel, here and in the subtests.
+	tests := []struct {
+		name     string
+		env      string
+		expected map[string]string
+	}{
+		{name: "unset", env: "", expected: nil},
+		{name: "single pair", env: "pool=control-plane", expected: map[string]string{"pool": "control-plane"}},
+		{
+			name:     "several pairs, trimmed",
+			env:      " pool = control-plane , role=admin ",
+			expected: map[string]string{"pool": "control-plane", "role": "admin"},
+		},
+		{name: "empty value is kept", env: "pool=", expected: map[string]string{"pool": ""}},
+		{name: "malformed entries are skipped", env: "pool,=admin, ,", expected: nil},
+		{
+			name:     "a malformed entry does not drop the valid ones",
+			env:      "pool,role=admin",
+			expected: map[string]string{"role": "admin"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(EnvServerNodeSelector, tt.env)
+			assert.Equal(t, tt.expected, serverNodeSelector())
+		})
+	}
+}
+
 func TestPrepullRequestFor(t *testing.T) {
 	t.Parallel()
 	pool := map[string]string{"pool": "workspaces"}
@@ -15,9 +45,11 @@ func TestPrepullRequestFor(t *testing.T) {
 		name             string
 		templates        []WorkspaceTemplate
 		baked            map[string]BakedImage
+		serverNodes      map[string]string
 		expectedImages   []string
 		expectedSecrets  []string
 		expectedSelector map[string]string
+		expectedExclude  map[string]string
 	}{
 		{
 			name:           "no templates",
@@ -82,11 +114,26 @@ func TestPrepullRequestFor(t *testing.T) {
 			expectedImages:   []string{kube.DefaultImage, kube.DefaultImage},
 			expectedSelector: nil,
 		},
+		{
+			name:            "the server's own nodes are excluded",
+			templates:       []WorkspaceTemplate{{Name: "t"}},
+			serverNodes:     map[string]string{"pool": "control-plane"},
+			expectedImages:  []string{kube.DefaultImage},
+			expectedExclude: map[string]string{"pool": "control-plane"},
+		},
+		{
+			name:             "a pinned template still reports the server's nodes",
+			templates:        []WorkspaceTemplate{{Name: "t", NodeSelector: pool}},
+			serverNodes:      map[string]string{"pool": "control-plane"},
+			expectedImages:   []string{kube.DefaultImage},
+			expectedSelector: pool,
+			expectedExclude:  map[string]string{"pool": "control-plane"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			req := prepullRequestFor(tt.templates, tt.baked)
+			req := prepullRequestFor(tt.templates, tt.baked, tt.serverNodes)
 			// Duplicates are left for the backend to collapse; order is what matters here.
 			assert.Equal(t, tt.expectedImages, req.Images)
 			assert.Equal(t, tt.expectedSecrets, req.PullSecrets)
@@ -94,6 +141,11 @@ func TestPrepullRequestFor(t *testing.T) {
 				assert.Empty(t, req.NodeSelector)
 			} else {
 				assert.Equal(t, tt.expectedSelector, req.NodeSelector)
+			}
+			if tt.expectedExclude == nil {
+				assert.Empty(t, req.ExcludeNodeSelector)
+			} else {
+				assert.Equal(t, tt.expectedExclude, req.ExcludeNodeSelector)
 			}
 		})
 	}

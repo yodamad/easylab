@@ -380,6 +380,13 @@ type PrepullRequest struct {
 	Images       []string          // every image a workspace pod of this lab can run
 	PullSecrets  []string          // dockerconfigjson Secrets needed to pull them
 	NodeSelector map[string]string // nodes workspaces can land on (empty = all)
+
+	// ExcludeNodeSelector names nodes that must not pull, even though workspaces
+	// are free to land anywhere else: the pool the EasyLab server itself is
+	// pinned to, which runs the admin UI and no workspaces, so a lab's images
+	// would only fill its disk. Ignored when NodeSelector is set, which already
+	// says where pulls happen.
+	ExcludeNodeSelector map[string]string
 }
 
 // ImagePrepuller is implemented by backends that can warm the nodes' image cache

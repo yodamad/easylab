@@ -129,7 +129,7 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 | `resources.requests.cpu` | CPU request | `500m` |
 | `resources.limits.memory` | Memory limit | `4096Mi` |
 | `resources.limits.cpu` | CPU limit | `3000m` |
-| `nodeSelector` | Pin the EasyLab server pod to nodes matching these labels (e.g. a dedicated node pool) | `{}` |
+| `nodeSelector` | Pin the EasyLab server pod to nodes matching these labels (e.g. a dedicated node pool). Labs' [image pre-pull](admin-lab-management.md#image-pre-pull) leaves those nodes alone | `{}` |
 | `tolerations` | Tolerations for the EasyLab server pod, needed if its target node pool is tainted | `[]` |
 
 !!! warning "Set an explicit data encryption key for persistent deployments"
@@ -569,6 +569,13 @@ If that pool is also tainted, add a matching toleration:
   --set tolerations[0].value="easylab" \
   --set tolerations[0].effect="NoSchedule"
 ```
+
+Setting `nodeSelector` also tells the server where *not* to cache workspace
+images: the chart passes those labels to it as `EASYLAB_SERVER_NODE_SELECTOR`, and
+every lab's [image pre-pull](admin-lab-management.md#image-pre-pull) then skips the
+pool the server runs on, which never runs a workspace. Nothing else to configure —
+and it only applies to labs on this same cluster, since the labels are matched
+against the lab cluster's nodes.
 
 ### Using a custom values file
 
