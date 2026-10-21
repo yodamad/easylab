@@ -55,7 +55,10 @@ k8s-deployment/secret.yaml
 site/
 
 # Claude
-.claude/
+.claude/*
+!.claude/agents/
+.claude/agents/*
+!.claude/agents/*.md
 
 # Test folder
 internal/server/job-*
