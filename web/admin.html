@@ -45,6 +45,21 @@
         <div class="container">
 
         <main>
+            <!-- Credential storage locked: saved provider credentials and DNS profiles cannot be reused in this lab -->
+            {{if eq .Storage.State "locked"}}
+            <div class="warning-message" id="credential-storage-notice">
+                <h3>&#128274; Credential storage is locked</h3>
+                <p>Saved cloud provider credentials and DNS profiles are unavailable until the passphrase is entered. You can still create this lab by typing the credentials it needs.</p>
+                <p><a href="/admin/dns">Unlock credential storage</a> to reuse the saved ones.</p>
+            </div>
+            {{else if eq .Storage.State "unreadable"}}
+            <div class="warning-message" id="credential-storage-notice">
+                <h3>&#128274; Saved credentials cannot be read</h3>
+                <p>Saved cloud provider credentials and DNS profiles are unavailable. You can still create this lab by typing the credentials it needs.</p>
+                <p>Restart EasyLab with the original <code>LAB_DATA_ENCRYPTION_KEY</code>, or <a href="/admin/dns">reset credential storage</a>.</p>
+            </div>
+            {{end}}
+
             <!-- Provider Credentials Notice -->
             <div id="provider-credentials-notice" class="info-box" style="display: none;">
                 <h3>🔐 Provider Credentials Required</h3>

@@ -74,7 +74,7 @@ The key EasyLab generates by itself in `<DATA_DIR>/.encryption_key` when `LAB_DA
 
 While credential storage is **locked**:
 
-* Saved cloud credentials and DNS profiles are unavailable; the lab wizard says so and links to the DNS page.
+* Saved cloud credentials and DNS profiles are unavailable; the lab wizard warns at the top of the page, and links to the DNS page.
 * Existing labs are unaffected. Each lab carries its own copy of the DNS credentials it was created with, so retry and destroy on a BYO-cluster lab keep working. Operations that need cloud credentials (destroy, recreate, automatic lab deletion on a provisioned cluster) wait until you unlock, exactly as they waited for credentials to be re-entered before.
 * Five wrong passphrases in a row pause unlocking for one minute.
 

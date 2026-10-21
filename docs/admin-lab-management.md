@@ -223,7 +223,12 @@ container. It requests almost no CPU or memory.
   minutes) also re-checks it, which covers templates edited any other way and
   nodes the autoscaler adds.
 * If every template sets the same **Node Selector**, pulls are limited to those
-  nodes. Otherwise every node pulls.
+  nodes. Otherwise every node pulls — except the pool the EasyLab server itself is
+  pinned to, if any: with the Helm chart's `nodeSelector` set (see
+  [Pinning to a dedicated node pool](helm.md#pinning-to-a-dedicated-node-pool)),
+  nodes carrying those labels are left out, since the server runs there and student
+  workspaces do not. A template **Node Selector** takes precedence: when pulls are
+  already pinned, nothing is excluded on top of it.
 * It uses the templates' `image_pull_secrets`, plus the in-cluster registry's
   credentials when a baked image lives there.
 * Destroying the lab removes it, including on a bring-your-own cluster.

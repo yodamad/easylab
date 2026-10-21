@@ -515,3 +515,49 @@ func TestCredentialStoragePartial_RendersEveryState(t *testing.T) {
 		})
 	}
 }
+
+// Starting a new lab warns up front when credential storage cannot hand over
+// what it holds, since the wizard then has nothing saved to offer.
+func TestServeAdminUI_WarnsWhenCredentialStorageLocked(t *testing.T) {
+	t.Chdir("../..") // getTemplate resolves web/ relative to the working directory
+
+	envDir := t.TempDir()
+	require.NoError(t, openTestVault(t, envDir, testEnvKey(1)).PutProviderCredentials("ovh", testOVHCredentials()))
+	lockedDir := t.TempDir()
+	require.NoError(t, openTestVault(t, lockedDir, nil).SetPassphrase(testVaultPassphrase))
+
+	const notice = `id="credential-storage-notice"`
+
+	tests := []struct {
+		name    string
+		dataDir string
+		envKey  []byte
+		unlock  bool
+		want    string
+	}{
+		{name: "disabled", dataDir: ""},
+		{name: "uninitialized", dataDir: t.TempDir()},
+		{name: "locked", dataDir: lockedDir, want: "Credential storage is locked"},
+		{name: "unlocked by passphrase", dataDir: lockedDir, unlock: true},
+		{name: "unlocked by env key", dataDir: envDir, envKey: testEnvKey(1)},
+		{name: "unreadable", dataDir: envDir, want: "Saved credentials cannot be read"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, v := vaultTestHandler(t, tt.dataDir, tt.envKey)
+			if tt.unlock {
+				require.NoError(t, v.Unlock(testVaultPassphrase))
+			}
+			rec := httptest.NewRecorder()
+			h.ServeAdminUI(rec, httptest.NewRequest(http.MethodGet, "/admin", nil))
+			require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+			body := rec.Body.String()
+			if tt.want == "" {
+				assert.NotContains(t, body, notice, "no warning for a usable credential storage")
+				return
+			}
+			assert.Contains(t, body, notice)
+			assert.Contains(t, body, tt.want)
+		})
+	}
+}

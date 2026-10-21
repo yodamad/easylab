@@ -4,18 +4,48 @@ import (
 	"context"
 	"log"
 	"maps"
+	"os"
 	"strings"
 
 	"easylab/internal/providers/workspace"
 	"easylab/internal/providers/workspace/kube"
 )
 
+// EnvServerNodeSelector lists the node labels this server itself is pinned to,
+// as "key=value" pairs separated by commas — the Helm chart fills it in from its
+// own nodeSelector value. Those nodes run the admin UI and never a workspace, so
+// a lab's pre-pull leaves them alone rather than filling their disk with images
+// nothing there will run.
+const EnvServerNodeSelector = "EASYLAB_SERVER_NODE_SELECTOR"
+
+// serverNodeSelector parses EnvServerNodeSelector. Pairs that are blank or carry
+// no "=" are skipped: a selector guessed from a malformed entry would exclude
+// the wrong nodes, and pre-pulling everywhere is the harmless outcome.
+func serverNodeSelector() map[string]string {
+	selector := map[string]string{}
+	for _, pair := range strings.Split(os.Getenv(EnvServerNodeSelector), ",") {
+		key, value, ok := strings.Cut(pair, "=")
+		key, value = strings.TrimSpace(key), strings.TrimSpace(value)
+		if !ok || key == "" {
+			continue
+		}
+		selector[key] = value
+	}
+	if len(selector) == 0 {
+		return nil
+	}
+	return selector
+}
+
 // prepullRequestFor lists every image a workspace pod of a lab can run, so the
 // lab's nodes can pull them before the first student asks for a workspace. It
 // mirrors what the kube backend puts in a workspace pod for each template: the
 // IDE image, sidecars, the git-clone init container, and for devcontainer
 // templates the IDE bundle plus either the baked image or envbuilder.
-func prepullRequestFor(templates []WorkspaceTemplate, baked map[string]BakedImage) workspace.PrepullRequest {
+//
+// serverNodes is where this server itself runs (see serverNodeSelector), kept
+// out of an otherwise cluster-wide pre-pull.
+func prepullRequestFor(templates []WorkspaceTemplate, baked map[string]BakedImage, serverNodes map[string]string) workspace.PrepullRequest {
 	var req workspace.PrepullRequest
 	for i, t := range templates {
 		image := strings.TrimSpace(t.Image)
@@ -55,6 +85,7 @@ func prepullRequestFor(templates []WorkspaceTemplate, baked map[string]BakedImag
 			req.NodeSelector = nil
 		}
 	}
+	req.ExcludeNodeSelector = maps.Clone(serverNodes)
 	return req
 }
 
@@ -66,12 +97,13 @@ func (h *Handler) reconcilePrepull(labID string) {
 	if !exists {
 		return
 	}
+	serverNodes := serverNodeSelector()
 	job.mu.RLock()
 	kubeconfig := extractStringFromConfigValue(job.Kubeconfig)
 	namespace := job.workspaceNamespace()
 	var req workspace.PrepullRequest
 	if job.Config != nil {
-		req = prepullRequestFor(job.Config.WorkspaceTemplates, job.Config.BakedImages)
+		req = prepullRequestFor(job.Config.WorkspaceTemplates, job.Config.BakedImages, serverNodes)
 	}
 	job.mu.RUnlock()
 	if kubeconfig == "" {

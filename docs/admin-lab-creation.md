@@ -13,6 +13,18 @@ else you can do once a lab exists.
 
 ![Steps](screens/steps.png)
 
+!!! warning "A locked credential storage is flagged up front"
+    If [credential storage](admin.md#credential-storage) is locked when you open the
+    wizard — a passphrase-protected store that nobody has unlocked since the last
+    restart — a warning at the top of the page says so. Saved cloud provider
+    credentials and [DNS profiles](admin.md#dns-profiles) are unavailable until it is
+    unlocked, so you have to type whatever credentials this lab needs. Follow the
+    **Unlock credential storage** link in the warning to reuse the saved ones instead.
+    The same warning appears, worded for that case, when a saved store cannot be read
+    at all because its `LAB_DATA_ENCRYPTION_KEY` is no longer set.
+
+    ![Credential storage locked warning](screens/credential-storage-locked.png){width=700}
+
 Start by naming the lab:
 
 * **Lab Name** (required) — a unique name used as the prefix for all cloud resources (letters, numbers, hyphens and underscores only).
@@ -105,7 +117,9 @@ server on one and student workspaces on another:
    pool=workspaces`).
 2. **Pin the EasyLab server** by setting `nodeSelector` (and `tolerations`, if the
    pool is tainted) in the Helm chart's values — see
-   [Helm Chart Deployment](helm.md#key-values).
+   [Helm Chart Deployment](helm.md#key-values). This also keeps the labs'
+   [image pre-pull](admin-lab-management.md#image-pre-pull) off that pool, so
+   workspace images are not cached on nodes that never run a workspace.
 3. **Pin student workspaces** by setting the **Node Selector** field on each
    workspace template (under **Advanced options**, see above) to match the
    workspace pool's label, e.g. key `pool`, value `workspaces`.

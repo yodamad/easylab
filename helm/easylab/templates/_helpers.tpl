@@ -89,6 +89,19 @@ The cross-provider reference Traefik expects in a router.middlewares annotation:
 {{- end }}
 
 {{/*
+A nodeSelector map as the comma-separated "key=value" list EasyLab reads from
+EASYLAB_SERVER_NODE_SELECTOR. Keys come out sorted, as Helm's range over a map
+does, so the rendered value does not churn between upgrades.
+*/}}
+{{- define "easylab.nodeSelectorEnv" -}}
+{{- $pairs := list -}}
+{{- range $key, $value := . -}}
+{{- $pairs = append $pairs (printf "%s=%v" $key $value) -}}
+{{- end -}}
+{{- join "," $pairs -}}
+{{- end }}
+
+{{/*
 Namespace to use.
 */}}
 {{- define "easylab.namespace" -}}

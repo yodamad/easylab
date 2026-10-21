@@ -1137,6 +1137,10 @@ func (h *Handler) ServeAdminUI(w http.ResponseWriter, r *http.Request) {
 	}
 	// Saved DNS profiles the wizard offers in place of typing DNS credentials.
 	data["DNSProfiles"], data["DNSProfilesLocked"] = h.wizardDNSProfiles()
+	// Credential storage state: a locked or unreadable vault means saved provider
+	// credentials and DNS profiles cannot be reused in this lab, so the wizard warns
+	// about it up front instead of letting the admin find out step by step.
+	data["Storage"] = h.credentialStorageView()
 	if h.ovhOptionsManager != nil {
 		cfg := h.ovhOptionsManager.GetConfig()
 		data["FlavorMinVCPUs"] = cfg.FlavorMinVCPUs

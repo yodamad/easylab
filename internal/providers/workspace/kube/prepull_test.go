@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	k8stesting "k8s.io/client-go/testing"
@@ -129,6 +130,97 @@ func TestEnsurePrepull_PullSecretsAndNodeSelector(t *testing.T) {
 			assert.Equal(t, map[string]string{"pool": "workspaces"}, spec.NodeSelector)
 		})
 	}
+}
+
+func TestEnsurePrepull_ExcludeNodeSelector(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name             string
+		req              workspace.PrepullRequest
+		expectedTerms    []corev1.NodeSelectorTerm
+		expectedPinnedTo map[string]string
+	}{
+		{
+			name: "the server's pool is kept out of a cluster-wide pre-pull",
+			req: workspace.PrepullRequest{
+				Images:              []string{"a/one:1"},
+				ExcludeNodeSelector: map[string]string{"pool": "control-plane"},
+			},
+			expectedTerms: []corev1.NodeSelectorTerm{{MatchExpressions: []corev1.NodeSelectorRequirement{{
+				Key: "pool", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"control-plane"},
+			}}}},
+		},
+		{
+			// "not (pool=control-plane and role=admin)" is one term per label, OR-ed:
+			// a node differing on either one still pulls.
+			name: "several labels become one term each, sorted",
+			req: workspace.PrepullRequest{
+				Images:              []string{"a/one:1"},
+				ExcludeNodeSelector: map[string]string{"role": "admin", "pool": "control-plane"},
+			},
+			expectedTerms: []corev1.NodeSelectorTerm{
+				{MatchExpressions: []corev1.NodeSelectorRequirement{{
+					Key: "pool", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"control-plane"},
+				}}},
+				{MatchExpressions: []corev1.NodeSelectorRequirement{{
+					Key: "role", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"admin"},
+				}}},
+			},
+		},
+		{
+			name: "a workspace node selector wins: no exclusion on top of a pin",
+			req: workspace.PrepullRequest{
+				Images:              []string{"a/one:1"},
+				NodeSelector:        map[string]string{"pool": "workspaces"},
+				ExcludeNodeSelector: map[string]string{"pool": "control-plane"},
+			},
+			expectedTerms:    nil,
+			expectedPinnedTo: map[string]string{"pool": "workspaces"},
+		},
+		{
+			name:          "no exclusion configured",
+			req:           workspace.PrepullRequest{Images: []string{"a/one:1"}},
+			expectedTerms: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			b, _ := newTestBackend()
+			require.NoError(t, b.EnsurePrepull(context.Background(), "lab-1", tt.req))
+
+			spec := getPrepull(t, b, "lab-1").Spec.Template.Spec
+			assert.Equal(t, tt.expectedPinnedTo, spec.NodeSelector)
+			if tt.expectedTerms == nil {
+				assert.Nil(t, spec.Affinity)
+				return
+			}
+			require.NotNil(t, spec.Affinity)
+			require.NotNil(t, spec.Affinity.NodeAffinity)
+			required := spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+			require.NotNil(t, required)
+			assert.Equal(t, tt.expectedTerms, required.NodeSelectorTerms)
+		})
+	}
+}
+
+func TestEnsurePrepull_ExclusionChangeUpdates(t *testing.T) {
+	t.Parallel()
+	b, cs := newTestBackend()
+	ctx := context.Background()
+	req := workspace.PrepullRequest{Images: []string{"a/one:1"}}
+
+	require.NoError(t, b.EnsurePrepull(ctx, "lab-1", req))
+	req.ExcludeNodeSelector = map[string]string{"pool": "control-plane"}
+	require.NoError(t, b.EnsurePrepull(ctx, "lab-1", req))
+	assert.Equal(t, 1, countUpdates(cs.Actions()), "the exclusion is part of the hash")
+	assert.NotNil(t, getPrepull(t, b, "lab-1").Spec.Template.Spec.Affinity)
+
+	// Unpinning the server clears the affinity again.
+	req.ExcludeNodeSelector = nil
+	require.NoError(t, b.EnsurePrepull(ctx, "lab-1", req))
+	assert.Equal(t, 2, countUpdates(cs.Actions()))
+	assert.Nil(t, getPrepull(t, b, "lab-1").Spec.Template.Spec.Affinity)
 }
 
 // countUpdates counts DaemonSet update calls the fake client has seen.
