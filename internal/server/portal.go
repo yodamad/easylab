@@ -254,6 +254,11 @@ func (h *Handler) deployPortal(job *Job, pd workspace.PortalDeployer, backend wo
 		spec.SecretNames = templateSecretNames(job.Config.WorkspaceTemplates)
 		spec.Domain = job.Config.Domain
 		spec.ClusterIssuer = job.Config.ClusterIssuerName
+		// The portal is served by the same controller as the lab's workspaces, and
+		// reads that controller's Service for its own nip.io fallback.
+		spec.IngressClass = job.Config.IngressClassName
+		spec.IngressNamespace = job.Config.NginxIngressNamespace
+		spec.IngressService = job.Config.NginxIngressServiceName
 		// Same rule as a workspace (see RequestWorkspace): a lab with a DNS provider
 		// got a wildcard certificate at provisioning, and the portal is served from it.
 		if job.Config.DNSProvider != "" {

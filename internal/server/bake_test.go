@@ -440,7 +440,7 @@ func (f *inClusterBakeBackend) EnsureBuildCache(context.Context) (string, error)
 	return "easylab-registry-cache.workshops.svc.cluster.local:5000/cache", nil
 }
 
-func (f *inClusterBakeBackend) EnsureRegistryIngress(_ context.Context, domain, _, _ string) (string, error) {
+func (f *inClusterBakeBackend) EnsureRegistryIngress(_ context.Context, domain, _, _, _ string) (string, error) {
 	return "easylab-registry-cache." + domain, nil
 }
 

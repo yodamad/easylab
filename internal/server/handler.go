@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"easylab/internal/clusterscan"
 	"easylab/internal/providers/workspace"
 	"easylab/internal/tfparse"
 	"encoding/json"
@@ -37,6 +38,13 @@ type Handler struct {
 	// newWorkspaceBackend builds the workspace backend for a lab from its kubeconfig
 	// and namespace. Overridable in tests to inject a fake backend.
 	newWorkspaceBackend func(kubeconfig, namespace string) (workspace.Backend, error)
+	// scanCluster reads the cluster behind DetectCluster with a kubeconfig an admin
+	// has just supplied. Deliberately unlike newWorkspaceBackend, it hands back the
+	// findings rather than a client: a scan runs before any lab exists, and the
+	// client built from those credentials is used once and dropped rather than
+	// cached, so a kubeconfig that turns out to be wrong leaves nothing behind.
+	// Overridable in tests.
+	scanCluster func(ctx context.Context, kubeconfig string, opts clusterscan.Options) (*clusterscan.Report, []error)
 	// workspaceBackends caches one built backend per lab (keyed by lab ID) so
 	// concurrent requests against the same lab reuse a single Kubernetes client
 	// instead of each building its own from scratch. A kubeconfig or namespace
@@ -327,6 +335,7 @@ func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsM
 		jobManager:          jobManager,
 		pulumiExec:          pulumiExec,
 		newWorkspaceBackend: workspace.Default,
+		scanCluster:         clusterscan.ScanKubeconfig,
 		workspaceBackends:   make(map[string]*cachedWorkspaceBackend),
 		workspaceCreateSem:  make(chan struct{}, workspaceCreateConcurrency()),
 		pulumiExecSem:       make(chan struct{}, pulumiExecutionConcurrency()),
@@ -782,6 +791,9 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 	if !installNginx {
 		config.NginxIngressNamespace = r.FormValue("nginx_ingress_namespace")
 		config.NginxIngressServiceName = r.FormValue("nginx_ingress_service_name")
+		// Only read when reusing a controller: one EasyLab installs itself is
+		// always Traefik, so there is no class to choose.
+		config.IngressClassName = strings.TrimSpace(r.FormValue("ingress_class_name"))
 	} else {
 		config.TraefikNodeSelector = parseNodeSelectorFromForm(r, "traefik_nodeselector_key", "traefik_nodeselector_value")
 	}
@@ -2303,6 +2315,9 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 	domain := ""
 	dnsProvider := ""
 	clusterIssuerName := ""
+	ingressClassName := ""
+	ingressNamespace := ""
+	ingressService := ""
 	var templates []WorkspaceTemplate
 	var bakedImages map[string]BakedImage
 	labDisabled := false
@@ -2311,6 +2326,9 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		domain = job.Config.Domain
 		dnsProvider = job.Config.DNSProvider
 		clusterIssuerName = job.Config.ClusterIssuerName
+		ingressClassName = job.Config.IngressClassName
+		ingressNamespace = job.Config.NginxIngressNamespace
+		ingressService = job.Config.NginxIngressServiceName
 		templates = job.Config.GetWorkspaceTemplates()
 		bakedImages = job.Config.BakedImages
 		labDisabled = job.Config.Disabled
@@ -2444,6 +2462,9 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		Domain:           domain,
 		ClusterIssuer:    clusterIssuerName,
 		Token:            password,
+		IngressClass:     ingressClassName,
+		IngressNamespace: ingressNamespace,
+		IngressService:   ingressService,
 	}
 
 	// A lab with a DNS provider got a wildcard certificate at provisioning: serve

@@ -94,7 +94,7 @@ const wizard = {
             addTraefikNodeSelector.addEventListener('click', () => {
                 const container = document.getElementById('traefik-nodeselector-container');
                 if (container) {
-                    container.appendChild(createStaticNodeSelectorRow('traefik_nodeselector_key', 'traefik_nodeselector_value', '', ''));
+                    container.appendChild(withLabelSuggestions(createStaticNodeSelectorRow('traefik_nodeselector_key', 'traefik_nodeselector_value', '', '')));
                 }
             });
         }
@@ -104,7 +104,7 @@ const wizard = {
             addCertManagerNodeSelector.addEventListener('click', () => {
                 const container = document.getElementById('certmanager-nodeselector-container');
                 if (container) {
-                    container.appendChild(createStaticNodeSelectorRow('certmanager_nodeselector_key', 'certmanager_nodeselector_value', '', ''));
+                    container.appendChild(withLabelSuggestions(createStaticNodeSelectorRow('certmanager_nodeselector_key', 'certmanager_nodeselector_value', '', '')));
                 }
             });
         }
@@ -1426,6 +1426,11 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     setKubeconfigMode('upload');
 
+    const detectClusterBtn = document.getElementById('btn-detect-cluster');
+    if (detectClusterBtn) {
+        detectClusterBtn.addEventListener('click', detectCluster);
+    }
+
     // Kubeconfig file upload: read contents into textarea
     const kubeconfigFileInput = document.getElementById('kubeconfig_file');
     const kubeconfigFileNameDisplay = document.getElementById('kubeconfig-file-name-display');
@@ -1779,6 +1784,454 @@ function detectVariables(row) {
         detectBtn.disabled = false;
         detectBtn.textContent = 'Detect Variables';
     });
+}
+
+// withLabelSuggestions points a node selector row's key/value inputs at the
+// datalists built from the last cluster scan (if any), so the shared row
+// builders stay untouched. The name$= selectors also cover the indexed
+// per-template pickers (template_N_nodeselector_key/value).
+function withLabelSuggestions(row) {
+    const hasKeys = !!document.getElementById('cluster-node-label-keys');
+    const hasValues = !!document.getElementById('cluster-node-label-values');
+    const keyInput = row.querySelector('input[name$="_key"]');
+    const valueInput = row.querySelector('input[name$="_value"]');
+    if (keyInput && hasKeys) keyInput.setAttribute('list', 'cluster-node-label-keys');
+    if (valueInput && hasValues) valueInput.setAttribute('list', 'cluster-node-label-values');
+    return row;
+}
+
+// setClusterNodeLabelDatalists replaces the two datalists that feed
+// withLabelSuggestions, and re-points rows that already exist.
+function setClusterNodeLabelDatalists(labels) {
+    const form = document.getElementById('lab-form') || document.body;
+    const build = (id, values) => {
+        const old = document.getElementById(id);
+        if (old) old.remove();
+        const list = document.createElement('datalist');
+        list.id = id;
+        values.forEach(v => {
+            const opt = document.createElement('option');
+            opt.value = v;
+            list.appendChild(opt);
+        });
+        form.appendChild(list);
+    };
+    const keys = [];
+    const values = [];
+    (labels || []).forEach(l => {
+        if (l && l.key && !keys.includes(l.key)) keys.push(l.key);
+        ((l && l.values) || []).forEach(v => {
+            if (!values.includes(v)) values.push(v);
+        });
+    });
+    build('cluster-node-label-keys', keys);
+    build('cluster-node-label-values', values);
+    document.querySelectorAll('.template-variable-row').forEach(withLabelSuggestions);
+}
+
+function clusterDetectBox() {
+    return document.getElementById('cluster-detect-result');
+}
+
+// setDetectEmphasis moves the component's weight between its two actions, so only
+// one of them is ever the obvious thing to press. Detect carries it until there
+// are results to act on; from then on Apply does, and re-running is the quieter
+// choice. The label never changes — only its weight.
+function setDetectEmphasis(strong) {
+    const btn = document.getElementById('btn-detect-cluster');
+    if (!btn) return;
+    btn.classList.toggle('btn-strong', strong);
+    btn.classList.toggle('btn-secondary', !strong);
+}
+
+// joinClause renders a list as prose: "a", "a and b", "a, b and c".
+function joinClause(parts) {
+    if (parts.length <= 1) return parts[0] || '';
+    return parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1];
+}
+
+function showClusterDetectError(message) {
+    const box = clusterDetectBox();
+    if (!box) return;
+    box.innerHTML = '';
+    const err = document.createElement('div');
+    err.className = 'detect-variables-status error-message';
+    err.textContent = message;
+    box.appendChild(err);
+    box.style.display = '';
+    // Nothing to apply, so trying again is the action worth offering.
+    setDetectEmphasis(true);
+}
+
+function detectCluster() {
+    const btn = document.getElementById('btn-detect-cluster');
+    const textarea = document.getElementById('kubeconfig_content');
+    if (!btn || !textarea) return;
+
+    if (!textarea.value.trim()) {
+        showClusterDetectError('Paste or upload a kubeconfig first.');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Detecting...';
+
+    const fd = new FormData();
+    fd.append('kubeconfig_content', textarea.value);
+    const ns = document.getElementById('workspace_namespace');
+    fd.append('workspace_namespace', ns ? ns.value : '');
+
+    fetch('/api/cluster/detect', { method: 'POST', body: fd })
+    .then(resp => {
+        if (!resp.ok) {
+            return resp.json().catch(() => ({})).then(data => { throw new Error(data.message || 'Detection failed'); });
+        }
+        return resp.json();
+    })
+    .then(data => {
+        renderClusterDetect(data);
+    })
+    .catch(err => {
+        showClusterDetectError('Detection failed: ' + err.message);
+    })
+    .finally(() => {
+        btn.disabled = false;
+        btn.textContent = 'Detect from cluster';
+    });
+}
+
+// findingBadgeClass maps a finding status onto the three-way display:
+// found / not found / couldn't check. "absent" is a real answer from the
+// cluster; "forbidden", "timeout" and "error" say nothing about it.
+function findingBadge(status) {
+    if (status === 'ok') return { key: 'ok', text: 'found' };
+    if (status === 'absent' || status === 'skipped') return { key: 'absent', text: 'not found' };
+    return { key: 'unknown', text: "couldn't check" };
+}
+
+// suggestsExistingIssuer answers whether the scan found a ClusterIssuer the lab
+// can actually use. One predicate decides both what the Apply note promises and
+// what Apply does, so the two cannot drift apart.
+function suggestsExistingIssuer(suggested) {
+    return suggested.install_cert_manager === false &&
+        suggested.dns_already_configured === true &&
+        suggested.cluster_issuer_name !== undefined;
+}
+
+function renderClusterDetect(data) {
+    const box = clusterDetectBox();
+    if (!box) return;
+    const report = (data && data.report) || {};
+    const suggested = (data && data.suggested) || {};
+    box.innerHTML = '';
+
+    const cluster = report.cluster || {};
+    const nodes = report.nodes || {};
+    const header = document.createElement('div');
+    header.className = 'cluster-detect-header';
+    const title = document.createElement('span');
+    title.className = 'cluster-detect-title';
+    title.textContent = cluster.status === 'ok' ? 'Detected on this cluster' : "Couldn't read this cluster";
+    header.appendChild(title);
+
+    const meta = document.createElement('span');
+    meta.className = 'cluster-detect-meta';
+    if (cluster.status === 'ok') {
+        const parts = [];
+        if (cluster.version) parts.push('Kubernetes ' + cluster.version);
+        if (nodes.status === 'ok' && typeof nodes.count === 'number') {
+            parts.push(nodes.count + (nodes.count === 1 ? ' node' : ' nodes'));
+        }
+        meta.textContent = parts.join(', ');
+    } else {
+        meta.textContent = cluster.detail || '';
+    }
+    header.appendChild(meta);
+    box.appendChild(header);
+
+    const list = document.createElement('ul');
+    list.className = 'cluster-detect-findings';
+    // A row is: what was looked for, what the cluster holds, and how the check
+    // went. The value column is monospace because these are real object names the
+    // admin can paste after `kubectl get` — prose never goes in it. Only a row
+    // that could not be checked is marked, so the eye lands on the one thing that
+    // needs a decision rather than on eight identical badges.
+    const addFinding = (label, finding, opts) => {
+        const f = finding || { status: 'skipped' };
+        const b = findingBadge(f.status);
+        const o = opts || {};
+
+        const li = document.createElement('li');
+        li.className = 'finding finding-' + b.key;
+
+        const name = document.createElement('span');
+        name.className = 'finding-label';
+        name.textContent = label;
+        li.appendChild(name);
+
+        const val = document.createElement('span');
+        val.className = 'finding-value';
+        if (o.plain) val.classList.add('finding-value-plain');
+        if (f.status === 'ok' && o.value) {
+            val.textContent = o.value;
+        } else {
+            // An em dash reads as "nothing here" without posing as a value.
+            val.textContent = '—';
+            val.classList.add('finding-value-plain', 'finding-value-empty');
+        }
+        li.appendChild(val);
+
+        const status = document.createElement('span');
+        status.className = 'finding-state';
+        // A found row says "found" only when it has nothing more useful to add —
+        // and a monospace value already proves it was found, so the column stays
+        // empty unless it can qualify the value ("class nginx", "not ready").
+        status.textContent = f.status === 'ok' ? (o.state || '') : b.text;
+        if (f.detail) status.title = f.detail;
+        li.appendChild(status);
+
+        list.appendChild(li);
+    };
+
+    const ing = report.ingress || {};
+    addFinding('Ingress controller', ing, {
+        value: (ing.namespace || '?') + '/' + (ing.service || '?'),
+        state: ing.class ? 'class ' + ing.class : '',
+    });
+
+    // The address gets a row of its own rather than trailing the controller: it is
+    // what DNS points at, and a hostname where an IP was expected rules out the
+    // Quick start mode entirely.
+    const addressFinding = ing.status === 'ok' && !ing.external_ip && !ing.external_hostname
+        ? { status: 'absent', detail: ing.detail }
+        : ing;
+    addFinding('External address', addressFinding, {
+        value: ing.external_ip || ing.external_hostname,
+        state: ing.external_ip ? '' : 'hostname only, no IP',
+    });
+
+    const cm = report.cert_manager || {};
+    const cmFinding = cm.status === 'ok' && cm.installed === false ? { status: 'absent', detail: cm.detail } : cm;
+    addFinding('cert-manager', cmFinding, { value: cm.namespace });
+
+    const issuers = report.issuers || {};
+    const items = issuers.items || [];
+    const issuersFinding = issuers.status === 'ok' && items.length === 0 ? { status: 'absent', detail: issuers.detail } : issuers;
+    // Name the one that would actually be used, and say why the others are not.
+    const usable = items.find(i => i.has_dns01 && i.ready);
+    const shown = usable || items[0];
+    let issuerState = '';
+    if (shown) {
+        const tags = [];
+        if (shown.has_dns01) tags.push('DNS-01');
+        else if (shown.has_http01) tags.push('HTTP-01 only');
+        if (shown.staging) tags.push('staging');
+        tags.push(shown.ready ? 'ready' : 'not ready');
+        issuerState = tags.join(', ');
+    }
+    addFinding('ClusterIssuer', issuersFinding, {
+        value: shown ? shown.name + (items.length > 1 ? ' +' + (items.length - 1) : '') : '',
+        state: issuerState,
+    });
+
+    const storage = report.storage || {};
+    const storageFinding = storage.status === 'ok' && !storage.default ? { status: 'absent', detail: storage.detail } : storage;
+    addFinding('Default StorageClass', storageFinding, {
+        value: storage.default,
+        state: storage.node_local ? 'node-local' : '',
+    });
+
+    const labels = nodes.labels || [];
+    const nodesFinding = nodes.status === 'ok' && labels.length === 0 ? { status: 'absent', detail: nodes.detail } : nodes;
+    const topLabel = labels[0];
+    addFinding('Node labels', nodesFinding, {
+        value: topLabel ? topLabel.key + '=' + (topLabel.values || []).join('|') : '',
+        state: labels.length > 1 ? labels.length + ' keys' : '',
+    });
+
+    const nsInfo = report.namespaces || {};
+    let nsFinding = nsInfo;
+    let nsState = 'exists';
+    if (nsInfo.status === 'ok' && !nsInfo.workspace_namespace_exists) {
+        nsFinding = { status: 'ok', detail: nsInfo.detail };
+        nsState = 'will be created';
+    }
+    addFinding('Workspace namespace', nsFinding, {
+        value: nsInfo.workspace_namespace,
+        state: nsState,
+    });
+
+    const perms = report.permissions || {};
+    const missing = perms.missing || [];
+    const total = (perms.checks || []).length;
+    addFinding('Permissions', perms, {
+        plain: true,
+        value: total ? total + (total === 1 ? ' check' : ' checks') : '',
+        state: missing.length ? missing.length + ' missing' : 'all granted',
+    });
+
+    box.appendChild(list);
+
+    const warnings = report.warnings || [];
+    if (warnings.length) {
+        const warn = document.createElement('div');
+        warn.className = 'warning-message';
+        const h3 = document.createElement('h3');
+        h3.textContent = 'Worth knowing';
+        warn.appendChild(h3);
+        const ul = document.createElement('ul');
+        warnings.forEach(w => {
+            const li = document.createElement('li');
+            li.textContent = w.message;
+            ul.appendChild(li);
+        });
+        warn.appendChild(ul);
+        box.appendChild(warn);
+    }
+
+    // What applying will set, as clauses rather than a run of comma-separated
+    // fragments: an admin is about to let this overwrite what they typed, so it
+    // should read as a sentence. storage_class is only ever mentioned, never
+    // written, so it is not listed here.
+    const sets = [];
+    if (suggested.install_nginx_ingress === false) {
+        const ingFields = ['namespace', 'service', 'class'].filter((_, i) =>
+            [suggested.nginx_ingress_namespace, suggested.nginx_ingress_service_name, suggested.ingress_class_name][i] !== undefined);
+        sets.push('the existing ingress controller' + (ingFields.length ? ' and its ' + joinClause(ingFields) : ''));
+    }
+    if (suggested.install_cert_manager === false) {
+        sets.push('the existing cert-manager' + (suggested.cert_manager_namespace !== undefined ? ' and its namespace' : ''));
+    }
+    if (suggestsExistingIssuer(suggested)) {
+        // Applying the issuer moves the lab onto a custom domain, which is too big
+        // a change to spring on an admin after the fact.
+        sets.push('"Custom domain — automatic" with the existing ClusterIssuer "' + suggested.cluster_issuer_name + '"');
+    }
+    if (suggested.workspace_namespace !== undefined) sets.push('the workspace namespace');
+    // Node selectors are only seeded for a component EasyLab installs itself, so
+    // reusing both leaves nothing to seed — and the note must not promise it.
+    const installsSomething = suggested.install_nginx_ingress !== false || suggested.install_cert_manager !== false;
+    if (suggested.node_selector_key !== undefined && installsSomething) {
+        sets.push('node selectors where none are set yet');
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'cluster-detect-actions';
+    if (sets.length) {
+        const applyBtn = document.createElement('button');
+        applyBtn.type = 'button';
+        applyBtn.className = 'btn btn-strong';
+        applyBtn.id = 'btn-apply-cluster-detect';
+        applyBtn.textContent = 'Apply to this lab';
+        applyBtn.addEventListener('click', () => applyClusterDetect(suggested, report));
+        actions.appendChild(applyBtn);
+        const note = document.createElement('small');
+        note.textContent = 'Sets ' + joinClause(sets) + '.';
+        actions.appendChild(note);
+    } else {
+        const note = document.createElement('small');
+        note.textContent = 'Nothing to apply from this scan.';
+        actions.appendChild(note);
+    }
+    box.appendChild(actions);
+
+    if (suggested.storage_class !== undefined) {
+        const sc = document.createElement('small');
+        sc.className = 'hint-text';
+        sc.textContent = 'Set the storage class to "' + suggested.storage_class + '" on your workspace templates (step 6).';
+        box.appendChild(sc);
+    }
+
+    setClusterNodeLabelDatalists(nodes.labels);
+    // There is something to act on now, so Apply takes the weight (above) and
+    // re-running the scan becomes the quieter of the two.
+    setDetectEmphasis(!sets.length);
+    box.style.display = '';
+}
+
+function applyClusterDetect(suggested, report) {
+    const written = [];
+    const write = (id, value) => {
+        if (value === undefined || value === null) return;
+        const el = document.getElementById(id);
+        if (!el) return;
+        setFieldValue(id, value);
+        written.push(el);
+    };
+
+    const reuseIngress = suggested.install_nginx_ingress === false;
+    if (reuseIngress) wizard.setIngressMode('existing');
+    write('nginx_ingress_namespace', suggested.nginx_ingress_namespace);
+    write('nginx_ingress_service_name', suggested.nginx_ingress_service_name);
+    write('ingress_class_name', suggested.ingress_class_name);
+
+    const reuseCertManager = suggested.install_cert_manager === false;
+
+    // An issuer is only ever suggested when it is Ready with a DNS-01 solver, and
+    // that can only serve a domain the admin owns — so applying it has to select
+    // "Custom domain — automatic" too. Quick start has no domain to issue a
+    // certificate for, and manual DNS mode has nowhere to put the issuer's name:
+    // in both, the issuer and the "already configured" answer are unreachable.
+    // The Apply note says the mode will change, and the buttons stay editable.
+    const useExistingIssuer = suggestsExistingIssuer(suggested);
+    const autoBtn = document.getElementById('domain-mode-auto-btn');
+    const wasAutoDomain = !!autoBtn && autoBtn.classList.contains('selected');
+    if (useExistingIssuer) wizard.setDomainMode('auto');
+
+    if (reuseCertManager) wizard.setCertManagerMode('existing');
+    write('cert_manager_namespace', suggested.cert_manager_namespace);
+
+    // setDNSAlreadyConfigured owns the issuer-name field — it reveals it on "yes"
+    // and clears it on "no" — so the two move together, as they do in applyPrefill.
+    if (useExistingIssuer) {
+        wizard.setDNSAlreadyConfigured(true);
+        write('cluster_issuer_name', suggested.cluster_issuer_name);
+    }
+
+    write('workspace_namespace', suggested.workspace_namespace);
+
+    if (suggested.node_selector_key !== undefined) {
+        // Only seed a node selector for a component EasyLab is going to install:
+        // the server reads these fields only in that case (see
+        // createLabConfigFromForm), and their container is hidden when the
+        // component is being reused, so seeding one there would write a value
+        // nothing reads and then surface it pre-filled if the admin switched to
+        // "install" later.
+        const targets = [
+            ['traefik-nodeselector-container', 'traefik_nodeselector_key', 'traefik_nodeselector_value', !reuseIngress],
+            ['certmanager-nodeselector-container', 'certmanager_nodeselector_key', 'certmanager_nodeselector_value', !reuseCertManager],
+        ];
+        targets.forEach(([containerId, keyName, valueName, installing]) => {
+            if (!installing) return;
+            const container = document.getElementById(containerId);
+            if (!container || container.children.length > 0) return;
+            const row = withLabelSuggestions(createStaticNodeSelectorRow(keyName, valueName, suggested.node_selector_key, suggested.node_selector_value || ''));
+            container.appendChild(row);
+            row.querySelectorAll('input').forEach(i => written.push(i));
+        });
+    }
+
+    written.forEach(el => {
+        el.classList.add('field-detected');
+        el.addEventListener('input', () => el.classList.remove('field-detected'), { once: true });
+    });
+
+    const box = clusterDetectBox();
+    if (box) {
+        const old = document.getElementById('cluster-detect-applied');
+        if (old) old.remove();
+        const done = document.createElement('div');
+        done.id = 'cluster-detect-applied';
+        done.className = 'success-message';
+        done.setAttribute('role', 'status');
+        // Switching to a custom domain leaves two fields the cluster cannot answer
+        // — the domain itself and the DNS credentials — so say what to do next
+        // rather than only what was done.
+        done.textContent = useExistingIssuer && !wasAutoDomain
+            ? 'Applied, and switched to a custom domain so the existing ClusterIssuer can be used. Add the domain students will reach and its DNS credentials below, then review the highlighted fields on steps 4 and 5.'
+            : 'Applied. Review the highlighted fields on steps 4 and 5 and edit anything that is not right.';
+        box.appendChild(done);
+    }
 }
 
 function updateRowSourceVisibility(row) {

@@ -56,6 +56,7 @@ internal/
       kube/             # Self-managed Kubernetes backend (Deployment + Service + Ingress + PVC per student, code-server)
   tfparse/
     variables.go         # Terraform .tf file parser — extracts variable definitions from ZIP uploads
+  clusterscan/           # Read-only cluster scan behind the "Detect from cluster" button (ingress, cert-manager, ClusterIssuers, StorageClass, permissions)
   pulumi/
     program.go           # Pulumi program builder
 ingress/
@@ -127,6 +128,7 @@ CRITICAL: Do NOT modify, refactor, rename, or restructure existing files unless 
 - **BYO Kubernetes**: `LabConfig.UseExistingCluster` + `ExternalKubeconfig` fields allow skipping OVH provisioning when a cluster already exists.
 - **HTTPS/TLS**: `ingress/https.go` handles ingress-nginx and cert-manager installation, DNS-01/HTTP-01 ACME challenge setup, wildcard domains, and LoadBalancer IP resolution for OVHcloud.
 - **Terraform variable detection**: `internal/tfparse/variables.go` parses Terraform `.tf` files from ZIP uploads to extract variable definitions used by the `DetectTemplateVariables` handler.
+- **Cluster detection**: `internal/clusterscan/` is a standalone read-only analysis package (like `internal/tfparse` and `internal/devcontainer`); `internal/server/cluster_detect.go` maps its `Report` onto the wizard's own form field names for the **Detect from cluster** button.
 - **HTMX response helpers**: Use `writeToast()` for success/error toast notifications in HTMX responses; use `writeJSONError()` for JSON API error responses. Both are defined in `handler.go`.
 
 ---

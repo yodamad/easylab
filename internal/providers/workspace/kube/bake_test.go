@@ -278,7 +278,7 @@ func TestRegistryPullAuthHeader_OwnRegistryFallback(t *testing.T) {
 	b, _ := newTestBackend()
 	ctx := context.Background()
 
-	host, err := b.EnsureRegistryIngress(ctx, "lab.example.com", "easylab-wildcard-tls", "")
+	host, err := b.EnsureRegistryIngress(ctx, "lab.example.com", "easylab-wildcard-tls", "", "")
 	require.NoError(t, err)
 	auths, err := b.registryAuths(ctx)
 	require.NoError(t, err)

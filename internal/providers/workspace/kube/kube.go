@@ -406,11 +406,36 @@ func sanitizeDNS(s string) string {
 	return s
 }
 
-// ingressIP returns the external IP assigned to the Traefik ingress controller
-// Service, or "" when the controller is absent or has no IP yet. Only an IP is
-// usable: nip.io encodes an address, so a hostname-only LoadBalancer yields "".
-func (b *Backend) ingressIP(ctx context.Context) string {
-	svc, err := b.client.CoreV1().Services(ingressControllerNamespace).Get(ctx, ingressControllerService, metav1.GetOptions{})
+// ingressClassFor returns the IngressClass a spec's Ingress should name, falling
+// back to the class EasyLab installs itself. Keeping the fallback here is what
+// makes a lab that sets nothing behave exactly as it did before the class became
+// configurable.
+func ingressClassFor(spec workspace.Spec) string {
+	if class := strings.TrimSpace(spec.IngressClass); class != "" {
+		return class
+	}
+	return workspaceIngressClass
+}
+
+// ingressLocationFor returns where to find the ingress controller's Service,
+// falling back to Traefik's conventional location.
+func ingressLocationFor(spec workspace.Spec) (namespace, service string) {
+	namespace, service = ingressControllerNamespace, ingressControllerService
+	if ns := strings.TrimSpace(spec.IngressNamespace); ns != "" {
+		namespace = ns
+	}
+	if svc := strings.TrimSpace(spec.IngressService); svc != "" {
+		service = svc
+	}
+	return namespace, service
+}
+
+// ingressIP returns the external IP assigned to the ingress controller Service,
+// or "" when the controller is absent or has no IP yet. Only an IP is usable:
+// nip.io encodes an address, so a hostname-only LoadBalancer yields "".
+func (b *Backend) ingressIP(ctx context.Context, spec workspace.Spec) string {
+	namespace, service := ingressLocationFor(spec)
+	svc, err := b.client.CoreV1().Services(namespace).Get(ctx, service, metav1.GetOptions{})
 	if err != nil {
 		return ""
 	}
@@ -434,7 +459,7 @@ func (b *Backend) resolveRouting(ctx context.Context, spec workspace.Spec) (work
 	if strings.TrimSpace(spec.Domain) != "" {
 		return spec, schemeHTTPS
 	}
-	ip := b.ingressIP(ctx)
+	ip := b.ingressIP(ctx, spec)
 	if ip == "" {
 		return spec, schemeHTTPS
 	}
@@ -446,6 +471,12 @@ func (b *Backend) resolveRouting(ctx context.Context, spec workspace.Spec) (work
 
 // Routing reports the base domain and scheme workspaces are served under, so
 // callers can show a lab's public base URL without creating a workspace.
+//
+// It knows only the lab's domain, so the nip.io fallback looks for the controller
+// in Traefik's conventional location. A lab reusing a controller elsewhere and
+// running without a domain therefore reports no base URL — which is what it did
+// before the location became configurable, and the detect panel now says as much
+// rather than leaving the admin to wonder.
 func (b *Backend) Routing(ctx context.Context, labDomain string) (string, string) {
 	spec, scheme := b.resolveRouting(ctx, workspace.Spec{Domain: labDomain})
 	return spec.Domain, scheme
@@ -1646,7 +1677,7 @@ func workspaceTLS(name string, spec workspace.Spec) (tlsSecret, clusterIssuer st
 func (b *Backend) createIngress(ctx context.Context, name string, labels map[string]string, spec workspace.Spec) error {
 	host := workspaceHost(name, spec.Domain)
 	pathType := netv1.PathTypePrefix
-	ingressClass := workspaceIngressClass
+	ingressClass := ingressClassFor(spec)
 
 	// Websocket / long-lived IDE connections and unbounded request bodies need no
 	// per-Ingress annotation under Traefik (unlike nginx): it streams bodies
@@ -1755,9 +1786,14 @@ func (b *Backend) reconcileIngressTLS(ctx context.Context, name string, spec wor
 	}
 	// Workspaces provisioned before the switch from ingress-nginx to Traefik still
 	// name the old class, so nothing routes to them and no ACME challenge resolves.
-	if ing.Spec.IngressClassName == nil || *ing.Spec.IngressClassName != workspaceIngressClass {
-		class := workspaceIngressClass
-		ing.Spec.IngressClassName = &class
+	// Reconcile toward the lab's own class, not the built-in default: a lab reusing
+	// a non-Traefik controller would otherwise have its class overwritten here on
+	// the first student request after creation, breaking routing with no error
+	// anywhere, since the Ingress update itself succeeds. A lab that names no class
+	// still resolves to Traefik, so the repair above keeps working.
+	desiredClass := ingressClassFor(spec)
+	if ing.Spec.IngressClassName == nil || *ing.Spec.IngressClassName != desiredClass {
+		ing.Spec.IngressClassName = &desiredClass
 		changed = true
 	}
 

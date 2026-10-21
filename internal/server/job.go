@@ -417,6 +417,17 @@ type LabConfig struct {
 	InstallCertManager      *bool  `json:"install_cert_manager,omitempty"`
 	CertManagerNamespace    string `json:"cert_manager_namespace,omitempty"`
 
+	// IngressClassName is the IngressClass workspace, portal and registry Ingresses
+	// are served by. Empty means "traefik", which is what EasyLab installs on a
+	// cluster it provisions itself — so this only matters when reusing an ingress
+	// controller on an existing cluster, where the class can be anything (nginx,
+	// haproxy, a cloud ALB) and an Ingress naming the wrong one is silently ignored.
+	//
+	// Read only by the client-go path (the workspace backend), deliberately not
+	// emitted as Pulumi stack config: on the provisioning path EasyLab installs
+	// Traefik itself, so the class is "traefik" by construction there.
+	IngressClassName string `json:"ingress_class_name,omitempty"`
+
 	// ClusterIssuerName overrides the cert-manager ClusterIssuer name EasyLab
 	// creates and requests certificates from (default "letsencrypt-prod", see
 	// utils.DefaultClusterIssuerName). Only meaningful when reusing an existing

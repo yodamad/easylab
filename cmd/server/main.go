@@ -635,6 +635,9 @@ func registerAdminRoutes(mux *http.ServeMux, handler *server.Handler, authHandle
 	mux.HandleFunc("/api/student-portal-password", authHandler.RequireAuth(handler.GetStudentPortalPassword))
 	mux.HandleFunc("/api/templates/detect-variables", authHandler.RequireAuth(handler.DetectTemplateVariables))
 	mux.HandleFunc("/api/templates/detect-devcontainer", authHandler.RequireAuth(handler.DetectDevcontainer))
+	// Kept outside the /api/labs/ subtree below: that one is a catch-all dispatched
+	// by resolveLabRoute, where a new literal path risks being read as a lab ID.
+	mux.HandleFunc("/api/cluster/detect", authHandler.RequireAuth(handler.DetectCluster))
 	mux.HandleFunc("/api/labs", authHandler.RequireAuth(handler.CreateLab))
 	mux.HandleFunc("/api/labs/templates/yaml", authHandler.RequireAuth(handler.ServeWorkspaceTemplatesYAML))
 	mux.HandleFunc("/api/labs/templates/yaml/validate", authHandler.RequireAuth(handler.ValidateWorkspaceTemplatesYAML))

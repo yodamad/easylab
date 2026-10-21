@@ -514,7 +514,7 @@ func (b *Backend) createRegistryCacheService(ctx context.Context, labels map[str
 // This does not reuse createIngress: that helper hardcodes backend port 80 (matching
 // every workspace Service, which always listens on 80), but the registry Service
 // listens on registryCachePort — reusing it as-is would silently misroute.
-func (b *Backend) EnsureRegistryIngress(ctx context.Context, domain, wildcardTLSSecret, clusterIssuer string) (string, error) {
+func (b *Backend) EnsureRegistryIngress(ctx context.Context, domain, wildcardTLSSecret, clusterIssuer, ingressClass string) (string, error) {
 	host := workspaceHost(registryCacheName, domain)
 	if host == "" {
 		return "", fmt.Errorf("cannot expose the registry without a domain")
@@ -527,7 +527,9 @@ func (b *Backend) EnsureRegistryIngress(ctx context.Context, domain, wildcardTLS
 	}
 
 	pathType := netv1.PathTypePrefix
-	ingressClass := workspaceIngressClass
+	if ingressClass = strings.TrimSpace(ingressClass); ingressClass == "" {
+		ingressClass = workspaceIngressClass
+	}
 	annotations := map[string]string{}
 
 	tlsSecret := wildcardTLSSecret

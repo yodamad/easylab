@@ -142,7 +142,7 @@ func (f *fakePortalBackend) EnsureBuildCache(context.Context) (string, error) {
 
 func (f *fakePortalBackend) WaitForBuildCache(context.Context) error { return nil }
 
-func (f *fakePortalBackend) EnsureRegistryIngress(context.Context, string, string, string) (string, error) {
+func (f *fakePortalBackend) EnsureRegistryIngress(context.Context, string, string, string, string) (string, error) {
 	return "", nil
 }
 

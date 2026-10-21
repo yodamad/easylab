@@ -144,7 +144,7 @@ func portalRules(name string, templateSecrets []string) []rbacv1.PolicyRule {
 // portalRules. A lab without a domain exposes workspaces through nip.io, which
 // takes the ingress controller's address — the one thing the portal reads outside
 // its namespace — so that lab also gets a read on that single Service.
-func (b *Backend) ensurePortalRBAC(ctx context.Context, labID string, templateSecrets []string, needsIngressIP bool) error {
+func (b *Backend) ensurePortalRBAC(ctx context.Context, labID string, templateSecrets []string, needsIngressIP bool, ingressNamespace, ingressService string) error {
 	name := portalName(labID)
 	labels := portalLabels(labID)
 
@@ -162,15 +162,15 @@ func (b *Backend) ensurePortalRBAC(ctx context.Context, labID string, templateSe
 
 	ingressRole := name + portalIngressAccessSuffix
 	if !needsIngressIP {
-		return b.removePortalIngressAccess(ctx, ingressRole)
+		return b.removePortalIngressAccess(ctx, ingressRole, ingressNamespace)
 	}
 	rules := []rbacv1.PolicyRule{{
 		APIGroups:     []string{""},
 		Resources:     []string{"services"},
-		ResourceNames: []string{ingressControllerService},
+		ResourceNames: []string{ingressService},
 		Verbs:         []string{"get"},
 	}}
-	if err := b.applyRole(ctx, ingressControllerNamespace, ingressRole, labels, rules); err != nil {
+	if err := b.applyRole(ctx, ingressNamespace, ingressRole, labels, rules); err != nil {
 		// No ingress controller where we expect one: the portal then has no nip.io
 		// fallback either, exactly like the workspaces it would create.
 		if apierrors.IsNotFound(err) {
@@ -178,7 +178,7 @@ func (b *Backend) ensurePortalRBAC(ctx context.Context, labID string, templateSe
 		}
 		return err
 	}
-	return b.ensureRoleBinding(ctx, ingressControllerNamespace, ingressRole, name, labels)
+	return b.ensureRoleBinding(ctx, ingressNamespace, ingressRole, name, labels)
 }
 
 // applyRole creates the Role, or brings an existing one's rules up to date — the
@@ -223,12 +223,21 @@ func (b *Backend) ensureRoleBinding(ctx context.Context, namespace, role, servic
 
 // removePortalIngressAccess deletes the Role/RoleBinding ensurePortalRBAC creates
 // in the ingress controller's namespace. Absent is not an error.
-func (b *Backend) removePortalIngressAccess(ctx context.Context, name string) error {
-	if err := b.client.RbacV1().RoleBindings(ingressControllerNamespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to delete role binding %s/%s: %w", ingressControllerNamespace, name, err)
+//
+// namespace is where to look; empty means Traefik's conventional location. Note
+// that RemovePortal knows only a lab ID, so a lab that reused a controller in
+// another namespace can leave this one Role behind. It grants nothing but `get`
+// on a single Service, and the same is already true of the shared ingress and
+// cert-manager installations a destroy deliberately leaves in place.
+func (b *Backend) removePortalIngressAccess(ctx context.Context, name, namespace string) error {
+	if namespace = strings.TrimSpace(namespace); namespace == "" {
+		namespace = ingressControllerNamespace
 	}
-	if err := b.client.RbacV1().Roles(ingressControllerNamespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to delete role %s/%s: %w", ingressControllerNamespace, name, err)
+	if err := b.client.RbacV1().RoleBindings(namespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete role binding %s/%s: %w", namespace, name, err)
+	}
+	if err := b.client.RbacV1().Roles(namespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete role %s/%s: %w", namespace, name, err)
 	}
 	return nil
 }
@@ -325,10 +334,14 @@ func (b *Backend) applyPortalDeployment(ctx context.Context, desired *appsv1.Dep
 // applyPortalIngress exposes the portal under host, creating the Ingress or
 // bringing an existing one back in line. Unlike a workspace's, the portal's host
 // is re-derived too: nobody has bookmarked a URL the lab's domain no longer serves.
-func (b *Backend) applyPortalIngress(ctx context.Context, labID, host, tlsSecret, clusterIssuer string) error {
+func (b *Backend) applyPortalIngress(ctx context.Context, labID, host, tlsSecret, clusterIssuer, class string) error {
 	name := portalName(labID)
 	pathType := netv1.PathTypePrefix
-	ingressClass := workspaceIngressClass
+	// Resolved through the shared helper so the portal is served by the same
+	// controller as the lab's workspaces: this function replaces the whole .Spec
+	// when it differs, so a hardcoded class would stamp over a reused one here
+	// just as the workspace reconciler would.
+	ingressClass := ingressClassFor(workspace.Spec{IngressClass: class})
 
 	desired := &netv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: b.namespace, Labels: portalLabels(labID), Annotations: map[string]string{}},
@@ -450,6 +463,13 @@ func (b *Backend) EnsurePortal(ctx context.Context, spec workspace.PortalSpec) (
 		Domain:            spec.Domain,
 		WildcardTLSSecret: spec.WildcardTLSSecret,
 		ClusterIssuer:     spec.ClusterIssuer,
+		IngressClass:      spec.IngressClass,
+		IngressNamespace:  spec.IngressNamespace,
+		IngressService:    spec.IngressService,
+	})
+	ingressNamespace, ingressService := ingressLocationFor(workspace.Spec{
+		IngressNamespace: spec.IngressNamespace,
+		IngressService:   spec.IngressService,
 	})
 	// The portal is served on the lab's domain itself, not a subdomain of it. That
 	// name is the one thing every lab with a domain is sure to have: provisioning
@@ -468,7 +488,7 @@ func (b *Backend) EnsurePortal(ctx context.Context, spec workspace.PortalSpec) (
 		}
 	}
 
-	if err := b.ensurePortalRBAC(ctx, spec.LabID, spec.SecretNames, strings.TrimSpace(spec.Domain) == ""); err != nil {
+	if err := b.ensurePortalRBAC(ctx, spec.LabID, spec.SecretNames, strings.TrimSpace(spec.Domain) == "", ingressNamespace, ingressService); err != nil {
 		return "", err
 	}
 
@@ -498,7 +518,7 @@ func (b *Backend) EnsurePortal(ctx context.Context, spec workspace.PortalSpec) (
 		return "", nil
 	}
 	tlsSecret, clusterIssuer := workspaceTLS(name, routed)
-	if err := b.applyPortalIngress(ctx, spec.LabID, host, tlsSecret, clusterIssuer); err != nil {
+	if err := b.applyPortalIngress(ctx, spec.LabID, host, tlsSecret, clusterIssuer, spec.IngressClass); err != nil {
 		return "", err
 	}
 	scheme := schemeHTTP
@@ -658,7 +678,9 @@ func (b *Backend) RemovePortal(ctx context.Context, labID string) error {
 	del("service account", b.client.CoreV1().ServiceAccounts(b.namespace).Delete(ctx, name, opts))
 	del("config", b.client.CoreV1().Secrets(b.namespace).Delete(ctx, name+portalConfigSuffix, opts))
 	del("outbox", b.client.CoreV1().ConfigMaps(b.namespace).Delete(ctx, name+portalOutboxSuffix, opts))
-	del("ingress access", b.removePortalIngressAccess(ctx, name+portalIngressAccessSuffix))
+	// Only a lab ID is known here, so this clears the conventional location; see
+	// removePortalIngressAccess on what a reused controller elsewhere leaves behind.
+	del("ingress access", b.removePortalIngressAccess(ctx, name+portalIngressAccessSuffix, ""))
 	return firstErr
 }
 

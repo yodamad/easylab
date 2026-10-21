@@ -200,11 +200,13 @@ func (h *Handler) startBake(ctx context.Context, jobID, templateName string) err
 	domain := ""
 	dnsProvider := ""
 	clusterIssuerName := ""
+	ingressClassName := ""
 	var templates []WorkspaceTemplate
 	if job.Config != nil {
 		domain = job.Config.Domain
 		dnsProvider = job.Config.DNSProvider
 		clusterIssuerName = job.Config.ClusterIssuerName
+		ingressClassName = job.Config.IngressClassName
 		templates = job.Config.GetWorkspaceTemplates()
 	}
 	job.mu.RUnlock()
@@ -266,7 +268,7 @@ func (h *Handler) startBake(ctx context.Context, jobID, templateName string) err
 		if dnsProvider != "" {
 			wildcardTLSSecret = ingress.WildcardTLSSecretName
 		}
-		if _, err := rc.EnsureRegistryIngress(ctx, domain, wildcardTLSSecret, clusterIssuerName); err != nil {
+		if _, err := rc.EnsureRegistryIngress(ctx, domain, wildcardTLSSecret, clusterIssuerName, ingressClassName); err != nil {
 			log.Printf("startBake: failed to expose registry for lab %s: %v", jobID, err)
 			return errors.New("Could not expose the in-cluster registry over HTTPS.")
 		}

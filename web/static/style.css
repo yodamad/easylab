@@ -382,6 +382,154 @@ main {
     font-weight: 600;
 }
 
+/* "Detect from cluster" on step 4 (existing cluster only).
+   The result is an inspection readout, not a set of cards: one row per thing we
+   looked for, aligned into label / value / outcome so the eye can run down the
+   value column. Values are monospace because they are real object names the
+   admin can paste after `kubectl get` — prose never goes in that column.
+   Only a row that could not be checked is marked, so attention lands on the one
+   thing needing a decision instead of on a badge per row. Colour never carries
+   the meaning alone: every row states its outcome in words. */
+.cluster-detect {
+    margin-bottom: 1.5rem;
+}
+
+.cluster-detect-prompt {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem 1rem;
+}
+
+.cluster-detect-lede {
+    flex: 1 1 18rem;
+    margin: 0;
+    color: var(--text-light);
+    font-size: 0.875rem;
+}
+
+.cluster-detect-result {
+    margin-top: 1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--background);
+    font-size: 0.875rem;
+    color: var(--text);
+    overflow: hidden;
+}
+
+.cluster-detect-header {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+}
+
+.cluster-detect-title {
+    font-weight: 600;
+}
+
+.cluster-detect-meta {
+    color: var(--text-light);
+}
+
+.cluster-detect-findings {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.finding {
+    display: grid;
+    grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 0.25rem 1rem;
+    padding: 0.5rem 1rem;
+    border-top: 1px solid var(--border);
+    /* Matched by the attention state below, so rows never shift by 3px. */
+    border-left: 3px solid transparent;
+}
+
+.cluster-detect-findings .finding:first-child {
+    border-top: 0;
+}
+
+.finding-label {
+    color: var(--text-light);
+}
+
+.finding-value {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.8125rem;
+    word-break: break-all;
+}
+
+.finding-value-plain {
+    font-family: inherit;
+    font-size: inherit;
+    word-break: normal;
+}
+
+.finding-value-empty {
+    color: var(--text-light);
+}
+
+.finding-state {
+    color: var(--text-light);
+    text-align: right;
+    white-space: nowrap;
+}
+
+/* The one marked state: a probe that was denied or failed says nothing about the
+   cluster, and is the only outcome the admin may need to act on. */
+.finding-unknown {
+    border-left-color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 6%, transparent);
+}
+
+.finding-unknown .finding-state {
+    color: #b45309;
+}
+
+.cluster-detect-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    padding: 0.75rem 1rem;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+}
+
+.cluster-detect-result .warning-message,
+.cluster-detect-result > .hint-text,
+.cluster-detect-result > .detect-variables-status {
+    margin: 0.75rem 1rem;
+}
+
+/* Marks a field the scan filled in, until the admin edits it. */
+.field-detected {
+    box-shadow: inset 3px 0 0 var(--success);
+}
+
+@media (max-width: 640px) {
+    .finding {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .finding-label {
+        grid-column: 1 / -1;
+    }
+
+    .finding-state {
+        text-align: right;
+    }
+}
+
 /* Sticky Footer */
 .wizard-footer {
     position: fixed;
@@ -914,6 +1062,23 @@ a.btn {
 
 .btn-secondary:hover:not(:disabled) {
     background: var(--border);
+}
+
+/* The strongest button weight, for the one action a panel most wants pressed.
+   Deliberately ink rather than --primary-color: the wizard's own Next button is
+   already blue and is the page's primary action, so a second blue fill competes
+   with it. Ink reads as weight rather than hue, which also leaves a panel's
+   colour free to carry meaning (see the cluster-detect readout, where amber is
+   reserved for the one row that needs attention). */
+.btn-strong {
+    background: var(--text);
+    color: #ffffff;
+    border: 1px solid var(--text);
+}
+
+.btn-strong:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--text) 88%, #ffffff);
+    border-color: color-mix(in srgb, var(--text) 88%, #ffffff);
 }
 
 .btn-success {

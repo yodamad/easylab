@@ -119,10 +119,10 @@ func TestEnsureRegistryIngress_ReconcilesExisting(t *testing.T) {
 			b, cs := newTestBackend()
 			ctx := context.Background()
 
-			_, err := b.EnsureRegistryIngress(ctx, domain, tt.firstSecret, tt.firstIssuer)
+			_, err := b.EnsureRegistryIngress(ctx, domain, tt.firstSecret, tt.firstIssuer, "")
 			require.NoError(t, err)
 
-			gotHost, err := b.EnsureRegistryIngress(ctx, domain, tt.secondSecret, tt.secondIssuer)
+			gotHost, err := b.EnsureRegistryIngress(ctx, domain, tt.secondSecret, tt.secondIssuer, "")
 			require.NoError(t, err)
 			assert.Equal(t, host, gotHost)
 
@@ -305,7 +305,7 @@ func TestEnsureRegistryIngress_AddsExternalHostToCredentials(t *testing.T) {
 	require.NoError(t, err)
 	before, beforeHtpasswd := registryCreds(t, cs)
 
-	host, err := b.EnsureRegistryIngress(ctx, "lab.example.com", "easylab-wildcard-tls", "")
+	host, err := b.EnsureRegistryIngress(ctx, "lab.example.com", "easylab-wildcard-tls", "", "")
 	require.NoError(t, err)
 
 	after, afterHtpasswd := registryCreds(t, cs)
@@ -438,11 +438,11 @@ func TestEnsureRegistryIngress_NoWriteWhenUnchanged(t *testing.T) {
 	b, cs := newTestBackend()
 	ctx := context.Background()
 
-	_, err := b.EnsureRegistryIngress(ctx, "lab.example.com", "easylab-wildcard-tls", "")
+	_, err := b.EnsureRegistryIngress(ctx, "lab.example.com", "easylab-wildcard-tls", "", "")
 	require.NoError(t, err)
 	cs.ClearActions()
 
-	_, err = b.EnsureRegistryIngress(ctx, "lab.example.com", "easylab-wildcard-tls", "")
+	_, err = b.EnsureRegistryIngress(ctx, "lab.example.com", "easylab-wildcard-tls", "", "")
 	require.NoError(t, err)
 
 	for _, a := range cs.Actions() {

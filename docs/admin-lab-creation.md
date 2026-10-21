@@ -43,15 +43,55 @@ When you choose **Use Existing Cluster**, EasyLab skips cloud provider provision
   template, see below)
 * The wizard goes directly to workspace and template configuration
 
-The kubeconfig must have sufficient permissions to create namespaces, Deployments, Services, Ingresses and PersistentVolumeClaims, and (when a domain is set) to install the Traefik ingress controller and cert-manager Helm releases.
+The kubeconfig must have sufficient permissions to create namespaces, Deployments, Services, Ingresses and PersistentVolumeClaims, and (when a domain is set) to install the Traefik ingress controller and cert-manager Helm releases. [**Detect from cluster**](#detect-from-cluster) checks exactly this for you and lists anything missing.
 
 !!! warning "The default StorageClass must be network-attached"
     Every workspace gets a persistent volume, and that volume is only as durable
     as the StorageClass behind it. If the cluster's default provisioner is
     node-local (`local-path`, `hostPath`), a workspace rescheduled onto another
-    node comes back empty. Check with `kubectl get storageclass` and, if needed,
-    set `storage_class` on the workspace template — see
-    [Persistence](templates.md#persistence).
+    node comes back empty. **Detect from cluster** checks the default StorageClass
+    and names a better, network-attached class when it is node-local; you can also
+    check by hand with `kubectl get storageclass`. If needed, set `storage_class`
+    on the workspace template — see [Persistence](templates.md#persistence).
+
+#### Detect from cluster
+
+**Detect from cluster** reads the cluster with the kubeconfig you supplied here and
+fills in the settings you would otherwise look up by hand. It sits at the top of the
+[HTTPS Configuration](#https-configuration-optional) step, beside the fields it fills,
+rather than on this one. Nothing scans automatically; it only runs when you click the
+button.
+
+The flow is detect, review, then **Apply to this lab**. The scan only reports; the
+separate **Apply to this lab** button writes the values into the fields on that step
+and the workspace namespace on the next. Applied fields are highlighted, so you can see
+at a glance which values came from the cluster and which you typed yourself; the
+highlight clears as soon as you edit the field. Everything stays editable.
+
+![Detect from cluster results](screens/detect-cluster-result.png){width=700}
+
+The scan is read-only and changes nothing on the cluster. It reports:
+
+* Connectivity, the Kubernetes version and the node count
+* The ingress controller: namespace, Service name, IngressClass, and the LoadBalancer's external IP or hostname
+* Whether cert-manager is installed, and in which namespace
+* Existing ClusterIssuers: whether each has a DNS-01 solver, is Ready, and points at Let's Encrypt staging
+* The default StorageClass and its provisioner
+* Node label keys and values, offered as autocomplete suggestions in the **Node Selector** pickers
+* Namespaces, and whether this lab's workspace namespace already exists
+* A permissions pre-flight (`SelfSubjectAccessReview`): whether these credentials may create the Deployments, Services, Ingresses, PVCs, Secrets, ConfigMaps, ServiceAccounts, Roles, RoleBindings, Jobs and DaemonSets a workspace needs, a Role in the ingress controller's namespace for the [in-lab student portal](student-portal.md), namespaces, list nodes and StorageClasses, and create ClusterIssuers when cert-manager is present
+
+Every check is independent. A check the kubeconfig is not allowed to make is reported
+as **couldn't check** and the others still run. The panel shows one of three outcomes
+per check — **found**, **not found**, or **couldn't check** — because "there is no
+cert-manager" and "I may not look for cert-manager" are different answers. The panel
+also raises warnings, each with an explanation (for example a non-Traefik controller, a
+node-local default StorageClass, a ClusterIssuer that is not Ready, or a workspace
+namespace that already exists). Nothing the scan reports blocks the wizard: **Next**
+stays enabled whatever it finds.
+
+See [Reusing components already on the cluster](#reusing-components-already-on-the-cluster)
+for exactly what gets prefilled, and when it deliberately suggests nothing.
 
 #### Splitting EasyLab and workspaces across node pools
 
@@ -513,7 +553,23 @@ Two infrastructure toggles sit in the main flow, not tucked behind a click, so y
 can find them even if you're just skimming: **Ingress Controller** (always shown) and
 **cert-manager** (shown once a custom domain is selected — it has nothing to do in
 Quick start mode). Both default to "install a new one"; switch to "use existing" if
-your cluster already has one, and a namespace/service-name override appears.
+your cluster already has one, and the namespace and service-name overrides appear (for
+the ingress controller: **Ingress Namespace**, **Controller Service Name** and
+**Ingress Class**, which defaults to `traefik`).
+
+The lab's **Ingress Class** is honoured by workspace, portal and registry Ingresses
+alike, so reusing a non-Traefik controller such as ingress-nginx works: set the class
+to match. One limitation remains: in **Quick start** (nip.io) mode the lab's base URL is
+still derived from the ingress controller in Traefik's conventional location, so a lab
+that reuses a controller in another namespace *and* has no domain will not show a
+nip.io base URL. Use a custom domain in that case.
+
+[**Detect from cluster**](#detect-from-cluster) fills these in for you:
+
+* The ingress namespace, Service name and class, and **Ingress Controller** switched to "use existing" — only when it actually found a controller. If the probe was denied it suggests nothing, rather than proposing a new install over a controller it could not see.
+* **Existing ClusterIssuer Name**, along with **Custom domain — automatic** and **Already configured** — only from an issuer that is both Ready and has a DNS-01 solver (see the note below). An issuer like that can only serve a domain you own, so applying it moves the lab off Quick start; the domain itself and the DNS credentials are still yours to fill in.
+* The workspace namespace — only when that namespace already exists.
+* A network-attached alternative when the default StorageClass is node-local. This is shown as panel text only: templates are defined later, on step 6, so set `storage_class` there.
 
 When installing (not reusing) either component, a **Node Selector** field appears
 underneath it — **Traefik Node Selector** and **cert-manager Node Selector**. Add
@@ -545,6 +601,14 @@ pool, or for co-locating them with a specific pool for cost or locality reasons.
     `CertificateRequest` just stalls waiting for an issuer that doesn't exist, no
     certificate is ever issued, and the ingress controller falls back to serving its
     own self-signed default certificate instead.
+
+    **Detect from cluster** lists the cluster's ClusterIssuers with their DNS-01 and
+    Ready state, and fills this field only from one that can actually issue the lab's
+    wildcard certificate. An issuer that is stalled or has only an HTTP-01 solver is
+    listed but never filled in. Applying one also selects **Custom domain —
+    automatic** and **Already configured**, because this field is only reachable
+    there and a DNS-01 issuer has nothing to issue for a Quick start lab. The Apply
+    note says so before you press it, and the domain mode stays editable afterwards.
 
 #### DNS Provider (Optional)
 

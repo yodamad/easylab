@@ -170,6 +170,7 @@
                                     <small>Paste your kubeconfig YAML content directly</small>
                                 </div>
                             </div>
+
                         </div>
 
                     </div>
@@ -333,6 +334,14 @@
                     </div>
                     <div class="step-content">
 
+                        <div class="cluster-detect byok-only">
+                            <div class="cluster-detect-prompt">
+                                <p class="cluster-detect-lede">Read the ingress, cert-manager and storage settings below off the cluster instead of looking them up. Nothing on the cluster is changed, and you can edit anything it fills in.</p>
+                                <button type="button" class="btn btn-strong" id="btn-detect-cluster">Detect from cluster</button>
+                            </div>
+                            <div id="cluster-detect-result" class="cluster-detect-result" style="display: none;"></div>
+                        </div>
+
                         <div class="form-group">
                             <label>How will students reach their workspaces?</label>
                             <div class="button-group">
@@ -396,6 +405,11 @@
                                     <label for="nginx_ingress_service_name">Controller Service Name</label>
                                     <input type="text" id="nginx_ingress_service_name" name="nginx_ingress_service_name" placeholder="traefik">
                                     <small>Service name of the ingress controller. Defaults to <code>traefik</code>.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="ingress_class_name">Ingress Class</label>
+                                    <input type="text" id="ingress_class_name" name="ingress_class_name" placeholder="traefik">
+                                    <small>IngressClass workspace URLs are routed through. Defaults to <code>traefik</code>.</small>
                                 </div>
                             </div>
                         </div>

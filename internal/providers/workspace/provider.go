@@ -256,6 +256,19 @@ type Spec struct {
 	ClusterIssuer     string // cert-manager ClusterIssuer used for per-host certs
 	Token             string // IDE access secret (connection token / password)
 
+	// IngressClass names the IngressClass this workspace's Ingress is served by.
+	// Empty means Traefik, which is what EasyLab installs on a cluster it creates
+	// itself — so only a lab reusing a controller on its own cluster ever sets it,
+	// and there the class can be anything (nginx, haproxy, a cloud ALB). Getting it
+	// wrong is silent: the controller simply ignores an Ingress that names another
+	// class, and nothing routes.
+	IngressClass string
+	// IngressNamespace and IngressService locate the ingress controller's Service,
+	// read for its external address when the lab has no domain of its own (the
+	// nip.io fallback). Empty means Traefik's own conventional location.
+	IngressNamespace string
+	IngressService   string
+
 	// NodeSelector constrains this workspace's pod to nodes matching these labels
 	// (e.g. a dedicated workspace node pool, separate from where EasyLab itself runs).
 	NodeSelector map[string]string
@@ -348,7 +361,11 @@ type RegistryCacheProvider interface {
 	// Ingress would (WildcardTLSSecret when set, else a per-host cert via
 	// clusterIssuer), so the kubelet can pull a baked image over trusted HTTPS
 	// rather than the plain-HTTP path envbuilder uses. Returns the external host.
-	EnsureRegistryIngress(ctx context.Context, domain, wildcardTLSSecret, clusterIssuer string) (host string, err error)
+	// ingressClass names the IngressClass serving it, and must match the one the
+	// lab's workspaces use: an Ingress naming a class no controller on the cluster
+	// serves is ignored, and the kubelet's pull of a baked image then fails with no
+	// error on the bake itself. Empty means Traefik.
+	EnsureRegistryIngress(ctx context.Context, domain, wildcardTLSSecret, clusterIssuer, ingressClass string) (host string, err error)
 	// BakedImageRepo returns the internal (push, used by a bake Job) and external
 	// (pull, handed to student pods) repository references for a template's baked
 	// image. Pure string building — does not provision anything, and does not
@@ -489,6 +506,13 @@ type PortalSpec struct {
 	Domain            string
 	WildcardTLSSecret string
 	ClusterIssuer     string
+	// IngressClass, IngressNamespace and IngressService mean the same as on Spec:
+	// which controller serves the portal's Ingress, and where that controller lives
+	// — the latter because the portal reads the controller's Service from its own
+	// namespace, which needs a Role over there.
+	IngressClass     string
+	IngressNamespace string
+	IngressService   string
 	// Config is the portal's whole view of its lab (see PortalRuntime): everything
 	// it serves students from, since it has no connection back to the admin.
 	Config map[string][]byte
