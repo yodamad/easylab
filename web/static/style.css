@@ -1293,6 +1293,12 @@ a.btn {
     border-radius: 3px;
 }
 
+.warning-message a:not(.btn) {
+    color: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+}
+
 .output-container {
     margin-top: 1rem;
 }

@@ -13,6 +13,18 @@ else you can do once a lab exists.
 
 ![Steps](screens/steps.png)
 
+!!! warning "A locked credential storage is flagged up front"
+    If [credential storage](admin.md#credential-storage) is locked when you open the
+    wizard — a passphrase-protected store that nobody has unlocked since the last
+    restart — a warning at the top of the page says so. Saved cloud provider
+    credentials and [DNS profiles](admin.md#dns-profiles) are unavailable until it is
+    unlocked, so you have to type whatever credentials this lab needs. Follow the
+    **Unlock credential storage** link in the warning to reuse the saved ones instead.
+    The same warning appears, worded for that case, when a saved store cannot be read
+    at all because its `LAB_DATA_ENCRYPTION_KEY` is no longer set.
+
+    ![Credential storage locked warning](screens/credential-storage-locked.png){width=700}
+
 Start by naming the lab:
 
 * **Lab Name** (required) — a unique name used as the prefix for all cloud resources (letters, numbers, hyphens and underscores only).
