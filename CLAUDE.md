@@ -36,6 +36,7 @@ internal/
     credentials.go       # Provider credentials management (OVH, extensible)
     credential_vault.go  # Encrypted credential storage (passphrase or LAB_DATA_ENCRYPTION_KEY) + its admin handlers
     dns_profiles.go      # Saved DNS credential profiles (stored in the vault) + DNS admin page handlers
+    cluster_profiles.go  # Saved cluster profiles: reusable kubeconfigs (stored in the vault) + Clusters admin page handlers
     job.go               # Job/lab lifecycle management (create, status, persist)
     pulumi.go            # Pulumi executor (preview, execute, destroy, retry)
     cleanup.go           # Background workspace cleanup goroutine (every 5 min)
@@ -125,7 +126,7 @@ CRITICAL: Do NOT modify, refactor, rename, or restructure existing files unless 
 - **Feedback system**: `internal/server/feedback.go` manages student ratings/comments (1–5 rating, difficulty, recommendation, free text) via `FeedbackStore` persisted to JSON. Admin view at `/admin/feedback?lab_id=`.
 - **Workspace cleanup**: `internal/server/cleanup.go` runs a background goroutine every 5 minutes that probes the lab's cluster API reachability, enforces `WorkspaceLifetimeHours` per job, and records cleanup events for the stats dashboard.
 - **Stats dashboard**: `ServeAdminStats` / `GetProjectStats` in `handler.go` aggregate deployment KPIs and monthly time-series data from job history (workspace snapshots + cleanup events).
-- **BYO Kubernetes**: `LabConfig.UseExistingCluster` + `ExternalKubeconfig` fields allow skipping OVH provisioning when a cluster already exists.
+- **BYO Kubernetes**: `LabConfig.UseExistingCluster` + `ExternalKubeconfig` fields allow skipping OVH provisioning when a cluster already exists. A kubeconfig can also be saved as a reusable named profile in the credential vault (`internal/server/cluster_profiles.go`, `/admin/clusters`) and picked in the wizard; `kubeconfigFromFormOrProfile` resolves pasted > profile > the lab's existing one, and copies the kubeconfig into `ExternalKubeconfig` so the lab is immune to the profile later changing.
 - **HTTPS/TLS**: `ingress/https.go` handles ingress-nginx and cert-manager installation, DNS-01/HTTP-01 ACME challenge setup, wildcard domains, and LoadBalancer IP resolution for OVHcloud.
 - **Terraform variable detection**: `internal/tfparse/variables.go` parses Terraform `.tf` files from ZIP uploads to extract variable definitions used by the `DetectTemplateVariables` handler.
 - **Cluster detection**: `internal/clusterscan/` is a standalone read-only analysis package (like `internal/tfparse` and `internal/devcontainer`); `internal/server/cluster_detect.go` maps its `Report` onto the wizard's own form field names for the **Detect from cluster** button.
@@ -210,7 +211,7 @@ When new visual styles are needed:
 
 ## Security
 
-- Provider credentials (OVH keys, etc.) are held in memory by `CredentialsManager` and never written to job files. They and saved DNS profiles are persisted only through `CredentialVault` (`credential_vault.go`), AES-256-GCM, and only under a key that is not on disk beside the data: an explicit `LAB_DATA_ENCRYPTION_KEY` or an admin passphrase held in memory. Never save them under the auto-generated `<dataDir>/.encryption_key`
+- Provider credentials (OVH keys, etc.) are held in memory by `CredentialsManager` and never written to job files. They, saved DNS profiles and saved cluster profiles (kubeconfigs) are persisted only through `CredentialVault` (`credential_vault.go`), AES-256-GCM, and only under a key that is not on disk beside the data: an explicit `LAB_DATA_ENCRYPTION_KEY` or an admin passphrase held in memory. Never save them under the auto-generated `<dataDir>/.encryption_key`
 - Admin auth uses bcrypt-hashed passwords with cookie-based sessions
 - Student passwords are generated server-side with `crypto/rand`
 - Always sanitize user input in templates with `template.HTMLEscapeString()`
@@ -237,7 +238,7 @@ Documentation is part of the deliverable, not a follow-up task. Any change to a 
 
 | Area | Doc file |
 |------|----------|
-| Admin UI overview, login, provider credentials, credential storage, DNS profiles | `docs/admin.md` |
+| Admin UI overview, login, provider credentials, credential storage, DNS profiles, cluster profiles | `docs/admin.md` |
 | Lab creation wizard (infrastructure, workspace templates, HTTPS/DNS, cleaning policies) | `docs/admin-lab-creation.md` |
 | Lab management (labs list, lab detail page, retry/recreate, workspace history, lab credentials) | `docs/admin-lab-management.md` |
 | Student feedback collection and admin feedback view | `docs/feedbacks.md` |

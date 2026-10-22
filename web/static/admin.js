@@ -396,11 +396,15 @@ const wizard = {
 
         // In BYOK mode on step 1, validate kubeconfig is provided
         if (this.useExistingCluster && this.currentStep === 1) {
+            // A saved cluster profile is a third way to provide the kubeconfig: it
+            // satisfies both checks below on its own.
+            const clusterProfile = document.getElementById('cluster_profile');
+            const usingClusterProfile = !!(clusterProfile && clusterProfile.value);
             const uploadBtn = document.getElementById('kubeconfig-mode-upload');
             const pasteBtn = document.getElementById('kubeconfig-mode-paste');
             const modeSelected = (uploadBtn && uploadBtn.classList.contains('selected')) ||
                                  (pasteBtn && pasteBtn.classList.contains('selected'));
-            if (!modeSelected) {
+            if (!modeSelected && !usingClusterProfile) {
                 alert('Please choose how to provide your kubeconfig: Upload File or Paste Content.');
                 return false;
             }
@@ -411,8 +415,8 @@ const wizard = {
             // Editing a failed lab's config before retrying it: a blank kubeconfig
             // here means "keep the lab's existing one" (the backend falls back to
             // it), so it is not required in that one case.
-            if (!hasFile && !hasContent && !this.retryEditKeepsKubeconfig) {
-                alert('Please provide your kubeconfig content.');
+            if (!hasFile && !hasContent && !usingClusterProfile && !this.retryEditKeepsKubeconfig) {
+                alert('Please provide your kubeconfig content, or pick a saved cluster.');
                 return false;
             }
             // Also validate stack name (now on step 1 for all modes)
@@ -966,6 +970,28 @@ function handleDNSProfileChange() {
     handleDNSProviderChange();
 }
 
+// A saved cluster profile supplies the kubeconfig, so there is nothing to upload
+// or paste. Clearing the selection brings the upload/paste choice back.
+function handleClusterProfileChange() {
+    const profileSelect = document.getElementById('cluster_profile');
+    const usingProfile = !!(profileSelect && profileSelect.value);
+    const provideGroup = document.getElementById('kubeconfig-provide-group');
+    const uploadSection = document.getElementById('kubeconfig-upload-section');
+    const pasteSection = document.getElementById('kubeconfig-paste-section');
+
+    if (provideGroup) provideGroup.style.display = usingProfile ? 'none' : '';
+    if (usingProfile) {
+        if (uploadSection) uploadSection.style.display = 'none';
+        if (pasteSection) pasteSection.style.display = 'none';
+        return;
+    }
+    // Restore whichever mode is still selected on the buttons.
+    const pasteBtn = document.getElementById('kubeconfig-mode-paste');
+    const pasting = !!(pasteBtn && pasteBtn.classList.contains('selected'));
+    if (uploadSection) uploadSection.style.display = pasting ? 'none' : '';
+    if (pasteSection) pasteSection.style.display = pasting ? '' : 'none';
+}
+
 // Show/hide DNS provider-specific credential fields when dns_provider changes.
 function handleDNSProviderChange() {
     const select = document.getElementById('dns_provider');
@@ -1426,6 +1452,12 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     setKubeconfigMode('upload');
 
+    const clusterProfileSelect = document.getElementById('cluster_profile');
+    if (clusterProfileSelect) {
+        clusterProfileSelect.addEventListener('change', handleClusterProfileChange);
+        handleClusterProfileChange();
+    }
+
     const detectClusterBtn = document.getElementById('btn-detect-cluster');
     if (detectClusterBtn) {
         detectClusterBtn.addEventListener('click', detectCluster);
@@ -1868,8 +1900,12 @@ function detectCluster() {
     const textarea = document.getElementById('kubeconfig_content');
     if (!btn || !textarea) return;
 
-    if (!textarea.value.trim()) {
-        showClusterDetectError('Paste or upload a kubeconfig first.');
+    // A saved cluster profile is resolved server-side, so the kubeconfig never
+    // has to be in the page for the scan to run.
+    const clusterProfile = document.getElementById('cluster_profile');
+    const profileID = clusterProfile ? clusterProfile.value : '';
+    if (!textarea.value.trim() && !profileID) {
+        showClusterDetectError('Paste or upload a kubeconfig first, or pick a saved cluster.');
         return;
     }
 
@@ -1878,6 +1914,7 @@ function detectCluster() {
 
     const fd = new FormData();
     fd.append('kubeconfig_content', textarea.value);
+    fd.append('cluster_profile', profileID);
     const ns = document.getElementById('workspace_namespace');
     fd.append('workspace_namespace', ns ? ns.value : '');
 
@@ -2435,11 +2472,24 @@ async function applyPrefill(config, templatesYaml, jobId, action) {
 
     if (config.use_existing_cluster) {
         wizard.retryEditKeepsKubeconfig = action === 'retry';
+        // Reselect the saved cluster the lab was created from, if it still exists.
+        const clusterProfileSelect = document.getElementById('cluster_profile');
+        const savedCluster = clusterProfileSelect && config.cluster_profile
+            ? Array.from(clusterProfileSelect.options).find(o => o.dataset.name === config.cluster_profile)
+            : null;
+        if (savedCluster) {
+            clusterProfileSelect.value = savedCluster.value;
+            handleClusterProfileChange();
+        }
         const hint = document.getElementById('kubeconfig-prefill-hint');
         if (hint) {
-            hint.textContent = action === 'retry'
-                ? "Leave blank to keep the lab's existing kubeconfig."
-                : 'The kubeconfig is not carried over when recreating — you must provide one to continue.';
+            if (savedCluster) {
+                hint.textContent = 'The kubeconfig comes from the saved cluster "' + config.cluster_profile + '".';
+            } else {
+                hint.textContent = action === 'retry'
+                    ? "Leave blank to keep the lab's existing kubeconfig."
+                    : 'The kubeconfig is not carried over when recreating — provide one or pick a saved cluster to continue.';
+            }
             hint.style.display = '';
         }
     } else {

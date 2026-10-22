@@ -591,6 +591,10 @@ func registerAdminRoutes(mux *http.ServeMux, handler *server.Handler, authHandle
 	mux.HandleFunc("/api/dns-profiles", authHandler.RequireAuth(handler.SaveDNSProfile))
 	mux.HandleFunc("/api/dns-profiles/fields", authHandler.RequireAuth(handler.DNSProfileFields))
 	mux.HandleFunc("/api/dns-profiles/delete", authHandler.RequireAuth(handler.DeleteDNSProfile))
+	// Saved cluster profiles (kubeconfigs for existing clusters), same storage
+	mux.HandleFunc("/admin/clusters", authHandler.RequireAuth(handler.ServeClusterProfiles))
+	mux.HandleFunc("/api/cluster-profiles", authHandler.RequireAuth(handler.SaveClusterProfile))
+	mux.HandleFunc("/api/cluster-profiles/delete", authHandler.RequireAuth(handler.DeleteClusterProfile))
 	mux.HandleFunc("/api/credential-vault/passphrase", authHandler.RequireAuth(handler.SetVaultPassphrase))
 	mux.HandleFunc("/api/credential-vault/unlock", authHandler.RequireAuth(handler.UnlockVault))
 	mux.HandleFunc("/api/credential-vault/lock", authHandler.RequireAuth(handler.LockVault))

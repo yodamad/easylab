@@ -1065,6 +1065,7 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 		"admin-audit-log.html":    "web/admin-audit-log.html",
 		"credentials.html":        "web/credentials.html",
 		"dns-profiles.html":       "web/dns-profiles.html",
+		"cluster-profiles.html":   "web/cluster-profiles.html",
 		"ovh-credentials.html":    "web/ovh-credentials.html", // Keep for backward compatibility
 		"ovh-options.html":        "web/ovh-options.html",
 		"azure-options.html":      "web/azure-options.html",
@@ -1086,10 +1087,11 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 	// Shared partials a page pulls in with {{template "..."}}. They have to be
 	// parsed alongside the page or the define is unknown at execution time.
 	extraPartials := map[string][]string{
-		"admin.html":        {"web/partials/template-editor.html"},
-		"lab-detail.html":   {"web/partials/template-editor.html"},
-		"credentials.html":  {"web/partials/credential-storage.html"},
-		"dns-profiles.html": {"web/partials/credential-storage.html"},
+		"admin.html":            {"web/partials/template-editor.html"},
+		"lab-detail.html":       {"web/partials/template-editor.html"},
+		"credentials.html":      {"web/partials/credential-storage.html"},
+		"dns-profiles.html":     {"web/partials/credential-storage.html"},
+		"cluster-profiles.html": {"web/partials/credential-storage.html"},
 	}
 
 	var err error
@@ -1137,6 +1139,8 @@ func (h *Handler) ServeAdminUI(w http.ResponseWriter, r *http.Request) {
 	}
 	// Saved DNS profiles the wizard offers in place of typing DNS credentials.
 	data["DNSProfiles"], data["DNSProfilesLocked"] = h.wizardDNSProfiles()
+	// Saved cluster profiles the wizard offers in place of uploading a kubeconfig.
+	data["ClusterProfiles"], data["ClusterProfilesLocked"] = h.wizardClusterProfiles()
 	// Credential storage state: a locked or unreadable vault means saved provider
 	// credentials and DNS profiles cannot be reused in this lab, so the wizard warns
 	// about it up front instead of letting the admin find out step by step.
@@ -1257,14 +1261,14 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 
 	// Handle kubeconfig for BYOK mode
 	if useExistingCluster {
-		kubeconfigContent, err := h.readKubeconfigFromForm(r)
+		kubeconfigContent, clusterProfile, err := h.kubeconfigFromFormOrProfile(r)
 		if err != nil {
 			log.Printf("Failed to read kubeconfig: %v", err)
-			h.renderHTMLError(w, "Kubeconfig Error", "Failed to read kubeconfig, please check the file and try again.")
+			h.renderHTMLError(w, "Kubeconfig Error", clusterProfileErrorMessage(err))
 			return
 		}
 		if kubeconfigContent == "" {
-			h.renderHTMLError(w, "Kubeconfig Required", "Please provide a kubeconfig file or paste its content")
+			h.renderHTMLError(w, "Kubeconfig Required", "Please provide a kubeconfig file, paste its content, or pick a saved cluster")
 			return
 		}
 		kubeconfigPath := filepath.Join(jobDir, "external-kubeconfig.yaml")
@@ -1275,6 +1279,7 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 		}
 		h.updateJobConfig(jobID, func(config *LabConfig) {
 			config.ExternalKubeconfig = kubeconfigContent
+			config.ClusterProfile = clusterProfile
 		})
 	}
 
@@ -5317,19 +5322,21 @@ func (h *Handler) RetryJobWithConfig(w http.ResponseWriter, r *http.Request) {
 	// response). Leaving those fields blank in the edit form must not wipe them
 	// out — fall back to the job's current values when nothing new was supplied.
 	if editedConfig.UseExistingCluster {
-		submittedKubeconfig, err := h.readKubeconfigFromForm(r)
+		submittedKubeconfig, clusterProfile, err := h.kubeconfigFromFormOrProfile(r)
 		if err != nil {
 			log.Printf("Failed to read kubeconfig: %v", err)
-			h.renderHTMLError(w, "Kubeconfig Error", "Failed to read kubeconfig, please check the file and try again.")
+			h.renderHTMLError(w, "Kubeconfig Error", clusterProfileErrorMessage(err))
 			return
 		}
 		if submittedKubeconfig != "" {
 			editedConfig.ExternalKubeconfig = submittedKubeconfig
+			editedConfig.ClusterProfile = clusterProfile
 		} else {
 			editedConfig.ExternalKubeconfig = originalConfig.ExternalKubeconfig
+			editedConfig.ClusterProfile = originalConfig.ClusterProfile
 		}
 		if editedConfig.ExternalKubeconfig == "" {
-			h.renderHTMLError(w, "Kubeconfig Required", "Please provide a kubeconfig file or paste its content")
+			h.renderHTMLError(w, "Kubeconfig Required", "Please provide a kubeconfig file, paste its content, or pick a saved cluster")
 			return
 		}
 	}

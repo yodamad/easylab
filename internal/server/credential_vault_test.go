@@ -502,6 +502,7 @@ func TestCredentialStoragePartial_RendersEveryState(t *testing.T) {
 			}{
 				{"/credentials", h.ServeCredentials},
 				{"/admin/dns", h.ServeDNSProfiles},
+				{"/admin/clusters", h.ServeClusterProfiles},
 			} {
 				rec := httptest.NewRecorder()
 				page.serve(rec, httptest.NewRequest(http.MethodGet, page.path, nil))

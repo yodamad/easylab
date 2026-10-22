@@ -30,6 +30,7 @@ lab's history rather than scanning the global log.
 * Credential changes: saving OVH or Azure credentials (the credential values themselves are never recorded)
 * [Credential storage](admin.md#credential-storage) actions: setting or changing the passphrase (`credential_vault.set_passphrase` / `credential_vault.change_passphrase`), unlocking (`credential_vault.unlock`), a failed unlock (`credential_vault.unlock_failed`), locking (`credential_vault.lock`) and resetting (`credential_vault.reset`) — never the passphrase
 * [DNS profile](admin.md#dns-profiles) changes: `dns_profile.create`, `dns_profile.update`, `dns_profile.delete`, with the profile name and provider as detail — never its credentials
+* [Cluster profile](admin.md#cluster-profiles) changes: `cluster_profile.create`, `cluster_profile.update`, `cluster_profile.delete`, with the profile name as detail — never its kubeconfig
 * [Detect from cluster](admin-lab-creation.md#detect-from-cluster) scans (`cluster.detect`), recorded whenever an admin runs one, with only what was found as detail (Kubernetes version, node count, ingress controller location and class, cert-manager namespace and ClusterIssuer count, warning count) — never the kubeconfig or the API server address
 * Admin viewing the shared student portal login password
 * Admin saving the [GitHub login](github.md) settings (`github_auth.update`, with whether it is enabled and for which organizations as detail — never the client secret)

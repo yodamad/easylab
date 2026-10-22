@@ -319,6 +319,10 @@ type LabConfig struct {
 	// Bring Your Own Kubernetes cluster
 	UseExistingCluster bool   `json:"use_existing_cluster"`
 	ExternalKubeconfig string `json:"external_kubeconfig,omitempty"`
+	// ClusterProfile is the name of the saved cluster profile ExternalKubeconfig
+	// was copied from, when one was picked in the wizard. Informational: the lab
+	// never reads the profile again.
+	ClusterProfile string `json:"cluster_profile,omitempty"`
 
 	// OVH Environment Variables (kept for backward compatibility)
 	OvhApplicationKey    string `json:"ovh_application_key"`

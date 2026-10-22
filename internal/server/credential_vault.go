@@ -18,10 +18,11 @@ import (
 	"time"
 )
 
-// The credential vault keeps cloud provider credentials and saved DNS profiles
-// across restarts, encrypted, without ever leaving the key that opens them next
-// to the data. That rules out the auto-generated <dataDir>/.encryption_key, which
-// protects job files but sits beside them. The vault is written to disk only
+// The credential vault keeps cloud provider credentials, saved DNS profiles and
+// saved cluster profiles (kubeconfigs) across restarts, encrypted, without ever
+// leaving the key that opens them next to the data. That rules out the
+// auto-generated <dataDir>/.encryption_key, which protects job files but sits
+// beside them. The vault is written to disk only
 // under a key that comes from somewhere else:
 //
 //   - LAB_DATA_ENCRYPTION_KEY set explicitly in the environment, or
@@ -85,15 +86,17 @@ var (
 )
 
 // vaultFile is the on-disk form. Everything secret in it is sealed; names,
-// providers and zones stay readable so a locked vault can still say what it holds.
+// providers, zones and descriptions stay readable so a locked vault can still
+// say what it holds.
 type vaultFile struct {
-	Version     int               `json:"version"`
-	KeySource   string            `json:"key_source"`
-	Salt        string            `json:"salt,omitempty"`
-	Iterations  int               `json:"iterations,omitempty"`
-	Check       string            `json:"check"`
-	Providers   map[string]string `json:"providers,omitempty"`
-	DNSProfiles []vaultDNSProfile `json:"dns_profiles,omitempty"`
+	Version         int                   `json:"version"`
+	KeySource       string                `json:"key_source"`
+	Salt            string                `json:"salt,omitempty"`
+	Iterations      int                   `json:"iterations,omitempty"`
+	Check           string                `json:"check"`
+	Providers       map[string]string     `json:"providers,omitempty"`
+	DNSProfiles     []vaultDNSProfile     `json:"dns_profiles,omitempty"`
+	ClusterProfiles []vaultClusterProfile `json:"cluster_profiles,omitempty"`
 }
 
 // vaultDNSProfile is a saved DNS profile with its credential values sealed.
@@ -104,6 +107,18 @@ type vaultDNSProfile struct {
 	Zone        string            `json:"zone,omitempty"`
 	UpdatedAt   time.Time         `json:"updated_at"`
 	Credentials map[string]string `json:"credentials,omitempty"`
+}
+
+// vaultClusterProfile is a saved cluster profile with its kubeconfig sealed. A
+// kubeconfig is one opaque secret — its server URL, context and CA stay inside
+// the sealed blob rather than being summarized in the clear, so only the name and
+// description are readable while the vault is locked.
+type vaultClusterProfile struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	Kubeconfig  string    `json:"kubeconfig,omitempty"`
 }
 
 // vaultContents is everything a key change has to swap as one unit, so a failed
@@ -117,9 +132,11 @@ type vaultContents struct {
 	check      string
 	providers  map[string]string
 	profiles   []vaultDNSProfile
+	clusters   []vaultClusterProfile
 }
 
-// CredentialVault stores provider credentials and DNS profiles, sealed.
+// CredentialVault stores provider credentials, DNS profiles and cluster
+// profiles, sealed.
 type CredentialVault struct {
 	mu sync.RWMutex
 	vaultContents
@@ -197,6 +214,7 @@ func (v *CredentialVault) open() error {
 		check:     f.Check,
 		providers: f.Providers,
 		profiles:  f.DNSProfiles,
+		clusters:  f.ClusterProfiles,
 	}
 	if contents.providers == nil {
 		contents.providers = make(map[string]string)
@@ -298,12 +316,13 @@ func (v *CredentialVault) saveLocked() error {
 		return nil
 	}
 	f := vaultFile{
-		Version:     1,
-		KeySource:   v.keySource,
-		Iterations:  v.iterations,
-		Check:       v.check,
-		Providers:   v.providers,
-		DNSProfiles: v.profiles,
+		Version:         1,
+		KeySource:       v.keySource,
+		Iterations:      v.iterations,
+		Check:           v.check,
+		Providers:       v.providers,
+		DNSProfiles:     v.profiles,
+		ClusterProfiles: v.clusters,
 	}
 	if len(v.salt) > 0 {
 		f.Salt = base64.StdEncoding.EncodeToString(v.salt)
@@ -330,6 +349,13 @@ func vaultProviderAAD(provider string) string { return "provider:" + provider }
 
 func vaultDNSFieldAAD(profileID, field string) string { return "dns:" + profileID + ":" + field }
 
+// vaultClusterKubeconfigAAD binds a sealed kubeconfig to the cluster profile it
+// belongs to. The "cluster:" prefix keeps it a namespace of its own, so a sealed
+// value cannot be moved between a provider slot, a DNS field and a kubeconfig.
+func vaultClusterKubeconfigAAD(profileID string) string {
+	return "cluster:" + profileID + ":kubeconfig"
+}
+
 // rewrapLocked returns the current contents re-sealed under aead. The receiver
 // is not modified, so the caller can still fall back to what it had.
 func (v *CredentialVault) rewrapLocked(aead cipher.AEAD) (vaultContents, error) {
@@ -337,6 +363,7 @@ func (v *CredentialVault) rewrapLocked(aead cipher.AEAD) (vaultContents, error) 
 		aead:      aead,
 		providers: make(map[string]string, len(v.providers)),
 		profiles:  make([]vaultDNSProfile, 0, len(v.profiles)),
+		clusters:  make([]vaultClusterProfile, 0, len(v.clusters)),
 	}
 	reseal := func(value, aad string) (string, error) {
 		plain, err := openWithAEAD(v.aead, value, aad)
@@ -363,6 +390,15 @@ func (v *CredentialVault) rewrapLocked(aead cipher.AEAD) (vaultContents, error) 
 			cp.Credentials[field] = sealed
 		}
 		out.profiles = append(out.profiles, cp)
+	}
+	for _, c := range v.clusters {
+		cp := c
+		sealed, err := reseal(c.Kubeconfig, vaultClusterKubeconfigAAD(c.ID))
+		if err != nil {
+			return vaultContents{}, fmt.Errorf("failed to re-encrypt cluster profile %q: %w", c.Name, err)
+		}
+		cp.Kubeconfig = sealed
+		out.clusters = append(out.clusters, cp)
 	}
 	check, err := sealWithAEAD(aead, vaultCheckPlaintext, vaultCheckAAD)
 	if err != nil {
@@ -510,9 +546,9 @@ func (v *CredentialVault) rekeyToEnvLocked() error {
 	return nil
 }
 
-// Lock forgets the passphrase-derived key. Saved DNS profiles become unusable
-// until the next Unlock; provider credentials already loaded into the
-// CredentialsManager stay in memory until the process restarts.
+// Lock forgets the passphrase-derived key. Saved DNS profiles and cluster
+// profiles become unusable until the next Unlock; provider credentials already
+// loaded into the CredentialsManager stay in memory until the process restarts.
 func (v *CredentialVault) Lock() error {
 	v.mu.Lock()
 	defer v.mu.Unlock()

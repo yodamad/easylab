@@ -1,0 +1,134 @@
+{{define "title"}}Cluster profiles{{end}}
+{{define "body-class"}}admin-page{{end}}
+{{define "head-extra"}}
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.0/dist/htmx.min.js" integrity="sha384-wS5l5IKJBvK6sPTKa2WZ1js3d947pvWXbPJ1OmWfEuxLgeHcEbjUUA5i9V5ZkpCw" crossorigin="anonymous"></script>
+<script src="/static/cluster-profiles.js" defer></script>
+{{end}}
+
+{{define "body"}}
+<div class="admin-layout">
+    {{template "admin-sidebar" .}}
+    <div class="admin-main">
+        <div class="admin-page-header">
+            <h1>Cluster profiles</h1>
+        </div>
+        <div class="admin-page-body">
+        <div class="admin-content-narrow">
+
+        {{template "credential-storage" .Storage}}
+
+        <section class="form-section" id="cluster-profiles-list">
+            <h2>Saved clusters</h2>
+            <p class="section-description">A profile holds the kubeconfig of one existing Kubernetes cluster. Pick it in the lab wizard instead of uploading or pasting it again.</p>
+
+            {{if .Profiles}}
+            <table class="options-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Description</th>
+                        <th>Updated</th>
+                        <th class="col-actions">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Profiles}}
+                    <tr>
+                        <td class="col-name">{{.Name}}</td>
+                        <td>{{if .Description}}{{.Description}}{{else}}—{{end}}</td>
+                        <td>{{.UpdatedAt}}</td>
+                        <td class="col-actions">
+                            {{if $.CanEdit}}
+                            <div class="cluster-profile-actions">
+                                <a href="/admin/clusters?edit={{.ID}}#cluster-profile-form" class="btn btn-secondary btn-sm">Edit</a>
+                                <form hx-post="/api/cluster-profiles/delete" hx-target="#cluster-profile-response" hx-swap="innerHTML" hx-boost="false" hx-confirm="Delete the cluster profile “{{.Name}}”? Labs already created keep their kubeconfig.">
+                                    <input type="hidden" name="profile_id" value="{{.ID}}">
+                                    <button type="submit" class="btn btn-danger btn-sm" aria-label="Delete {{.Name}}">Delete</button>
+                                </form>
+                            </div>
+                            {{else}}—{{end}}
+                        </td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+            {{else}}
+            <div class="info-box">
+                <p>No cluster profile yet. Add one below.</p>
+            </div>
+            {{end}}
+        </section>
+
+        <div id="cluster-profile-response"></div>
+
+        {{if .CanEdit}}
+        <form id="cluster-profile-form"
+              method="POST"
+              action="/api/cluster-profiles"
+              enctype="multipart/form-data"
+              hx-post="/api/cluster-profiles"
+              hx-encoding="multipart/form-data"
+              hx-target="#cluster-profile-response"
+              hx-swap="innerHTML"
+              hx-boost="false">
+            <input type="hidden" name="profile_id" value="{{.Edit.ID}}">
+            <div class="form-section">
+                <h2>{{if .Edit.ID}}Edit “{{.Edit.Name}}”{{else}}Add a cluster profile{{end}}</h2>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="profile_name">Name</label>
+                        <input type="text" id="profile_name" name="profile_name" value="{{.Edit.Name}}" maxlength="64" placeholder="Workshop cluster" autocomplete="off" required>
+                        <small>How the profile appears in the lab wizard.</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="profile_description">Description (optional)</label>
+                        <input type="text" id="profile_description" name="profile_description" value="{{.Edit.Description}}" maxlength="200" placeholder="Shared staging cluster, eu-west" autocomplete="off">
+                        <small>Free text to tell clusters apart. Do not put anything secret here.</small>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="kubeconfig_file">Kubeconfig file</label>
+                    <div class="file-upload-wrapper">
+                        <input type="file" id="kubeconfig_file" name="kubeconfig_file" accept=".yaml,.yml,.conf,.config" class="file-input">
+                        <label for="kubeconfig_file" class="file-upload-label">
+                            <span class="file-upload-icon">&#128196;</span>
+                            <span class="file-upload-text">Choose file or drag it here</span>
+                            <span class="file-upload-button">Browse</span>
+                        </label>
+                        <div class="file-name-display" id="kubeconfig-file-name-display"></div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="kubeconfig_content">&hellip;or paste the kubeconfig</label>
+                    <textarea id="kubeconfig_content" name="kubeconfig_content" rows="10" class="monospace" placeholder="apiVersion: v1&#10;kind: Config&#10;clusters:&#10;- cluster:&#10;    server: https://...&#10;  name: my-cluster&#10;..."></textarea>
+                    {{if .HasKubeconfig}}
+                    <small>A kubeconfig is saved for this profile. It is never shown again — leave both fields empty to keep it, or provide a new one to replace it.</small>
+                    {{else}}
+                    <small>The kubeconfig is encrypted in credential storage and never shown again after saving. It needs the same permissions a pasted kubeconfig does.</small>
+                    {{end}}
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">
+                    <span class="btn-icon">💾</span> {{if .Edit.ID}}Save changes{{else}}Add profile{{end}}
+                </button>
+                {{if .Edit.ID}}
+                <a href="/admin/clusters" class="btn btn-secondary">Cancel</a>
+                {{end}}
+            </div>
+        </form>
+        {{else}}
+        <div class="info-box">
+            <p>Unlock or reset credential storage above to add or change cluster profiles.</p>
+        </div>
+        {{end}}
+
+        </div>
+        </div>
+    </div>
+</div>
+{{end}}

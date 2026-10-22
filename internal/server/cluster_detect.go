@@ -130,7 +130,9 @@ func (h *Handler) DetectCluster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	kubeconfig, err := h.readKubeconfigFromForm(r)
+	// A saved cluster profile is resolved here rather than in the browser, so a
+	// stored kubeconfig still never reaches it.
+	kubeconfig, _, err := h.kubeconfigFromFormOrProfile(r)
 	if err != nil {
 		log.Printf("Cluster detect: failed to read the submitted kubeconfig: %v", err)
 		writeJSONError(w, http.StatusBadRequest, "the kubeconfig could not be read")

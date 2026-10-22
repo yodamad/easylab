@@ -8193,6 +8193,18 @@ details[open] > .secrets-summary::after {
     margin: 0;
 }
 
+/* Cluster profiles page: same Edit / Delete pairing */
+.cluster-profile-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: center;
+    align-items: center;
+}
+
+.cluster-profile-actions form {
+    margin: 0;
+}
+
 /* Credential storage card: stacked forms need breathing room */
 .credential-storage form + form,
 .credential-storage details {

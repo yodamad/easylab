@@ -45,17 +45,17 @@
         <div class="container">
 
         <main>
-            <!-- Credential storage locked: saved provider credentials and DNS profiles cannot be reused in this lab -->
+            <!-- Credential storage locked: saved provider credentials, DNS profiles and clusters cannot be reused in this lab -->
             {{if eq .Storage.State "locked"}}
             <div class="warning-message" id="credential-storage-notice">
                 <h3>&#128274; Credential storage is locked</h3>
-                <p>Saved cloud provider credentials and DNS profiles are unavailable until the passphrase is entered. You can still create this lab by typing the credentials it needs.</p>
+                <p>Saved cloud provider credentials, DNS profiles and clusters are unavailable until the passphrase is entered. You can still create this lab by typing the credentials it needs and providing a kubeconfig directly.</p>
                 <p><a href="/admin/dns">Unlock credential storage</a> to reuse the saved ones.</p>
             </div>
             {{else if eq .Storage.State "unreadable"}}
             <div class="warning-message" id="credential-storage-notice">
                 <h3>&#128274; Saved credentials cannot be read</h3>
-                <p>Saved cloud provider credentials and DNS profiles are unavailable. You can still create this lab by typing the credentials it needs.</p>
+                <p>Saved cloud provider credentials, DNS profiles and clusters are unavailable. You can still create this lab by typing the credentials it needs and providing a kubeconfig directly.</p>
                 <p>Restart EasyLab with the original <code>LAB_DATA_ENCRYPTION_KEY</code>, or <a href="/admin/dns">reset credential storage</a>.</p>
             </div>
             {{end}}
@@ -142,7 +142,21 @@
                         <!-- Kubeconfig input (shown for existing cluster) -->
                         <div id="kubeconfig-section" style="display: none;">
                             <p id="kubeconfig-prefill-hint" class="hint-text" style="display: none;"></p>
-                            <div class="form-group">
+                            <div class="form-group" id="cluster_profile_group">
+                                <label for="cluster_profile">Saved cluster</label>
+                                <select id="cluster_profile" name="cluster_profile">
+                                    <option value="">Upload or paste a kubeconfig</option>
+                                    {{range .ClusterProfiles}}
+                                    <option value="{{.ID}}" data-name="{{.Name}}" data-description="{{.Description}}">{{.Name}}</option>
+                                    {{end}}
+                                </select>
+                                {{if .ClusterProfilesLocked}}
+                                <small>Saved clusters are locked. <a href="/admin/clusters">Unlock credential storage</a> to use them.</small>
+                                {{else}}
+                                <small>Reuse a kubeconfig saved on the <a href="/admin/clusters">Clusters</a> page instead of providing it here.</small>
+                                {{end}}
+                            </div>
+                            <div class="form-group" id="kubeconfig-provide-group">
                                 <label>Provide Kubeconfig *</label>
                                 <div class="button-group">
                                     <button type="button" class="source-button" data-kubeconfig-mode="upload" id="kubeconfig-mode-upload">

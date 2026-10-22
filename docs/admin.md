@@ -105,6 +105,27 @@ The credentials required are the same as in the wizard — see [OVH DNS and Azur
 
 Profiles follow the [credential storage](#credential-storage) rules above: without a passphrase or `LAB_DATA_ENCRYPTION_KEY` they last until EasyLab restarts.
 
+## Cluster profiles
+
+A cluster profile is a named, saved kubeconfig for an existing Kubernetes cluster. Create one per cluster on the **Clusters** page in the sidebar, then pick it in the lab wizard instead of uploading or pasting the kubeconfig for every lab on that cluster.
+
+![Cluster profiles page](screens/cluster-profiles.png)
+
+To add a profile:
+
+1. Open **Clusters** in the admin sidebar.
+2. Under **Add a cluster profile**, enter a **Name** — this is what the lab wizard shows.
+3. Optionally enter a **Description** to tell clusters apart. It is stored in the clear, so do not put anything secret in it.
+4. Upload a kubeconfig file or paste its content, then click **Add profile**.
+
+The kubeconfig is checked for validity before it is saved, and needs the same permissions as one provided directly in the wizard — see [Use Existing Cluster](admin-lab-creation.md#use-existing-cluster).
+
+**Edit** changes a profile. The kubeconfig is never shown again: leave both kubeconfig fields empty to keep the saved one, or provide a new one to replace it. **Delete** removes the profile. Neither affects labs already created, which keep the kubeconfig they were created with — to move an existing lab to a new kubeconfig, retry or recreate it with the profile selected.
+
+!!! warning "A kubeconfig is usually a cluster-admin credential"
+
+    Saved kubeconfigs are encrypted with AES-256-GCM in credential storage and are never written anywhere else, never returned to the browser, and never recorded in the [audit log](audit-log.md). They follow the [credential storage](#credential-storage) rules above: without a passphrase or `LAB_DATA_ENCRYPTION_KEY` they last until EasyLab restarts, and while storage is locked the **Clusters** page lists the profile names but cannot use them.
+
 ## Where to go next
 
 * [Creating a Lab](admin-lab-creation.md) — the lab creation wizard: infrastructure, workspace templates, HTTPS/DNS, and cleaning policies.

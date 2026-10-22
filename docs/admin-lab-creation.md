@@ -43,9 +43,17 @@ When you choose **Use Existing Cluster**, EasyLab skips cloud provider provision
 
 **What you need to provide:**
 
-* **Kubeconfig** — Either:
+* **Kubeconfig** — Any one of:
+    * Pick a **Saved cluster** — a [cluster profile](admin.md#cluster-profiles) saved earlier, so you do not provide the kubeconfig again for every lab on the same cluster, or
     * Upload a `.yaml` or `.yml` kubeconfig file, or
     * Paste the kubeconfig YAML content directly
+
+![Providing the kubeconfig for an existing cluster](screens/byok-saved-cluster.png){width=700}
+
+Picking a saved cluster hides the upload and paste fields — the kubeconfig comes from
+credential storage instead and never reaches the browser. [**Detect from cluster**](#detect-from-cluster)
+works with a saved cluster too. The lab keeps its own copy of the kubeconfig, so
+deleting the profile or locking credential storage afterwards does not affect it.
 
 **What is skipped:**
 
