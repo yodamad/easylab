@@ -41,7 +41,8 @@ docker buildx build --platform linux/amd64,linux/arm64 -t your-registry/easylab:
 ```bash
 helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
   --version __VERSION__ \
-  --set secrets.adminPassword="your-secure-password"
+  --set secrets.adminPassword="your-secure-password" \
+  --set secrets.dataEncryptionKey="$(openssl rand -base64 32)"
 ```
 
 Versions follow [SemVer](https://semver.org/) without the `v` prefix.
@@ -84,6 +85,7 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 | `secrets.create` | Create a Kubernetes secret | `true` |
 | `secrets.adminPassword` | Admin login password | `""` |
 | `secrets.studentPassword` | Student login password | `""` |
+| `secrets.dataEncryptionKey` | **Required** with `config.dataDir` set (the default): base64-encoded 32-byte key encrypting kubeconfigs and DNS credentials in persisted job files | `""` |
 | `secrets.ovh.applicationKey` | OVH application key | `""` |
 | `secrets.ovh.applicationSecret` | OVH application secret | `""` |
 | `secrets.ovh.consumerKey` | OVH consumer key | `""` |
@@ -132,8 +134,12 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 | `nodeSelector` | Pin the EasyLab server pod to nodes matching these labels (e.g. a dedicated node pool). Labs' [image pre-pull](admin-lab-management.md#image-pre-pull) leaves those nodes alone | `{}` |
 | `tolerations` | Tolerations for the EasyLab server pod, needed if its target node pool is tainted | `[]` |
 
-!!! warning "Set an explicit data encryption key for persistent deployments"
-    Because `config.dataDir` is set by default, persisted job files hold cluster kubeconfigs and DNS credentials. Provide a `LAB_DATA_ENCRYPTION_KEY` environment variable (a base64-encoded 32-byte key, e.g. from `openssl rand -base64 32`) through your secret / pod environment and keep it stable across upgrades, or previously-encrypted kubeconfigs become unreadable and the affected labs must be recreated. If `LAB_DATA_ENCRYPTION_KEY` is not set, the server auto-generates one and saves it to `<dataDir>/.encryption_key` so it still starts — but on Kubernetes this file only survives pod restarts if `dataDir` is backed by a persistent volume; without one, a new pod means a new key and unreadable existing job data. Explicitly setting the key via a Secret is strongly recommended for any real deployment. Setting a strong `PULUMI_CONFIG_PASSPHRASE` is likewise recommended (see [Docker — Environment Variables](docker.md#environment-variables) for details on both). Provider API credentials are never written to lab state.
+!!! warning "A data encryption key is required"
+    Because `config.dataDir` is set by default, persisted job files hold cluster kubeconfigs and DNS credentials — so `secrets.dataEncryptionKey` is **required** and the pod will not start without it. Set it to a base64-encoded 32-byte key (`openssl rand -base64 32`); the chart puts it in the release Secret as `LAB_DATA_ENCRYPTION_KEY`:
+    ```bash
+    helm install easylab ... --set secrets.dataEncryptionKey="$(openssl rand -base64 32)"
+    ```
+    Keep it stable across upgrades: a different key makes previously-encrypted kubeconfigs unreadable and the affected labs must be recreated. EasyLab deliberately does not generate a key of its own — one written into `dataDir` would sit beside the data it protects, and on Kubernetes would also be lost whenever a pod restarted without a persistent volume. If you are upgrading a `dataDir` volume that still holds a `.encryption_key` file from an older version, set `secrets.dataEncryptionKey` to that file's contents before upgrading (see [Docker — Environment Variables](docker.md#environment-variables)). Setting a strong `PULUMI_CONFIG_PASSPHRASE` is likewise recommended. Provider API credentials are never written to lab state.
 
 !!! tip "Keeping credentials across pod restarts"
     With `LAB_DATA_ENCRYPTION_KEY` set from a Secret, cloud provider credentials and DNS profiles saved in the admin UI are stored encrypted under it and are available again automatically after a pod restart (see [Credential storage](admin.md#credential-storage)). The Secret can be fed by whatever already manages secrets in your cluster — a plain Kubernetes Secret, External Secrets Operator, or an OpenBao / Vault agent injector — with no change to EasyLab: it only reads the environment variable. Without the variable, an admin can set a passphrase in the UI instead and enter it once after each restart.

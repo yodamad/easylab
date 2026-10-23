@@ -16,6 +16,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Lab IDs in these tests have the shape the server issues (see labIDPattern in
+// feedback.go): the store names a file after the lab ID, so it refuses anything
+// else. testLabUnused is well-formed but has no feedback file.
+const (
+	testLabA      = "job-11111111-1111-4111-8111-111111111111"
+	testLabB      = "job-22222222-2222-4222-8222-222222222222"
+	testLabUnused = "job-33333333-3333-4333-8333-333333333333"
+)
+
 // --- FeedbackStore unit tests ---
 
 func TestNewFeedbackStore_Success(t *testing.T) {
@@ -37,7 +46,7 @@ func TestFeedbackStore_GetByLab_Empty(t *testing.T) {
 	fs, err := NewFeedbackStore(t.TempDir())
 	require.NoError(t, err)
 
-	entries, err := fs.GetByLab("nonexistent-lab")
+	entries, err := fs.GetByLab(testLabUnused)
 	require.NoError(t, err)
 	assert.Empty(t, entries)
 }
@@ -48,7 +57,7 @@ func TestFeedbackStore_AddAndGetByLab(t *testing.T) {
 
 	f := Feedback{
 		ID:          "1",
-		LabID:       "lab-abc",
+		LabID:       testLabA,
 		Email:       "student@example.com",
 		Rating:      4,
 		Difficulty:  "just-right",
@@ -58,7 +67,7 @@ func TestFeedbackStore_AddAndGetByLab(t *testing.T) {
 	}
 	require.NoError(t, fs.Add(f))
 
-	entries, err := fs.GetByLab("lab-abc")
+	entries, err := fs.GetByLab(testLabA)
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
 	assert.Equal(t, f.Email, entries[0].Email)
@@ -73,13 +82,13 @@ func TestFeedbackStore_AddMultiple(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		require.NoError(t, fs.Add(Feedback{
 			ID:         string(rune('0' + i)),
-			LabID:      "lab-x",
+			LabID:      testLabB,
 			Rating:     i,
 			Difficulty: "just-right",
 		}))
 	}
 
-	entries, err := fs.GetByLab("lab-x")
+	entries, err := fs.GetByLab(testLabB)
 	require.NoError(t, err)
 	assert.Len(t, entries, 3)
 }
@@ -88,14 +97,14 @@ func TestFeedbackStore_AddIsolatedByLab(t *testing.T) {
 	fs, err := NewFeedbackStore(t.TempDir())
 	require.NoError(t, err)
 
-	require.NoError(t, fs.Add(Feedback{ID: "1", LabID: "lab-a", Rating: 5, Difficulty: "just-right"}))
-	require.NoError(t, fs.Add(Feedback{ID: "2", LabID: "lab-b", Rating: 3, Difficulty: "challenging"}))
+	require.NoError(t, fs.Add(Feedback{ID: "1", LabID: testLabA, Rating: 5, Difficulty: "just-right"}))
+	require.NoError(t, fs.Add(Feedback{ID: "2", LabID: testLabB, Rating: 3, Difficulty: "challenging"}))
 
-	a, err := fs.GetByLab("lab-a")
+	a, err := fs.GetByLab(testLabA)
 	require.NoError(t, err)
 	assert.Len(t, a, 1)
 
-	b, err := fs.GetByLab("lab-b")
+	b, err := fs.GetByLab(testLabB)
 	require.NoError(t, err)
 	assert.Len(t, b, 1)
 }
@@ -106,7 +115,7 @@ func TestFeedbackStore_LockFor_SameLabReturnsSameLock(t *testing.T) {
 	fs, err := NewFeedbackStore(t.TempDir())
 	require.NoError(t, err)
 
-	assert.Same(t, fs.lockFor("lab-x"), fs.lockFor("lab-x"))
+	assert.Same(t, fs.lockFor(testLabB), fs.lockFor(testLabB))
 }
 
 // TestFeedbackStore_PerLabLocking_UnrelatedLabsDontBlock is a regression test
@@ -117,13 +126,13 @@ func TestFeedbackStore_PerLabLocking_UnrelatedLabsDontBlock(t *testing.T) {
 	require.NoError(t, err)
 
 	// Simulate an in-flight Add for lab-a by holding its lock directly.
-	labALock := fs.lockFor("lab-a")
+	labALock := fs.lockFor(testLabA)
 	labALock.Lock()
 	defer labALock.Unlock()
 
 	done := make(chan error, 1)
 	go func() {
-		done <- fs.Add(Feedback{ID: "1", LabID: "lab-b", Rating: 5, Difficulty: "just-right"})
+		done <- fs.Add(Feedback{ID: "1", LabID: testLabB, Rating: 5, Difficulty: "just-right"})
 	}()
 
 	select {
@@ -139,7 +148,7 @@ func TestFeedbackStore_ReadUnsafe_InvalidJSON(t *testing.T) {
 	fs, err := NewFeedbackStore(dir)
 	require.NoError(t, err)
 
-	labID := "lab-bad"
+	labID := testLabA
 	// Write invalid JSON to the file
 	err = os.WriteFile(filepath.Join(dir, labID+".json"), []byte("not valid json"), 0644)
 	require.NoError(t, err)
@@ -155,7 +164,7 @@ func TestFeedbackStore_JSONRoundtrip(t *testing.T) {
 
 	original := Feedback{
 		ID:          "42",
-		LabID:       "lab-rt",
+		LabID:       testLabA,
 		Email:       "user@test.com",
 		Rating:      5,
 		Difficulty:  "too-hard",
@@ -165,7 +174,7 @@ func TestFeedbackStore_JSONRoundtrip(t *testing.T) {
 	}
 	require.NoError(t, fs.Add(original))
 
-	entries, err := fs.GetByLab("lab-rt")
+	entries, err := fs.GetByLab(testLabA)
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
 
@@ -255,6 +264,14 @@ func newHandlerWithFeedbackStore(t *testing.T) *Handler {
 	return NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, fs)
 }
 
+// newHandlerWithLab returns a handler plus the ID of a lab its job manager
+// knows, which is what SubmitFeedback requires before it stores anything.
+func newHandlerWithLab(t *testing.T) (*Handler, string) {
+	t.Helper()
+	h := newHandlerWithFeedbackStore(t)
+	return h, h.jobManager.CreateJob(&LabConfig{StackName: "feedback-test"})
+}
+
 func TestSubmitFeedback_WrongMethod(t *testing.T) {
 	h := newHandlerWithFeedbackStore(t)
 	req := httptest.NewRequest("GET", "/api/student/feedback", nil)
@@ -310,9 +327,9 @@ func TestSubmitFeedback_InvalidRating(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := newHandlerWithFeedbackStore(t)
+			h, labID := newHandlerWithLab(t)
 			form := url.Values{}
-			form.Set("lab_id", "lab-1")
+			form.Set("lab_id", labID)
 			form.Set("rating", tt.rating)
 			form.Set("difficulty", "just-right")
 			req := httptest.NewRequest("POST", "/api/student/feedback", strings.NewReader(form.Encode()))
@@ -327,9 +344,9 @@ func TestSubmitFeedback_InvalidRating(t *testing.T) {
 }
 
 func TestSubmitFeedback_InvalidDifficulty(t *testing.T) {
-	h := newHandlerWithFeedbackStore(t)
+	h, labID := newHandlerWithLab(t)
 	form := url.Values{}
-	form.Set("lab_id", "lab-1")
+	form.Set("lab_id", labID)
 	form.Set("rating", "3")
 	form.Set("difficulty", "invalid-value")
 	req := httptest.NewRequest("POST", "/api/student/feedback", strings.NewReader(form.Encode()))
@@ -342,9 +359,9 @@ func TestSubmitFeedback_InvalidDifficulty(t *testing.T) {
 }
 
 func TestSubmitFeedback_Success_HTMX(t *testing.T) {
-	h := newHandlerWithFeedbackStore(t)
+	h, labID := newHandlerWithLab(t)
 	form := url.Values{}
-	form.Set("lab_id", "lab-1")
+	form.Set("lab_id", labID)
 	form.Set("rating", "5")
 	form.Set("difficulty", "just-right")
 	form.Set("recommend", "yes")
@@ -360,9 +377,9 @@ func TestSubmitFeedback_Success_HTMX(t *testing.T) {
 }
 
 func TestSubmitFeedback_Success_NonHTMX(t *testing.T) {
-	h := newHandlerWithFeedbackStore(t)
+	h, labID := newHandlerWithLab(t)
 	form := url.Values{}
-	form.Set("lab_id", "lab-1")
+	form.Set("lab_id", labID)
 	form.Set("rating", "4")
 	form.Set("difficulty", "challenging")
 	form.Set("recommend", "maybe")
@@ -381,9 +398,9 @@ func TestSubmitFeedback_AllDifficultyValues(t *testing.T) {
 	for _, d := range difficulties {
 		t.Run(d, func(t *testing.T) {
 			t.Parallel()
-			h := newHandlerWithFeedbackStore(t)
+			h, labID := newHandlerWithLab(t)
 			form := url.Values{}
-			form.Set("lab_id", "lab-diff")
+			form.Set("lab_id", labID)
 			form.Set("rating", "3")
 			form.Set("difficulty", d)
 			req := httptest.NewRequest("POST", "/api/student/feedback", strings.NewReader(form.Encode()))
@@ -398,9 +415,9 @@ func TestSubmitFeedback_AllDifficultyValues(t *testing.T) {
 }
 
 func TestSubmitFeedback_CommentTruncated(t *testing.T) {
-	h := newHandlerWithFeedbackStore(t)
+	h, labID := newHandlerWithLab(t)
 	form := url.Values{}
-	form.Set("lab_id", "lab-1")
+	form.Set("lab_id", labID)
 	form.Set("rating", "3")
 	form.Set("difficulty", "just-right")
 	form.Set("comment", strings.Repeat("x", 3000))
@@ -413,10 +430,97 @@ func TestSubmitFeedback_CommentTruncated(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "toast-success")
 
 	// Verify comment was truncated in the store
-	entries, err := h.feedbackStore.GetByLab("lab-1")
+	entries, err := h.feedbackStore.GetByLab(labID)
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
 	assert.Len(t, entries[0].Comment, 2000)
+}
+
+// TestIsValidLabID pins the shape the store accepts. The rejected cases are the
+// ones that would otherwise steer a read or write out of the feedback directory.
+func TestIsValidLabID(t *testing.T) {
+	tests := []struct {
+		name  string
+		labID string
+		want  bool
+	}{
+		{"server-issued ID", "job-11111111-2222-4333-8444-555555555555", true},
+		{"empty", "", false},
+		{"parent directory", "../credential-vault", false},
+		{"nested parent directory", "../jobs/job-11111111-2222-4333-8444-555555555555", false},
+		{"traversal appended to a real ID", "job-11111111-2222-4333-8444-555555555555/../x", false},
+		{"absolute path", "/etc/easylab", false},
+		{"encoded traversal", "%2e%2e%2fcredential-vault", false},
+		{"missing job prefix", "11111111-2222-4333-8444-555555555555", false},
+		{"uppercase hex", "job-AAAAAAAA-2222-4333-8444-555555555555", false},
+		{"trailing newline", "job-11111111-2222-4333-8444-555555555555\n", false},
+		{"short UUID", "job-1111-2222-4333-8444-555555555555", false},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, isValidLabID(tt.labID))
+		})
+	}
+}
+
+// TestFeedbackStore_RejectsTraversingLabID is a security regression test: a lab
+// ID is concatenated into a file path, so the store must refuse any ID the
+// server could not have issued rather than writing outside its directory.
+func TestFeedbackStore_RejectsTraversingLabID(t *testing.T) {
+	dir := t.TempDir()
+	// A file next to the feedback directory, standing in for the credential
+	// vault and the persisted job files that live there.
+	outside := filepath.Join(dir, "credential-vault.json")
+	require.NoError(t, os.WriteFile(outside, []byte("original"), 0600))
+
+	fs, err := NewFeedbackStore(filepath.Join(dir, "feedback"))
+	require.NoError(t, err)
+
+	for _, labID := range []string{"../credential-vault", "../../credential-vault", outside} {
+		t.Run(labID, func(t *testing.T) {
+			err := fs.Add(Feedback{ID: "1", LabID: labID, Rating: 5, Difficulty: "just-right"})
+			require.ErrorIs(t, err, errInvalidLabID)
+
+			_, err = fs.GetByLab(labID)
+			require.ErrorIs(t, err, errInvalidLabID)
+
+			added, err := fs.AddIfAbsent(Feedback{ID: "2", LabID: labID, Rating: 5, Difficulty: "just-right"})
+			require.ErrorIs(t, err, errInvalidLabID)
+			assert.False(t, added)
+		})
+	}
+
+	data, err := os.ReadFile(outside)
+	require.NoError(t, err)
+	assert.Equal(t, "original", string(data), "a file outside the feedback directory was overwritten")
+}
+
+// TestSubmitFeedback_RejectsTraversingLabID is the handler-level half of the
+// same regression: an authenticated student must not be able to name a path.
+func TestSubmitFeedback_RejectsTraversingLabID(t *testing.T) {
+	for _, labID := range []string{"../credential-vault", "../jobs/job-x", testLabUnused} {
+		t.Run(labID, func(t *testing.T) {
+			h, _ := newHandlerWithLab(t)
+			form := url.Values{}
+			form.Set("lab_id", labID)
+			form.Set("rating", "5")
+			form.Set("difficulty", "just-right")
+			req := httptest.NewRequest("POST", "/api/student/feedback", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("HX-Request", "true")
+			w := httptest.NewRecorder()
+
+			h.SubmitFeedback(w, req)
+
+			assert.Contains(t, w.Body.String(), "toast-error")
+			entries, err := os.ReadDir(h.feedbackStore.dataDir)
+			require.NoError(t, err)
+			assert.Empty(t, entries, "nothing should have been written")
+		})
+	}
 }
 
 // --- buildFeedbackSummary tests ---
@@ -540,11 +644,13 @@ func TestServeAdminLabFeedback_UnknownLabID(t *testing.T) {
 	require.NoError(t, err)
 	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, fs)
 
-	req := httptest.NewRequest("GET", "/admin/feedback?lab_id=unknown-lab", nil)
+	req := httptest.NewRequest("GET", "/admin/feedback?lab_id="+testLabUnused, nil)
 	w := httptest.NewRecorder()
 
 	h.ServeAdminLabFeedback(w, req)
-	// lab not in jobManager → LabName falls back to labID value
+	// A lab the job manager doesn't know is refused before the store is read:
+	// the ID names the feedback file, so it may only be one the server issued.
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 // --- slugify / feedbackDifficultyPlainLabel ---
@@ -606,15 +712,12 @@ func TestExportLabFeedbackCSV_UnknownLabID(t *testing.T) {
 	require.NoError(t, err)
 	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, fs)
 
-	req := httptest.NewRequest("GET", "/admin/feedback/export?lab_id=unknown-lab", nil)
+	req := httptest.NewRequest("GET", "/admin/feedback/export?lab_id="+testLabUnused, nil)
 	w := httptest.NewRecorder()
 	h.ExportLabFeedbackCSV(w, req)
 
-	require.Equal(t, http.StatusOK, w.Code)
-	rows, err := csv.NewReader(strings.NewReader(w.Body.String())).ReadAll()
-	require.NoError(t, err)
-	require.Len(t, rows, 1, "header row only, no feedback entries")
-	assert.Equal(t, []string{"Email", "Rating", "Difficulty", "Recommend", "Comment", "Submitted At"}, rows[0])
+	// Refused before the store is read: the ID names the file the export opens.
+	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestExportLabFeedbackCSV_WithEntries(t *testing.T) {

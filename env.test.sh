@@ -10,6 +10,11 @@ export LAB_STUDENT_PASSWORD=studentpass
 export WORK_DIR=test-results/work
 export DATA_DIR=test-results/data
 
+# Required whenever DATA_DIR is set: encrypts kubeconfigs and DNS credentials in
+# persisted job files. A fixed throwaway value for tests only — generate a real
+# one with `openssl rand -base64 32` for anything else.
+export LAB_DATA_ENCRYPTION_KEY=ZWFzeWxhYi10ZXN0LWtleS1kby1ub3QtdXNlLTAwMDA=
+
 # OVH credentials (can be overridden if needed for specific tests)
 # These are optional for most tests
 export OVH_APPLICATION_KEY=aa

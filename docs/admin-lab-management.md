@@ -435,6 +435,10 @@ when it has exactly one, for both the bake and the students' workspaces; with se
 pick one explicitly.
 When a private repository's credential is picked, EasyLab reads it from the lab's
 cluster to clone the devcontainer during the import, so there is no token to retype.
+Only a credential that appears in this lab's own pickers can be read that way, and
+the repository has to be an `http(s)` URL on a public host — that clone is made by
+EasyLab itself and carries the token, so it is deliberately not allowed to reach a
+private address (see [Importing a devcontainer](templates.md#importing-a-devcontainer)).
 
 At the bottom of the drawer, **Bake devcontainer images automatically** starts the
 bake of a devcontainer template as soon as it is added — the toast says so, and the

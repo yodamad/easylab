@@ -23,11 +23,16 @@ This guide explains how to deploy the EasyLab application using Docker and Docke
    curl -fsSL https://gitlab.com/yodamad-workshops/easylab/-/raw/main/docker-compose.yml -o docker-compose.yml
    ```
 
-2. **Set passwords (optional but recommended):**
+2. **Set the admin password (required) and the data encryption key:**
    ```bash
    export LAB_ADMIN_PASSWORD="your-secure-password"
+   export LAB_DATA_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+   # Optional: enables password sign-in for students
    export LAB_STUDENT_PASSWORD="your-student-password"
    ```
+   Neither the admin password nor the encryption key has a default: compose refuses
+   to start without the first, and the server exits without the second. Keep the key
+   somewhere you can retrieve it — see [`LAB_DATA_ENCRYPTION_KEY`](#environment-variables).
 
 3. **Start the application:**
    ```bash
@@ -49,8 +54,8 @@ This guide explains how to deploy the EasyLab application using Docker and Docke
 
 The application can be configured using the following environment variables:
 
-- `LAB_ADMIN_PASSWORD`: Admin password for the web interface (default: "admin123")
-- `LAB_STUDENT_PASSWORD`: Student password for the web interface (default: "student123")
+- `LAB_ADMIN_PASSWORD` **(required)**: Admin password for the web interface. There is no default — the server refuses to start without it, and `docker-compose.yml` refuses to start the container.
+- `LAB_STUDENT_PASSWORD` (optional): Shared student password for the web interface. No default; leaving it unset disables student password login, which is what you want when students sign in with Microsoft / GitHub / GitLab instead.
 - `TRUST_FORWARDED_PROTO`: Whether the `X-Forwarded-Proto` header from an incoming request is trusted to mark the session cookie `Secure` (default: `true`). Leave this at its default when the app sits behind a reverse proxy that sets/overwrites this header. Set to `false` if the app is ever reachable in a way where a client-supplied `X-Forwarded-Proto` header would reach the app unstripped — otherwise a client could suppress the cookie's `Secure` flag.
 - `EASYLAB_MODE`: Which areas the instance serves — `all` (default: admin space and student space) or `admin` (admin space only, for when every lab has its own [in-lab student portal](student-portal.md)). The `--mode` flag takes precedence.
 - `EASYLAB_PUBLIC_URL`: This instance's address as students reach it, e.g. `https://easylab.example.com`. In-lab student portals send students here for Microsoft / GitHub / GitLab sign-in; without it they offer password sign-in only. This is only the default: it can also be set, and overridden, from the admin's [Student portals](student-portal.md#the-student-portals-page) page.
@@ -64,7 +69,14 @@ The application can be configured using the following environment variables:
 - `WORKSPACE_CREATE_CONCURRENCY`: Maximum number of workspace create/delete requests processed at the same time, across all labs (default: 20). Each request makes several sequential calls to the lab's Kubernetes API server, so this bounds how hard a burst of students starting workspaces together — e.g. at the start of a large workshop — or an admin bulk-deleting many workspaces can hit that cluster at once; extra requests wait briefly rather than firing all together. Raise it for a bigger/faster cluster, lower it for a smaller one.
 - `PULUMI_EXECUTION_CONCURRENCY`: Maximum number of Pulumi executions (preview/up/destroy) running at the same time, across all labs (default: 5). Each execution spawns a full Pulumi engine process plus its resource provider plugins, so this bounds how much host CPU/memory a burst of concurrent lab creates, destroys, retries, or recreations can consume at once; extra executions wait briefly rather than all starting together. Raise it on a bigger host, lower it on a smaller one.
 - `CLEANUP_DELETE_CONCURRENCY`: Maximum number of workspace deletions run at once per job during a single automatic cleanup pass (default: 5). Separate from `WORKSPACE_CREATE_CONCURRENCY` since cleanup runs on a background schedule rather than in response to a request.
-- `LAB_DATA_ENCRYPTION_KEY` **(recommended when `DATA_DIR` is set)**: base64-encoded 32-byte key (AES-256) used to encrypt secrets at rest in persisted job files — cluster kubeconfigs and DNS provider credentials. If unset while a data directory is configured, the server generates a random key on first start and saves it to `<DATA_DIR>/.encryption_key` (mode `0600`), reusing it on subsequent restarts so persisted data stays decryptable; a startup log line reports which path was used. For production, set this variable explicitly from a managed secret store instead of relying on the generated file. Generate one with `openssl rand -base64 32` and keep it stable: rotating the key (or losing the generated file) makes previously-encrypted kubeconfigs unreadable, so you must destroy/recreate affected labs after a change. Setting this variable explicitly also lets EasyLab keep cloud provider credentials and DNS profiles across restarts with nothing to unlock — see [Credential storage](admin.md#credential-storage); the auto-generated key file is never used for that.
+- `LAB_DATA_ENCRYPTION_KEY` **(required when `DATA_DIR` is set)**: base64-encoded 32-byte key (AES-256) used to encrypt secrets at rest in persisted job files — cluster kubeconfigs and DNS provider credentials. Generate one with `openssl rand -base64 32`, supply it from a managed secret store, and keep it stable: a different key makes previously-encrypted kubeconfigs unreadable, so you must destroy/recreate affected labs after a change. The server **refuses to start** when a data directory is configured and this variable is unset — it will not generate a key for you, because a key stored beside the data it protects provides no protection at all. Setting it also lets EasyLab keep cloud provider credentials and DNS profiles across restarts with nothing to unlock — see [Credential storage](admin.md#credential-storage).
+
+    !!! warning "Upgrading from a version that generated its own key"
+        Earlier versions wrote a key to `<DATA_DIR>/.encryption_key` when this variable was unset. That file is the only thing that can decrypt the job files already in that directory, so before upgrading, set `LAB_DATA_ENCRYPTION_KEY` to its contents:
+        ```bash
+        export LAB_DATA_ENCRYPTION_KEY="$(cat <DATA_DIR>/.encryption_key)"
+        ```
+        Start the server, confirm your labs are listed, then delete the file. If you skip this the server will stop with a message naming the file rather than starting with unreadable labs.
 - `PULUMI_CONFIG_PASSPHRASE` (recommended): passphrase Pulumi uses to encrypt secrets in local stack state. If unset it defaults to the insecure literal `passphrase`; set a strong value. The server logs a `[SECURITY]` warning at startup while the default is in use (existing stacks stay decryptable).
 
 !!! note "Provider credentials are not written to lab state"
@@ -89,6 +101,15 @@ When running the EasyLab server binary directly (not only in Docker), you can lo
 ```
 
 The file format is standard `.env` style: one `KEY=VALUE` per line. Lines starting with `#` are comments; lines starting with `export ` are supported for compatibility with shell scripts. This allows you to keep secrets out of the command line and reuse a single file for local development.
+
+A local `env.sh` needs at least an admin password and a data encryption key, since a data directory is always configured (`/tmp/easylab-data` by default) — `make dev` stops at startup without them:
+
+```bash
+export LAB_ADMIN_PASSWORD=dev-password
+export LAB_DATA_ENCRYPTION_KEY=$(openssl rand -base64 32)
+```
+
+Keep that key in the file rather than regenerating it each time, or every restart leaves the previous run's labs unreadable. The repo's own `env.test.sh`, used by the Playwright suite, carries a fixed throwaway key for the same reason.
 
 **Server flags** (when running the binary): `-port` (default: 8081), `-work-dir`, `-data-dir`, `-env-file`. Environment variables `WORK_DIR` and `DATA_DIR` override the defaults if set.
 

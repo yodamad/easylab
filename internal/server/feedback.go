@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,8 +46,29 @@ func NewFeedbackStore(dataDir string) (*FeedbackStore, error) {
 	return &FeedbackStore{dataDir: dataDir}, nil
 }
 
-func (fs *FeedbackStore) filePath(labID string) string {
-	return filepath.Join(fs.dataDir, labID+".json")
+// labIDPattern is the shape of every lab ID the server hands out: CreateJob
+// builds them as "job-" + a canonical UUID (see job.go). Feedback is stored one
+// file per lab, so a lab ID reaches the filesystem and nothing else may.
+var labIDPattern = regexp.MustCompile(`^job-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// errInvalidLabID is returned instead of touching a path built from a lab ID
+// that the server could never have issued.
+var errInvalidLabID = errors.New("invalid lab ID")
+
+// isValidLabID reports whether labID has the server-issued shape. Callers that
+// can reach the job manager should also check the lab exists; this is what
+// guards the filesystem itself.
+func isValidLabID(labID string) bool {
+	return labIDPattern.MatchString(labID)
+}
+
+// filePath is the lab's feedback file. It refuses a lab ID that isn't one the
+// server issued, so no caller can steer the read or write out of dataDir.
+func (fs *FeedbackStore) filePath(labID string) (string, error) {
+	if !isValidLabID(labID) {
+		return "", errInvalidLabID
+	}
+	return filepath.Join(fs.dataDir, labID+".json"), nil
 }
 
 // lockFor returns the per-lab lock for labID, creating it on first use.
@@ -56,6 +79,9 @@ func (fs *FeedbackStore) lockFor(labID string) *sync.RWMutex {
 
 // Add appends a feedback entry to the lab's JSON file
 func (fs *FeedbackStore) Add(f Feedback) error {
+	if !isValidLabID(f.LabID) {
+		return errInvalidLabID
+	}
 	lock := fs.lockFor(f.LabID)
 	lock.Lock()
 	defer lock.Unlock()
@@ -72,6 +98,9 @@ func (fs *FeedbackStore) Add(f Feedback) error {
 // stored, and reports whether it was added. It is how feedback collected by an
 // in-lab student portal is imported: that delivery is at-least-once.
 func (fs *FeedbackStore) AddIfAbsent(f Feedback) (bool, error) {
+	if !isValidLabID(f.LabID) {
+		return false, errInvalidLabID
+	}
 	lock := fs.lockFor(f.LabID)
 	lock.Lock()
 	defer lock.Unlock()
@@ -90,6 +119,9 @@ func (fs *FeedbackStore) AddIfAbsent(f Feedback) (bool, error) {
 
 // GetByLab returns all feedback entries for a given lab
 func (fs *FeedbackStore) GetByLab(labID string) ([]Feedback, error) {
+	if !isValidLabID(labID) {
+		return nil, errInvalidLabID
+	}
 	lock := fs.lockFor(labID)
 	lock.RLock()
 	defer lock.RUnlock()
@@ -97,7 +129,10 @@ func (fs *FeedbackStore) GetByLab(labID string) ([]Feedback, error) {
 }
 
 func (fs *FeedbackStore) readUnsafe(labID string) ([]Feedback, error) {
-	path := fs.filePath(labID)
+	path, err := fs.filePath(labID)
+	if err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return []Feedback{}, nil
@@ -113,11 +148,15 @@ func (fs *FeedbackStore) readUnsafe(labID string) ([]Feedback, error) {
 }
 
 func (fs *FeedbackStore) writeUnsafe(labID string, entries []Feedback) error {
+	path, err := fs.filePath(labID)
+	if err != nil {
+		return err
+	}
 	data, err := json.MarshalIndent(entries, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal feedback: %w", err)
 	}
-	if err := os.WriteFile(fs.filePath(labID), data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("failed to write feedback file: %w", err)
 	}
 	return nil
@@ -196,6 +235,18 @@ func (h *Handler) SubmitFeedback(w http.ResponseWriter, r *http.Request) {
 
 	labID := getFormValue(r, "lab_id")
 	if labID == "" {
+		if htmx {
+			writeToast(w, false, "Please select a lab.")
+		} else {
+			redirectFeedback(w, r, "Please+select+a+lab")
+		}
+		return
+	}
+	// The lab ID names the file the feedback is stored in, so accept only a lab
+	// this server actually knows: the form's own options come from that same list,
+	// and a known lab's ID is one the server issued (see isValidLabID).
+	if _, exists := h.jobManager.GetJob(labID); !exists {
+		log.Printf("Feedback rejected: unknown lab %q", labID)
 		if htmx {
 			writeToast(w, false, "Please select a lab.")
 		} else {
@@ -331,6 +382,15 @@ func buildFeedbackSummary(entries []Feedback) FeedbackSummary {
 // Route: GET /admin/feedback?lab_id=...
 func (h *Handler) ServeAdminLabFeedback(w http.ResponseWriter, r *http.Request) {
 	labID := r.URL.Query().Get("lab_id")
+	// No lab selected yet is the normal first view; a lab that was named has to
+	// be one this server knows, since the ID names the file read below.
+	if labID != "" {
+		if _, exists := h.jobManager.GetJob(labID); !exists {
+			log.Printf("Admin feedback requested for unknown lab %q", labID)
+			http.Error(w, "Unknown lab", http.StatusNotFound)
+			return
+		}
+	}
 
 	type LabOption struct {
 		ID       string
@@ -467,6 +527,13 @@ func (h *Handler) ExportLabFeedbackCSV(w http.ResponseWriter, r *http.Request) {
 	labID := r.URL.Query().Get("lab_id")
 	if labID == "" {
 		http.Error(w, "lab_id is required", http.StatusBadRequest)
+		return
+	}
+	// The ID names the file this export reads, so it has to be a lab this
+	// server issued and still knows.
+	if _, exists := h.jobManager.GetJob(labID); !exists {
+		log.Printf("Feedback export requested for unknown lab %q", labID)
+		http.Error(w, "Unknown lab", http.StatusNotFound)
 		return
 	}
 

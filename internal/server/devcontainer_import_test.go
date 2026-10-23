@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"easylab/internal/devcontainer"
+	"easylab/internal/providers/workspace"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -241,7 +242,38 @@ func TestDevcontainerCloneSource(t *testing.T) {
 		{
 			name:    "invalid git_repo",
 			form:    url.Values{"git_repo": {"not-a-url"}},
-			wantErr: "git_repo is not a valid URL",
+			wantErr: "git_repo must be an http(s) URL",
+		},
+		// The server clones this URL itself, with a credential out of the lab's
+		// cluster, so the SSRF-hardened validator applies: no metadata endpoint,
+		// no loopback, no private address, and no scheme it cannot fetch.
+		{
+			name:    "git_repo pointing at cloud metadata",
+			form:    url.Values{"git_repo": {"http://169.254.169.254/latest/meta-data/"}},
+			wantErr: "git_repo must be an http(s) URL",
+		},
+		{
+			name:    "git_repo pointing at loopback",
+			form:    url.Values{"git_repo": {"http://127.0.0.1:8080/repo.git"}},
+			wantErr: "git_repo must be an http(s) URL",
+		},
+		{
+			name:    "git_repo pointing at a private address",
+			form:    url.Values{"git_repo": {"http://10.0.0.5/repo.git"}},
+			wantErr: "git_repo must be an http(s) URL",
+		},
+		{
+			name:    "ssh git_repo cannot be detected server-side",
+			form:    url.Values{"git_repo": {"ssh://git@gitlab.com/org/workshop.git"}},
+			wantErr: "git_repo must be an http(s) URL",
+		},
+		{
+			name: "config repo pointing at cloud metadata",
+			form: url.Values{
+				"git_repo":                 {"https://gitlab.com/org/workshop.git"},
+				"devcontainer_config_repo": {"http://169.254.169.254/"},
+			},
+			wantErr: "devcontainer_config_repo must be an http(s) URL",
 		},
 		{
 			name: "no config repo clones git_repo",
@@ -280,7 +312,7 @@ func TestDevcontainerCloneSource(t *testing.T) {
 				"git_repo":                 {"https://gitlab.com/org/workshop.git"},
 				"devcontainer_config_repo": {"not-a-url"},
 			},
-			wantErr: "devcontainer_config_repo is not a valid URL",
+			wantErr: "devcontainer_config_repo must be an http(s) URL",
 		},
 	}
 
@@ -490,7 +522,12 @@ func TestDetectDevcontainer_GitRequiresRepo(t *testing.T) {
 		{
 			name:       "invalid repo URL is rejected before any clone",
 			form:       url.Values{"source": {"git"}, "git_repo": {"not-a-url"}},
-			wantInBody: "not a valid URL",
+			wantInBody: "must be an http(s) URL",
+		},
+		{
+			name:       "internal address is rejected before any clone",
+			form:       url.Values{"source": {"git"}, "git_repo": {"http://169.254.169.254/"}},
+			wantInBody: "must be an http(s) URL",
 		},
 	}
 
@@ -873,6 +910,9 @@ func TestResolveCloneAuth(t *testing.T) {
 		t.Helper()
 		h, fb, labID := newSecretsTestHandler(t)
 		fb.gitAuth = map[string]gitCall{"gitcred": {Name: "gitcred", Username: "oauth2", Token: "glpat-x"}}
+		// A real lab's git credential is also one of the credentials it offers;
+		// only those may be read back out.
+		fb.secrets = []workspace.AuthSecret{{Name: "gitcred", Type: workspace.AuthSecretGit, Username: "oauth2"}}
 		return h, labID
 	}
 
@@ -933,6 +973,47 @@ func TestResolveCloneAuth(t *testing.T) {
 		user, token := h.resolveCloneAuth(req, "", "", "deleted-last-week")
 		assert.Empty(t, user)
 		assert.Empty(t, token)
+	})
+
+	// Security regression: ReadGitAuth is the one place secret material is read
+	// back out, so it may only be reached for a credential the lab publishes as
+	// a git credential. A Secret that merely happens to carry basic-auth keys in
+	// the namespace — another lab's, or one made out of band — must not be
+	// readable by naming it here, since its token would then be sent to whatever
+	// host is being cloned.
+	t.Run("a credential the lab does not offer is refused", func(t *testing.T) {
+		h, fb, labID := newSecretsTestHandler(t)
+		fb.gitAuth = map[string]gitCall{"other-labs-cred": {Name: "other-labs-cred", Username: "oauth2", Token: "glpat-secret"}}
+		fb.secrets = nil // not among the credentials this lab offers
+
+		req := postForm(t, "/api/templates/detect-devcontainer", url.Values{
+			"lab_id":          {labID},
+			"git_auth_secret": {"other-labs-cred"},
+		})
+
+		user, token := h.resolveCloneAuth(req, "", "", "other-labs-cred")
+		assert.Empty(t, user)
+		assert.Empty(t, token)
+		assert.Empty(t, fb.ReadGitAuthCalls, "the credential must not even be read")
+	})
+
+	// A listing failure must not fall open: without knowing what the lab offers,
+	// nothing is read.
+	t.Run("a listing failure stays anonymous", func(t *testing.T) {
+		h, fb, labID := newSecretsTestHandler(t)
+		fb.gitAuth = map[string]gitCall{"gitcred": {Name: "gitcred", Username: "oauth2", Token: "glpat-x"}}
+		fb.secrets = []workspace.AuthSecret{{Name: "gitcred", Type: workspace.AuthSecretGit}}
+		fb.listErrSecrets = errors.New("api server unreachable")
+
+		req := postForm(t, "/api/templates/detect-devcontainer", url.Values{
+			"lab_id":          {labID},
+			"git_auth_secret": {"gitcred"},
+		})
+
+		user, token := h.resolveCloneAuth(req, "", "", "gitcred")
+		assert.Empty(t, user)
+		assert.Empty(t, token)
+		assert.Empty(t, fb.ReadGitAuthCalls)
 	})
 }
 

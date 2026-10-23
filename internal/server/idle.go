@@ -293,11 +293,10 @@ func (h *Handler) ResumeWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	labID := r.FormValue("lab_id")
 	workspaceName := r.FormValue("workspace_name")
-	// The owner is always the authenticated student — never trusted from the client.
+	// The identity is always the authenticated student — never trusted from the client.
 	email := studentEmailFromContext(r)
-	owner := usernameFromEmail(email)
 
-	if labID == "" || workspaceName == "" || owner == "" {
+	if labID == "" || workspaceName == "" || email == "" {
 		http.Error(w, "lab_id and workspace_name are required and you must be logged in", http.StatusBadRequest)
 		return
 	}
@@ -327,8 +326,8 @@ func (h *Handler) ResumeWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	ws, err := backend.GetWorkspace(r.Context(), workspaceName)
 	// Authorization: a student may only resume their own workspace.
-	if err != nil || ws.Owner != owner {
-		log.Printf("ResumeWorkspace: lookup/authz failed workspace=%s owner=%s in lab %s: %v", workspaceName, owner, labID, err)
+	if err != nil || !workspaceOwnedBy(ws, email) {
+		log.Printf("ResumeWorkspace: lookup/authz failed workspace=%s owner=%s in lab %s: %v", workspaceName, email, labID, err)
 		http.Error(w, "workspace not available", http.StatusServiceUnavailable)
 		return
 	}

@@ -70,7 +70,7 @@ To start saving credentials, either:
 * **Set a passphrase** — on the **DNS** page, type a passphrase of at least 12 characters twice and click **Save credentials encrypted**. Whatever you already entered in this session is saved with it. The passphrase cannot be recovered if lost.
 * **Set `LAB_DATA_ENCRYPTION_KEY`** in the environment (see [Docker — Environment Variables](docker.md#environment-variables)). This suits unattended deployments: nobody has to unlock anything after a restart.
 
-The key EasyLab generates by itself in `<DATA_DIR>/.encryption_key` when `LAB_DATA_ENCRYPTION_KEY` is unset is deliberately **not** used for this, because it sits beside the data it would protect.
+EasyLab never generates a key for itself. Earlier versions wrote one to `<DATA_DIR>/.encryption_key` to encrypt persisted job files, but a key sitting beside the data it protects is no protection, so that key was never used for credential storage — and is no longer generated at all. With a data directory configured, `LAB_DATA_ENCRYPTION_KEY` is required and the server will not start without it (see [Docker — Environment Variables](docker.md#environment-variables), which also covers upgrading a data directory that still holds that file).
 
 While credential storage is **locked**:
 

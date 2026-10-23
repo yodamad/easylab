@@ -15,9 +15,16 @@ services:
       - PORT=8080
       - WORK_DIR=/app/jobs
       - DATA_DIR=/app/data
-      # Set passwords via environment variables (change these!)
-      - LAB_ADMIN_PASSWORD=${LAB_ADMIN_PASSWORD:-admin123}
-      - LAB_STUDENT_PASSWORD=${LAB_STUDENT_PASSWORD:-student123}
+      # Required: compose refuses to start without it. There is deliberately no
+      # default, so an instance can never come up on a password from this file.
+      - LAB_ADMIN_PASSWORD=${LAB_ADMIN_PASSWORD:?set LAB_ADMIN_PASSWORD to a strong password before starting}
+      # Optional: leaving it unset disables student password login.
+      - LAB_STUDENT_PASSWORD=${LAB_STUDENT_PASSWORD}
+      # Required because DATA_DIR is set above: encrypts the cluster kubeconfigs
+      # and DNS credentials in persisted job files. Generate with
+      # `openssl rand -base64 32` and keep it stable — a different key leaves
+      # existing labs unreadable.
+      - LAB_DATA_ENCRYPTION_KEY=${LAB_DATA_ENCRYPTION_KEY:?generate one with: openssl rand -base64 32}
       # Set OVH credentials via environment variables (change these!)
       - OVH_APPLICATION_KEY=${OVH_APPLICATION_KEY}
       - OVH_APPLICATION_SECRET=${OVH_APPLICATION_SECRET}

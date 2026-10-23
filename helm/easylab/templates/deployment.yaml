@@ -97,6 +97,14 @@ spec:
                   name: {{ include "easylab.fullname" . }}-secrets
                   key: LAB_STUDENT_PASSWORD
             {{- end }}
+            {{- /* Required once config.dataDir is set: the server refuses to persist job files without it. */}}
+            {{- if .Values.secrets.dataEncryptionKey }}
+            - name: LAB_DATA_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "easylab.fullname" . }}-secrets
+                  key: LAB_DATA_ENCRYPTION_KEY
+            {{- end }}
             {{- if .Values.secrets.ovh.applicationKey }}
             - name: OVH_APPLICATION_KEY
               valueFrom:

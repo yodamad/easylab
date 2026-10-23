@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
 	"easylab/internal/providers/workspace/kube" // also registers the kube workspace backend
 	"easylab/internal/server"
 	"easylab/utils"
@@ -95,66 +94,46 @@ func loadEnvFile(envFile string) error {
 	return nil
 }
 
-// generatedKeyFileName is the file, inside dataDir, that holds an
-// auto-generated LAB_DATA_ENCRYPTION_KEY when the operator hasn't provided
-// one explicitly. Reusing this file across restarts keeps previously
-// persisted encrypted job data decryptable.
-const generatedKeyFileName = ".encryption_key"
+// legacyGeneratedKeyFileName is the file, inside dataDir, that older versions
+// wrote an auto-generated key to when the operator hadn't provided one. That
+// key sat beside the data it protected, so it no longer exists — but a data
+// directory written by one of those versions still holds the file, and it is
+// the only thing that can decrypt those job files. missingEncryptionKeyError
+// points the operator at it.
+const legacyGeneratedKeyFileName = ".encryption_key"
 
-// loadOrGenerateEncryptionKey returns the raw (decoded) key to use when
-// LAB_DATA_ENCRYPTION_KEY is not set in the environment. It reuses a
-// previously generated key file under dataDir if present, otherwise it
-// generates a new random 32-byte key and persists it there (mode 0600) so
-// subsequent restarts pick up the same key.
-func loadOrGenerateEncryptionKey(dataDir string) ([]byte, error) {
-	keyPath := filepath.Join(dataDir, generatedKeyFileName)
-
-	if existing, err := os.ReadFile(keyPath); err == nil {
-		key, decodeErr := base64.StdEncoding.DecodeString(strings.TrimSpace(string(existing)))
-		if decodeErr != nil {
-			return nil, fmt.Errorf("existing generated key file %s is not valid base64: %w", keyPath, decodeErr)
-		}
-		log.Printf("[STARTUP] LAB_DATA_ENCRYPTION_KEY not set; reusing previously generated key from %s", keyPath)
-		return key, nil
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("failed to read generated key file %s: %w", keyPath, err)
+// missingEncryptionKeyError explains how to supply the key when persistence is
+// on and LAB_DATA_ENCRYPTION_KEY is not set. A data directory carried over from
+// a version that generated its own key needs that key moved into the
+// environment, or every lab in it becomes unreadable.
+func missingEncryptionKeyError(dataDir string) error {
+	keyPath := filepath.Join(dataDir, legacyGeneratedKeyFileName)
+	if _, err := os.Stat(keyPath); err == nil {
+		return fmt.Errorf("LAB_DATA_ENCRYPTION_KEY is not set, and %s holds the key this data directory was encrypted with. "+
+			"EasyLab no longer keeps a key beside the data it protects. Set LAB_DATA_ENCRYPTION_KEY to the contents of that file "+
+			"(`cat %s`), restart, then delete the file. Starting without it would make every saved lab unreadable", keyPath, keyPath)
 	}
-
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
-		return nil, fmt.Errorf("failed to generate encryption key: %w", err)
-	}
-	encoded := base64.StdEncoding.EncodeToString(key)
-	if err := os.WriteFile(keyPath, []byte(encoded), 0600); err != nil {
-		return nil, fmt.Errorf("failed to persist generated encryption key to %s: %w", keyPath, err)
-	}
-	log.Printf("[STARTUP] LAB_DATA_ENCRYPTION_KEY not set; generated a new key and saved it to %s. For production, set LAB_DATA_ENCRYPTION_KEY explicitly from a managed secret store instead of relying on this file.", keyPath)
-	return key, nil
+	return fmt.Errorf("LAB_DATA_ENCRYPTION_KEY is not set but DATA_DIR is (%s), and persisted job files hold cluster kubeconfigs "+
+		"and DNS provider credentials. Generate a key with `openssl rand -base64 32`, set LAB_DATA_ENCRYPTION_KEY from a managed "+
+		"secret store, and keep it stable — losing it makes existing labs unreadable", dataDir)
 }
 
 // initDataEncryption configures at-rest encryption for persisted job files from
-// LAB_DATA_ENCRYPTION_KEY (base64-encoded 32 bytes / AES-256). When persistence
-// is enabled (dataDir is set) and no key is provided, one is generated and
-// persisted under dataDir (see loadOrGenerateEncryptionKey) so the server can
-// still start and encrypted data remains decryptable across restarts.
+// LAB_DATA_ENCRYPTION_KEY (base64-encoded 32 bytes / AES-256). The key is
+// mandatory whenever persistence is enabled: EasyLab never generates one into
+// dataDir, because a key stored beside its ciphertext protects nothing (the
+// same rule the credential vault already follows — see credential_vault.go).
 func initDataEncryption(dataDir string) error {
 	raw := strings.TrimSpace(os.Getenv("LAB_DATA_ENCRYPTION_KEY"))
-	var key []byte
 	if raw == "" {
 		if dataDir == "" {
 			return nil // persistence disabled, no key needed
 		}
-		generated, err := loadOrGenerateEncryptionKey(dataDir)
-		if err != nil {
-			return fmt.Errorf("failed to obtain data encryption key: %w", err)
-		}
-		key = generated
-	} else {
-		decoded, err := base64.StdEncoding.DecodeString(raw)
-		if err != nil {
-			return fmt.Errorf("LAB_DATA_ENCRYPTION_KEY must be base64-encoded: %w", err)
-		}
-		key = decoded
+		return missingEncryptionKeyError(dataDir)
+	}
+	key, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return fmt.Errorf("LAB_DATA_ENCRYPTION_KEY must be base64-encoded: %w", err)
 	}
 	if err := server.InitDataEncryption(key); err != nil {
 		return fmt.Errorf("invalid LAB_DATA_ENCRYPTION_KEY: %w", err)
@@ -163,10 +142,11 @@ func initDataEncryption(dataDir string) error {
 	return nil
 }
 
-// explicitEncryptionKey returns the decoded LAB_DATA_ENCRYPTION_KEY when the
-// operator set it in the environment, and nil when the key in use is the one
-// auto-generated under dataDir. The credential vault is only ever saved to disk
-// under a key that does not sit beside it, so it must tell the two apart.
+// explicitEncryptionKey returns the decoded LAB_DATA_ENCRYPTION_KEY, or nil when
+// it is unset — which, since initDataEncryption has already run, means
+// persistence is off. The credential vault takes the key from here rather than
+// reading the environment itself, so its contract stays "only ever saved to disk
+// under a key that does not sit beside it".
 func explicitEncryptionKey() []byte {
 	raw := strings.TrimSpace(os.Getenv("LAB_DATA_ENCRYPTION_KEY"))
 	if raw == "" {

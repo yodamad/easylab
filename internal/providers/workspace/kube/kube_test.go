@@ -429,17 +429,28 @@ func newTestBackend() (*Backend, *fake.Clientset) {
 }
 
 func TestWorkspaceName_DeterministicAndSafe(t *testing.T) {
-	n1 := workspaceName("job-abc", "Alice.Smith", "docker")
-	n2 := workspaceName("job-abc", "Alice.Smith", "docker")
+	n1 := workspaceName("job-abc", "alice-smith", "Alice.Smith@corp.com", "docker")
+	n2 := workspaceName("job-abc", "alice-smith", "Alice.Smith@corp.com", "docker")
 	if n1 != n2 {
 		t.Fatalf("workspaceName not deterministic: %q vs %q", n1, n2)
 	}
-	if got := workspaceName("job-xyz", "Alice.Smith", "docker"); got == n1 {
+	// The identity is compared case-insensitively, so the same person coming
+	// back with differently-cased mail must land on the same workspace.
+	if got := workspaceName("job-abc", "alice-smith", " alice.smith@CORP.com ", "docker"); got != n1 {
+		t.Fatalf("workspaceName changed with identity case/space: %q vs %q", got, n1)
+	}
+	if got := workspaceName("job-xyz", "alice-smith", "Alice.Smith@corp.com", "docker"); got == n1 {
 		t.Fatalf("workspaceName collided across labs: %q", got)
 	}
 	// Different template for the same lab/owner must yield a different workspace.
-	if got := workspaceName("job-abc", "Alice.Smith", "go"); got == n1 {
+	if got := workspaceName("job-abc", "alice-smith", "Alice.Smith@corp.com", "go"); got == n1 {
 		t.Fatalf("workspaceName collided across templates: %q", got)
+	}
+	// Two distinct people whose sanitized usernames collapse to the same string
+	// must not share a workspace: that would hand the second one the first one's
+	// running IDE and its access token.
+	if got := workspaceName("job-abc", "alice-smith", "alice-smith@other.org", "docker"); got == n1 {
+		t.Fatalf("workspaceName collided across identities sharing a username: %q", got)
 	}
 	if len(n1) > 63 {
 		t.Fatalf("workspaceName too long (%d): %q", len(n1), n1)
@@ -448,6 +459,90 @@ func TestWorkspaceName_DeterministicAndSafe(t *testing.T) {
 		if !(c == '-' || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
 			t.Fatalf("workspaceName has invalid DNS-1123 char %q in %q", c, n1)
 		}
+	}
+}
+
+// A workspace created before the owner's identity was part of the resource name
+// must keep being used: its pod is running, and its hostname and TLS certificate
+// are the ones the student has. Creating a second workspace beside it would
+// strand the first.
+func TestEnsureWorkspace_AdoptsWorkspaceNamedBeforeIdentityHashing(t *testing.T) {
+	b, cs := newTestBackend()
+	ctx := context.Background()
+
+	spec := workspace.Spec{
+		LabID:      "job-1",
+		Owner:      "alice",
+		OwnerEmail: "alice@corp.com",
+		Image:      "codercom/code-server:latest",
+		Domain:     "lab.example.com",
+		Token:      "secret-token",
+	}
+	legacy := legacyWorkspaceName(spec.LabID, spec.Owner, spec.Template)
+	current := workspaceName(spec.LabID, spec.Owner, spec.OwnerEmail, spec.Template)
+	if legacy == current {
+		t.Fatal("test needs the two derivations to differ")
+	}
+
+	// Create under the old name, as an earlier version would have.
+	legacySpec := spec
+	if err := b.createResources(ctx, legacy, legacySpec, "https"); err != nil {
+		t.Fatalf("failed to create legacy workspace: %v", err)
+	}
+
+	ws, err := b.EnsureWorkspace(ctx, spec)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace error: %v", err)
+	}
+	if ws.ID != legacy {
+		t.Errorf("EnsureWorkspace returned %q, want the existing %q", ws.ID, legacy)
+	}
+	if ws.Created {
+		t.Error("an adopted workspace must not be reported as newly created")
+	}
+	if _, err := cs.AppsV1().Deployments("workshops").Get(ctx, current, metav1.GetOptions{}); err == nil {
+		t.Error("a second workspace was created beside the existing one")
+	}
+}
+
+// Adoption is by identity: a workspace recorded for one student must never be
+// handed to another whose sanitized username happens to match.
+func TestEnsureWorkspace_DoesNotAdoptAnotherIdentitysWorkspace(t *testing.T) {
+	b, cs := newTestBackend()
+	ctx := context.Background()
+
+	base := workspace.Spec{
+		LabID:  "job-1",
+		Owner:  "alice-smith",
+		Image:  "codercom/code-server:latest",
+		Domain: "lab.example.com",
+		Token:  "first-token",
+	}
+	first := base
+	first.OwnerEmail = "alice.smith@corp.com"
+	legacy := legacyWorkspaceName(base.LabID, base.Owner, base.Template)
+	if err := b.createResources(ctx, legacy, first, "https"); err != nil {
+		t.Fatalf("failed to create the first student's workspace: %v", err)
+	}
+
+	// A different person whose email reduces to the same owner string.
+	second := base
+	second.OwnerEmail = "alice-smith@other.org"
+	second.Token = "second-token"
+
+	ws, err := b.EnsureWorkspace(ctx, second)
+	if err != nil {
+		t.Fatalf("EnsureWorkspace error: %v", err)
+	}
+	if ws.ID == legacy {
+		t.Fatal("the second student was handed the first student's workspace")
+	}
+	dep, err := cs.AppsV1().Deployments("workshops").Get(ctx, ws.ID, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("the second student's own workspace was not created: %v", err)
+	}
+	if got := dep.Annotations[annotationOwnerEmail]; got != second.OwnerEmail {
+		t.Errorf("owner email annotation = %q, want %q", got, second.OwnerEmail)
 	}
 }
 

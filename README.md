@@ -41,8 +41,9 @@ EasyLab streamlines cloud infrastructure lab management for **educators**, **wor
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yodamad/easylab/main/docker-compose.yml -o docker-compose.yml
-export LAB_ADMIN_PASSWORD="your-secure-password"
-export LAB_STUDENT_PASSWORD="your-student-password"
+export LAB_ADMIN_PASSWORD="your-secure-password"          # required
+export LAB_DATA_ENCRYPTION_KEY="$(openssl rand -base64 32)"  # required, keep it stable
+export LAB_STUDENT_PASSWORD="your-student-password"       # optional
 docker-compose up -d
 # Access at http://localhost:8080
 ```
@@ -50,7 +51,9 @@ docker-compose up -d
 ### Helm
 
 ```bash
-helm install easylab oci://registry-1.docker.io/yodamad/easylab
+helm install easylab oci://registry-1.docker.io/yodamad/easylab \
+  --set secrets.adminPassword="your-secure-password" \
+  --set secrets.dataEncryptionKey="$(openssl rand -base64 32)"
 ```
 
 See the [documentation](https://docs.easylab.yodamad.fr) for [Docker](https://docs.easylab.yodamad.fr/docker/), [Helm](https://docs.easylab.yodamad.fr/helm/), and local development setup.

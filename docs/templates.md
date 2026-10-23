@@ -639,6 +639,20 @@ cluster does not exist yet, so there is nowhere to put a Secret. Giving *student
 access to the repo is the separate step described in
 [Private registries and repositories](#private-registries-and-repositories).
 
+!!! note "The repository EasyLab reads must be reachable over http(s)"
+    EasyLab clones this one repository itself — unlike a template's `git_repo`,
+    which is cloned inside the student's pod — so the URL must be `http://` or
+    `https://` on a routable public host. An `ssh://` URL, a `localhost` address
+    or an address on a private network is refused for the import. This is what
+    keeps an import from being pointed at an internal service, since the clone
+    can carry the lab's git credential. An `ssh://` repository is still a
+    perfectly good template `git_repo`: write the template by hand, or import
+    from an `https://` URL and change it afterwards.
+
+    For the same reason, the credential named under **Git credential** must be
+    one of the lab's own git credentials, as listed on its page — EasyLab will
+    not read an arbitrary Secret out of the lab's namespace.
+
 ### What is honoured, and what is not
 
 The build understands the parts that describe the image; EasyLab covers several

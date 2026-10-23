@@ -380,15 +380,44 @@ func newBackend(client kubernetes.Interface, namespace string) *Backend {
 }
 
 // workspaceName derives a deterministic, DNS-1123-safe resource name unique per
-// (lab, owner, template). The lab+template are folded in via a short hash so a
-// student can hold one workspace per template, and the same student in two labs
-// does not collide within a shared namespace.
-func workspaceName(labID, owner, template string) string {
+// (lab, owner identity, template). The lab+template are folded in via a short
+// hash so a student can hold one workspace per template, and the same student in
+// two labs does not collide within a shared namespace.
+//
+// identity is the owner's full login email. It is hashed in because the owner
+// string alone is not unique: it is a DNS-safe reduction of the local part of an
+// email, so john.doe@corp.com and john-doe@other.org reduce to the same owner
+// (see usernameFromEmail in internal/server). Without the identity in the hash
+// they would resolve to one resource name, and because this function is the
+// identity of the workspace, the second student would be handed the first
+// student's running workspace and its IDE token. The owner still leads the name
+// so it stays recognisable in kubectl output.
+//
+// Workspaces created before the identity was included carry the name
+// legacyWorkspaceName returns; EnsureWorkspace adopts those rather than building
+// a second workspace beside a running one.
+func workspaceName(labID, owner, identity, template string) string {
+	return buildWorkspaceName(owner, labID+"\x00"+template+"\x00"+normalizeIdentity(identity))
+}
+
+// legacyWorkspaceName is the name workspaces got before the owner's identity was
+// part of the hash. It exists only so an existing workspace can still be found.
+func legacyWorkspaceName(labID, owner, template string) string {
+	return buildWorkspaceName(owner, labID+"\x00"+template)
+}
+
+// normalizeIdentity matches how the server compares login identities: trimmed
+// and lowercased, so the same person always hashes to the same workspace.
+func normalizeIdentity(identity string) string {
+	return strings.ToLower(strings.TrimSpace(identity))
+}
+
+func buildWorkspaceName(owner, hashInput string) string {
 	owner = sanitizeDNS(owner)
 	if owner == "" {
 		owner = "student"
 	}
-	sum := sha1.Sum([]byte(labID + "\x00" + template))
+	sum := sha1.Sum([]byte(hashInput))
 	hash := hex.EncodeToString(sum[:])[:8]
 	// Reserve room for "ws-", "-", and the 8-char hash (<=63 total).
 	const maxOwner = 63 - len("ws-") - 1 - 8
@@ -396,6 +425,20 @@ func workspaceName(labID, owner, template string) string {
 		owner = owner[:maxOwner]
 	}
 	return fmt.Sprintf("ws-%s-%s", owner, hash)
+}
+
+// ownsDeployment reports whether an existing workspace Deployment may be handed
+// to the identity asking for one. A workspace that recorded its owner's email is
+// adopted only by that identity. One created before the email was recorded has
+// no identity to check and keeps the behaviour it has always had: it belongs to
+// the sanitized owner already baked into its name, which is how the server's own
+// authorization check treats it too.
+func ownsDeployment(dep *appsv1.Deployment, identity string) bool {
+	recorded := strings.TrimSpace(dep.Annotations[annotationOwnerEmail])
+	if recorded == "" {
+		return true
+	}
+	return normalizeIdentity(recorded) == normalizeIdentity(identity)
 }
 
 // sanitizeDNS lowercases and strips characters not allowed in DNS-1123 labels.
@@ -494,9 +537,23 @@ func (b *Backend) labels(labID, owner, name string) map[string]string {
 // EnsureWorkspace creates the workspace resources if absent and returns the
 // current workspace state. It is idempotent.
 func (b *Backend) EnsureWorkspace(ctx context.Context, spec workspace.Spec) (workspace.Workspace, error) {
-	name := workspaceName(spec.LabID, spec.Owner, spec.Template)
+	name := workspaceName(spec.LabID, spec.Owner, spec.OwnerEmail, spec.Template)
 
 	existing, err := b.client.AppsV1().Deployments(b.namespace).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		// A workspace created before the owner's identity was part of the name is
+		// still that student's workspace, running under its own hostname and TLS
+		// certificate. Keep using it instead of building a second one beside it.
+		if legacy := legacyWorkspaceName(spec.LabID, spec.Owner, spec.Template); legacy != name {
+			if adopted, legacyErr := b.client.AppsV1().Deployments(b.namespace).Get(ctx, legacy, metav1.GetOptions{}); legacyErr == nil {
+				if ownsDeployment(adopted, spec.OwnerEmail) {
+					name, existing, err = legacy, adopted, nil
+				} else {
+					log.Printf("Workspace %s exists but belongs to another identity; creating %s instead", legacy, name)
+				}
+			}
+		}
+	}
 	if err == nil {
 		// The workspace's Ingress was created once and never revisited, so its
 		// certificate configuration can be stale (see reconcileIngressTLS). Fix it

@@ -468,57 +468,47 @@ func TestInitDataEncryption_NoDataDirNoKey(t *testing.T) {
 	}
 }
 
-func TestInitDataEncryption_GeneratesAndPersistsKey(t *testing.T) {
+// A key is mandatory once persistence is on: job files hold cluster kubeconfigs
+// and DNS credentials, and EasyLab must never generate a key into the directory
+// it protects.
+func TestInitDataEncryption_RefusesWithoutKey(t *testing.T) {
 	t.Setenv("LAB_DATA_ENCRYPTION_KEY", "")
 	tmpDir := t.TempDir()
 	t.Cleanup(func() { _ = server.InitDataEncryption(nil) })
 
-	if err := initDataEncryption(tmpDir); err != nil {
-		t.Fatalf("initDataEncryption() with no key set error = %v, want nil (key should be generated)", err)
+	err := initDataEncryption(tmpDir)
+	if err == nil {
+		t.Fatal("initDataEncryption() with a data dir and no key = nil, want an error")
 	}
-
-	keyPath := filepath.Join(tmpDir, generatedKeyFileName)
-	raw, err := os.ReadFile(keyPath)
-	if err != nil {
-		t.Fatalf("expected generated key file at %s, read error: %v", keyPath, err)
+	if !strings.Contains(err.Error(), "openssl rand -base64 32") {
+		t.Errorf("error should tell the operator how to generate a key, got: %v", err)
 	}
-	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(raw)))
-	if err != nil {
-		t.Fatalf("generated key file content is not valid base64: %v", err)
-	}
-	if len(decoded) != 32 {
-		t.Fatalf("generated key length = %d, want 32", len(decoded))
+	if _, statErr := os.Stat(filepath.Join(tmpDir, legacyGeneratedKeyFileName)); !os.IsNotExist(statErr) {
+		t.Errorf("no key file may be written beside the data, stat err = %v", statErr)
 	}
 }
 
-func TestInitDataEncryption_ReusesGeneratedKeyAcrossRestarts(t *testing.T) {
+// A data directory carried over from a version that generated its own key is
+// still decryptable, but only with that key — so say where it is instead of
+// failing with generic advice.
+func TestInitDataEncryption_PointsAtLegacyKeyFile(t *testing.T) {
 	t.Setenv("LAB_DATA_ENCRYPTION_KEY", "")
 	tmpDir := t.TempDir()
-	t.Cleanup(func() { _ = server.InitDataEncryption(nil) })
-
-	if err := initDataEncryption(tmpDir); err != nil {
-		t.Fatalf("first initDataEncryption() error = %v", err)
-	}
-	firstKey, err := os.ReadFile(filepath.Join(tmpDir, generatedKeyFileName))
-	if err != nil {
-		t.Fatalf("failed to read generated key after first start: %v", err)
+	keyPath := filepath.Join(tmpDir, legacyGeneratedKeyFileName)
+	if err := os.WriteFile(keyPath, []byte(base64.StdEncoding.EncodeToString(make([]byte, 32))), 0600); err != nil {
+		t.Fatalf("failed to write legacy key file: %v", err)
 	}
 
-	// Simulate a restart: same dataDir, key still unset in the environment.
-	if err := initDataEncryption(tmpDir); err != nil {
-		t.Fatalf("second initDataEncryption() error = %v", err)
+	err := initDataEncryption(tmpDir)
+	if err == nil {
+		t.Fatal("initDataEncryption() with a legacy key file = nil, want an error")
 	}
-	secondKey, err := os.ReadFile(filepath.Join(tmpDir, generatedKeyFileName))
-	if err != nil {
-		t.Fatalf("failed to read generated key after second start: %v", err)
-	}
-
-	if string(firstKey) != string(secondKey) {
-		t.Fatalf("generated key changed across restarts: previously persisted encrypted data would become undecryptable")
+	if !strings.Contains(err.Error(), keyPath) {
+		t.Errorf("error should name the legacy key file %s, got: %v", keyPath, err)
 	}
 }
 
-func TestInitDataEncryption_ExplicitKeyTakesPrecedence(t *testing.T) {
+func TestInitDataEncryption_ExplicitKeyAccepted(t *testing.T) {
 	tmpDir := t.TempDir()
 	key := make([]byte, 32)
 	t.Setenv("LAB_DATA_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(key))
@@ -528,8 +518,8 @@ func TestInitDataEncryption_ExplicitKeyTakesPrecedence(t *testing.T) {
 		t.Fatalf("initDataEncryption() with explicit key error = %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(tmpDir, generatedKeyFileName)); !os.IsNotExist(err) {
-		t.Fatalf("expected no generated key file when LAB_DATA_ENCRYPTION_KEY is explicitly set, stat err = %v", err)
+	if _, err := os.Stat(filepath.Join(tmpDir, legacyGeneratedKeyFileName)); !os.IsNotExist(err) {
+		t.Fatalf("expected no key file beside the data, stat err = %v", err)
 	}
 }
 
@@ -542,8 +532,8 @@ func TestInitDataEncryption_InvalidExplicitKey(t *testing.T) {
 	}
 }
 
-// Only a key the operator set counts as explicit: the credential vault must
-// never be saved under the key auto-generated beside the data.
+// The credential vault takes its key from here rather than reading the
+// environment itself, so a malformed or absent value must read as "no key".
 func TestExplicitEncryptionKey(t *testing.T) {
 	key := bytes.Repeat([]byte{7}, 32)
 
@@ -567,12 +557,15 @@ func TestExplicitEncryptionKey(t *testing.T) {
 		})
 	}
 
-	// An auto-generated key file is not an explicit key.
+	// A key file left in the data directory by an older version is not a key:
+	// only the environment counts, which is what keeps the vault's contract.
 	t.Setenv("LAB_DATA_ENCRYPTION_KEY", "")
-	if err := initDataEncryption(t.TempDir()); err != nil {
-		t.Fatalf("initDataEncryption() error = %v", err)
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, legacyGeneratedKeyFileName),
+		[]byte(base64.StdEncoding.EncodeToString(key)), 0600); err != nil {
+		t.Fatalf("failed to write legacy key file: %v", err)
 	}
 	if got := explicitEncryptionKey(); got != nil {
-		t.Errorf("explicitEncryptionKey() with a generated key file = %v, want nil", got)
+		t.Errorf("explicitEncryptionKey() with a legacy key file = %v, want nil", got)
 	}
 }

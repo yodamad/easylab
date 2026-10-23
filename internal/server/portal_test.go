@@ -684,14 +684,14 @@ func TestFeedbackStore_AddIfAbsent(t *testing.T) {
 	fs, err := NewFeedbackStore(t.TempDir())
 	require.NoError(t, err)
 
-	added, err := fs.AddIfAbsent(Feedback{ID: "fb-1", LabID: "lab-1", Rating: 5})
+	added, err := fs.AddIfAbsent(Feedback{ID: "fb-1", LabID: testLabA, Rating: 5})
 	require.NoError(t, err)
 	assert.True(t, added)
-	added, err = fs.AddIfAbsent(Feedback{ID: "fb-1", LabID: "lab-1", Rating: 1})
+	added, err = fs.AddIfAbsent(Feedback{ID: "fb-1", LabID: testLabA, Rating: 1})
 	require.NoError(t, err)
 	assert.False(t, added)
 
-	entries, err := fs.GetByLab("lab-1")
+	entries, err := fs.GetByLab(testLabA)
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
 	assert.Equal(t, 5, entries[0].Rating)

@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"easylab/internal/devcontainer"
+	"easylab/internal/providers/workspace"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -296,13 +298,19 @@ func devcontainerCloneSource(r *http.Request) (repoURL, branch, username, token,
 	if gitRepo == "" {
 		return "", "", "", "", "", clientErrorf("git_repo is required")
 	}
-	if !validateURL(gitRepo) {
-		return "", "", "", "", "", clientErrorf("git_repo is not a valid URL")
+	// This URL is cloned by the EasyLab server itself, with a credential read
+	// from the lab's cluster, so it goes through the SSRF-hardened validator —
+	// not the shape-only validateURL used for template fields a student's own
+	// pod clones (see the rule at validateServerFetchURL in handler.go). The
+	// cost is that detection needs an http(s) host: an ssh:// repo is still a
+	// valid template, it just cannot be auto-detected.
+	if !validateServerFetchURL(gitRepo) {
+		return "", "", "", "", "", clientErrorf("git_repo must be an http(s) URL on a public host for EasyLab to read its devcontainer")
 	}
 
 	if configRepo := strings.TrimSpace(getFormValue(r, "devcontainer_config_repo")); configRepo != "" {
-		if !validateURL(configRepo) {
-			return "", "", "", "", "", clientErrorf("devcontainer_config_repo is not a valid URL")
+		if !validateServerFetchURL(configRepo) {
+			return "", "", "", "", "", clientErrorf("devcontainer_config_repo must be an http(s) URL on a public host for EasyLab to read its devcontainer")
 		}
 		return configRepo, strings.TrimSpace(getFormValue(r, "devcontainer_config_branch")),
 			getFormValue(r, "devcontainer_config_username"), getFormValue(r, "devcontainer_config_token"),
@@ -338,12 +346,38 @@ func (h *Handler) resolveCloneAuth(r *http.Request, username, token, authSecret 
 		log.Printf("Devcontainer import: no secret manager for lab %s: %v", labID, err)
 		return username, token
 	}
+	// Only a credential the lab actually offers as a git credential may be read
+	// back out. Without this, any Secret name carrying basic-auth keys in that
+	// namespace — including one belonging to another lab's templates — could be
+	// named here and its token sent to whatever host is being cloned.
+	if !isListedGitAuthSecret(r.Context(), sm, authSecret) {
+		log.Printf("Devcontainer import: credential %q is not a git credential of lab %s", authSecret, labID)
+		return username, token
+	}
 	user, pass, err := sm.ReadGitAuth(r.Context(), authSecret)
 	if err != nil {
 		log.Printf("Devcontainer import: failed to read credential %q on lab %s: %v", authSecret, labID, err)
 		return username, token
 	}
 	return user, pass
+}
+
+// isListedGitAuthSecret reports whether name is one of the git credentials the
+// lab offers, i.e. a name a template may legitimately reference. It is what
+// keeps ReadGitAuth — the one place secret material is read back out — to
+// credentials the lab published rather than any Secret in its namespace.
+func isListedGitAuthSecret(ctx context.Context, sm workspace.SecretManager, name string) bool {
+	secrets, err := sm.ListAuthSecrets(ctx)
+	if err != nil {
+		log.Printf("Devcontainer import: failed to list lab credentials: %v", err)
+		return false
+	}
+	for _, s := range secrets {
+		if s.Name == name && s.Type == workspace.AuthSecretGit {
+			return true
+		}
+	}
+	return false
 }
 
 // detectDevcontainerFromGit shallow-clones a repo and reads its

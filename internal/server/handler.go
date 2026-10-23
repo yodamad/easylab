@@ -2598,10 +2598,10 @@ func (h *Handler) WorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 
 	labID := r.URL.Query().Get("lab_id")
 	workspaceName := r.URL.Query().Get("workspace_name")
-	// The owner is always the authenticated student — never trusted from the client.
-	owner := usernameFromEmail(studentEmailFromContext(r))
+	// The identity is always the authenticated student — never trusted from the client.
+	email := studentEmailFromContext(r)
 
-	if labID == "" || workspaceName == "" || owner == "" {
+	if labID == "" || workspaceName == "" || email == "" {
 		http.Error(w, "lab_id and workspace_name are required and you must be logged in", http.StatusBadRequest)
 		return
 	}
@@ -2635,8 +2635,8 @@ func (h *Handler) WorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 
 	ws, err := backend.GetWorkspace(r.Context(), workspaceName)
 	// Authorization: a student may only see their own workspace.
-	if err != nil || ws.Owner != owner {
-		log.Printf("[debug] WorkspaceStatus: lookup/authz failed workspace=%s owner=%s error=%v", workspaceName, owner, err)
+	if err != nil || !workspaceOwnedBy(ws, email) {
+		log.Printf("[debug] WorkspaceStatus: lookup/authz failed workspace=%s owner=%s error=%v", workspaceName, email, err)
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprint(w, buildWorkspaceStatusHTML(labID, workspaceName, "checking", "", ""))
 		return
@@ -2720,13 +2720,70 @@ var usernameInvalidChars = regexp.MustCompile(`[^a-z0-9-]`)
 
 // usernameFromEmail derives the sanitized, DNS-1123-safe workspace username from
 // a student email. It matches the sanitization the kube backend applies to the
-// owner label, so it can be compared against Workspace.Owner for authorization.
+// owner label.
+//
+// It is not an identity: the domain is dropped and every character a DNS label
+// cannot carry becomes "-", so john.doe@corp.com, john-doe@other.org and
+// John_Doe@x.io all reduce to "john-doe". Authorization compares the full login
+// email instead — see workspaceOwnedBy. This value is for resource and label
+// names only.
 func usernameFromEmail(email string) string {
 	if email == "" {
 		return ""
 	}
 	local := strings.ToLower(strings.Split(email, "@")[0])
 	return strings.Trim(usernameInvalidChars.ReplaceAllString(local, "-"), "-")
+}
+
+// normalizeEmail is how login identities are compared: trimmed and lowercased,
+// so two sign-ins differing only in case or surrounding space are one person.
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
+// workspaceOwnedBy reports whether ws belongs to the student signed in as email.
+// It is the single authorization check behind every per-student workspace route.
+//
+// The comparison is on the full login email, recorded on the workspace when it
+// was created, because the sanitized username is not unique across identities
+// (see usernameFromEmail). A workspace created before the email was recorded has
+// none, and falls back to comparing that sanitized username — the best such a
+// workspace can offer, and no weaker than the check it had before.
+//
+// OwnerEmail reaches this function from an annotation on the workspace's
+// Deployment, so the guarantee is only as strong as write access to the lab's
+// workspace namespace.
+func workspaceOwnedBy(ws workspace.Workspace, email string) bool {
+	if email == "" {
+		return false
+	}
+	if ws.OwnerEmail != "" {
+		return normalizeEmail(ws.OwnerEmail) == normalizeEmail(email)
+	}
+	return ws.Owner != "" && ws.Owner == usernameFromEmail(email)
+}
+
+// workspaceOwnerKey is how a workspace's owner is recorded in the lab history
+// that is later compared against a signed-in student (WorkspaceAccess): the
+// login email when the workspace carries one, else the sanitized username.
+func workspaceOwnerKey(ws workspace.Workspace) string {
+	if ws.OwnerEmail != "" {
+		return normalizeEmail(ws.OwnerEmail)
+	}
+	return ws.Owner
+}
+
+// workspaceAccessBelongsTo reports whether a recorded teacher access is on the
+// workspace of the student signed in as email. Records written before ownership
+// moved to the login email hold the sanitized username, so both are accepted.
+func workspaceAccessBelongsTo(access WorkspaceAccess, email string) bool {
+	if email == "" || access.Owner == "" {
+		return false
+	}
+	if normalizeEmail(access.Owner) == normalizeEmail(email) {
+		return true
+	}
+	return access.Owner == usernameFromEmail(email)
 }
 
 // ownerDisplayName returns the identity to show an admin for a workspace:
@@ -2921,10 +2978,10 @@ func (h *Handler) OpenWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	labID := r.URL.Query().Get("lab_id")
 	workspaceName := r.URL.Query().Get("workspace_name")
-	// The owner is always the authenticated student — never trusted from the client.
-	owner := usernameFromEmail(studentEmailFromContext(r))
+	// The identity is always the authenticated student — never trusted from the client.
+	email := studentEmailFromContext(r)
 
-	if labID == "" || workspaceName == "" || owner == "" {
+	if labID == "" || workspaceName == "" || email == "" {
 		http.Error(w, "lab_id and workspace_name are required and you must be logged in", http.StatusBadRequest)
 		return
 	}
@@ -2954,8 +3011,8 @@ func (h *Handler) OpenWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	ws, err := backend.GetWorkspace(r.Context(), workspaceName)
 	// Authorization: a student may only open their own workspace.
-	if err != nil || ws.Owner != owner || ws.OpenURL == "" {
-		log.Printf("OpenWorkspace: lookup/authz failed workspace=%s owner=%s in lab %s: %v", workspaceName, owner, labID, err)
+	if err != nil || !workspaceOwnedBy(ws, email) || ws.OpenURL == "" {
+		log.Printf("OpenWorkspace: lookup/authz failed workspace=%s owner=%s in lab %s: %v", workspaceName, email, labID, err)
 		http.Error(w, "workspace not available", http.StatusServiceUnavailable)
 		return
 	}
@@ -3013,7 +3070,7 @@ func (h *Handler) OpenWorkspaceAsAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if rerr := h.jobManager.RecordWorkspaceAccess(labID, workspaceID, ws.Owner); rerr != nil {
+	if rerr := h.jobManager.RecordWorkspaceAccess(labID, workspaceID, workspaceOwnerKey(ws)); rerr != nil {
 		log.Printf("Failed to record admin access to workspace %s: %v", workspaceID, rerr)
 	} else {
 		// Off the response's critical path — see the comment on the SaveJob call
@@ -3048,17 +3105,17 @@ func (h *Handler) WorkspaceTeacherAccess(w http.ResponseWriter, r *http.Request)
 
 	labID := r.URL.Query().Get("lab_id")
 	workspaceName := r.URL.Query().Get("workspace_name")
-	// The owner is always the authenticated student — never trusted from the client.
-	owner := usernameFromEmail(studentEmailFromContext(r))
+	// The identity is always the authenticated student — never trusted from the client.
+	email := studentEmailFromContext(r)
 
-	if labID == "" || workspaceName == "" || owner == "" {
+	if labID == "" || workspaceName == "" || email == "" {
 		writeJSONError(w, http.StatusBadRequest, "lab_id and workspace_name are required and you must be logged in")
 		return
 	}
 
 	accessedAt := ""
 	// Authorization: a student may only learn about accesses to their own workspace.
-	if access, ok := h.jobManager.GetWorkspaceAccess(labID, workspaceName); ok && access.Owner == owner {
+	if access, ok := h.jobManager.GetWorkspaceAccess(labID, workspaceName); ok && workspaceAccessBelongsTo(access, email) {
 		accessedAt = access.At.Format(time.RFC3339)
 	}
 
@@ -3094,11 +3151,10 @@ func (h *Handler) DeleteStudentWorkspace(w http.ResponseWriter, r *http.Request)
 
 	labID := r.FormValue("lab_id")
 	workspaceName := r.FormValue("workspace_name")
+	// The identity is always the authenticated student — never trusted from the client.
 	email := studentEmailFromContext(r)
-	// The owner is always the authenticated student — never trusted from the client.
-	owner := usernameFromEmail(email)
 
-	if labID == "" || workspaceName == "" || owner == "" {
+	if labID == "" || workspaceName == "" || email == "" {
 		writeJSONError(w, http.StatusBadRequest, "lab_id and workspace_name are required and you must be logged in")
 		return
 	}
@@ -3150,8 +3206,8 @@ func (h *Handler) DeleteStudentWorkspace(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Authorization: a student may only delete their own workspace.
-	if target.Owner != owner {
-		log.Printf("DeleteStudentWorkspace: authz failed workspace=%s owner=%s in lab %s", workspaceName, owner, labID)
+	if !workspaceOwnedBy(*target, email) {
+		log.Printf("DeleteStudentWorkspace: authz failed workspace=%s owner=%s in lab %s", workspaceName, email, labID)
 		writeJSONError(w, http.StatusForbidden, "You can only delete your own workspace")
 		return
 	}

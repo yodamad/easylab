@@ -77,11 +77,11 @@ Once GitLab login is on, **Turn off password sign-in for students** hides the pa
 
 ### Student identity and other sign-in methods
 
-A workspace is owned by the part of the student's identity before the `@`. This has two consequences:
+A workspace is owned by the student's **full** sign-in identity: a GitLab sign-in as `tanuki` owns workspaces as `tanuki@users.noreply.<host>`. That identity is distinct from a student typing `tanuki@example.com` in the password form, and from the GitHub user `tanuki` when [GitHub login](github.md) is also on, so each keeps their own workspaces even where the names look alike.
 
-* A student signing in with GitLab as `tanuki` and a student typing `tanuki@example.com` in the password form share the same workspaces. The email typed in the password form is not verified, so turn off password sign-in for students when a workshop uses GitLab login.
-* If [GitHub login](github.md) and GitLab login are both on, the GitHub user `tanuki` and the GitLab user `tanuki` also share the same workspaces, even when they are two different people. Offer one of the two per workshop, or restrict both to your own organization and group.
+Characters that are not valid in a workspace name are still replaced by `-`, so a GitLab user `jane.doe` gets workspaces *named* `jane-doe` — the name is cosmetic, and a `jane-doe` from somewhere else does not share those workspaces.
 
-Characters that are not valid in a workspace name are replaced by `-` (a GitLab user `jane.doe` owns workspaces as `jane-doe`).
+!!! warning "Turn off password sign-in when a workshop uses GitLab login"
+    The email typed in the password form is **not verified** — the shared student password is the only check. A student who types `tanuki@users.noreply.<host>` is treated as that GitLab user and reaches their workspaces. So when a workshop signs in with GitLab, use **Turn off password sign-in for students** above.
 
 Changing the GitLab URL later changes how students are displayed (`users.noreply.<host>`), but not the username part, so they keep their workspaces.

@@ -340,7 +340,11 @@ Choose **From a devcontainer** at the top of the **Templates** step:
    instead, which is a poor substitute for explaining what the template is for.
 3. Choose **Git repository** (EasyLab clones the repo and finds the
    `devcontainer.json`) or **Upload** (a `devcontainer.json`, or a repository
-   `.zip`).
+   `.zip`). EasyLab performs this clone itself, so the URL has to be `http(s)` on
+   a public host — an `ssh://` or private-network URL is refused here, though it
+   remains fine as the template's own repository (see
+   [Importing a devcontainer](templates.md#importing-a-devcontainer)). **Upload**
+   is the way in for a repository EasyLab cannot reach.
 4. Choose a **Cache registry**: **Host in-cluster**, the default, has EasyLab
    provision the registry itself, in the lab's own cluster — no address or cache
    credential to fill in. **External registry** requires a **Cache registry

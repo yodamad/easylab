@@ -34,6 +34,12 @@ secrets:
   create: true
   adminPassword: ""
   studentPassword: ""
+  # Required when config.dataDir is set (it is by default): base64-encoded
+  # 32 bytes, used to encrypt cluster kubeconfigs and DNS credentials in
+  # persisted job files. Generate with `openssl rand -base64 32` and keep it
+  # stable — the server refuses to start without it, and a different key makes
+  # existing labs unreadable.
+  dataEncryptionKey: ""
   ovh:
     applicationKey: ""
     applicationSecret: ""

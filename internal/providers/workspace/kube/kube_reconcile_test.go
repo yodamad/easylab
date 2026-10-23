@@ -205,7 +205,7 @@ func TestEnsureWorkspace_ReturnsWorkspaceWhenReconcileFails(t *testing.T) {
 		LabID: "lab-1", Owner: "alice", Template: "docker",
 		Domain: domain, WildcardTLSSecret: "easylab-wildcard-tls", Token: "tok",
 	}
-	name := workspaceName(spec.LabID, spec.Owner, spec.Template)
+	name := workspaceName(spec.LabID, spec.Owner, spec.OwnerEmail, spec.Template)
 
 	_, err := b.EnsureWorkspace(context.Background(), spec)
 	require.NoError(t, err)

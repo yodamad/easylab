@@ -74,6 +74,111 @@ func TestRequestWorkspace_NoEventWhenAlreadyExisting(t *testing.T) {
 	assert.Empty(t, events, "revisiting an already-running workspace must not add a history event")
 }
 
+// --- workspaceOwnedBy: the per-student authorization key ---
+
+// TestWorkspaceOwnedBy is a security regression test. The sanitized username is
+// not an identity — usernameFromEmail drops the domain and folds anything a DNS
+// label cannot carry into "-" — so authorization compares the full login email.
+func TestWorkspaceOwnedBy(t *testing.T) {
+	tests := []struct {
+		name  string
+		ws    workspace.Workspace
+		email string
+		want  bool
+	}{
+		{
+			name:  "the owner's own email",
+			ws:    workspace.Workspace{Owner: "alice", OwnerEmail: "alice@corp.com"},
+			email: "alice@corp.com",
+			want:  true,
+		},
+		{
+			name:  "case and surrounding space do not matter",
+			ws:    workspace.Workspace{Owner: "alice", OwnerEmail: "Alice@Corp.com"},
+			email: "  alice@corp.com ",
+			want:  true,
+		},
+		{
+			name:  "another student entirely",
+			ws:    workspace.Workspace{Owner: "alice", OwnerEmail: "alice@corp.com"},
+			email: "bob@corp.com",
+			want:  false,
+		},
+		{
+			// The collision this check exists to close: both reduce to "john-doe".
+			name:  "a different identity that sanitizes to the same username",
+			ws:    workspace.Workspace{Owner: "john-doe", OwnerEmail: "john.doe@corp.com"},
+			email: "john-doe@other.org",
+			want:  false,
+		},
+		{
+			name:  "same local part, different domain",
+			ws:    workspace.Workspace{Owner: "alice", OwnerEmail: "alice@corp.com"},
+			email: "alice@other.org",
+			want:  false,
+		},
+		{
+			// Nothing better is on record for a workspace created before the
+			// email was tracked, so it keeps the check it has always had.
+			name:  "legacy workspace with no email falls back to the username",
+			ws:    workspace.Workspace{Owner: "alice"},
+			email: "alice@corp.com",
+			want:  true,
+		},
+		{
+			name:  "legacy workspace rejects a different username",
+			ws:    workspace.Workspace{Owner: "alice"},
+			email: "bob@corp.com",
+			want:  false,
+		},
+		{
+			name:  "no session email owns nothing",
+			ws:    workspace.Workspace{Owner: "alice", OwnerEmail: "alice@corp.com"},
+			email: "",
+			want:  false,
+		},
+		{
+			name:  "an empty workspace owner matches nobody",
+			ws:    workspace.Workspace{},
+			email: "alice@corp.com",
+			want:  false,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, workspaceOwnedBy(tt.ws, tt.email))
+		})
+	}
+}
+
+// TestWorkspaceAccessBelongsTo covers the teacher-access records, which are
+// persisted: entries written before ownership moved to the login email hold the
+// sanitized username and must keep resolving.
+func TestWorkspaceAccessBelongsTo(t *testing.T) {
+	tests := []struct {
+		name   string
+		access WorkspaceAccess
+		email  string
+		want   bool
+	}{
+		{name: "recorded by email", access: WorkspaceAccess{Owner: "alice@corp.com"}, email: "alice@corp.com", want: true},
+		{name: "recorded by email, different case", access: WorkspaceAccess{Owner: "Alice@Corp.com"}, email: "alice@corp.com", want: true},
+		{name: "legacy record by username", access: WorkspaceAccess{Owner: "alice"}, email: "alice@corp.com", want: true},
+		{name: "another student", access: WorkspaceAccess{Owner: "alice@corp.com"}, email: "bob@corp.com", want: false},
+		{name: "nothing recorded", access: WorkspaceAccess{}, email: "alice@corp.com", want: false},
+		{name: "no session email", access: WorkspaceAccess{Owner: "alice@corp.com"}, email: "", want: false},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, workspaceAccessBelongsTo(tt.access, tt.email))
+		})
+	}
+}
+
 // --- ownerDisplayName ---
 
 func TestOwnerDisplayName(t *testing.T) {

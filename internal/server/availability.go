@@ -191,10 +191,9 @@ func (h *Handler) ownedTemplates(ctx context.Context, labID, kubeconfig, namespa
 		return nil, fmt.Errorf("failed to list workspaces: %w", err)
 	}
 
-	owner := usernameFromEmail(email)
 	for _, ws := range workspaces {
 		// A workspace created before template attribution has no template to match.
-		if ws.Owner == owner && ws.Template != "" {
+		if workspaceOwnedBy(ws, email) && ws.Template != "" {
 			owned[ws.Template] = true
 		}
 	}

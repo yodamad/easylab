@@ -57,10 +57,9 @@ func (h *Handler) ListStudentWorkspaces(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// The identity is always the authenticated student — never trusted from the client.
 	email := studentEmailFromContext(r)
-	// The owner is always the authenticated student — never trusted from the client.
-	owner := usernameFromEmail(email)
-	if owner == "" {
+	if email == "" {
 		writeJSONError(w, http.StatusUnauthorized, "Session email not found, please log in again")
 		return
 	}
@@ -136,7 +135,7 @@ func (h *Handler) ListStudentWorkspaces(w http.ResponseWriter, r *http.Request) 
 
 			for _, ws := range found {
 				// Authorization: a student only ever sees their own workspaces.
-				if ws.Owner != owner {
+				if !workspaceOwnedBy(ws, email) {
 					continue
 				}
 				entry := studentWorkspace{
@@ -155,7 +154,7 @@ func (h *Handler) ListStudentWorkspaces(w http.ResponseWriter, r *http.Request) 
 				if deletionAt := workspaceDeletionTime(ws.CreatedAt, l.lifetimeHours, l.labDeletionDate); deletionAt != nil {
 					entry.DeletionAt = deletionAt.Format(time.RFC3339)
 				}
-				if access, ok := h.jobManager.GetWorkspaceAccess(l.id, ws.Name); ok && access.Owner == owner {
+				if access, ok := h.jobManager.GetWorkspaceAccess(l.id, ws.Name); ok && workspaceAccessBelongsTo(access, email) {
 					entry.TeacherAccessedAt = access.At.Format(time.RFC3339)
 				}
 				mu.Lock()
