@@ -72,10 +72,11 @@ portal needs its own `A` record, pointing at the same IP.
 
 ### The Student portals page
 
-Two settings apply to every portal. Set them from **Student portals** in the admin
-sidebar (`/admin/student-portals`):
+Set these from **Student portals** in the admin sidebar (`/admin/student-portals`):
 
 ![Student portals settings](screens/portal-settings.png){width=850}
+
+Two settings apply to every portal:
 
 * **Public address of this instance** — where students' browsers reach the central
   instance, e.g. `https://easylab.example.com`. Portals send students there for
@@ -89,6 +90,18 @@ The box at the top of the page says what portals currently get, and what is miss
 Leave a field empty to use its default (shown under the field). Saving applies to the
 labs that already have a portal too, in the background: a new address reaches them
 within seconds; a new image restarts them, which signs their students out.
+
+A third setting is about **this instance's own** student area, not the in-lab portals:
+
+* **Student password** — the password students type to sign in here. Leave it empty to
+  keep the current one; type a new one (at least 8 characters) to replace it. It takes
+  effect immediately, with no restart. Tick **Go back to `LAB_STUDENT_PASSWORD`** to
+  forget what is saved here and use the environment variable again — and, with no
+  variable set, to turn password sign-in off on this instance entirely.
+
+    Each lab portal's password is **not** set here: it belongs to the lab and is managed
+    on the lab's own page. See
+    [the lab's student portal password](admin-lab-management.md#the-labs-student-portal-password).
 
 ### Environment variables
 
@@ -120,8 +133,19 @@ the page.
 
 ## How students sign in
 
-* **Password** — checked by the portal itself, against the same student password as the
-  central instance (`LAB_STUDENT_PASSWORD`). It keeps working when the admin is down.
+* **Password** — checked by the portal itself, against **its own** password: each portal
+  has one, generated when the portal is deployed, so a password handed to one lab's
+  students opens that lab and no other. Read it out from the **Student password** button
+  in the lab's *Student portal* section (see
+  [Lab management](admin-lab-management.md#the-labs-student-portal-password)). It keeps
+  working when the admin is down, because the portal holds the password itself.
+
+    !!! warning "The central student space is not covered by this"
+        The student space on the admin instance has a password of its own, and it lists
+        **every** lab — so that one password reaches all of them. If you want each lab
+        reachable only through its own portal, run the admin instance with
+        `-mode=admin`, which serves no student space at all (see
+        [Run modes](#run-modes)).
 * **Microsoft, GitHub, GitLab** — the portal shows the same buttons as the central login
   page, but the sign-in itself runs on the **central** instance:
 

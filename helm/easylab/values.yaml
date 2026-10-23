@@ -33,6 +33,9 @@ config:
 secrets:
   create: true
   adminPassword: ""
+  # Password for this instance's own student area. Each in-lab student portal has
+  # its own, generated when the portal is deployed and shown on the lab's page, so
+  # a password handed to one lab's students opens that lab and no other.
   studentPassword: ""
   # Required when config.dataDir is set (it is by default): base64-encoded
   # 32 bytes, used to encrypt cluster kubeconfigs and DNS credentials in

@@ -101,6 +101,10 @@ type Handler struct {
 	classicLoginConfigurer      func(disabled bool)
 	adminGroupIDConfigurer      func(groupID string)
 	classicAdminLoginConfigurer func(disabled bool)
+	// studentPasswordConfigurer applies the password this instance's own student
+	// area accepts, as an admin saving one on the Student portals page does. It
+	// takes the stored hash, not the password (see applyStudentPassword).
+	studentPasswordConfigurer func(hash string)
 	// githubAuthStore persists the GitHub student login settings; githubAuthConfigurer
 	// pushes them to the live AuthHandler. Both nil unless SetGitHubAuth is called.
 	githubAuthStore      *GitHubAuthStore
@@ -165,6 +169,12 @@ func (h *Handler) SetAzureADConfigurer(fn func(clientID, clientSecret, tenantID 
 // SetClassicLoginConfigurer wires a callback to enable/disable password-based student login at runtime.
 func (h *Handler) SetClassicLoginConfigurer(fn func(disabled bool)) {
 	h.classicLoginConfigurer = fn
+}
+
+// SetStudentPasswordConfigurer wires a callback so the handler can replace the
+// password this instance's student area accepts at runtime.
+func (h *Handler) SetStudentPasswordConfigurer(fn func(hash string)) {
+	h.studentPasswordConfigurer = fn
 }
 
 // SetAdminGroupIDConfigurer wires a callback so the handler can update the admin Azure AD group ID at runtime.
@@ -3786,20 +3796,22 @@ func (h *Handler) ServeAzureAD(w http.ResponseWriter, r *http.Request) {
 	h.serveTemplate(w, "azure-ad.html", azureAD)
 }
 
-// GetStudentPortalPassword returns the current shared password students use to
-// sign in to the student area (classic login, set via LAB_STUDENT_PASSWORD).
-// This lets an admin without shell/deployment access hand it out without
-// tracking down whoever set the environment variable. It is the one password
-// every student shares to reach the portal — distinct from, and unrelated to,
-// a student's own per-workspace code-server password, which is personal and
-// is never exposed through the admin UI.
+// GetStudentPortalPassword returns the password students use to sign in to
+// *this instance's own* student area: the one saved on the Student portals page,
+// else LAB_STUDENT_PASSWORD. This lets an admin without shell/deployment access
+// hand it out without tracking down whoever set the environment variable.
+//
+// It is not the password of every lab. A lab with a student portal of its own
+// has its own, shown on that lab's page — see GetLabPortalPassword. And it is
+// unrelated to a student's own per-workspace code-server password, which is
+// personal and is never exposed through the admin UI.
 func (h *Handler) GetStudentPortalPassword(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
-	password := os.Getenv(EnvStudentPassword)
+	password := h.effectiveStudentPassword()
 	h.recordAudit(adminActor(r), "admin", "student_portal_password.view", "", "")
 
 	w.Header().Set("Content-Type", "application/json")

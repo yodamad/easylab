@@ -809,3 +809,126 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     } catch (e) { /* ignore */ }
 });
+
+// ---------------------------------------------------------------------------
+// Student portal password — the password this lab's students type on the lab's
+// own portal. One password per portal: it opens this lab and no other. Fetched
+// when the modal opens rather than rendered into the page, so the server audits
+// each read (see GetLabPortalPassword).
+// ---------------------------------------------------------------------------
+
+// portalPasswordLabId is the lab whose password the open modal is showing, kept
+// from the button that opened it so the save/rotate calls know where to post.
+var portalPasswordLabId = null;
+
+function openPortalPasswordModal(button) {
+    var overlay = document.getElementById('portal-password-overlay');
+    var loading = document.getElementById('portal-password-loading');
+    var errorEl = document.getElementById('portal-password-error');
+    var fields = document.getElementById('portal-password-fields');
+    var unset = document.getElementById('portal-password-unset');
+    if (!overlay || !loading || !errorEl || !fields || !unset) return;
+
+    portalPasswordLabId = button && button.dataset ? button.dataset.labId : null;
+    if (!portalPasswordLabId) return;
+
+    overlay.classList.add('visible');
+    overlay.setAttribute('aria-hidden', 'false');
+    loading.style.display = 'block';
+    errorEl.style.display = 'none';
+    errorEl.textContent = '';
+    fields.style.display = 'none';
+    unset.style.display = 'none';
+
+    fetch('/api/labs/' + encodeURIComponent(portalPasswordLabId) + '/portal/password')
+        .then(function (response) {
+            if (!response.ok) return Promise.reject('Could not load the password (' + response.status + ').');
+            return response.json();
+        })
+        .then(function (data) {
+            loading.style.display = 'none';
+            showPortalPassword(data.set ? data.password : '');
+        })
+        .catch(function (err) {
+            loading.style.display = 'none';
+            errorEl.textContent = typeof err === 'string' ? err : 'Could not load the password.';
+            errorEl.style.display = 'block';
+        });
+}
+
+// showPortalPassword switches the modal between "here it is" and "there isn't
+// one yet". An empty password shows the explanation instead of a blank field.
+function showPortalPassword(password) {
+    var fields = document.getElementById('portal-password-fields');
+    var unset = document.getElementById('portal-password-unset');
+    var valueEl = document.getElementById('portal-password-value');
+    if (!fields || !unset) return;
+
+    if (valueEl) valueEl.value = password || '';
+    fields.style.display = password ? 'block' : 'none';
+    unset.style.display = password ? 'none' : 'block';
+}
+
+function closePortalPasswordModal() {
+    var overlay = document.getElementById('portal-password-overlay');
+    if (!overlay) return;
+    overlay.classList.remove('visible');
+    overlay.setAttribute('aria-hidden', 'true');
+    portalPasswordLabId = null;
+    var valueEl = document.getElementById('portal-password-value');
+    if (valueEl) valueEl.value = '';
+    var newEl = document.getElementById('portal-password-new');
+    if (newEl) newEl.value = '';
+}
+
+function savePortalPassword(button) {
+    var input = document.getElementById('portal-password-new');
+    if (!input) return;
+    var password = input.value.trim();
+    if (!password) {
+        showToast('Type a password first, or use “Generate a new one”.', 'error');
+        return;
+    }
+    postPortalPassword(button, password, 'Saved the portal password.');
+}
+
+function rotatePortalPassword(button) {
+    // No password in the body: the server generates one.
+    postPortalPassword(button, '', 'Generated a new portal password.');
+}
+
+// postPortalPassword sets or rotates the password and leaves the modal showing
+// the new value, so an admin can copy it straight away.
+function postPortalPassword(button, password, doneMessage) {
+    if (!portalPasswordLabId) return;
+    var label = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Saving…';
+
+    var body = new URLSearchParams();
+    body.append('password', password);
+
+    fetch('/api/labs/' + encodeURIComponent(portalPasswordLabId) + '/portal/password', { method: 'POST', body: body })
+        .then(function (response) {
+            if (!response.ok) {
+                return response.json().then(
+                    function (data) { return Promise.reject(data && data.message); },
+                    function () { return Promise.reject(); }
+                );
+            }
+            return response.json();
+        })
+        .then(function (data) {
+            button.disabled = false;
+            button.textContent = label;
+            var newEl = document.getElementById('portal-password-new');
+            if (newEl) newEl.value = '';
+            showPortalPassword(data.password || '');
+            showToast(doneMessage, 'success');
+        })
+        .catch(function (message) {
+            button.disabled = false;
+            button.textContent = label;
+            showToast(typeof message === 'string' && message ? message : 'Couldn’t change the portal password. Try again.', 'error');
+        });
+}

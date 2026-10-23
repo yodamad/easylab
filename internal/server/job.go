@@ -391,6 +391,29 @@ type LabConfig struct {
 	// own cluster (see portal.go), next to the workspaces it hands out.
 	StudentPortal bool `json:"student_portal,omitempty"`
 
+	// StudentPortalPassword is the password students type on *this lab's* portal,
+	// and StudentPortalPasswordHash is the form that portal compares against
+	// (HashStudentPassword). One password per portal is the point: a password
+	// leaked from one lab opens that lab and no other.
+	//
+	// Both are kept because neither alone does the job. The plaintext is what an
+	// admin hands out, so the admin UI has to be able to show it again — the hash
+	// cannot be reversed. The hash is stored rather than derived on demand because
+	// bcrypt is salted: hashing afresh on each portal sync would produce a
+	// different value every time, so portalConfigEqual would never match and
+	// reconcilePortals would rewrite the lab's portal Secret on every five-minute
+	// cleanup tick.
+	//
+	// Lab-scoped, like BakedImages and DisabledTemplates above, and deliberately
+	// not part of WorkspaceTemplate: a password must never ride along into a YAML
+	// template export or a cloned lab.
+	//
+	// Both are encrypted at rest by sanitizedCopy and blanked out of API
+	// responses — a student must never read either from the labs list, and a
+	// bcrypt hash is worth cracking offline.
+	StudentPortalPassword     string `json:"student_portal_password,omitempty"`
+	StudentPortalPasswordHash string `json:"student_portal_password_hash,omitempty"`
+
 	// OVH Endpoint
 	OvhEndpoint string `json:"ovh_endpoint"`
 
@@ -861,6 +884,20 @@ func (j *Job) sanitizedCopy(encryptSecrets bool) (*Job, error) {
 		}
 		cfg.ExternalKubeconfig = ek
 
+		// The lab portal's password and its hash are both secrets: students read
+		// this copy through ListLabs, and a bcrypt hash would be cracked offline.
+		pp, err := atRest(cfg.StudentPortalPassword)
+		if err != nil {
+			return nil, err
+		}
+		cfg.StudentPortalPassword = pp
+
+		ph, err := atRest(cfg.StudentPortalPasswordHash)
+		if err != nil {
+			return nil, err
+		}
+		cfg.StudentPortalPasswordHash = ph
+
 		if len(j.Config.DNSCredentials) > 0 {
 			if encryptSecrets {
 				dns := make(map[string]string, len(j.Config.DNSCredentials))
@@ -1019,6 +1056,18 @@ func (jm *JobManager) LoadJobs() error {
 				continue
 			} else {
 				job.Config.ExternalKubeconfig = ek
+			}
+			if pp, decErr := decryptSecret(job.Config.StudentPortalPassword); decErr != nil {
+				log.Printf("Warning: failed to decrypt student portal password in job file %s: %v", jobFile, decErr)
+				continue
+			} else {
+				job.Config.StudentPortalPassword = pp
+			}
+			if ph, decErr := decryptSecret(job.Config.StudentPortalPasswordHash); decErr != nil {
+				log.Printf("Warning: failed to decrypt student portal password hash in job file %s: %v", jobFile, decErr)
+				continue
+			} else {
+				job.Config.StudentPortalPasswordHash = ph
 			}
 			for k, v := range job.Config.DNSCredentials {
 				dv, decErr := decryptSecret(v)

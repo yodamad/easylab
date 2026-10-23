@@ -174,16 +174,17 @@ func NewAuthHandler() (*AuthHandler, error) {
 	}
 	log.Printf("Admin password hash initialized")
 
-	// Initialize student password
+	// Initialize student password. This is the password of this instance's own
+	// student area only: a lab with a portal of its own carries its own password
+	// (see LabConfig.StudentPortalPassword), and SetStudentPassword replaces this
+	// one when an admin sets it from the Student portals page.
 	studentPassword := os.Getenv(EnvStudentPassword)
 	var studentPasswordHash string
 	if studentPassword == "" {
 		log.Printf("WARNING: %s environment variable not set. Student login will be disabled.", EnvStudentPassword)
 		studentPasswordHash = ""
 	} else {
-		// Hash password with SHA-256 first, then bcrypt for secure storage
-		sha256Hash := sha256.Sum256([]byte(studentPassword))
-		studentPasswordHash, err = hashPassword(hex.EncodeToString(sha256Hash[:]))
+		studentPasswordHash, err = HashStudentPassword(studentPassword)
 		if err != nil {
 			return nil, fmt.Errorf("failed to hash student password: %w", err)
 		}
@@ -395,6 +396,47 @@ func (ah *AuthHandler) AzureADEnabled() bool {
 	ah.mu.RLock()
 	defer ah.mu.RUnlock()
 	return ah.azureADEnabled
+}
+
+// HashStudentPassword turns a plaintext student password into the stored form
+// the login handlers compare against: bcrypt over the hex SHA-256 of the
+// password, because the browser sends SHA-256(password) rather than the password
+// itself (see web/static/login.js and HandleStudentLogin).
+//
+// An empty password hashes to "", which every caller reads as "password sign-in
+// is not configured here".
+func HashStudentPassword(password string) (string, error) {
+	if password == "" {
+		return "", nil
+	}
+	sha256Hash := sha256.Sum256([]byte(password))
+	hash, err := hashPassword(hex.EncodeToString(sha256Hash[:]))
+	if err != nil {
+		return "", fmt.Errorf("failed to hash student password: %w", err)
+	}
+	return hash, nil
+}
+
+// SetStudentPassword replaces the password this instance's own student area
+// accepts, as an admin setting it on the Student portals page does. It takes the
+// stored hash from HashStudentPassword, not the password, so the plaintext never
+// has to reach the auth handler. Passing "" turns password sign-in off here,
+// leaving only whichever providers are configured.
+//
+// An in-lab portal gets its password through ConfigurePortalAuth instead, from
+// the lab it serves.
+func (ah *AuthHandler) SetStudentPassword(hash string) {
+	ah.mu.Lock()
+	defer ah.mu.Unlock()
+	if ah.studentPasswordHash == hash {
+		return
+	}
+	ah.studentPasswordHash = hash
+	if hash == "" {
+		log.Printf("Student password sign-in disabled for this instance's student area")
+	} else {
+		log.Printf("Student password updated for this instance's student area")
+	}
 }
 
 // SetClassicLoginDisabled enables or disables the password-based student login form.
@@ -1401,4 +1443,39 @@ func GenerateWorkspaceToken() (string, error) {
 	}
 
 	return string(token), nil
+}
+
+// GeneratePortalPassword generates the password students type on a student
+// portal's sign-in form. Unlike GenerateSecurePassword and
+// GenerateWorkspaceToken, this one is usually read out to a room or written on a
+// whiteboard, so it trades length for legibility: uppercase only, in dash-separated
+// groups, and without the characters people mistake for each other (no O/0, I/1,
+// or the letters S and Z that are easily misheard). 15 characters from a 23-letter
+// alphabet still carry ~67 bits, well beyond what the 5-attempt lockout allows
+// anyone to guess (see maxLoginAttempts).
+//
+// Admins who prefer their own password can set one instead; this is only the
+// default a portal gets when it is deployed.
+func GeneratePortalPassword() (string, error) {
+	const (
+		alphabet = "ABCDEFGHJKLMNPQRTUVWXY2346789"
+		groups   = 3
+		perGroup = 5
+	)
+
+	password := make([]byte, 0, groups*perGroup+groups-1)
+	for g := 0; g < groups; g++ {
+		if g > 0 {
+			password = append(password, '-')
+		}
+		for i := 0; i < perGroup; i++ {
+			idx, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphabet))))
+			if err != nil {
+				return "", fmt.Errorf("failed to generate portal password: %w", err)
+			}
+			password = append(password, alphabet[idx.Int64()])
+		}
+	}
+
+	return string(password), nil
 }

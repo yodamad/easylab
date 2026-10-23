@@ -31,6 +31,12 @@ const (
 	// portalDrainTimeout bounds collecting a portal's outbox while an admin page
 	// waits on it: a slow cluster must not hold the page back.
 	portalDrainTimeout = 5 * time.Second
+
+	// minPortalPasswordLength is the floor for a student portal password an admin
+	// types in place of the generated one. Deliberately low: this guards a lab's
+	// sign-in page, not an account, the 5-attempt lockout in auth.go does the
+	// heavy lifting, and an organiser has to be able to read it out to a room.
+	minPortalPasswordLength = 8
 )
 
 // portalImage returns the image in-lab portals run: EASYLAB_PORTAL_IMAGE, else
@@ -123,8 +129,58 @@ func (h *Handler) ensurePortalBrokerSecret(job *Job) (string, error) {
 	return secret, nil
 }
 
-// portalConfigFor builds the config a lab's portal is served from.
+// ensurePortalPassword gives the lab its own student portal password, generating
+// one the first time its portal needs it. It reports whether it had to, so the
+// caller can persist the job.
+//
+// Generating here rather than at lab creation is what gets a lab that was
+// deployed before passwords were per-portal onto one of its own: its next
+// reconcile fills this in. Both fields are written together — a password without
+// its hash would leave the portal refusing every sign-in.
+func (h *Handler) ensurePortalPassword(job *Job) (bool, error) {
+	job.mu.Lock()
+	defer job.mu.Unlock()
+
+	if job.Config == nil {
+		return false, nil
+	}
+	if job.Config.StudentPortalPassword != "" && job.Config.StudentPortalPasswordHash != "" {
+		return false, nil
+	}
+
+	password := job.Config.StudentPortalPassword
+	if password == "" {
+		generated, err := GeneratePortalPassword()
+		if err != nil {
+			return false, fmt.Errorf("failed to generate student portal password: %w", err)
+		}
+		password = generated
+	}
+	hash, err := HashStudentPassword(password)
+	if err != nil {
+		return false, err
+	}
+	job.Config.StudentPortalPassword = password
+	job.Config.StudentPortalPasswordHash = hash
+	return true, nil
+}
+
+// portalConfigFor builds the config a lab's portal is served from. Callers hold
+// the lab's portal lock, which is also what keeps two of them from generating
+// two different passwords for the same lab.
 func (h *Handler) portalConfigFor(job *Job) (map[string][]byte, error) {
+	generated, err := h.ensurePortalPassword(job)
+	if err != nil {
+		return nil, err
+	}
+	if generated {
+		if saveErr := h.jobManager.SaveJob(job.ID); saveErr != nil {
+			// Logged, not fatal: the portal still gets a working password now, and
+			// the next reconcile generates a fresh one if this was lost.
+			log.Printf("[portal] failed to persist generated portal password for lab %s: %v", job.ID, saveErr)
+		}
+	}
+
 	var auth StudentAuthSnapshot
 	if h.studentAuthSnapshot != nil {
 		auth = h.studentAuthSnapshot()
@@ -540,17 +596,26 @@ type PortalDisplay struct {
 	// CentralPortal is whether this instance serves students itself, which is
 	// where a lab without a portal of its own sends them.
 	CentralPortal bool
+	// HasPassword is whether this lab's portal has a password of its own yet. The
+	// password itself is never put on the page — it is fetched on demand through
+	// GetLabPortalPassword, so it stays out of the HTML and out of the audit trail
+	// until an admin actually asks for it.
+	HasPassword bool
 }
 
 // portalDisplayFor reads a lab's portal state for the lab detail page.
 func (h *Handler) portalDisplayFor(ctx context.Context, job *Job) PortalDisplay {
 	target := portalTargetFor(job)
+	job.mu.RLock()
+	hasPassword := job.Config != nil && job.Config.StudentPortalPassword != ""
+	job.mu.RUnlock()
 	display := PortalDisplay{
 		Enabled:       target.enabled,
 		Supported:     target.completed && target.kubeconfig != "",
 		Error:         h.portalError(job.ID),
 		BrokeredLogin: h.effectivePublicURL() != "",
 		CentralPortal: h.mode != ModeAdmin,
+		HasPassword:   hasPassword,
 	}
 	if !display.Supported || !display.Enabled {
 		return display
@@ -646,4 +711,134 @@ func (h *Handler) SetLabPortal(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "enabled": enabled})
+}
+
+// labPortalPasswordLabID reads the lab ID out of an /api/labs/{id}/portal/password
+// path, shared by the two handlers below.
+func labPortalPasswordLabID(path string) (string, bool) {
+	pathParts := strings.Split(strings.Trim(path, "/"), "/")
+	// Expect: api/labs/{id}/portal/password or api/jobs/{id}/portal/password
+	if len(pathParts) != 5 || (pathParts[1] != "labs" && pathParts[1] != "jobs") {
+		return "", false
+	}
+	return pathParts[2], true
+}
+
+// GetLabPortalPassword returns the password students type on this lab's own
+// student portal, so an admin can hand it out without shell access to the lab.
+// It is the one password that lab's students share — distinct from a student's
+// own per-workspace IDE password, which is personal and never shown here.
+//
+// Admin-only (registered behind RequireAuth) and audited, like the instance's
+// own portal password in GetStudentPortalPassword.
+func (h *Handler) GetLabPortalPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	labID, ok := labPortalPasswordLabID(r.URL.Path)
+	if !ok {
+		writeJSONError(w, http.StatusBadRequest, "Invalid path")
+		return
+	}
+	job, exists := h.jobManager.GetJob(labID)
+	if !exists {
+		writeJSONError(w, http.StatusNotFound, "Lab not found")
+		return
+	}
+
+	job.mu.RLock()
+	password := ""
+	if job.Config != nil {
+		password = job.Config.StudentPortalPassword
+	}
+	job.mu.RUnlock()
+
+	h.recordAudit(adminActor(r), "admin", "lab.portal_password.view", labID, "")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"password": password,
+		"set":      password != "",
+	})
+}
+
+// SetLabPortalPassword replaces a lab portal's password with one the admin
+// chose, or — when the form carries no password — rotates it to a freshly
+// generated one.
+//
+// The new password reaches the deployed portal through the state sync, so it is
+// in force within a reconcile cycle. Students already signed in keep their
+// sessions; the next sign-in needs the new password.
+func (h *Handler) SetLabPortalPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	labID, ok := labPortalPasswordLabID(r.URL.Path)
+	if !ok {
+		writeJSONError(w, http.StatusBadRequest, "Invalid path")
+		return
+	}
+	job, exists := h.jobManager.GetJob(labID)
+	if !exists {
+		writeJSONError(w, http.StatusNotFound, "Lab not found")
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid request")
+		return
+	}
+
+	password := strings.TrimSpace(r.FormValue("password"))
+	rotated := password == ""
+	if rotated {
+		generated, err := GeneratePortalPassword()
+		if err != nil {
+			log.Printf("Failed to generate portal password for lab %s: %v", labID, err)
+			writeJSONError(w, http.StatusInternalServerError, "Failed to generate a password")
+			return
+		}
+		password = generated
+	} else if len(password) < minPortalPasswordLength {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("The password must be at least %d characters", minPortalPasswordLength))
+		return
+	}
+
+	hash, err := HashStudentPassword(password)
+	if err != nil {
+		log.Printf("Failed to hash portal password for lab %s: %v", labID, err)
+		writeJSONError(w, http.StatusInternalServerError, "Failed to set the password")
+		return
+	}
+
+	job.mu.Lock()
+	if job.Config == nil {
+		job.mu.Unlock()
+		writeJSONError(w, http.StatusConflict, "Lab has no configuration")
+		return
+	}
+	job.Config.StudentPortalPassword = password
+	job.Config.StudentPortalPasswordHash = hash
+	job.mu.Unlock()
+
+	if err := h.jobManager.SaveJob(labID); err != nil {
+		log.Printf("Failed to persist portal password for lab %s: %v", labID, err)
+		writeJSONError(w, http.StatusInternalServerError, "Failed to save the password")
+		return
+	}
+	// Reaches the lab's deployed portal, and is a no-op for a lab without one.
+	go h.syncPortalState(labID)
+
+	action := "lab.portal_password.set"
+	if rotated {
+		action = "lab.portal_password.rotate"
+	}
+	h.recordAudit(adminActor(r), "admin", action, labID, "")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "password": password})
 }

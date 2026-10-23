@@ -31,7 +31,7 @@
 
             <div class="form-section">
                 <h2>In-lab student portals</h2>
-                <p class="section-description">A lab can run its own student portal inside its cluster. These two settings are what every portal gets from this instance. Leave a field empty to use its default.</p>
+                <p class="section-description">A lab can run its own student portal inside its cluster. These settings are what every portal gets from this instance. Leave a field empty to use its default. Each portal's <strong>password</strong> is its own and is set on its lab's page &mdash; so a password handed to one lab's students opens that lab and no other.</p>
 
                 {{if not .EffectiveImage}}
                 <div class="warning-message" id="portal-settings-status">
@@ -63,6 +63,40 @@
                            placeholder="{{if .DefaultImage}}{{.DefaultImage}}{{else}}registry.example.com/easylab:my-build{{end}}"
                            autocomplete="off">
                     <small>The EasyLab image the portals run. It has to be built from the same version as this instance, and the labs' clusters must be able to pull it. {{if .DefaultImage}}Default: <code>{{.DefaultImage}}</code>.{{else}}No default on a development build.{{end}}</small>
+                </div>
+            </div>
+
+            <div class="form-section">
+                <h2>This instance's own student area</h2>
+                <p class="section-description">This instance serves a student area of its own, and it has its own password &mdash; separate from every in-lab portal's. It lists every lab, so it is the one password that reaches all of them: run EasyLab with <code>-mode=admin</code> if you want each lab reachable only through its own portal.</p>
+
+                {{if .StudentPasswordSet}}
+                <div class="info-box">
+                    <p>Password sign-in is <strong>on</strong> for this instance's student area{{if .StudentPasswordFromEnv}}, using <code>LAB_STUDENT_PASSWORD</code>{{end}}. Read the password out from the <strong>Student password</strong> button on the Labs page.</p>
+                </div>
+                {{else}}
+                <div class="warning-message">
+                    <p>No password is set, so students <strong>cannot</strong> sign in here with one. Set it below, or have them use Microsoft, GitHub or GitLab.</p>
+                </div>
+                {{end}}
+
+                <div class="form-group">
+                    <label for="portal_student_password">Student password</label>
+                    <input type="text" id="portal_student_password" name="portal_student_password"
+                           placeholder="Leave empty to keep the current one"
+                           autocomplete="off">
+                    <small>At least 8 characters. Changing it signs nobody out, but the next student to sign in here needs the new one. {{if .StudentPasswordFromEnv}}Setting it here overrides <code>LAB_STUDENT_PASSWORD</code>.{{else}}Leaving it empty keeps whatever is already in use.{{end}}</small>
+                </div>
+
+                <div class="form-checkboxes">
+                    <span>Reset</span>
+                    <div class="checkbox-stack">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="portal_student_password_reset" id="portal_student_password_reset">
+                            Go back to <code>LAB_STUDENT_PASSWORD</code>
+                        </label>
+                    </div>
+                    <small>Forgets the password saved here and uses the environment variable again. With no variable set, password sign-in on this instance is turned off.</small>
                 </div>
             </div>
 

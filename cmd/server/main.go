@@ -324,6 +324,7 @@ func main() {
 	handler.SetClassicLoginConfigurer(authHandler.SetClassicLoginDisabled)
 	handler.SetAdminGroupIDConfigurer(authHandler.SetAdminGroupID)
 	handler.SetClassicAdminLoginConfigurer(authHandler.SetClassicAdminLoginDisabled)
+	handler.SetStudentPasswordConfigurer(authHandler.SetStudentPassword)
 	handler.SetAuditStore(auditStore)
 	handler.SetCredentialVault(credentialVault)
 	log.Printf("[STARTUP] Handler initialization took %v", time.Since(handlerStart))
@@ -367,6 +368,9 @@ func main() {
 	handler.SetMode(mode)
 	handler.SetPortalAuth(publicURL, authHandler.StudentAuthSnapshot)
 	handler.SetPortalSettingsStore(portalSettings)
+	// A password saved on the Student portals page beats the one the auth handler
+	// hashed out of the environment at construction.
+	handler.ApplyStudentPassword()
 	authHandler.SetBrokerLabResolver(handler.BrokerPortal)
 	authHandler.SetBrokerOnly(mode == server.ModeAdmin)
 	if publicURL == "" && portalSettings.Get().PublicURL == "" {
@@ -756,6 +760,8 @@ const (
 	routeRetryJobWithConfig
 	routeOpenWorkspace
 	routeSetLabPortal
+	routeGetPortalPassword
+	routeSetPortalPassword
 )
 
 // resolveLabRoute picks the endpoint for a request. The case order is the
@@ -820,6 +826,14 @@ func resolveLabRoute(path, method, format string) labRoute {
 		return routeKubeconfig
 	case strings.HasSuffix(path, "/lifecycle") && method == http.MethodPost:
 		return routeUpdateLabLifecycle
+	// The portal's password must be matched before the portal itself below, which
+	// is this file's convention for a longer path sharing a prefix (see
+	// /secrets/delete above /secrets). The segment count there would reject these
+	// anyway; the order is what keeps that an accident rather than the contract.
+	case strings.HasSuffix(path, "/portal/password") && method == http.MethodGet:
+		return routeGetPortalPassword
+	case strings.HasSuffix(path, "/portal/password") && method == http.MethodPost:
+		return routeSetPortalPassword
 	// Anchored on the segment count as well as the suffix: every workspace and
 	// template route sits above and so never gets here, but a path this check
 	// could be confused by must not start meaning "deploy a portal" the day one of
@@ -882,6 +896,10 @@ func labRequestRouter(h *server.Handler) http.HandlerFunc {
 			h.UpdateLabLifecycle(w, r)
 		case routeSetLabPortal:
 			h.SetLabPortal(w, r)
+		case routeGetPortalPassword:
+			h.GetLabPortalPassword(w, r)
+		case routeSetPortalPassword:
+			h.SetLabPortalPassword(w, r)
 		default:
 			h.GetJobStatus(w, r)
 		}

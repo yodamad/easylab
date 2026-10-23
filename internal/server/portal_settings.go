@@ -13,20 +13,32 @@ import (
 	"sync"
 )
 
-// PortalSettings are the two things in-lab student portals need from this
-// instance that an admin can set from the UI rather than the environment. An
-// empty field means "use the default": the matching environment variable, then
-// what the build itself provides (see portalImage).
+// PortalSettings are the things student portals need from this instance that an
+// admin can set from the UI rather than the environment. An empty field means
+// "use the default": the matching environment variable, then what the build
+// itself provides (see portalImage).
 type PortalSettings struct {
 	// PublicURL is this instance's address as students reach it. Portals send
 	// students here for Microsoft / GitHub / GitLab sign-in.
 	PublicURL string `json:"public_url,omitempty"`
 	// Image is the EasyLab image the portals run.
 	Image string `json:"image,omitempty"`
+
+	// StudentPassword is the password for *this instance's own* student area, and
+	// StudentPasswordHash the form the login handlers compare against. Empty
+	// means fall back to LAB_STUDENT_PASSWORD.
+	//
+	// It applies to this portal alone: a lab with a portal of its own carries its
+	// own password (LabConfig.StudentPortalPassword). Both are kept for the same
+	// reasons as there — the plaintext so the admin page can show it again, the
+	// hash because bcrypt is salted and must not be recomputed per read.
+	StudentPassword     string `json:"student_password,omitempty"`
+	StudentPasswordHash string `json:"student_password_hash,omitempty"`
 }
 
-// PortalSettingsStore persists PortalSettings to disk. Neither value is a
-// secret, so unlike the sign-in provider stores nothing is encrypted.
+// PortalSettingsStore persists PortalSettings to disk. The student password and
+// its hash are encrypted at rest, as the sign-in provider stores do with their
+// client secrets; the other two values are not secrets.
 type PortalSettingsStore struct {
 	settings PortalSettings
 	dataDir  string
@@ -62,6 +74,17 @@ func (s *PortalSettingsStore) load() error {
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return fmt.Errorf("failed to parse portal settings: %w", err)
 	}
+	password, err := decryptSecret(settings.StudentPassword)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt portal student password: %w", err)
+	}
+	settings.StudentPassword = password
+	hash, err := decryptSecret(settings.StudentPasswordHash)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt portal student password hash: %w", err)
+	}
+	settings.StudentPasswordHash = hash
+
 	s.mu.Lock()
 	s.settings = settings
 	s.mu.Unlock()
@@ -78,7 +101,20 @@ func (s *PortalSettingsStore) Get() PortalSettings {
 // Set updates the settings and persists them.
 func (s *PortalSettingsStore) Set(settings PortalSettings) error {
 	if s.dataDir != "" {
-		data, err := json.MarshalIndent(settings, "", "  ")
+		// Only the on-disk copy is encrypted; what the store serves stays plaintext.
+		onDisk := settings
+		password, err := encryptSecret(settings.StudentPassword)
+		if err != nil {
+			return fmt.Errorf("failed to encrypt portal student password: %w", err)
+		}
+		onDisk.StudentPassword = password
+		hash, err := encryptSecret(settings.StudentPasswordHash)
+		if err != nil {
+			return fmt.Errorf("failed to encrypt portal student password hash: %w", err)
+		}
+		onDisk.StudentPasswordHash = hash
+
+		data, err := json.MarshalIndent(onDisk, "", "  ")
 		if err != nil {
 			return fmt.Errorf("failed to marshal portal settings: %w", err)
 		}
@@ -124,6 +160,55 @@ func (h *Handler) effectivePortalImage() string {
 		return saved
 	}
 	return portalImage()
+}
+
+// effectiveStudentPassword is the password this instance's own student area
+// accepts: the one saved from the admin page, else LAB_STUDENT_PASSWORD. "" means
+// password sign-in is off here.
+//
+// It covers this portal alone. A lab with a portal of its own has its own
+// password; see LabConfig.StudentPortalPassword and GetLabPortalPassword.
+func (h *Handler) effectiveStudentPassword() string {
+	if saved := h.savedPortalSettings().StudentPassword; saved != "" {
+		return saved
+	}
+	return os.Getenv(EnvStudentPassword)
+}
+
+// applyStudentPassword pushes the effective password into the auth handler, so a
+// password saved on the admin page takes effect without a restart. Called at
+// startup — the saved one has to beat the environment the auth handler read —
+// and after every save.
+func (h *Handler) applyStudentPassword() {
+	if h.studentPasswordConfigurer == nil {
+		return
+	}
+	saved := h.savedPortalSettings()
+	hash := saved.StudentPasswordHash
+	if saved.StudentPassword == "" {
+		// Nothing saved: back to whatever the environment says, which may be "".
+		var err error
+		hash, err = HashStudentPassword(os.Getenv(EnvStudentPassword))
+		if err != nil {
+			log.Printf("Failed to hash %s: %v", EnvStudentPassword, err)
+			return
+		}
+	}
+	h.studentPasswordConfigurer(hash)
+}
+
+// ApplyStudentPassword applies a password saved on the admin page at startup.
+// Set up the store and the configurer first.
+//
+// Nothing saved is a no-op rather than a fallback: the auth handler already
+// hashed LAB_STUDENT_PASSWORD when it was built, and hashing it again would cost
+// a bcrypt and log a change that did not happen (bcrypt is salted, so the second
+// hash never equals the first).
+func (h *Handler) ApplyStudentPassword() {
+	if h.savedPortalSettings().StudentPassword == "" {
+		return
+	}
+	h.applyStudentPassword()
 }
 
 // normalizePublicURL validates the public address an admin typed and returns
@@ -185,6 +270,12 @@ type portalSettingsView struct {
 	DetectedURL string
 	// PortalLabs counts the labs with a portal, which a save redeploys.
 	PortalLabs int
+	// StudentPasswordSet and StudentPasswordFromEnv say where this portal's
+	// password comes from. The password itself is deliberately not here: it is
+	// fetched on demand through GetStudentPortalPassword, which audits the read,
+	// so it stays out of the page source.
+	StudentPasswordSet     bool
+	StudentPasswordFromEnv bool
 }
 
 // ServePortalSettings serves the Student portals admin page.
@@ -207,14 +298,16 @@ func (h *Handler) ServePortalSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.serveTemplate(w, "portal-settings.html", portalSettingsView{
-		PublicURL:          saved.PublicURL,
-		Image:              saved.Image,
-		DefaultPublicURL:   h.publicURL,
-		DefaultImage:       portalImage(),
-		EffectivePublicURL: h.effectivePublicURL(),
-		EffectiveImage:     h.effectivePortalImage(),
-		DetectedURL:        scheme + "://" + r.Host,
-		PortalLabs:         portalLabs,
+		PublicURL:              saved.PublicURL,
+		Image:                  saved.Image,
+		DefaultPublicURL:       h.publicURL,
+		DefaultImage:           portalImage(),
+		EffectivePublicURL:     h.effectivePublicURL(),
+		EffectiveImage:         h.effectivePortalImage(),
+		DetectedURL:            scheme + "://" + r.Host,
+		PortalLabs:             portalLabs,
+		StudentPasswordSet:     h.effectiveStudentPassword() != "",
+		StudentPasswordFromEnv: saved.StudentPassword == "" && os.Getenv(EnvStudentPassword) != "",
 	})
 }
 
@@ -251,16 +344,48 @@ func (h *Handler) SavePortalSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.portalSettings.Set(PortalSettings{PublicURL: publicURL, Image: image}); err != nil {
+	// The password of this instance's own student area. An empty field leaves it
+	// as it is — this form is mostly saved for the other two settings — so
+	// clearing it back to LAB_STUDENT_PASSWORD takes the explicit checkbox.
+	saved := h.portalSettings.Get()
+	password := saved.StudentPassword
+	passwordHash := saved.StudentPasswordHash
+	passwordDetail := "unchanged"
+	if r.FormValue("portal_student_password_reset") == "on" {
+		password, passwordHash, passwordDetail = "", "", "reset to "+EnvStudentPassword
+	} else if typed := strings.TrimSpace(r.FormValue("portal_student_password")); typed != "" {
+		if len(typed) < minPortalPasswordLength {
+			fmt.Fprintf(w, `<div class="error-message"><p>The student password must be at least %d characters.</p></div>`, minPortalPasswordLength)
+			return
+		}
+		hash, hashErr := HashStudentPassword(typed)
+		if hashErr != nil {
+			log.Printf("SavePortalSettings: failed to hash student password: %v", hashErr)
+			fmt.Fprint(w, `<div class="error-message"><p>Failed to save student portal settings. Check the server logs for details.</p></div>`)
+			return
+		}
+		password, passwordHash, passwordDetail = typed, hash, "updated"
+	}
+
+	if err := h.portalSettings.Set(PortalSettings{
+		PublicURL:           publicURL,
+		Image:               image,
+		StudentPassword:     password,
+		StudentPasswordHash: passwordHash,
+	}); err != nil {
 		log.Printf("SavePortalSettings: failed to persist: %v", err)
 		fmt.Fprint(w, `<div class="error-message"><p>Failed to save student portal settings. Check the server logs for details.</p></div>`)
 		return
 	}
 
+	// In force immediately: this instance's own student area is served by this
+	// process, so there is nothing to reconcile for it.
+	h.applyStudentPassword()
+
 	// Existing portals run the old image and know the old address until reconciled.
 	go h.reconcilePortals()
 
-	detail := fmt.Sprintf("public URL: %s, image: %s", orDefault(publicURL), orDefault(image))
+	detail := fmt.Sprintf("public URL: %s, image: %s, student password: %s", orDefault(publicURL), orDefault(image), passwordDetail)
 	h.recordAudit(adminActor(r), "admin", "portal_settings.update", "", detail)
 
 	if r.Header.Get("HX-Request") == "true" {

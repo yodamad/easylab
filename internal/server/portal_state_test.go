@@ -35,6 +35,11 @@ func TestPortalStateFromJob_CarriesNoCredentials(t *testing.T) {
 		AzureClientSecret:    "azure-secret-value",
 		ExternalKubeconfig:   "external-kubeconfig-value",
 		DNSCredentials:       map[string]string{"token": "dns-secret-value"},
+
+		// The portal verifies sign-in against the hash, so the password itself has
+		// no business in a Secret living in the students' own namespace.
+		StudentPortalPassword:     "lab-portal-password-value",
+		StudentPortalPasswordHash: "lab-portal-bcrypt-hash",
 	})
 	job, _ := jm.GetJob(id)
 	job.mu.Lock()
@@ -65,13 +70,15 @@ func TestPortalStateFromJob_CarriesNoCredentials(t *testing.T) {
 	encoded := string(config[portalStateKey])
 	for _, secret := range []string{
 		"ovh-secret-value", "azure-secret-value", "external-kubeconfig-value",
-		"dns-secret-value", "cluster-admin-kubeconfig-value",
+		"dns-secret-value", "cluster-admin-kubeconfig-value", "lab-portal-password-value",
 	} {
 		assert.NotContains(t, encoded, secret)
 	}
 	// The broker secret is the one thing shared on purpose: the portal verifies
-	// sign-in assertions with it.
+	// sign-in assertions with it. The password hash likewise — that is what the
+	// portal compares a student's sign-in against.
 	assert.Contains(t, encoded, "broker-secret-value")
+	assert.Equal(t, "lab-portal-bcrypt-hash", state.Auth.StudentPasswordHash)
 
 	// And the config the portal rebuilds from it is the student-facing subset.
 	decoded, err := decodePortalState(config)
@@ -104,7 +111,7 @@ func TestPortalStateFromJob_Auth(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			jm := NewJobManager("")
-			id := jm.CreateJob(&LabConfig{StackName: "workshop"})
+			id := jm.CreateJob(&LabConfig{StackName: "workshop", StudentPortalPasswordHash: "lab-bcrypt-hash"})
 			job, _ := jm.GetJob(id)
 			job.mu.Lock()
 			job.PortalBrokerSecret = tt.brokerSecret
@@ -112,8 +119,9 @@ func TestPortalStateFromJob_Auth(t *testing.T) {
 
 			got := portalStateFromJob(job, auth, tt.publicURL).Auth
 
-			// Password login is local to the portal either way.
-			assert.Equal(t, "bcrypt-hash", got.StudentPasswordHash)
+			// Password login is local to the portal either way, and it is the lab's
+			// own password — never the one this instance's student area uses.
+			assert.Equal(t, "lab-bcrypt-hash", got.StudentPasswordHash)
 			assert.Equal(t, tt.wantBrokered, got.AzureAD)
 			assert.Equal(t, tt.wantBrokered, got.GitHub)
 			assert.Equal(t, tt.wantBrokered, got.GitLab)

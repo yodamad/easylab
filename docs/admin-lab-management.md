@@ -14,16 +14,20 @@ for the creation wizard itself.
 Clicking on the `Labs` button in the header will redirect you to the labs list page. The **Provider** dropdown is available on every admin page and navigates directly to the OVH or Azure configuration page.
 
 The page header also has a **Student Password** button, next to **New Lab**. Click it
-to reveal the shared password students use to sign in to the student area (set via the
-`LAB_STUDENT_PASSWORD` environment variable — see [Docker configuration](docker.md)),
+to reveal the password students use to sign in to **this instance's own** student area,
 with a **Copy** button alongside — handy if you're administering EasyLab without shell
-or deployment access and don't want to track down whoever set that variable. This is
-the password students type on `/student/login` to reach the student portal; it has
-nothing to do with, and is never the same as, an individual student's own workspace
-(code-server) password, which is personal to that student and generated per-workspace
-— EasyLab never exposes a student's workspace password through the admin UI. If
-`LAB_STUDENT_PASSWORD` isn't set, the dialog says so — classic student login is
-disabled in that case, and students can only sign in via Azure AD if it's configured
+or deployment access and don't want to track down whoever set that variable. It comes
+from the [Student portals](student-portal.md#the-student-portals-page) page, or from the
+`LAB_STUDENT_PASSWORD` environment variable when nothing is set there (see
+[Docker configuration](docker.md)).
+
+This is the password students type on `/student/login` on this instance. It is **not**
+every lab's password: a lab running [its own student portal](#the-labs-student-portal-password)
+has a separate one of its own. And it has nothing to do with an individual student's
+workspace (code-server) password, which is personal to that student and generated
+per-workspace — EasyLab never exposes a student's workspace password through the admin
+UI. If no password is set anywhere, the dialog says so: password sign-in is disabled
+here, and students can only sign in via Azure AD, GitHub or GitLab if configured
 (see [Azure AD authentication](azure-ad.md)).
 
 ![Student Portal Login dialog](screens/student-password.png){width=450}
@@ -115,6 +119,39 @@ page where you set it.
 You never have to push changes to the portal: closing a template, adding one, editing the
 lifecycle and so on reach it within seconds, and what students do there shows up in this
 page's Workspaces, Feedback and Activity tabs.
+
+#### The lab's student portal password
+
+Every portal has **its own** student password, so the password you give one lab's students
+opens that lab and no other. EasyLab generates one — short and in groups, meant to be read
+out to a room — the first time the portal is deployed.
+
+Click **Student password** in the strip to see it, with a **Copy** button alongside.
+
+![The lab portal's password dialog](screens/lab-portal-password.png){width=700}
+
+In the same dialog you can:
+
+* **Set your own** — type a password of at least 8 characters and click **Save**, for
+  something easier to dictate or print on a handout.
+* **Generate a new one** — replaces it with a fresh generated password.
+
+Either way the new password reaches the lab's portal within seconds. Changing it signs
+nobody out: students already working keep their session, but the next one to sign in needs
+the new password — so rotate between sessions rather than in the middle of one.
+
+!!! warning "The central student space has its own password, and it reaches every lab"
+    The password above protects this lab's portal. The student space on this admin
+    instance has a separate password (the **Student password** button on the Labs page)
+    and it lists *every* lab, so that one does reach all of them. If a lab should be
+    reachable only through its own portal, run the admin instance with `-mode=admin` —
+    it then serves no student space at all. See
+    [In-lab student portal](student-portal.md#run-modes).
+
+!!! info "A password is not an identity"
+    A portal password says the person belongs in that lab, not *who* they are: students
+    type their own email address on the sign-in form and it is not verified. Use
+    Microsoft, GitHub or GitLab sign-in where it matters who did what.
 
 ### Retry or recreate a lab
 

@@ -341,6 +341,11 @@ func TestResolveLabRoute_StudentPortal(t *testing.T) {
 		{name: "template named portal: remove", path: "/api/labs/job-1/templates/portal/remove", method: http.MethodPost, want: routeRemoveTemplate},
 		{name: "deeper path ending in portal", path: "/api/labs/job-1/templates/portal", method: http.MethodPost, want: routeJobStatus},
 		{name: "a lab called portal still resolves to status", path: "/api/labs/portal", method: http.MethodPost, want: routeJobStatus},
+		{name: "read the portal's password", path: "/api/labs/job-1/portal/password", method: http.MethodGet, want: routeGetPortalPassword},
+		{name: "set the portal's password", path: "/api/labs/job-1/portal/password", method: http.MethodPost, want: routeSetPortalPassword},
+		{name: "portal password on the legacy jobs prefix", path: "/api/jobs/job-1/portal/password", method: http.MethodGet, want: routeGetPortalPassword},
+		// The password route must not swallow the portal route it sits above.
+		{name: "the portal itself is still its own route", path: "/api/labs/job-1/portal", method: http.MethodPost, want: routeSetLabPortal},
 	}
 
 	for _, tt := range tests {

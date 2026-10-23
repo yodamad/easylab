@@ -136,7 +136,7 @@
                     <button type="button" class="credentials-modal-close" onclick="closeStudentPasswordModal()" title="Close" aria-label="Close">&times;</button>
                 </div>
                 <div class="credentials-modal-body">
-                    <p>The shared password every student uses to sign in to the student area (<code>LAB_STUDENT_PASSWORD</code>). This is separate from a student's own workspace password, which is personal to them and is never shown here.</p>
+                    <p>The password students type to sign in to <strong>this instance's</strong> student area. A lab with a student portal of its own has its own password, shown on that lab's page. This is separate from a student's own workspace password, which is personal to them and is never shown here.</p>
                     <div id="student-password-loading">Loading…</div>
                     <div id="student-password-error" class="error-message" style="display: none;"></div>
                     <div id="student-password-fields" class="credentials-modal-fields" style="display: none;">
@@ -149,7 +149,7 @@
                         </div>
                     </div>
                     <div id="student-password-unset" class="info-box" style="display: none;">
-                        <p><code>LAB_STUDENT_PASSWORD</code> is not set on this deployment, so classic student login is disabled. Students can only sign in via Azure AD, GitHub or GitLab, if configured (<a href="/admin/azure-ad">Azure AD settings</a>, <a href="/admin/github">GitHub settings</a>, <a href="/admin/gitlab">GitLab settings</a>).</p>
+                        <p>No password is set for this instance's student area, so password sign-in is disabled here. Set one on the <a href="/admin/student-portals">Student portals</a> page (or with <code>LAB_STUDENT_PASSWORD</code>). Students can otherwise only sign in via Azure AD, GitHub or GitLab, if configured (<a href="/admin/azure-ad">Azure AD settings</a>, <a href="/admin/github">GitHub settings</a>, <a href="/admin/gitlab">GitLab settings</a>).</p>
                     </div>
                 </div>
             </div>

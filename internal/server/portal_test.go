@@ -147,20 +147,32 @@ func TestReconcilePortal_Deploys(t *testing.T) {
 			assert.Equal(t, id, state.LabID)
 			assert.Equal(t, "https://admin.example.com", state.Auth.AdminURL)
 			assert.True(t, state.Auth.GitHub)
-			assert.Equal(t, "bcrypt-hash", state.Auth.StudentPasswordHash)
 			require.NotEmpty(t, state.Auth.BrokerSecret)
 
 			job, _ := h.jobManager.GetJob(id)
 			job.mu.RLock()
+			password := job.Config.StudentPortalPassword
 			assert.Equal(t, state.Auth.BrokerSecret, job.PortalBrokerSecret)
 			job.mu.RUnlock()
 
+			// The portal was given a password of its own, generated for this lab —
+			// not the one this instance's student area uses ("bcrypt-hash" above).
+			// Only the hash travels: the password itself would be sitting in a Secret
+			// in the namespace the lab's students run workspaces in.
+			require.NotEmpty(t, password)
+			assert.NotEqual(t, "bcrypt-hash", state.Auth.StudentPasswordHash)
+			assert.True(t, comparePassword(state.Auth.StudentPasswordHash, sha256Hex(password)))
+			assert.NotContains(t, string(spec.Config[portalStateKey]), password)
+
 			// A second reconcile keeps the same secret: rotating it would sign every
-			// student in the middle of a sign-in out of luck.
+			// student in the middle of a sign-in out of luck. The password likewise —
+			// and because bcrypt is salted, a hash recomputed per sync would also
+			// rewrite the lab's portal Secret on every cleanup tick.
 			h.reconcilePortal(id)
 			again, err := decodePortalState(fb.ensuredSpecs()[1].Config)
 			require.NoError(t, err)
 			assert.Equal(t, state.Auth.BrokerSecret, again.Auth.BrokerSecret)
+			assert.Equal(t, state.Auth.StudentPasswordHash, again.Auth.StudentPasswordHash)
 		})
 	}
 }

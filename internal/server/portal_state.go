@@ -83,16 +83,27 @@ type StudentAuthSnapshot struct {
 // admin instance's own address as students reach it; without one the portal
 // cannot be sent back here to sign in, so it falls back to password login alone.
 //
+// Password sign-in uses the lab's *own* password, not this instance's: that is
+// what keeps a password leaked from one lab from opening any other. auth supplies
+// only the brokered providers, which are this instance's to offer.
+//
 // The job must not be locked by the caller.
 func portalStateFromJob(job *Job, auth StudentAuthSnapshot, publicURL string) PortalState {
 	job.mu.RLock()
 	defer job.mu.RUnlock()
 
+	// The hash alone — never job.Config.StudentPortalPassword. This state is
+	// written to a Secret in the namespace the lab's student workspaces run in.
+	labPasswordHash := ""
+	if job.Config != nil {
+		labPasswordHash = job.Config.StudentPortalPasswordHash
+	}
+
 	state := PortalState{
 		LabID:     job.ID,
 		CreatedAt: job.CreatedAt,
 		Auth: PortalAuthState{
-			StudentPasswordHash: auth.StudentPasswordHash,
+			StudentPasswordHash: labPasswordHash,
 		},
 	}
 	if publicURL != "" && job.PortalBrokerSecret != "" {

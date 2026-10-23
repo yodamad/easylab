@@ -84,7 +84,7 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 | `config.portalImage` | Image the in-lab student portals run | `""` (this release's own image) |
 | `secrets.create` | Create a Kubernetes secret | `true` |
 | `secrets.adminPassword` | Admin login password | `""` |
-| `secrets.studentPassword` | Student login password | `""` |
+| `secrets.studentPassword` | Student login password for this instance's own student area (each in-lab portal has its own) | `""` |
 | `secrets.dataEncryptionKey` | **Required** with `config.dataDir` set (the default): base64-encoded 32-byte key encrypting kubeconfigs and DNS credentials in persisted job files | `""` |
 | `secrets.ovh.applicationKey` | OVH application key | `""` |
 | `secrets.ovh.applicationSecret` | OVH application secret | `""` |
@@ -164,8 +164,11 @@ config:
   portalImage: ""
 ```
 
-`secrets.studentPassword` is still what students type on a portal's password form: each
-portal checks it locally, against a hash EasyLab copies to it.
+`secrets.studentPassword` is the password for the **admin instance's own** student area.
+Each in-lab portal has its own, generated when it is deployed and shown on the lab's page,
+which the portal checks locally against a hash EasyLab copies to it — so a password handed
+to one lab's students opens that lab and no other. Set `config.mode: admin` if you want
+every lab reachable only through its own portal.
 
 ### Optional infrastructure components
 
