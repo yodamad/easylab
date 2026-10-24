@@ -59,6 +59,7 @@ site/
 !.claude/agents/
 .claude/agents/*
 !.claude/agents/*.md
+!.claude/skills/
 
 # Test folder
 internal/server/job-*
