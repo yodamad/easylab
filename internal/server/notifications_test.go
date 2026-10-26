@@ -46,7 +46,8 @@ func newNotifyTestHandler(t *testing.T, owners ...string) (*Handler, string) {
 func testNotification(message, recipient string, ttl time.Duration) StudentNotification {
 	now := time.Now()
 	return StudentNotification{
-		ID:        "n-" + message,
+		// Space-free: an ID is spliced into a request path by the cancel tests.
+		ID:        "n-" + strings.ReplaceAll(message, " ", "-"),
 		At:        now,
 		ExpiresAt: now.Add(ttl),
 		Message:   message,
