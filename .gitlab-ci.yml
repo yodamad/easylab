@@ -126,6 +126,21 @@ test:
       - .go-mod-cache/
     policy: pull
 
+# Race detector. Kept separate from `test` because the instrumented build of the
+# Pulumi Kubernetes SDK is heavy, and because a data race should be readable as its
+# own red job rather than hidden inside the coverage run.
+test-race:
+  extends: .go-base
+  stage: test
+  needs: []
+  script:
+    - make test-race
+  cache:
+    key: go-modules-${CI_COMMIT_REF_SLUG}
+    paths:
+      - .go-mod-cache/
+    policy: pull
+
 # Lint Dockerfile with Hadolint
 hadolint:
   stage: test
