@@ -188,6 +188,8 @@ alone — a break, a change of exercise, a warning that something is about to re
 A message shows up as a banner at the top of the student portal, and it goes away on its
 own after a few minutes. There is nothing to dismiss.
 
+![Messages from your admin on the student portal](screens/student-notification.png){width=700}
+
 ### See them while you are working in your IDE
 
 You will be in your workspace rather than on this page most of the time, so there are two

@@ -100,6 +100,8 @@ Workspaces & Templates section.
 The **Notify** tab sends a message to the lab's students while the workshop is running —
 "back in 10 minutes", "move on to exercise 3", "I am about to restart the cluster".
 
+![Notify students](screens/lab-notify.png){width=850}
+
 Fill in the form and press **Send message**:
 
 * **Message** — up to 500 characters. Anything longer is cut.
