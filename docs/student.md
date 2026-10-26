@@ -180,6 +180,30 @@ What does not survive a pause is anything that was *running*: open terminals and
 
 If a workspace cannot be deleted from the lab (for example the lab is temporarily unreachable), it stays in the list and a message asks you to try again. A workspace that is already gone — deleted by the organiser or by its auto-deletion date — no longer appears in the list.
 
+## Messages from your admin
+
+During a workshop your admin can send a short message to everyone in the lab, or to you
+alone — a break, a change of exercise, a warning that something is about to restart.
+
+A message shows up as a banner at the top of the student portal, and it goes away on its
+own after a few minutes. There is nothing to dismiss.
+
+### See them while you are working in your IDE
+
+You will be in your workspace rather than on this page most of the time, so there are two
+more ways a message reaches you:
+
+* **Inside your IDE** — the message appears as a notification in code-server, bottom
+  right, like any other. Nothing to set up.
+* **As a desktop notification** — press the **bell** in the portal header once and allow
+  notifications when your browser asks. From then on, messages pop up over whatever you
+  are doing, as long as a portal tab is still open somewhere. The bell turns green once
+  notifications are on; if your browser has blocked them for this site, the bell is
+  greyed out and you will need to allow them again in your browser's site settings.
+
+If you have no EasyLab tab open and no workspace running, you will see the message the
+next time you open the portal — provided it has not run out by then.
+
 ## Submit feedback
 
 After completing a lab session, you can share your experience via the **Feedback** page, accessible from the student portal header.

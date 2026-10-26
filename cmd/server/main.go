@@ -478,6 +478,14 @@ func registerCommonRoutes(mux *http.ServeMux, handler *server.Handler) {
 	})
 	mux.HandleFunc("/static/", handler.ServeStatic) // Static files don't need auth
 
+	// Read by the notification extension inside a student's IDE, which has no
+	// session cookie and authenticates with its workspace's notify token instead
+	// (see internal/server/notifications.go). Registered here, not with the
+	// student routes, because the workspace reads it from whichever instance it
+	// can reach — its lab's own portal or the central one — whatever that
+	// instance's mode is.
+	mux.HandleFunc("/api/workspace/notifications", handler.WorkspaceNotifications)
+
 	// Public homepage (no auth required)
 	mux.HandleFunc("/", handler.ServeUI)
 }
@@ -504,6 +512,7 @@ func registerStudentRoutes(mux *http.ServeMux, handler *server.Handler, authHand
 	mux.HandleFunc("/api/student/workspace/resume", authHandler.RequireStudentAuth(handler.ResumeWorkspace))
 	mux.HandleFunc("/api/student/workspace/delete", authHandler.RequireStudentAuth(handler.DeleteStudentWorkspace))
 	mux.HandleFunc("/api/student/workspace/access", authHandler.RequireStudentAuth(handler.WorkspaceTeacherAccess))
+	mux.HandleFunc("/api/student/notifications", authHandler.RequireStudentAuth(handler.StudentNotifications))
 	mux.HandleFunc("/api/student/feedback", authHandler.RequireStudentAuth(handler.SubmitFeedback))
 }
 
@@ -762,6 +771,9 @@ const (
 	routeSetLabPortal
 	routeGetPortalPassword
 	routeSetPortalPassword
+	routeSendLabNotification
+	routeListLabNotifications
+	routeCancelLabNotification
 )
 
 // resolveLabRoute picks the endpoint for a request. The case order is the
@@ -789,6 +801,16 @@ func resolveLabRoute(path, method, format string) labRoute {
 		return routeSaveLabSecret
 	case strings.HasSuffix(path, "/secrets") && method == http.MethodGet:
 		return routeServeLabSecrets
+
+	// Taking one message down must be matched before the plain /notifications
+	// below, this file's convention for a longer path sharing a prefix (see
+	// /secrets/delete above /secrets).
+	case strings.Contains(path, "/notifications/") && strings.HasSuffix(path, "/cancel") && method == http.MethodPost:
+		return routeCancelLabNotification
+	case strings.HasSuffix(path, "/notifications") && method == http.MethodPost:
+		return routeSendLabNotification
+	case strings.HasSuffix(path, "/notifications") && method == http.MethodGet:
+		return routeListLabNotifications
 
 	case strings.HasSuffix(path, "/delete") && !strings.Contains(path, "/workspaces") && method == http.MethodPost:
 		return routeDeleteLab
@@ -864,6 +886,12 @@ func labRequestRouter(h *server.Handler) http.HandlerFunc {
 			h.SaveLabSecret(w, r)
 		case routeServeLabSecrets:
 			h.ServeLabSecrets(w, r)
+		case routeSendLabNotification:
+			h.SendLabNotification(w, r)
+		case routeListLabNotifications:
+			h.ServeLabNotifications(w, r)
+		case routeCancelLabNotification:
+			h.CancelLabNotification(w, r)
 		case routeDeleteLab:
 			h.DeleteLab(w, r)
 		case routeRetryJob:

@@ -185,6 +185,13 @@ The central instance remains where everything is decided and recorded:
   image on the next cycle.
 * **Opening a student's workspace** as a teacher works as before, and the student is told
   about it in their portal.
+* **Messages to students** sent from a lab's [Notify tab](admin-lab-management.md#notify-students)
+  are copied to its portal within seconds, so they reach its students the same way every
+  other change to the lab does. The message a student's **IDE** shows is read from the
+  lab's own portal, which keeps that working while the central instance is down. A lab
+  **without** a portal needs the [public address](#the-student-portals-page) set instead,
+  since that is then the only EasyLab a workspace in the lab's cluster can reach; with
+  neither, students get their messages on the portal pages only.
 
 On a combined (`all`) instance, a lab with its own portal is still listed in the central
 student space too, so a student in several labs keeps one place that shows all their

@@ -743,6 +743,16 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 		env = append(env, corev1.EnvVar{Name: k, Value: v})
 	}
 	env = append(env, corev1.EnvVar{Name: p.authEnv, Value: spec.Token})
+	// After the template's Env for the same reason as the access secret: these are
+	// what the in-IDE notification extension reads, and a template must not be
+	// able to point it somewhere else. Both are absent when the lab has nowhere
+	// for the IDE to poll, and the extension is then not installed either.
+	if url := strings.TrimSpace(spec.NotifyURL); url != "" {
+		env = append(env,
+			corev1.EnvVar{Name: envNotifyURL, Value: url},
+			corev1.EnvVar{Name: envNotifyToken, Value: spec.NotifyToken},
+		)
+	}
 
 	container := corev1.Container{
 		Name:  workspaceContainerName,
@@ -1079,6 +1089,8 @@ func setupSteps(spec workspace.Spec, p ideProfile) string {
 			fmt.Fprintf(&b, "%s --install-extension %s || true\n", p.serverBin, shellQuote(ext))
 		}
 	}
+	// Last, so a template's own extensions are installed whatever this one does.
+	b.WriteString(notifyExtensionStep(spec, p))
 	return b.String()
 }
 

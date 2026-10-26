@@ -185,7 +185,14 @@ func (h *Handler) portalConfigFor(job *Job) (map[string][]byte, error) {
 	if h.studentAuthSnapshot != nil {
 		auth = h.studentAuthSnapshot()
 	}
-	return encodePortalState(portalStateFromJob(job, auth, h.effectivePublicURL()))
+	state := portalStateFromJob(job, auth, h.effectivePublicURL())
+	// The portal's own address, so the workspaces it creates know where to read
+	// their notifications (see workspaceNotifyAccess). Empty until the portal has
+	// been deployed once, which is also when it first has students.
+	h.portalErrorsMu.RLock()
+	state.PortalURL = h.portalURLs[job.ID]
+	h.portalErrorsMu.RUnlock()
+	return encodePortalState(state)
 }
 
 // needsInClusterBuildCache reports whether any template builds its devcontainer
@@ -331,6 +338,18 @@ func (h *Handler) deployPortal(job *Job, pd workspace.PortalDeployer, backend wo
 		return fmt.Errorf("failed to deploy student portal: %w", err)
 	}
 	h.setPortalURL(job.ID, portalURL)
+
+	// The config above was built before EnsurePortal told us the address, so on a
+	// first deployment it went out without one and the portal would not know where
+	// its workspaces should read their notifications. Write it again now that we
+	// know. Not through syncPortalState: callers hold the lab's portal lock.
+	if portalURL != "" {
+		if refreshed, buildErr := h.portalConfigFor(job); buildErr != nil {
+			log.Printf("[portal] failed to rebuild state with the portal address for lab %s: %v", job.ID, buildErr)
+		} else if syncErr := pd.SyncPortalConfig(ctx, job.ID, refreshed); syncErr != nil {
+			log.Printf("[portal] failed to sync the portal address for lab %s: %v", job.ID, syncErr)
+		}
+	}
 	return nil
 }
 

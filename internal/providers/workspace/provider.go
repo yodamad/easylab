@@ -272,6 +272,15 @@ type Spec struct {
 	// NodeSelector constrains this workspace's pod to nodes matching these labels
 	// (e.g. a dedicated workspace node pool, separate from where EasyLab itself runs).
 	NodeSelector map[string]string
+
+	// NotifyURL and NotifyToken let the IDE show the student the messages an admin
+	// sends their lab, in the tab they actually work in. The IDE polls NotifyURL
+	// carrying NotifyToken, which authorizes reading this one owner's messages in
+	// this one lab and nothing else. Empty NotifyURL — no portal and no public
+	// address for the workspace to reach — leaves the IDE without the feature;
+	// the student still gets the messages on the portal pages.
+	NotifyURL   string
+	NotifyToken string
 }
 
 // Backend manages the lifecycle of student workspaces on a single cluster.

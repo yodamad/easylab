@@ -47,6 +47,27 @@ func TestResolveLabRoute(t *testing.T) {
 			want:   routeDeleteLabSecret,
 		},
 
+		// Notifications. Taking one down ends in "/cancel" and so collides with
+		// nothing, but the plain "/notifications" cases must not swallow it.
+		{
+			name:   "send a notification",
+			path:   "/api/labs/job-1/notifications",
+			method: http.MethodPost,
+			want:   routeSendLabNotification,
+		},
+		{
+			name:   "list notifications",
+			path:   "/api/labs/job-1/notifications",
+			method: http.MethodGet,
+			want:   routeListLabNotifications,
+		},
+		{
+			name:   "cancel a notification is not a send",
+			path:   "/api/labs/job-1/notifications/abc123/cancel",
+			method: http.MethodPost,
+			want:   routeCancelLabNotification,
+		},
+
 		// Lab deletion must still reach DeleteLab.
 		{
 			name:   "delete a lab",

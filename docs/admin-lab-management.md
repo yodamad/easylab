@@ -81,6 +81,8 @@ lab, organized into tabs at the top:
   content is unchanged, only where you reach it moved.
 * **Feedback** — a compact summary (average rating, most recent comments) with a link to
   the full [feedback page](feedbacks.md) for this lab.
+* **Notify** — send a message to this lab's students mid-workshop and see what is
+  currently showing. See [Notify students](#notify-students).
 * **Lifecycle & Cleanup** — an inline form for the workspace lifetime, the idle
   timeout after which unused workspaces are paused, and the lab deletion date/time (this replaces the old **Edit Lifecycle** modal), plus a history table of
   every automatic cleanup sweep that has run.
@@ -92,6 +94,55 @@ lab, organized into tabs at the top:
 
 The old `/labs/{id}/workspaces` URL still works — it redirects into this page's
 Workspaces & Templates section.
+
+### Notify students
+
+The **Notify** tab sends a message to the lab's students while the workshop is running —
+"back in 10 minutes", "move on to exercise 3", "I am about to restart the cluster".
+
+Fill in the form and press **Send message**:
+
+* **Message** — up to 500 characters. Anything longer is cut.
+* **Send to** — **All students of this lab**, or one student picked from the list. The
+  list holds the students who have requested a workspace in this lab; a student who has
+  signed in but not yet asked for one cannot be picked individually yet, though a
+  lab-wide message still reaches them once they have one.
+* **Level** — **Info** or **Warning**. A warning is shown in amber, and in the IDE as a
+  warning rather than an information message.
+* **Stays up for** — 5, 15 or 30 minutes, or an hour. This is the whole of the message's
+  lifetime: it disappears on its own when the time is up, and students have nothing to
+  dismiss.
+
+**Currently showing** lists what is live, who it went to and how long it has left, with a
+**Take down** button to end one early.
+
+#### Where the message turns up
+
+A student sees the same message in two places, so it reaches them whether or not they are
+looking at the portal:
+
+* **As a desktop notification**, raised by the student portal from whatever tab it is open
+  in — so it pops up over the IDE they are working in. This needs the student to have
+  pressed the bell in the portal header once and allowed notifications, and a portal tab
+  to still be open somewhere. See [the student's side](student.md#messages-from-your-admin).
+* **Inside their IDE**, as a code-server notification. This works without any permission,
+  but only for workspaces **created or restarted after this feature was deployed** — the
+  piece that shows it is installed when the workspace starts. It also needs the lab to
+  have either its own [student portal](student-portal.md) or a
+  [public address](student-portal.md#the-student-portals-page) configured, which is how a
+  workspace in the lab's cluster reaches EasyLab. Without either, the desktop notification
+  and the portal page remain the channels.
+
+A student with no EasyLab tab open and no running workspace sees the message the next time
+they load a portal page, as long as it has not expired.
+
+!!! warning "Messages are not private"
+    A message is copied into the lab's own cluster so the lab's portal and workspaces can
+    read it. Never send a password, a token or anything else confidential this way — use
+    the lab's [credentials](#lab-credentials-private-registries-and-repositories) for that.
+
+Every send and take-down is recorded in the [audit log](audit-log.md) as `lab.notify` and
+`lab.notify_cancel`. The message text itself is not logged.
 
 ### Student portal
 

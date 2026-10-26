@@ -39,6 +39,9 @@ func TestBuildMux_RoutesPerMode(t *testing.T) {
 		// Everywhere.
 		{name: "health", path: "/health", all: true, admin: true, student: true},
 		{name: "static assets", path: "/static/style.css", all: true, admin: true, student: true},
+		// Read from inside a student's IDE, which reaches whichever instance it
+		// can — its lab's own portal or the central one — so every mode answers it.
+		{name: "workspace notifications", path: "/api/workspace/notifications", all: true, admin: true, student: true},
 
 		// Student portal.
 		{name: "student login", path: "/student/login", all: true, student: true},
@@ -51,6 +54,7 @@ func TestBuildMux_RoutesPerMode(t *testing.T) {
 		{name: "student workspace request", path: "/api/student/workspace/request", all: true, student: true},
 		{name: "student workspace open", path: "/api/student/workspace/open", all: true, student: true},
 		{name: "student workspace delete", path: "/api/student/workspace/delete", all: true, student: true},
+		{name: "student notifications API", path: "/api/student/notifications", all: true, student: true},
 		{name: "student feedback API", path: "/api/student/feedback", all: true, student: true},
 
 		// Provider sign-in starts on the same path everywhere: run here on the

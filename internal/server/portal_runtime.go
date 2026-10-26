@@ -47,6 +47,11 @@ type PortalRuntime struct {
 	jobManager *JobManager
 	auth       *AuthHandler
 
+	// onState is called with each state the admin syncs, for what the handler
+	// itself has to keep rather than the job: the portal's own address, which is
+	// where this lab's workspaces read their notifications from.
+	onState func(PortalState)
+
 	mu      sync.Mutex
 	pending []pendingPortalRecord
 	// kick wakes the flush loop early; buffered so a producer never blocks on it.
@@ -81,6 +86,10 @@ func NewPortalRuntime(labID string, backend workspace.Backend, jobManager *JobMa
 func (h *Handler) UsePortalRuntime(p *PortalRuntime) {
 	h.portal = p
 	h.newWorkspaceBackend = func(_, _ string) (workspace.Backend, error) { return p.backend, nil }
+	// A portal is not told its own address at startup — the admin deploys it and
+	// knows the URL — so it learns it from the state it is synced. Workspaces it
+	// creates read their notifications there (see workspaceNotifyAccess).
+	p.onState = func(state PortalState) { h.setPortalURL(state.LabID, state.PortalURL) }
 }
 
 // Load reads the lab state the admin last synced and applies it.
@@ -102,6 +111,9 @@ func (p *PortalRuntime) Load(ctx context.Context) error {
 	p.jobManager.setPortalJob(state)
 	if p.auth != nil {
 		p.auth.ConfigurePortalAuth(state.LabID, state.Auth)
+	}
+	if p.onState != nil {
+		p.onState(state)
 	}
 	return nil
 }
@@ -164,6 +176,8 @@ func (jm *JobManager) setPortalJob(state PortalState) {
 			Config:            config,
 			Kubeconfig:        portalKubeconfigSentinel,
 			WorkspaceAccesses: state.WorkspaceAccesses,
+			Notifications:     state.Notifications,
+			NotifySecret:      state.NotifySecret,
 			DeletionRetries:   make(map[string]*WorkspaceDeletionRetry),
 		}
 		return
@@ -171,6 +185,8 @@ func (jm *JobManager) setPortalJob(state PortalState) {
 	job.mu.Lock()
 	job.Config = config
 	job.WorkspaceAccesses = state.WorkspaceAccesses
+	job.Notifications = state.Notifications
+	job.NotifySecret = state.NotifySecret
 	job.UpdatedAt = time.Now()
 	job.mu.Unlock()
 }

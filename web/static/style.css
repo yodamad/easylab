@@ -8236,3 +8236,153 @@ details[open] > .secrets-summary::after {
     align-items: center;
     margin-top: 1rem;
 }
+
+/* ============================================
+   STUDENT NOTIFICATIONS (admin → student messages)
+   ============================================ */
+
+/* The bell in the student header asks for desktop-notification permission and
+   shows whether it was granted. */
+.student-notify-bell {
+    cursor: pointer;
+    background: none;
+    border: none;
+}
+
+.student-notify-bell--granted {
+    color: var(--student-color);
+}
+
+.student-notify-bell--denied,
+.student-notify-bell.is-unavailable {
+    opacity: 0.45;
+}
+
+/* The on-page banners, stacked under the header. Hidden by JS while empty. */
+.student-notifications {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-width: 1100px;
+    margin: 1rem auto 0;
+    padding: 0 1rem;
+}
+
+.student-notification {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    border-radius: var(--radius);
+    padding: 0.85rem 1.1rem;
+    font-size: 0.95rem;
+    background: #dbeafe;
+    border: 1px solid #93c5fd;
+    color: #1e3a8a;
+}
+
+.student-notification--warning {
+    background: #fef3c7;
+    border-color: #fcd34d;
+    color: #92400e;
+}
+
+.student-notification-icon {
+    font-size: 1.25rem;
+    flex-shrink: 0;
+}
+
+.student-notification-text {
+    line-height: 1.45;
+}
+
+/* ============================================
+   LAB DETAIL — NOTIFY TAB
+   ============================================ */
+
+.lab-notify-intro {
+    color: var(--text-light);
+    font-size: 0.9rem;
+    line-height: 1.6;
+    margin-bottom: 1.25rem;
+    max-width: 70ch;
+}
+
+.lab-notify-form {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    margin-bottom: 1.75rem;
+}
+
+.lab-notify-form textarea {
+    width: 100%;
+    font-family: inherit;
+    font-size: 0.95rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    resize: vertical;
+}
+
+.lab-notify-form-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.lab-notify-form-row .form-group {
+    flex: 1 1 200px;
+}
+
+.lab-notify-list-title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+}
+
+.lab-notify-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.lab-notify-empty {
+    color: var(--text-light);
+    font-size: 0.9rem;
+}
+
+.lab-notify-item {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.35rem 1rem;
+    align-items: center;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--primary-color);
+    border-radius: var(--radius);
+    padding: 0.85rem 1rem;
+    background: var(--background);
+}
+
+.lab-notify-item--warning {
+    border-left-color: var(--warning);
+}
+
+.lab-notify-item-message {
+    font-size: 0.95rem;
+    line-height: 1.5;
+    word-break: break-word;
+}
+
+.lab-notify-item-meta {
+    grid-column: 1;
+    display: flex;
+    gap: 0.75rem;
+    color: var(--text-light);
+    font-size: 0.8rem;
+}
+
+.lab-notify-item-action {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+}

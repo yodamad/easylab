@@ -94,6 +94,15 @@ type Job struct {
 	// by workspace ID. Kept apart from WorkspaceEvents, whose consumers (history,
 	// stats) only know creations and deletions.
 	WorkspaceAccesses map[string]WorkspaceAccess `json:"workspace_accesses,omitempty"`
+	// Notifications holds the messages an admin sent this lab's students that have
+	// not expired yet (see notifications.go). Short-lived by design: entries are
+	// pruned on every write rather than kept as history.
+	Notifications []StudentNotification `json:"notifications,omitempty"`
+	// NotifySecret signs the tokens a student's workspace uses to read its own
+	// notifications from inside the IDE, where there is no session cookie (see
+	// notifyToken). Generated the first time a workspace needs one; encrypted at
+	// rest and never exposed, like PortalBrokerSecret.
+	NotifySecret string `json:"notify_secret,omitempty"`
 	// PortalBrokerSecret signs the sign-in assertions this instance hands the lab's
 	// in-lab student portal (see broker.go). Generated the first time the portal is
 	// deployed; encrypted at rest and never exposed, like Kubeconfig.
@@ -840,9 +849,11 @@ func (j *Job) sanitizedCopy(encryptSecrets bool) (*Job, error) {
 		WorkspaceEvents:    j.WorkspaceEvents,
 	}
 	// Persisted, but left out of API responses: a student only learns about
-	// accesses to their own workspace, through WorkspaceTeacherAccess.
+	// accesses to their own workspace, through WorkspaceTeacherAccess, and about
+	// the notifications addressed to them, through StudentNotifications.
 	if encryptSecrets {
 		cp.WorkspaceAccesses = j.WorkspaceAccesses
+		cp.Notifications = j.Notifications
 	}
 
 	// atRest encrypts when persisting and blanks when exposing via the API.
@@ -864,6 +875,12 @@ func (j *Job) sanitizedCopy(encryptSecrets bool) (*Job, error) {
 		return nil, err
 	}
 	cp.PortalBrokerSecret = bs
+
+	ns, err := atRest(j.NotifySecret)
+	if err != nil {
+		return nil, err
+	}
+	cp.NotifySecret = ns
 
 	if j.Config != nil {
 		cfg := *j.Config
@@ -1049,6 +1066,12 @@ func (jm *JobManager) LoadJobs() error {
 			continue
 		} else {
 			job.PortalBrokerSecret = bs
+		}
+		if ns, decErr := decryptSecret(job.NotifySecret); decErr != nil {
+			log.Printf("Warning: failed to decrypt notification secret in job file %s: %v", jobFile, decErr)
+			continue
+		} else {
+			job.NotifySecret = ns
 		}
 		if job.Config != nil {
 			if ek, decErr := decryptSecret(job.Config.ExternalKubeconfig); decErr != nil {

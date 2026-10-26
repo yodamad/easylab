@@ -2496,6 +2496,15 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		spec.WildcardTLSSecret = ingress.WildcardTLSSecretName
 	}
 
+	// Let the IDE show this student the messages their admin sends the lab, in the
+	// tab they actually work in. Best-effort: a workspace that has nowhere to poll
+	// is created exactly as before, and the student still sees the messages on the
+	// portal pages.
+	if notifyURL, notifyToken := h.workspaceNotifyAccess(labID, email); notifyURL != "" {
+		spec.NotifyURL = notifyURL
+		spec.NotifyToken = notifyToken
+	}
+
 	if baked, ok := bakedImages[selected.Name]; spec.Devcontainer != nil && ok {
 		// A template with a successful pre-bake skips the build entirely — every
 		// workspace just pulls the baked image, no envbuilder, no in-cluster-cache
@@ -4573,6 +4582,8 @@ func (h *Handler) ServeLabDetail(w http.ResponseWriter, r *http.Request) {
 		"WorkspacesFailed":   err != nil,
 		"Feedback":           feedback,
 		"Activity":           activity,
+		// Who the Notify tab can address a single message to.
+		"Students":           labStudents(job),
 		"CleanupEvents":      cleanupDisplay,
 		"StripCleanupEvents": stripCleanupEvents,
 		"CreatedAtRaw":       createdAtRaw.Format("2006-01-02 15:04"),

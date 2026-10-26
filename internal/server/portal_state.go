@@ -49,6 +49,20 @@ type PortalState struct {
 	// WorkspaceAccesses tells a student when a teacher last opened their workspace.
 	WorkspaceAccesses map[string]WorkspaceAccess `json:"workspace_accesses,omitempty"`
 
+	// Notifications are the admin's messages to this lab's students that have not
+	// expired yet (see notifications.go). They are the admin's own words, not a
+	// secret, but they do reach the lab's cluster in this state — which is why
+	// admins are told not to send credentials this way.
+	Notifications []StudentNotification `json:"notifications,omitempty"`
+	// NotifySecret lets the portal verify the tokens the lab's workspaces carry
+	// when they read their notifications from inside the IDE. Signing key only: it
+	// grants nothing but reading one owner's messages in this one lab.
+	NotifySecret string `json:"notify_secret,omitempty"`
+	// PortalURL is the address the admin deployed this portal under. A portal is
+	// not told its own address at startup, and the workspaces it creates need one
+	// to read their notifications from — this is it.
+	PortalURL string `json:"portal_url,omitempty"`
+
 	Auth PortalAuthState `json:"auth"`
 }
 
@@ -121,6 +135,13 @@ func portalStateFromJob(job *Job, auth StudentAuthSnapshot, publicURL string) Po
 			state.WorkspaceAccesses[id] = access
 		}
 	}
+	// Only what is still showing: an expired message has nothing to tell the
+	// portal's students, and the state is written to a Secret, so it stays small.
+	state.Notifications = pruneNotifications(job.Notifications, time.Now())
+	if len(state.Notifications) == 0 {
+		state.Notifications = nil
+	}
+	state.NotifySecret = job.NotifySecret
 	if cfg := job.Config; cfg != nil {
 		state.StackName = cfg.StackName
 		state.Description = cfg.Description

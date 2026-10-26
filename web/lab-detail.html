@@ -65,6 +65,7 @@
                 {{if .ShowProgress}}<button type="button" class="lab-detail-tab" role="tab" id="lab-tab-progress" aria-selected="false" aria-controls="progress" onclick="switchLabDetailTab('progress')"><span class="lab-detail-tab-icon" aria-hidden="true">⏳</span> Progress</button>{{end}}
                 {{if .Workspaces}}<button type="button" class="lab-detail-tab" role="tab" id="lab-tab-workspaces" aria-selected="false" aria-controls="workspaces" onclick="switchLabDetailTab('workspaces')"><span class="lab-detail-tab-icon" aria-hidden="true">🧩</span> Workspaces & Templates</button>{{end}}
                 <button type="button" class="lab-detail-tab" role="tab" id="lab-tab-feedback" aria-selected="false" aria-controls="feedback" onclick="switchLabDetailTab('feedback')"><span class="lab-detail-tab-icon" aria-hidden="true">💬</span> Feedback</button>
+                <button type="button" class="lab-detail-tab" role="tab" id="lab-tab-notify" aria-selected="false" aria-controls="notify" onclick="switchLabDetailTab('notify')"><span class="lab-detail-tab-icon" aria-hidden="true">📣</span> Notify</button>
                 <button type="button" class="lab-detail-tab" role="tab" id="lab-tab-lifecycle" aria-selected="false" aria-controls="lifecycle" onclick="switchLabDetailTab('lifecycle')"><span class="lab-detail-tab-icon" aria-hidden="true">♻️</span> Lifecycle & Cleanup</button>
                 <button type="button" class="lab-detail-tab" role="tab" id="lab-tab-activity" aria-selected="false" aria-controls="activity" onclick="switchLabDetailTab('activity')"><span class="lab-detail-tab-icon" aria-hidden="true">📜</span> Activity</button>
                 <div class="lab-detail-tabs-divider" aria-hidden="true"></div>
@@ -572,6 +573,62 @@
                 {{end}}
                 <div class="lab-detail-config-actions">
                     <a href="/admin/feedback?lab_id={{.Lab.ID}}" class="btn btn-secondary btn-sm">View all feedback →</a>
+                </div>
+            </section>
+
+            <section id="notify" class="lab-detail-section is-hidden" role="tabpanel" aria-labelledby="lab-tab-notify">
+                <h2 class="lab-detail-section-title">Notify students</h2>
+                <p class="lab-notify-intro">
+                    Send a message to this lab's students during the workshop. It reaches them
+                    wherever they are: as a desktop notification from the student portal, and
+                    inside their IDE. It disappears on its own when its time is up — students
+                    have nothing to dismiss. Messages are not private, so never send a password
+                    or a token this way.
+                </p>
+
+                <form class="lab-notify-form" hx-post="/api/labs/{{.Lab.ID}}/notifications"
+                      hx-target="#notifications-panel" hx-swap="innerHTML"
+                      hx-on::after-request="if (event.detail.successful) this.reset()">
+                    <div class="form-group">
+                        <label for="notify-message">Message</label>
+                        <textarea id="notify-message" name="message" rows="3" maxlength="500"
+                                  placeholder="We are taking a 10 minute break — back at 14:30." required></textarea>
+                    </div>
+                    <div class="lab-notify-form-row">
+                        <div class="form-group">
+                            <label for="notify-recipient">Send to</label>
+                            <select id="notify-recipient" name="recipient">
+                                <option value="">All students of this lab</option>
+                                {{range .Students}}<option value="{{.}}">{{.}}</option>{{end}}
+                            </select>
+                            {{if not .Students}}<small>No student has requested a workspace here yet, so there is nobody to pick.</small>{{end}}
+                        </div>
+                        <div class="form-group">
+                            <label for="notify-level">Level</label>
+                            <select id="notify-level" name="level">
+                                <option value="info">Info</option>
+                                <option value="warning">Warning</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="notify-ttl">Stays up for</label>
+                            <select id="notify-ttl" name="ttl_minutes">
+                                <option value="5">5 minutes</option>
+                                <option value="15" selected>15 minutes</option>
+                                <option value="30">30 minutes</option>
+                                <option value="60">1 hour</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="lab-detail-config-actions">
+                        <button type="submit" class="btn btn-primary btn-sm">Send message</button>
+                    </div>
+                </form>
+
+                <h3 class="lab-notify-list-title">Currently showing</h3>
+                <div id="notifications-panel" class="lab-notify-list"
+                     hx-get="/api/labs/{{.Lab.ID}}/notifications" hx-trigger="load" hx-swap="innerHTML">
+                    <p class="lab-notify-empty">Loading messages…</p>
                 </div>
             </section>
 

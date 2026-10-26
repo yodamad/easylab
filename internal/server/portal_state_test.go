@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -192,4 +193,94 @@ func TestPortalRecord_RoundTrip(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &decoded))
 	require.NotNil(t, decoded.WorkspaceEvent)
 	assert.True(t, decoded.WorkspaceEvent.At.Equal(at))
+}
+
+// A lab's own portal serves its students, so the admin's messages have to reach
+// it — and only the ones still showing: an expired message has nothing to tell
+// anyone, and the state is written to a Secret.
+func TestPortalStateFromJob_Notifications(t *testing.T) {
+	t.Parallel()
+
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "workshop"})
+	job, ok := jm.GetJob(id)
+	require.True(t, ok)
+
+	now := time.Now()
+	job.mu.Lock()
+	job.NotifySecret = "signing-key"
+	job.Notifications = []StudentNotification{
+		{ID: "live", At: now, ExpiresAt: now.Add(time.Hour), Message: "break in 10", Level: NotificationLevelInfo},
+		{ID: "stale", At: now.Add(-2 * time.Hour), ExpiresAt: now.Add(-time.Hour), Message: "long gone", Level: NotificationLevelInfo},
+	}
+	job.mu.Unlock()
+
+	state := portalStateFromJob(job, StudentAuthSnapshot{}, "https://easylab.example.com")
+
+	require.Len(t, state.Notifications, 1)
+	assert.Equal(t, "live", state.Notifications[0].ID)
+	// The portal verifies the tokens its lab's workspaces carry, so it needs the key.
+	assert.Equal(t, "signing-key", state.NotifySecret)
+
+	// It survives the trip through the Secret intact, and the portal's mirror of
+	// the lab serves it to students from there.
+	config, err := encodePortalState(state)
+	require.NoError(t, err)
+	decoded, err := decodePortalState(config)
+	require.NoError(t, err)
+	require.Len(t, decoded.Notifications, 1)
+	assert.Equal(t, "break in 10", decoded.Notifications[0].Message)
+	assert.Equal(t, "signing-key", decoded.NotifySecret)
+
+	portalJobs := NewJobManager("")
+	portalJobs.setPortalJob(decoded)
+	mirrored, ok := portalJobs.GetJob(id)
+	require.True(t, ok)
+	assert.Equal(t, "signing-key", mirrored.NotifySecret)
+	assert.Len(t, portalJobs.ActiveStudentNotifications(id, "alice@example.com"), 1)
+}
+
+// Nothing to say means nothing in the state, rather than an empty list taking up
+// room in every sync.
+func TestPortalStateFromJob_NoNotifications(t *testing.T) {
+	t.Parallel()
+
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "workshop"})
+	job, ok := jm.GetJob(id)
+	require.True(t, ok)
+
+	state := portalStateFromJob(job, StudentAuthSnapshot{}, "")
+	assert.Nil(t, state.Notifications)
+
+	encoded, err := json.Marshal(state)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "notifications")
+}
+
+// A portal is not told its own address at startup: it learns it from the state
+// the admin syncs, and that is where the workspaces it creates read their
+// notifications.
+func TestPortalRuntime_LearnsItsOwnURL(t *testing.T) {
+	t.Parallel()
+
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "workshop"})
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	p := &PortalRuntime{labID: id, jobManager: NewJobManager("")}
+	h.UsePortalRuntime(p)
+	require.NotNil(t, p.onState)
+
+	p.onState(PortalState{LabID: id, PortalURL: "https://lab.example.com"})
+
+	h.portalErrorsMu.RLock()
+	learned := h.portalURLs[id]
+	h.portalErrorsMu.RUnlock()
+	assert.Equal(t, "https://lab.example.com", learned)
+
+	// Which is then what a workspace created on this portal is told to poll.
+	notifyURL, token := h.workspaceNotifyAccess(id, "alice@example.com")
+	assert.True(t, strings.HasPrefix(notifyURL, "https://lab.example.com/api/workspace/notifications?lab_id="))
+	assert.NotEmpty(t, token)
 }
