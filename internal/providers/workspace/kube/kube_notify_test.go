@@ -552,3 +552,65 @@ func TestNotifyExtensionStep_WritesBothFiles(t *testing.T) {
 	assert.Empty(t, notifyExtensionStep(workspace.Spec{}, codeServerProfile))
 	assert.Empty(t, notifyExtensionStep(spec, ideProfile{kind: "other", supportsExtensions: false}))
 }
+
+// TestDeploymentRecordsIdentity pins the fail-closed half of the pair. The
+// permissive ownsDeployment decides whether a workspace may be handed over;
+// this one decides whether a credential minted over the requester may be
+// written onto it, and "nobody recorded" must not mean yes.
+func TestDeploymentRecordsIdentity(t *testing.T) {
+	t.Parallel()
+
+	dep := func(ownerEmail string) *appsv1.Deployment {
+		d := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "ws-alice"}}
+		if ownerEmail != "" {
+			d.Annotations = map[string]string{annotationOwnerEmail: ownerEmail}
+		}
+		return d
+	}
+
+	tests := []struct {
+		name     string
+		dep      *appsv1.Deployment
+		identity string
+		// want is deploymentRecordsIdentity; owns is ownsDeployment, included so
+		// the cases where the two deliberately disagree are visible here.
+		want bool
+		owns bool
+	}{
+		{
+			name: "records this identity", dep: dep("alice@example.com"),
+			identity: "alice@example.com", want: true, owns: true,
+		},
+		{
+			name: "case and surrounding space are ignored", dep: dep(" Alice@Example.com "),
+			identity: "alice@example.com", want: true, owns: true,
+		},
+		{
+			name: "records a different identity", dep: dep("alice@other.example"),
+			identity: "alice@example.com", want: false, owns: false,
+		},
+		{
+			// The adoption path: two emails sanitizing to the same username land on
+			// one legacy Deployment. ownsDeployment lets it through, this must not.
+			name: "records nobody", dep: dep(""),
+			identity: "alice@example.com", want: false, owns: true,
+		},
+		{
+			name: "no identity to check against", dep: dep("alice@example.com"),
+			identity: "", want: false, owns: false,
+		},
+		{
+			name: "neither side has an identity", dep: dep(""),
+			identity: "", want: false, owns: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, deploymentRecordsIdentity(tt.dep, tt.identity))
+			assert.Equal(t, tt.owns, ownsDeployment(tt.dep, tt.identity),
+				"ownsDeployment must keep its existing, more permissive behaviour")
+		})
+	}
+}

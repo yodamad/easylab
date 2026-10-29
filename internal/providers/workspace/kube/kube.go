@@ -441,6 +441,25 @@ func ownsDeployment(dep *appsv1.Deployment, identity string) bool {
 	return normalizeIdentity(recorded) == normalizeIdentity(identity)
 }
 
+// deploymentRecordsIdentity reports whether dep names an owner and that owner is
+// identity. It is ownsDeployment's fail-closed twin: where that one reads "no
+// recorded owner" as "may be handed over", this one reads it as "we do not know
+// whose this is", because it gates writing a credential minted over identity.
+//
+// The difference matters on the adoption path above: a Deployment created before
+// the owner's email was recorded is adopted by whoever's sanitized username
+// matches its name, and two different emails can sanitize to the same username.
+// Stamping a notify token minted over the requester onto such a workspace would
+// point its IDE — possibly still in use by the student who created it — at the
+// requester's messages.
+func deploymentRecordsIdentity(dep *appsv1.Deployment, identity string) bool {
+	recorded := strings.TrimSpace(dep.Annotations[annotationOwnerEmail])
+	if recorded == "" || strings.TrimSpace(identity) == "" {
+		return false
+	}
+	return normalizeIdentity(recorded) == normalizeIdentity(identity)
+}
+
 // sanitizeDNS lowercases and strips characters not allowed in DNS-1123 labels.
 func sanitizeDNS(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
@@ -565,8 +584,18 @@ func (b *Backend) EnsureWorkspace(ctx context.Context, spec workspace.Spec) (wor
 		// Same for where its IDE reads the lab's notifications: a workspace created
 		// before the lab had an address to poll, or before this build, carries no
 		// endpoint at all and would stay deaf for its whole life otherwise.
-		if reconcileErr := b.reconcileNotifyEnv(ctx, name, spec); reconcileErr != nil {
-			log.Printf("Failed to reconcile notifications for workspace %s: %v", name, reconcileErr)
+		//
+		// Only when this Deployment says it is this student's, though. The token is
+		// minted over the requester, and the adoption path above accepts a
+		// Deployment that records no owner at all, so writing it here on that path
+		// could hand one student's IDE another student's messages. A workspace
+		// skipped here is not left behind: the background pass in internal/server
+		// mints over the Deployment's own recorded owner, so it is reconciled
+		// correctly within one cleanup tick.
+		if deploymentRecordsIdentity(existing, spec.OwnerEmail) {
+			if reconcileErr := b.reconcileNotifyEnv(ctx, name, spec); reconcileErr != nil {
+				log.Printf("Failed to reconcile notifications for workspace %s: %v", name, reconcileErr)
+			}
 		}
 		// Workspace already exists — return its actual access token (a freshly
 		// generated spec.Token would not match the running pod, which keeps its
