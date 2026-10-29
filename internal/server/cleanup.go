@@ -111,8 +111,95 @@ func (h *Handler) StartWorkspaceCleanup(ctx context.Context) {
 			h.cleanupExpiredLabs()
 			h.reconcilePrepulls()
 			h.reconcilePortals()
+			// After reconcilePortals: that is what learns a lab's portal address,
+			// which is the address this then points the lab's workspaces at.
+			h.reconcileWorkspaceNotifications()
 		case <-idleTicker.C:
 			h.stopIdleWorkspaces()
+		}
+	}
+}
+
+// reconcileWorkspaceNotifications points a lab's already-running workspaces at
+// its notification endpoint, so one created before the lab had an address to
+// poll starts showing the admin's messages inside the IDE on its own instead of
+// waiting for the student to request that workspace again.
+//
+// It rides the cleanup ticker rather than the student's own status poll: that
+// poll runs every few seconds per student and should stay a read, while this is
+// a write that restarts a pod. The per-workspace reconcile is a no-op once the
+// endpoint matches, so a lab settles on the first pass and every later tick
+// costs one list per lab and no writes at all.
+func (h *Handler) reconcileWorkspaceNotifications() {
+	for _, job := range h.jobManager.GetAllJobs() {
+		// Read under the job's lock, as reconcilePrepulls does: an admin retrying
+		// or re-provisioning a lab writes these under the write lock, and
+		// workspaceNamespace requires at least a read lock of its own.
+		job.mu.RLock()
+		completed := job.Status == JobStatusCompleted
+		kubeconfig := extractStringFromConfigValue(job.Kubeconfig)
+		namespace := job.workspaceNamespace()
+		job.mu.RUnlock()
+		if !completed || kubeconfig == "" {
+			continue
+		}
+		// No address a pod in this lab could reach: leave every workspace exactly
+		// as it is rather than paying a cluster round trip to discover that again
+		// per workspace.
+		if h.notifyBaseFor(job.ID) == "" {
+			continue
+		}
+
+		backend, err := h.workspaceBackendFor(job.ID, kubeconfig, namespace)
+		if err != nil {
+			log.Printf("[notify] skipping lab %s: failed to build backend: %v", job.ID, err)
+			continue
+		}
+		reconciler, ok := backend.(workspace.NotifyReconciler)
+		if !ok {
+			continue
+		}
+
+		reachCtx, cancel := context.WithTimeout(context.Background(), clusterReachabilityTimeout)
+		reachable := backend.Reachable(reachCtx)
+		cancel()
+		if !reachable {
+			log.Printf("[notify] skipping lab %s: cluster API unreachable", job.ID)
+			continue
+		}
+
+		listCtx, listCancel := context.WithTimeout(context.Background(), clusterOperationTimeout)
+		workspaces, err := backend.ListWorkspaces(listCtx, job.ID)
+		listCancel()
+		if err != nil {
+			log.Printf("[notify] failed to list workspaces for lab %s: %v", job.ID, err)
+			continue
+		}
+
+		for _, ws := range workspaces {
+			// The token has to be minted over the identity the workspace was created
+			// with, which is the student's email wherever one was recorded. A
+			// workspace predating OwnerEmail has only the sanitized username, so its
+			// token carries that — enough for the lab-wide messages a workshop
+			// actually sends, though not for one addressed to that student by email.
+			owner := ws.OwnerEmail
+			if owner == "" {
+				owner = ws.Owner
+			}
+			if owner == "" {
+				continue
+			}
+			notifyURL, token := h.workspaceNotifyAccess(job.ID, owner)
+			if notifyURL == "" {
+				continue
+			}
+
+			reconcileCtx, reconcileCancel := context.WithTimeout(context.Background(), clusterOperationTimeout)
+			err := reconciler.ReconcileNotify(reconcileCtx, ws.ID, workspace.Spec{NotifyURL: notifyURL, NotifyToken: token})
+			reconcileCancel()
+			if err != nil {
+				log.Printf("[notify] failed to reconcile notifications on workspace %s in lab %s: %v", ws.ID, job.ID, err)
+			}
 		}
 	}
 }

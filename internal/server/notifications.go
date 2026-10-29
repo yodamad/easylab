@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -327,21 +328,59 @@ const workspaceNotifyPath = "/api/workspace/notifications"
 // and otherwise this instance's public address. Without either there is nothing
 // a pod in the lab's cluster could reliably resolve, so the feature is left off
 // rather than pointing the IDE at a URL only the admin's browser can reach.
+// reachableFromCluster reports whether raw is an address a pod in the lab's
+// cluster could actually poll. A development instance's public address is
+// routinely "http://localhost:8081", which inside a workspace container resolves
+// to that container — so the IDE polls itself, gets nothing, and the admin sees
+// messages that never arrive. An address only the admin's own browser can reach
+// is worse than none: with none the student still gets the portal banner, and
+// the workspace is not given a token that can never work.
+func reachableFromCluster(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") || strings.HasSuffix(strings.ToLower(host), ".localhost") {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return !ip.IsLoopback() && !ip.IsUnspecified() && !ip.IsLinkLocalUnicast()
+	}
+	return true
+}
+
+// notifyBaseFor returns the address a workspace in the lab's cluster should poll
+// for its notifications, or "" when the lab has none that such a pod could
+// reach. Split out from workspaceNotifyAccess so a caller can ask whether a lab
+// has an address at all without minting a token for it.
+func (h *Handler) notifyBaseFor(labID string) string {
+	h.portalErrorsMu.RLock()
+	portalURL := h.portalURLs[labID]
+	h.portalErrorsMu.RUnlock()
+	if reachableFromCluster(portalURL) {
+		return portalURL
+	}
+	if public := h.effectivePublicURL(); reachableFromCluster(public) {
+		return public
+	}
+	return ""
+}
+
 func (h *Handler) workspaceNotifyAccess(labID, owner string) (notifyURL, token string) {
 	job, exists := h.jobManager.GetJob(labID)
 	if !exists {
 		return "", ""
 	}
 
-	base := ""
-	h.portalErrorsMu.RLock()
-	portalURL := h.portalURLs[labID]
-	h.portalErrorsMu.RUnlock()
-	if portalURL != "" {
-		base = portalURL
-	} else if public := h.effectivePublicURL(); public != "" {
-		base = public
-	}
+	base := h.notifyBaseFor(labID)
 	if base == "" {
 		return "", ""
 	}
@@ -680,9 +719,39 @@ func (h *Handler) renderNotificationsPanel(labID string) string {
 	return b.String()
 }
 
-// labStudents lists the students who have had a workspace in the lab, so the
-// admin can address one of them. Same source as studentInLab, sorted and
-// de-duplicated for the picker.
+// notifyRecipients lists the students an admin can address one message to: the
+// ones with a workspace in the lab right now, not everyone who ever had one.
+// The lab's history keeps a student forever — a deleted workspace leaves its
+// "created" event behind — so building the picker from it offers people who
+// left hours ago, and addressing one of them sends a message nobody reads.
+//
+// live is the lab's current workspace list, already fetched for this page. It
+// is nil when the lab has no cluster to ask or the list failed, and the history
+// is the fallback then: an empty picker during a cluster blip would leave the
+// admin unable to address anyone at all, which is worse than offering a name
+// too many. A paused workspace still counts — its student is still in the
+// workshop, and the message is there when they resume.
+func notifyRecipients(job *Job, live *WorkspacesViewModel) []string {
+	if live == nil {
+		return labStudents(job)
+	}
+	seen := map[string]bool{}
+	var students []string
+	for _, ws := range live.Workspaces {
+		owner := strings.TrimSpace(ws.Owner)
+		if owner == "" || seen[owner] {
+			continue
+		}
+		seen[owner] = true
+		students = append(students, owner)
+	}
+	sort.Strings(students)
+	return students
+}
+
+// labStudents lists every student who has had a workspace in the lab. It is the
+// fallback for notifyRecipients when the live list cannot be had; prefer that.
+// Same source as studentInLab, sorted and de-duplicated for the picker.
 func labStudents(job *Job) []string {
 	job.mu.RLock()
 	defer job.mu.RUnlock()

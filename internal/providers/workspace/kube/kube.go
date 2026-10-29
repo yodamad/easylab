@@ -562,6 +562,12 @@ func (b *Backend) EnsureWorkspace(ctx context.Context, spec workspace.Spec) (wor
 		if reconcileErr := b.reconcileIngressTLS(ctx, name, spec); reconcileErr != nil {
 			log.Printf("Failed to reconcile TLS for workspace %s: %v", name, reconcileErr)
 		}
+		// Same for where its IDE reads the lab's notifications: a workspace created
+		// before the lab had an address to poll, or before this build, carries no
+		// endpoint at all and would stay deaf for its whole life otherwise.
+		if reconcileErr := b.reconcileNotifyEnv(ctx, name, spec); reconcileErr != nil {
+			log.Printf("Failed to reconcile notifications for workspace %s: %v", name, reconcileErr)
+		}
 		// Workspace already exists — return its actual access token (a freshly
 		// generated spec.Token would not match the running pod, which keeps its
 		// original token/password) and the routing recorded at create time, which

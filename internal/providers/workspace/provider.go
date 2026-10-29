@@ -548,6 +548,23 @@ type PortalStatus struct {
 	Image    string `json:"image,omitempty"`
 }
 
+// NotifyReconciler is implemented by backends that can point an already-running
+// workspace at the lab's notification endpoint. Optional and separate from
+// Backend for the same reason as PortalDeployer below — callers type-assert for
+// it.
+//
+// It exists because a workspace's endpoint is fixed when it is created, so one
+// created before its lab had an address to poll would never show the admin's
+// messages inside the IDE. Implementations must leave a workspace that already
+// carries the right endpoint completely alone: applying it restarts the
+// student's IDE, so a reconcile that is not a no-op has a visible cost.
+type NotifyReconciler interface {
+	// ReconcileNotify brings one workspace's notification endpoint in line with
+	// spec, reading only its NotifyURL and NotifyToken. An empty NotifyURL means
+	// "no address right now" and must change nothing.
+	ReconcileNotify(ctx context.Context, workspaceID string, spec Spec) error
+}
+
 // PortalDeployer is implemented by backends that can host a lab's student portal
 // inside the lab's cluster. Optional and deliberately separate from Backend, like
 // ImagePrepuller above — callers type-assert for it. This is the admin's side.

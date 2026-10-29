@@ -195,8 +195,19 @@ own after a few minutes. There is nothing to dismiss.
 You will be in your workspace rather than on this page most of the time, so there are two
 more ways a message reaches you:
 
-* **Inside your IDE** — the message appears as a notification in code-server, bottom
-  right, like any other. Nothing to set up.
+* **Inside your IDE** — nothing to set up. Three things happen in code-server:
+    * The message pops up as a notification, bottom right, starting with
+      **Instructor:** so you know who it is from. It has an **Open messages** button.
+    * A **megaphone** stays in the status bar, bottom left, for as long as any message is
+      still up. It shows the most recent message, and turns amber if one of them is a
+      warning. Hover it to read everything that is up.
+    * Click the megaphone (or the **Open messages** button, or run **EasyLab: Show
+      workshop messages** from the command palette) to open a **Workshop messages** panel
+      beside your editor. It lists every message still up, with when it was sent and how
+      long it has left. Opening it does not move your cursor: you keep typing where you were.
+
+    You never have to dismiss anything. Messages clear themselves when their time runs out,
+    and the megaphone disappears with the last one.
 * **As a desktop notification** — press the **bell** in the portal header once and allow
   notifications when your browser asks. From then on, messages pop up over whatever you
   are doing, as long as a portal tab is still open somewhere. The bell turns green once

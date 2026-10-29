@@ -191,7 +191,10 @@ The central instance remains where everything is decided and recorded:
   lab's own portal, which keeps that working while the central instance is down. A lab
   **without** a portal needs the [public address](#the-student-portals-page) set instead,
   since that is then the only EasyLab a workspace in the lab's cluster can reach; with
-  neither, students get their messages on the portal pages only.
+  neither, students get their messages on the portal pages only. A loopback public address
+  (such as `http://localhost:8081`) does not count, since a workspace cannot reach it. The
+  portal must also run the same EasyLab version as the central instance; an older portal
+  image has no notification endpoints and the messages never arrive.
 
 On a combined (`all`) instance, a lab with its own portal is still listed in the central
 student space too, so a student in several labs keeps one place that shows all their

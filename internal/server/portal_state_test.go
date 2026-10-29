@@ -284,3 +284,97 @@ func TestPortalRuntime_LearnsItsOwnURL(t *testing.T) {
 	assert.True(t, strings.HasPrefix(notifyURL, "https://lab.example.com/api/workspace/notifications?lab_id="))
 	assert.NotEmpty(t, token)
 }
+
+// An admin that has no key to sync (an older build, or a lab not yet minted)
+// must not wipe the one the portal verifies workspace tokens with.
+func TestSetPortalJob_NotifySecret(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		existing string
+		incoming string
+		expected string
+	}{
+		{"empty incoming keeps the live key", "live-key", "", "live-key"},
+		{"non-empty incoming replaces it", "live-key", "rotated-key", "rotated-key"},
+		{"same key stays", "live-key", "live-key", "live-key"},
+		{"empty over empty stays empty", "", "", ""},
+		{"first real key is adopted", "", "first-key", "first-key"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			jm := NewJobManager("")
+			jm.setPortalJob(PortalState{LabID: "lab-1", NotifySecret: tt.existing})
+			jm.setPortalJob(PortalState{LabID: "lab-1", NotifySecret: tt.incoming})
+
+			job, ok := jm.GetJob("lab-1")
+			require.True(t, ok)
+			job.mu.RLock()
+			defer job.mu.RUnlock()
+			assert.Equal(t, tt.expected, job.NotifySecret)
+		})
+	}
+}
+
+// A job the portal has never seen takes the state's value as-is.
+func TestSetPortalJob_CreateTakesStateSecret(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		incoming string
+	}{
+		{"with a key", "signing-key"},
+		{"without a key", ""},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			jm := NewJobManager("")
+			jm.setPortalJob(PortalState{LabID: "lab-new", NotifySecret: tt.incoming})
+
+			job, ok := jm.GetJob("lab-new")
+			require.True(t, ok)
+			job.mu.RLock()
+			defer job.mu.RUnlock()
+			assert.Equal(t, tt.incoming, job.NotifySecret)
+		})
+	}
+}
+
+// The admin mints the lab's key before the first state reaches the portal, so
+// the portal never has to invent one of its own.
+func TestPortalConfigFor_MintsNotifySecret(t *testing.T) {
+	t.Parallel()
+
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "workshop"})
+	job, ok := jm.GetJob(id)
+	require.True(t, ok)
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	config, err := h.portalConfigFor(job)
+	require.NoError(t, err)
+
+	job.mu.RLock()
+	minted := job.NotifySecret
+	job.mu.RUnlock()
+	require.NotEmpty(t, minted, "the key must exist after the first sync")
+
+	state, err := decodePortalState(config)
+	require.NoError(t, err)
+	assert.Equal(t, minted, state.NotifySecret)
+
+	// Stable: a second sync carries the same key rather than a fresh one.
+	config, err = h.portalConfigFor(job)
+	require.NoError(t, err)
+	state, err = decodePortalState(config)
+	require.NoError(t, err)
+	assert.Equal(t, minted, state.NotifySecret)
+}

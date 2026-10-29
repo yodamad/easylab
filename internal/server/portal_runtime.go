@@ -186,7 +186,13 @@ func (jm *JobManager) setPortalJob(state PortalState) {
 	job.Config = config
 	job.WorkspaceAccesses = state.WorkspaceAccesses
 	job.Notifications = state.Notifications
-	job.NotifySecret = state.NotifySecret
+	// Only a real key replaces the one in force. An admin running a build that
+	// does not mint one yet would otherwise clear it on every sync, ten seconds
+	// apart, and every token this lab's workspaces carry would stop verifying —
+	// silently, since the IDE swallows a rejected poll.
+	if state.NotifySecret != "" {
+		job.NotifySecret = state.NotifySecret
+	}
 	job.UpdatedAt = time.Now()
 	job.mu.Unlock()
 }

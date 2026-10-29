@@ -601,7 +601,7 @@
                                 <option value="">All students of this lab</option>
                                 {{range .Students}}<option value="{{.}}">{{.}}</option>{{end}}
                             </select>
-                            {{if not .Students}}<small>No student has requested a workspace here yet, so there is nobody to pick.</small>{{end}}
+                            {{if not .Students}}<small>No student has a workspace here right now, so there is nobody to pick. A message to all students still reaches anyone who opens the portal.</small>{{end}}
                         </div>
                         <div class="form-group">
                             <label for="notify-level">Level</label>

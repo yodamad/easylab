@@ -4576,14 +4576,15 @@ func (h *Handler) ServeLabDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := map[string]interface{}{
-		"Lab":                lab,
-		"Portal":             portal,
-		"Workspaces":         workspacesVM,
-		"WorkspacesFailed":   err != nil,
-		"Feedback":           feedback,
-		"Activity":           activity,
-		// Who the Notify tab can address a single message to.
-		"Students":           labStudents(job),
+		"Lab":              lab,
+		"Portal":           portal,
+		"Workspaces":       workspacesVM,
+		"WorkspacesFailed": err != nil,
+		"Feedback":         feedback,
+		"Activity":         activity,
+		// Who the Notify tab can address a single message to: the students with a
+		// workspace here now, not everyone the lab's history remembers.
+		"Students":           notifyRecipients(job, workspacesVM),
 		"CleanupEvents":      cleanupDisplay,
 		"StripCleanupEvents": stripCleanupEvents,
 		"CreatedAtRaw":       createdAtRaw.Format("2006-01-02 15:04"),

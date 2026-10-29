@@ -185,6 +185,23 @@ func (h *Handler) portalConfigFor(job *Job) (map[string][]byte, error) {
 	if h.studentAuthSnapshot != nil {
 		auth = h.studentAuthSnapshot()
 	}
+
+	// Mint the lab's notification signing key here, before any state reaches a
+	// portal, so the key the portal verifies tokens with is the admin's and never
+	// changes under it. Generating it on first use alone is not enough: a portal
+	// that minted its own would lose it to the next state this builds (see
+	// setPortalJob), and with it every token its workspaces already carry — which
+	// an admin sending the lab a message is exactly what triggers.
+	if _, generated, err := ensureNotifySecret(job); err != nil {
+		// Logged, not fatal: the lab keeps working, it just has no in-IDE
+		// notifications until a later sync manages to mint the key.
+		log.Printf("[notify] failed to prepare the notification secret for lab %s: %v", job.ID, err)
+	} else if generated {
+		if err := h.jobManager.SaveJob(job.ID); err != nil {
+			log.Printf("[notify] failed to persist the notification secret for lab %s: %v", job.ID, err)
+		}
+	}
+
 	state := portalStateFromJob(job, auth, h.effectivePublicURL())
 	// The portal's own address, so the workspaces it creates know where to read
 	// their notifications (see workspaceNotifyAccess). Empty until the portal has

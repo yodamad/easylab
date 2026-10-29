@@ -106,9 +106,12 @@ Fill in the form and press **Send message**:
 
 * **Message** — up to 500 characters. Anything longer is cut.
 * **Send to** — **All students of this lab**, or one student picked from the list. The
-  list holds the students who have requested a workspace in this lab; a student who has
-  signed in but not yet asked for one cannot be picked individually yet, though a
-  lab-wide message still reaches them once they have one.
+  list holds the students with a workspace in this lab right now, so it empties as the
+  workshop winds down and workspaces are cleaned up. A paused workspace still counts. A
+  student who has signed in but not yet asked for a workspace cannot be picked
+  individually, though a lab-wide message still reaches them once they have one. If the
+  lab's cluster cannot be reached, the list falls back to everyone who has ever had a
+  workspace here, so that a blip does not leave you unable to address anybody.
 * **Level** — **Info** or **Warning**. A warning is shown in amber, and in the IDE as a
   warning rather than an information message.
 * **Stays up for** — 5, 15 or 30 minutes, or an hour. This is the whole of the message's
@@ -127,13 +130,28 @@ looking at the portal:
   in — so it pops up over the IDE they are working in. This needs the student to have
   pressed the bell in the portal header once and allowed notifications, and a portal tab
   to still be open somewhere. See [the student's side](student.md#messages-from-your-admin).
-* **Inside their IDE**, as a code-server notification. This works without any permission,
-  but only for workspaces **created or restarted after this feature was deployed** — the
-  piece that shows it is installed when the workspace starts. It also needs the lab to
-  have either its own [student portal](student-portal.md) or a
-  [public address](student-portal.md#the-student-portals-page) configured, which is how a
-  workspace in the lab's cluster reaches EasyLab. Without either, the desktop notification
-  and the portal page remain the channels.
+* **Inside their IDE**, without any permission to grant. The message pops up in
+  code-server naming you as the sender, and a megaphone stays in the student's status bar
+  for as long as it is up; from there they can open a **Workshop messages** panel listing
+  everything still live with the time each has left. Messages clear themselves, so there is
+  nothing for a student to dismiss — see [the student's side](student.md#messages-from-your-admin).
+  A workspace created before the lab had a notification address is not left behind:
+  EasyLab points it at the lab's address on its own, on the same background pass that
+  cleans up workspaces (every 5 minutes by default), and that **restarts the student's
+  IDE pod once**. A workspace that already has the right address is left alone, so this
+  happens once per workspace and never again. The student's own request for that
+  workspace does the same thing immediately, if you would rather not wait for the pass.
+
+  It needs an address that a pod in the
+  lab's cluster can actually reach: the lab's own [student portal](student-portal.md), or
+  this instance's [public address](student-portal.md#the-student-portals-page). A loopback
+  address such as `http://localhost:8081` is ignored, because inside a workspace it would
+  point back at the workspace itself — so on a purely local instance, students get the
+  messages on the portal pages only, not inside code-server. If the lab uses its own
+  portal, that portal must run an EasyLab image built from the **same version** as this
+  instance: an older portal image has no notification endpoints, and the messages silently
+  never arrive. Without a usable address, the desktop notification and the portal page
+  remain the channels.
 
 A student with no EasyLab tab open and no running workspace sees the message the next time
 they load a portal page, as long as it has not expired.

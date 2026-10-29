@@ -205,8 +205,77 @@ func TestStudentInLabAndLabStudents(t *testing.T) {
 	assert.False(t, studentInLab(job, "carol@example.com"))
 	assert.False(t, studentInLab(job, ""))
 
-	// De-duplicated and sorted for the admin's recipient picker.
+	// De-duplicated and sorted. This is the whole history, which is why the
+	// recipient picker uses notifyRecipients instead — see below.
 	assert.Equal(t, []string{"alice@example.com", "bob"}, labStudents(job))
+}
+
+func TestNotifyRecipients(t *testing.T) {
+	t.Parallel()
+
+	workspace := func(owner string) WorkspaceDisplay {
+		return WorkspaceDisplay{Name: "ws-" + owner, Owner: owner}
+	}
+
+	tests := []struct {
+		name string
+		// history is who the lab remembers ever having a workspace.
+		history []string
+		// live is the lab's current workspace list; nil means it could not be had.
+		live     *WorkspacesViewModel
+		expected []string
+	}{
+		{
+			name:    "only the students with a workspace right now",
+			history: []string{"alice@example.com", "bob@example.com", "carol@example.com"},
+			live: &WorkspacesViewModel{Workspaces: []WorkspaceDisplay{
+				workspace("carol@example.com"), workspace("alice@example.com"),
+			}},
+			// Sorted, and bob is gone: his workspace was cleaned up.
+			expected: []string{"alice@example.com", "carol@example.com"},
+		},
+		{
+			name:     "nobody left is an empty picker, not the whole history",
+			history:  []string{"alice@example.com", "bob@example.com"},
+			live:     &WorkspacesViewModel{},
+			expected: nil,
+		},
+		{
+			name:    "duplicates collapse",
+			history: []string{"alice@example.com"},
+			live: &WorkspacesViewModel{Workspaces: []WorkspaceDisplay{
+				workspace("alice@example.com"), workspace("alice@example.com"),
+			}},
+			expected: []string{"alice@example.com"},
+		},
+		{
+			name:    "an unattributed workspace is not a recipient",
+			history: []string{"alice@example.com"},
+			live: &WorkspacesViewModel{Workspaces: []WorkspaceDisplay{
+				workspace("alice@example.com"), {Name: "ws-orphan", Owner: "  "},
+			}},
+			expected: []string{"alice@example.com"},
+		},
+		{
+			name:    "no live list falls back to the history",
+			history: []string{"bob@example.com", "alice@example.com"},
+			live:    nil,
+			// Better a name too many than a picker the admin cannot use at all.
+			expected: []string{"alice@example.com", "bob@example.com"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			h, labID := newNotifyTestHandler(t, tt.history...)
+			job, ok := h.jobManager.GetJob(labID)
+			require.True(t, ok)
+
+			assert.Equal(t, tt.expected, notifyRecipients(job, tt.live))
+		})
+	}
 }
 
 func TestNotifyTokenVerification(t *testing.T) {
@@ -614,4 +683,132 @@ func TestStudentNotificationsOnPortal(t *testing.T) {
 	rec = httptest.NewRecorder()
 	h.StudentNotifications(rec, req)
 	assert.Contains(t, rec.Body.String(), "everyone")
+}
+
+// The address handed to a workspace is polled from inside the lab's cluster, so
+// anything that resolves to the pod itself or to the admin's own machine is
+// worse than no address at all.
+func TestReachableFromCluster(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{"public https host", "https://demo1.labdevrel.ovh", true},
+		{"public host with port and path", "https://easylab.example.com:8443/base", true},
+		{"private cluster IP", "http://10.0.0.12:8081", true},
+		{"in-cluster service name", "http://easylab-portal.lab.svc:8081", true},
+		{"bare hostname without scheme is not a host", "easylab.example.com", false},
+		{"localhost", "http://localhost:8081", false},
+		{"localhost mixed case", "http://LocalHost:8081", false},
+		{"subdomain of localhost", "http://easylab.localhost:8081", false},
+		{"ipv4 loopback", "http://127.0.0.1:8081", false},
+		{"ipv4 loopback elsewhere in 127/8", "http://127.1.2.3", false},
+		{"ipv6 loopback", "http://[::1]:8081", false},
+		{"ipv4 unspecified", "http://0.0.0.0:8081", false},
+		{"ipv6 unspecified", "http://[::]:8081", false},
+		{"ipv4 link-local", "http://169.254.10.1:8081", false},
+		{"ipv6 link-local", "http://[fe80::1]:8081", false},
+		{"surrounding whitespace is trimmed", "  https://demo1.labdevrel.ovh  ", true},
+		{"empty", "", false},
+		{"blank", "   ", false},
+		{"malformed", "http://[::1", false},
+		{"scheme without host", "http://", false},
+		{"port only", "http://:8081", false},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.expected, reachableFromCluster(tt.input))
+		})
+	}
+}
+
+// A loopback address is skipped at both levels, falling through to the next
+// candidate and finally to nothing.
+func TestWorkspaceNotifyAccess_SkipsUnreachableAddresses(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		portalURL string
+		publicURL string
+		wantBase  string
+	}{
+		{"loopback public URL only", "", "http://localhost:8081", ""},
+		{"loopback portal and public", "http://127.0.0.1:8081", "http://localhost:8081", ""},
+		{"loopback portal falls back to a good public URL", "http://localhost:9000", "https://easylab.example.com", "https://easylab.example.com"},
+		{"good portal wins over a loopback public URL", "https://lab.example.com", "http://localhost:8081", "https://lab.example.com"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			h, labID := newNotifyTestHandler(t, "alice@example.com")
+			h.publicURL = tt.publicURL
+			if tt.portalURL != "" {
+				h.setPortalURL(labID, tt.portalURL)
+			}
+
+			notifyURL, token := h.workspaceNotifyAccess(labID, "alice@example.com")
+			if tt.wantBase == "" {
+				assert.Empty(t, notifyURL)
+				assert.Empty(t, token)
+				return
+			}
+			assert.True(t, strings.HasPrefix(notifyURL, tt.wantBase+"/api/workspace/notifications?lab_id="), notifyURL)
+			assert.NotEmpty(t, token)
+		})
+	}
+}
+
+func TestNotifyBaseFor(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		portalURL string
+		publicURL string
+		want      string
+	}{
+		{"reachable portal URL wins over public URL", "https://lab.example.com", "https://easylab.example.com", "https://lab.example.com"},
+		{"loopback portal URL falls through to public URL", "http://localhost:9000", "https://easylab.example.com", "https://easylab.example.com"},
+		{"empty portal URL falls through to public URL", "", "https://easylab.example.com", "https://easylab.example.com"},
+		{"both loopback", "http://127.0.0.1:9000", "http://localhost:8081", ""},
+		{"empty portal URL and loopback public URL", "", "http://localhost:8081", ""},
+		{"neither set", "", "", ""},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			h, labID := newNotifyTestHandler(t, "alice@example.com")
+			h.publicURL = tt.publicURL
+			if tt.portalURL != "" {
+				h.setPortalURL(labID, tt.portalURL)
+			}
+
+			assert.Equal(t, tt.want, h.notifyBaseFor(labID))
+
+			job, ok := h.jobManager.GetJob(labID)
+			require.True(t, ok)
+			job.mu.RLock()
+			secret := job.NotifySecret
+			job.mu.RUnlock()
+			assert.Empty(t, secret, "looking up the address must not mint the signing key")
+		})
+	}
+}
+
+func TestNotifyBaseFor_UnknownLab(t *testing.T) {
+	t.Parallel()
+	h, _ := newNotifyTestHandler(t)
+	h.publicURL = ""
+	assert.Empty(t, h.notifyBaseFor("no-such-lab"))
 }
