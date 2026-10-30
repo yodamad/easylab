@@ -551,11 +551,11 @@ func parseNodeSelectorFromForm(r *http.Request, keyField, valueField string) map
 }
 
 // parseWorkspaceTemplatesFromForm extracts workspace template entries from the form.
-// Expects template_N_name, template_N_image, template_N_git_repo, template_N_cpu,
-// template_N_memory, template_N_cpu_limit, template_N_memory_limit,
-// template_N_disk_size, template_N_ephemeral, template_N_storage_class, repeated
-// template_N_env_name / template_N_env_value pairs, and repeated
-// template_N_nodeselector_key / template_N_nodeselector_value pairs.
+// Expects template_N_name, template_N_ide, template_N_image, template_N_git_repo,
+// template_N_cpu, template_N_memory, template_N_cpu_limit, template_N_memory_limit,
+// template_N_disk_size, template_N_ephemeral, template_N_storage_class,
+// template_N_home_dir, repeated template_N_env_name / template_N_env_value pairs,
+// and repeated template_N_nodeselector_key / template_N_nodeselector_value pairs.
 func parseWorkspaceTemplatesFromForm(r *http.Request) []WorkspaceTemplate {
 	var templates []WorkspaceTemplate
 	for i := 0; ; i++ {
@@ -567,6 +567,7 @@ func parseWorkspaceTemplatesFromForm(r *http.Request) []WorkspaceTemplate {
 			Name:          name,
 			Description:   strings.TrimSpace(getFormValue(r, fmt.Sprintf("template_%d_description", i))),
 			IDE:           getFormValue(r, fmt.Sprintf("template_%d_ide", i)),
+			HomeDir:       strings.TrimSpace(getFormValue(r, fmt.Sprintf("template_%d_home_dir", i))),
 			Image:         getFormValue(r, fmt.Sprintf("template_%d_image", i)),
 			GitRepo:       getFormValue(r, fmt.Sprintf("template_%d_git_repo", i)),
 			GitBranch:     getFormValue(r, fmt.Sprintf("template_%d_git_branch", i)),
@@ -1153,6 +1154,8 @@ func (h *Handler) ServeAdminUI(w http.ResponseWriter, r *http.Request) {
 		// A new lab gets its own student portal unless this build has no image
 		// to run one from (see portalImage).
 		"PortalAvailable": h.effectivePortalImage() != "",
+		// Ready-made starting points offered above the workspace template form.
+		"WorkspacePresets": workspacePresets(),
 	}
 	// Saved DNS profiles the wizard offers in place of typing DNS credentials.
 	data["DNSProfiles"], data["DNSProfilesLocked"] = h.wizardDNSProfiles()
@@ -4670,7 +4673,10 @@ func (h *Handler) ServeLabDetail(w http.ResponseWriter, r *http.Request) {
 		"StripCleanupEvents": stripCleanupEvents,
 		"CreatedAtRaw":       createdAtRaw.Format("2006-01-02 15:04"),
 		"UpdatedAtRaw":       updatedAtRaw.Format("2006-01-02 15:04"),
-		"ShowProgress":       job.Status == JobStatusPending || job.Status == JobStatusRunning || job.Status == JobStatusFailed || job.Status == JobStatusDryRunCompleted,
+		// The Add Template drawer renders the same editor as the wizard, presets
+		// included.
+		"WorkspacePresets": workspacePresets(),
+		"ShowProgress":     job.Status == JobStatusPending || job.Status == JobStatusRunning || job.Status == JobStatusFailed || job.Status == JobStatusDryRunCompleted,
 	}
 
 	h.serveTemplate(w, "lab-detail.html", data)

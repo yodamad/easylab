@@ -44,8 +44,11 @@ test.describe('Lab wizard — Create New Infrastructure path', () => {
   }
 
   // Per-template node selectors live inside each row's collapsed "Advanced options".
+  // The row's knobs live in several grouped disclosures (size, setup, image,
+  // extras, placement) rather than one "Advanced options" list, so open them all.
   async function openTemplateAdvanced(page: any) {
-    await page.locator('.template-row .template-advanced > summary').first().click();
+    await page.locator('#workspace-templates-container .template-row details.ws-group')
+      .evaluateAll((groups: HTMLDetailsElement[]) => groups.forEach(g => { g.open = true; }));
   }
 
   test('hides every reuse toggle and node selector on Step 4', async ({ page }) => {
@@ -85,8 +88,8 @@ test.describe('Lab wizard — Create New Infrastructure path', () => {
     await chooseModeThenGoTo(page, 'new', 6);
     await openTemplateAdvanced(page);
     await expect(page.locator('.template-nodeselector-section').first()).toBeHidden();
-    // Its neighbours inside the same <details> are still there, so the section is
-    // hidden by the new-infra rule rather than by a collapsed parent.
+    // The other groups are open, so Placement is hidden by the new-infra rule
+    // rather than by a collapsed disclosure.
     await expect(page.locator('.template-row .btn-add-mount').first()).toBeVisible();
   });
 

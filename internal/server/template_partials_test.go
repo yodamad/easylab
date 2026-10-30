@@ -65,6 +65,8 @@ func TestTemplateEditorIsWiredIntoBothPages(t *testing.T) {
 var formBuilderFields = []string{
 	"template_0_name",
 	"template_0_description",
+	"template_0_ide",
+	"template_0_home_dir",
 	"template_0_git_repo",
 	"template_0_git_branch",
 	"template_0_git_folder",
@@ -140,8 +142,36 @@ func TestTemplateEditorFieldsOnBothSurfaces(t *testing.T) {
 			}
 			assert.Contains(t, s.html, `name="templates_mode"`)
 			assert.Contains(t, s.html, `name="templates_yaml"`)
+			// The starting points and the live summary are part of the editor, so
+			// the drawer gets them too. The cards themselves come from the page's
+			// data, which these renders do not supply; the container is what both
+			// surfaces must carry.
+			assert.Contains(t, s.html, `id="templates-presets"`, "starting points block missing")
+			assert.Contains(t, s.html, `ws-summary-lines`, `"What students will get" summary missing`)
 		})
 	}
+}
+
+// The starting points are rendered from the page's data, so this is what proves a
+// card actually reaches the markup carrying the template JS reads back from it.
+func TestTemplateEditorPresetsRender(t *testing.T) {
+	t.Chdir("../..")
+
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	tmpl, err := h.getTemplate("admin.html")
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	require.NoError(t, tmpl.ExecuteTemplate(&buf, "template-editor-presets", workspacePresets()))
+	html := buf.String()
+
+	for _, preset := range workspacePresets() {
+		assert.Contains(t, html, `data-preset-id="`+preset.ID+`"`, "preset %q missing a card", preset.ID)
+		assert.Contains(t, html, preset.Title)
+	}
+	// The JSON is attribute-escaped by html/template, so the raw quotes are gone —
+	// the template name is what survives recognisably.
+	assert.Contains(t, html, "workshop")
 }
 
 // The two surfaces are the same editor, but not the same page: the wizard defines

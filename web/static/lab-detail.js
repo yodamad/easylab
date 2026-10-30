@@ -589,6 +589,11 @@ function utClearFormContainers() {
         var c = document.querySelector('#templates-form-mode ' + sel);
         if (c) c.innerHTML = '';
     });
+    // form.reset() clears the fields a starting point filled in, so the card that
+    // filled them must stop looking chosen too.
+    document.querySelectorAll('#templates-presets .ws-preset').forEach(function (card) {
+        card.classList.remove('selected');
+    });
 }
 
 function utResetSubmitBtn() {

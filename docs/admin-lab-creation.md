@@ -129,8 +129,8 @@ server on one and student workspaces on another:
    [image pre-pull](admin-lab-management.md#image-pre-pull) off that pool, so
    workspace images are not cached on nodes that never run a workspace.
 3. **Pin student workspaces** by setting the **Node Selector** field on each
-   workspace template (under **Advanced options**, see above) to match the
-   workspace pool's label, e.g. key `pool`, value `workspaces`.
+   workspace template (under **Placement**, see above) to match the workspace
+   pool's label, e.g. key `pool`, value `workspaces`.
 
 Workspace pods only support `nodeSelector` (label matching), not tolerations, so
 the workspace pool should be labeled rather than tainted.
@@ -202,52 +202,113 @@ for what a bake does and requires.
   in the [Add Template drawer](admin-lab-management.md#add-a-template-to-an-existing-lab).
 * Plain (non-devcontainer) templates are unaffected.
 
-Then, on the **Templates** step, you define **one or more** workspace templates
-for the lab. Each template is a different workspace flavor that students can
-choose when requesting a workspace.
+#### The Templates step
+
+On the **Templates** step you define **one or more** workspace templates
+for the lab. A template is one kind of workspace: the editor a student opens in
+their browser, optionally with your exercises repository already cloned, and how
+big it is. One template is enough for most workshops.
+
+Every field on this step is optional. A template you leave alone gives students
+**code-server** (VS Code in the browser) on `codercom/code-server:latest`, with
+500m CPU, 1Gi of memory and a 5Gi volume that keeps their work across restarts.
+The **What students will get** card at the top of each template says so as you
+type, defaults included, so you can see what you are shipping without reading
+back through the fields.
 
 ![Workspace template selection](screens/templates.png)
 
-At the top of the step you choose **how** to define the workspace:
+##### Start from
 
-* **Build with a form** — fill in the fields for each template (the default).
-* **From a devcontainer** — import a workshop repository's `.devcontainer`; see
-  [Workshops with a devcontainer](#workshops-with-a-devcontainer).
-* **Paste YAML** — edit the templates as YAML directly; see
-  [Editing templates as YAML](#editing-templates-as-yaml).
+The row of cards above the template fills it in with a setup that already works,
+ready to edit. Each one matches a recipe in
+[Workspace template examples](templates.md):
 
-With **Build with a form**, each template shows two **essentials** up front and
-tucks the rest behind **Advanced options**, so simple labs stay simple. Use **Add
-Template** to define additional templates.
+| Card | What it gives you |
+|---|---|
+| **Blank workspace** | VS Code in the browser, nothing cloned. ([Minimal](templates.md#minimal)) |
+| **Git workshop** | Clones your exercises repo and opens a subfolder. ([A git-backed workshop](templates.md#a-git-backed-workshop)) |
+| **Workshop + database** | Adds a PostgreSQL sidecar each student gets their own copy of. ([A database sidecar](templates.md#a-database-sidecar)) |
+| **Docker in a workspace** | A Docker-in-Docker sidecar, for a lab about building images. ([Docker inside a workspace](templates.md#docker-inside-a-workspace)) |
+| **AI agent lab** | OpenChamber instead of VS Code. You supply the image. ([AI labs with OpenChamber](templates.md#ai-labs-with-openchamber)) |
 
-The **essentials**:
+Picking a card replaces the template below it and opens the groups it wrote into,
+so you can see what it did. It asks first if you have already filled anything in.
 
-* **Template name** — Name shown in the student template selector.
-* **Description** (optional) — a free-text summary of what the template provides (e.g. *Go 1.26 + Postgres*). Shown next to the template name in the lab's **Templates** panel.
-* **Git Repository** (optional) — a repo cloned into the workspace on first start, into an empty workspace only. The **branch** field clones a specific branch; **subfolder** opens a subdirectory of the repo. Tick **Shallow clone** to clone only the latest commit. The workspace starts faster on a large repo, but the student gets no git history (see [Faster first start](templates.md#faster-first-start)).
+##### The three visible decisions
 
-Under **Advanced options** (all optional):
+These are the ones that change what a student sees, so they are always on screen:
 
-* **Git credential** — the credential (from the **Credentials** section at the top of the step) that unlocks a **private** Git Repository. Define a single git credential and it is wired into every template with a private repo automatically; add more than one and pick the right one per template here.
-* **Image** — a container image override. Defaults to `codercom/code-server:latest`.
+1. **Name it** — the name and description students see when they pick a
+   workspace (e.g. *Go 1.26 + Postgres*). The name must be unique within the lab.
+2. **Editor** — **VS Code in the browser** (code-server, the default) or **An AI
+   coding agent** ([OpenChamber](templates.md#ai-labs-with-openchamber), for a lab
+   about working with an agent). OpenChamber publishes no image, so picking it
+   makes **Image** required and withdraws the fields it cannot honour — VS Code
+   extensions and the repo subfolder — rather than letting you set something that
+   would be rejected on save.
+3. **Exercises repository** (optional) — a repo cloned into the workspace on first
+   start, into an empty workspace only. **branch** clones a specific branch;
+   **subfolder** opens a subdirectory. Tick **Shallow clone** to clone only the
+   latest commit: faster on a large repo, but the student gets no git history
+   (see [Faster first start](templates.md#faster-first-start)).
+
+##### The rest, grouped by what it is for
+
+Everything else sits in five collapsed groups, each naming what is inside. All of
+it is optional.
+
+**Size & storage**
+
 * **CPU / Memory / Disk Size** — resource requests for the workspace pod (e.g. `500m`, `1Gi`, `5Gi`). Disk Size sizes the workspace's persistent volume and defaults to 5Gi.
-* **Storage Class** (optional) — the StorageClass backing that volume. Leave it empty to use the cluster's default, which is correct on OVHcloud and Azure; set it on a bring-your-own cluster whose default provisioner is node-local. See [Persistence](templates.md#persistence).
+* **CPU Limit / Memory Limit** — override the pod's resource limit independently of the request above. Left blank, the limit matches the request. See [Workshops with a devcontainer](#workshops-with-a-devcontainer) for why a devcontainer template in particular benefits from setting these explicitly.
+* **Storage Class** — the StorageClass backing that volume. Leave it empty to use the cluster's default, which is correct on OVHcloud and Azure; set it on a bring-your-own cluster whose default provisioner is node-local. See [Persistence](templates.md#persistence).
 * **Ephemeral** (checkbox) — drop the persistent volume entirely. Student work then lives on the node and is **lost whenever the pod is rescheduled**, so reserve it for throwaway labs and very large Azure cohorts (see [Persistence](templates.md#persistence)). It cannot be combined with Disk Size or Storage Class.
 
 ![Workspace storage options](screens/template-storage-options.png){width=700}
 
-* **CPU Limit / Memory Limit** (optional) — override the pod's resource limit independently of the request above. Left blank, the limit matches the request, as it always has. See [Workshops with a devcontainer](#workshops-with-a-devcontainer) for why a devcontainer template in particular benefits from setting these explicitly.
-* **Startup Script** — shell commands run (best-effort) on start, *before* the IDE opens: install tools, configure the shell, run a bootstrap. Failures are shown in `kubectl logs` but never block the workspace from opening.
-* **Dotfiles Repository** — cloned to `~/.dotfiles`; its `install.sh` / `setup.sh` / `bootstrap.sh` is run if present.
-* **Extensions** — comma-separated VS Code extension IDs installed on start.
-* **Environment Variables** — passed to the workspace container.
-* **Sidecars** — extra containers in the workspace pod (name / image / ports / env), reachable from the IDE at `localhost:<port>` — e.g. a `postgres:16` database. Each sidecar can also be marked **privileged** and given extra **capabilities** (e.g. `SYS_ADMIN`) — needed to run **docker-in-docker** (see below).
-* **Mounts** — mount an existing **ConfigMap** or **Secret** into the workspace container. The referenced object **must already exist** in the workspace namespace, or the pod won't start.
-* **Node Selector** (optional) — pin this template's workspace pods to nodes carrying specific labels, e.g. a dedicated `pool: workspaces` node pool. Useful when you want student workspaces scheduled onto different nodes than the EasyLab server itself — see [Splitting EasyLab and workspaces across node pools](#splitting-easylab-and-workspaces-across-node-pools). The field appears only on [Use Existing Cluster](#use-existing-cluster) labs: **Create New Infrastructure** provisions a single node pool, so there is no second pool to pin anything to.
+**Setup on start**
 
-If no template is defined, a `default` code-server workspace is used.
-Students can request **one workspace per template** within a lab, so multiple
-templates let them get multiple workspaces in the same environment.
+* **Startup Script** — shell commands run (best-effort) on start, *before* the IDE opens: install tools, configure the shell, run a bootstrap. Failures are shown in `kubectl logs` but never block the workspace from opening. Every student pays this cost on every start, so bake anything slow into an image instead.
+* **Dotfiles Repository** — cloned to `~/.dotfiles`; its `install.sh` / `setup.sh` / `bootstrap.sh` is run if present.
+* **Extensions** — comma-separated VS Code extension IDs installed on start. VS Code editors only.
+* **Environment Variables** — passed to the workspace container.
+
+**Image & private access**
+
+* **Image** — a container image override. Defaults to `codercom/code-server:latest`; **required** when the editor is an AI agent, which has no default to fall back to.
+* **Home Directory** — AI agent workspaces only: the home directory inside your own image, where the workspace volume is mounted. Upstream's OpenChamber image uses `/home/openchamber`; set this only if yours is built on another base. See [If your image is not built from upstream's Dockerfile](templates.md#if-your-image-is-not-built-from-upstreams-dockerfile).
+* **Git credential** — the credential (from **Private repositories & registries**, below the templates) that unlocks a **private** Exercises repository. Define a single git credential and it is wired into every template with a private repo automatically; add more than one and pick the right one per template here.
+
+**Extras**
+
+* **Sidecars** — extra containers in the workspace pod (name / image / ports / env), reachable from the IDE at `localhost:<port>` — e.g. a `postgres:16` database. Each student gets their own. A sidecar can also be marked **privileged** and given extra **capabilities** (e.g. `SYS_ADMIN`) — needed to run **docker-in-docker** (see below).
+* **Mounts** — mount an existing **ConfigMap** or **Secret** into the workspace container. The referenced object **must already exist** in the workspace namespace, or the pod won't start.
+
+**Placement**
+
+* **Node Selector** — pin this template's workspace pods to nodes carrying specific labels, e.g. a dedicated `pool: workspaces` node pool. Useful when you want student workspaces scheduled onto different nodes than the EasyLab server itself — see [Splitting EasyLab and workspaces across node pools](#splitting-easylab-and-workspaces-across-node-pools). The group appears only on [Use Existing Cluster](#use-existing-cluster) labs: **Create New Infrastructure** provisions a single node pool, so there is no second pool to pin anything to.
+
+##### More than one template, and the other ways in
+
+Use **Add another template** to define a second one: students then choose when
+they open the lab, and can request **one workspace per template**, so several
+templates let them get several workspaces in the same environment. If no template
+is defined at all, a `default` code-server workspace is used.
+
+The form is checked when the lab is created, with the same rules the YAML editor
+applies: duplicate template names, an agent template with no image, **Ephemeral**
+combined with a Disk Size, or a Git Repository that is not a URL are refused with
+an explanation rather than producing a lab that breaks when the first student
+asks for a workspace.
+
+Below the templates, **Already have the workspace defined elsewhere?** offers two
+ways past the form:
+
+* **From a devcontainer** — import a workshop repository's `.devcontainer`; see
+  [Workshops with a devcontainer](#workshops-with-a-devcontainer).
+* **Paste YAML** — edit the templates as YAML directly; see
+  [Editing templates as YAML](#editing-templates-as-yaml).
 
 A template can also build its workspace from a workshop repository's
 `devcontainer.json` instead of an **Image** — see
@@ -255,14 +316,13 @@ A template can also build its workspace from a workshop repository's
 
 #### Editing templates as YAML
 
-At the top of the **Templates** step, pick **Paste YAML** to edit the lab's
+At the bottom of the **Templates** step, pick **Paste YAML** to edit the lab's
 workspace templates directly instead of filling in the form — useful for labs
 with several templates, for reusing a previous workshop, or for keeping the
-configuration in a git repository. It is also the only place to set `ide:` (and
-`home_dir:`, which goes with it), so an
-[OpenChamber template](templates.md#ai-labs-with-openchamber) is written here
-rather than in the form. A template saved from the form carries no `ide:` at all,
-so editing an OpenChamber template there turns it back into a code-server one.
+configuration in a git repository. It is also the only place to reach the keys the
+form does not expose: `vscode_settings`, `image_pull_secrets` and the
+`devcontainer` block. A template saved from the form carries none of those, so
+editing a template that uses one here and saving it from the form drops it.
 
 ```yaml
 workspace_templates:
@@ -356,8 +416,8 @@ Choose **From a devcontainer** at the top of the **Templates** step:
    envbuilder pulls the base image (and pushes the cache) with it, inside each
    student's pod and in a bake; without it the pull falls back to anonymous and
    the build fails.
-5. If the workshop repository is **private**, add a git token in the **Credentials**
-   section and choose it under **Git credential** — with a single git credential it is
+5. If the workshop repository is **private**, add a git token in **Private
+   repositories & registries** and choose it under **Git credential** — with a single git credential it is
    applied automatically. The same credential reads the devcontainer during import and,
    baked into the template, clones the repo in each student's workspace.
 6. Optionally open **Advanced options** to override **CPU / CPU Limit / Memory /
@@ -791,9 +851,10 @@ records written by cert-manager, independently of what creates the A records.
 
 ### Environment Variables
 
-Each workspace template can define environment variables passed to the workspace container.
-
-**Manual entry** — Click **+ Add Variable** on a template row to add an environment variable name and value.
+Each workspace template can define environment variables passed to the workspace
+container. They live under **Setup on start** on the
+[Templates step](#the-templates-step): click **+ Add Variable** and fill in a name
+and a value.
 
 ![Environment variables](screens/variables.png)
 
