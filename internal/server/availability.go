@@ -86,6 +86,13 @@ func (h *Handler) SetLabAvailability(w http.ResponseWriter, r *http.Request) {
 	updated := false
 	h.updateJobConfig(jobID, func(config *LabConfig) {
 		config.Disabled = disabled
+		// Reopening a lab whose scheduled close has already passed drops that
+		// schedule: it is spent, and leaving it set would close the lab again on
+		// the next cleanup tick. A close still in the future is left alone —
+		// reopening the lab now says nothing about tonight.
+		if !disabled && config.isCloseDue(time.Now()) {
+			config.LabCloseDate = nil
+		}
 		updated = true
 	})
 	if !updated {

@@ -210,6 +210,49 @@ func TestSetLabAvailability(t *testing.T) {
 	}
 }
 
+// Reopening drops a close date that has already passed (it is spent, and would
+// close the lab again on the next tick) but keeps one still in the future.
+func TestSetLabAvailability_ReopenAndCloseDate(t *testing.T) {
+	t.Parallel()
+
+	past := time.Now().Add(-time.Hour)
+	future := time.Now().Add(24 * time.Hour)
+
+	tests := []struct {
+		name         string
+		disabled     string
+		closeDate    *time.Time
+		wantDisabled bool
+		wantDate     bool
+	}{
+		{name: "reopen clears a passed date", disabled: "false", closeDate: &past},
+		{name: "reopen keeps a future date", disabled: "false", closeDate: &future, wantDate: true},
+		{name: "reopen without a date", disabled: "false"},
+		{name: "close keeps a future date", disabled: "true", closeDate: &future, wantDisabled: true, wantDate: true},
+		{name: "close keeps a passed date", disabled: "true", closeDate: &past, wantDisabled: true, wantDate: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			h, jm := newUploadTestHandler(t)
+			labID := completedLab(t, jm, WorkspaceTemplate{Name: "go"})
+			h.updateJobConfig(labID, func(c *LabConfig) {
+				c.Disabled = true
+				c.LabCloseDate = tt.closeDate
+			})
+
+			rec := postAvailability(h.SetLabAvailability, http.MethodPost, "/api/labs/"+labID+"/availability", "disabled="+tt.disabled)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+			job, _ := jm.GetJob(labID)
+			job.mu.RLock()
+			defer job.mu.RUnlock()
+			assert.Equal(t, tt.wantDisabled, job.Config.Disabled)
+			assert.Equal(t, tt.wantDate, job.Config.LabCloseDate != nil)
+		})
+	}
+}
+
 func TestSetAvailability_RecordsAudit(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -461,6 +504,62 @@ func TestListLabs_ClosedLab(t *testing.T) {
 			}
 			assert.NotContains(t, rec.Body.String(), "fake-kubeconfig")
 			assert.Equal(t, tt.wantListCalls, tt.backend.ListCalls)
+		})
+	}
+}
+
+// A close date that has passed turns students away at once, before the cleanup
+// pass has flipped the Disabled flag.
+func TestListLabs_PassedCloseDate(t *testing.T) {
+	t.Parallel()
+
+	past := time.Now().Add(-time.Minute)
+	future := time.Now().Add(time.Hour)
+
+	tests := []struct {
+		name       string
+		closeDate  *time.Time
+		backend    *fakeBackend
+		wantListed bool
+	}{
+		{name: "future date keeps the lab offered", closeDate: &future, backend: &fakeBackend{}, wantListed: true},
+		{
+			name:      "passed date hides the lab from a student without a workspace",
+			closeDate: &past,
+			backend:   &fakeBackend{workspaces: []workspace.Workspace{{ID: "ws-bob", Owner: "bob", Template: "go"}}},
+		},
+		{
+			name:       "passed date keeps the lab for a student with a workspace",
+			closeDate:  &past,
+			backend:    &fakeBackend{workspaces: []workspace.Workspace{{ID: "ws-alice", Owner: "alice", Template: "go"}}},
+			wantListed: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			h, jm := newUploadTestHandler(t)
+			useFakeBackend(h, tt.backend)
+			labID := closableLab(t, jm, WorkspaceTemplate{Name: "go"})
+			h.updateJobConfig(labID, func(c *LabConfig) { c.LabCloseDate = tt.closeDate })
+
+			req := asStudent(httptest.NewRequest(http.MethodGet, "/api/student/labs", nil), "alice@example.com")
+			rec := httptest.NewRecorder()
+			h.ListLabs(rec, req)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+			var labs []struct {
+				ID string `json:"id"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &labs))
+			if tt.wantListed {
+				require.Len(t, labs, 1)
+				assert.Equal(t, labID, labs[0].ID)
+			} else {
+				assert.Empty(t, labs)
+			}
+			disabled, _ := labAvailability(t, jm, labID)
+			assert.False(t, disabled, "the flag is only set by the cleanup pass")
 		})
 	}
 }

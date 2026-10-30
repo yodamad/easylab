@@ -108,6 +108,7 @@ func (h *Handler) StartWorkspaceCleanup(ctx context.Context) {
 			return
 		case <-ticker.C:
 			h.cleanupExpiredWorkspaces()
+			h.closeScheduledLabs()
 			h.cleanupExpiredLabs()
 			h.reconcilePrepulls()
 			h.reconcilePortals()
@@ -307,6 +308,57 @@ func (h *Handler) cleanupExpiredWorkspaces() {
 				log.Printf("[cleanup] failed to persist cleanup event for job %s: %v", job.ID, err)
 			}
 		}
+	}
+}
+
+// closeScheduledLabs closes every completed lab whose scheduled close date
+// (LabConfig.LabCloseDate) has passed, exactly as an admin pressing "Close lab
+// to new students" would: nothing is deleted, running workspaces keep running
+// and their owners keep reaching them.
+//
+// Students are turned away the moment the date passes, without waiting for this
+// pass — every gate reads LabConfig.IsClosed. What this adds is the lasting
+// record of it: the Closed badge in the admin UI, an audit entry, and the lab's
+// own portal told about it. It also clears the schedule it just honored, so an
+// admin who reopens the lab afterwards does not find it closed again on the
+// next tick.
+func (h *Handler) closeScheduledLabs() {
+	// Not on an in-lab portal: its jobs are a read-only mirror the admin re-syncs
+	// every few seconds, so closing one there is undone immediately and the audit
+	// entry it reports back is a duplicate of the admin's own. The portal still
+	// turns students away on time — that is IsClosed on the synced close date.
+	if h.portal != nil {
+		return
+	}
+
+	now := time.Now()
+	for _, job := range h.jobManager.GetAllJobs() {
+		// Status under the lock, unlike the passes above: an admin closing or
+		// reopening this lab writes the same config this reads, and the race
+		// detector gates every change here (see CLAUDE.md).
+		job.mu.RLock()
+		due := job.Status == JobStatusCompleted && job.Config != nil &&
+			!job.Config.Disabled && job.Config.isCloseDue(now)
+		stackName := ""
+		closeDate := ""
+		if due {
+			stackName = job.Config.StackName
+			closeDate = job.Config.LabCloseDate.Format("2006-01-02 15:04")
+		}
+		job.mu.RUnlock()
+		if !due {
+			continue
+		}
+
+		log.Printf("[cleanup] closing lab %s to new students: scheduled close %s reached", job.ID, closeDate)
+		h.updateJobConfig(job.ID, func(config *LabConfig) {
+			config.Disabled = true
+			config.LabCloseDate = nil
+		})
+		if err := h.jobManager.SaveJob(job.ID); err != nil {
+			log.Printf("[cleanup] failed to persist scheduled close for lab %s: %v", job.ID, err)
+		}
+		h.recordAudit("system", "system", "lab.disable", job.ID, fmt.Sprintf("%s: scheduled close %s reached", stackName, closeDate))
 	}
 }
 

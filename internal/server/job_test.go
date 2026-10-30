@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestJobStatus_Constants(t *testing.T) {
@@ -37,6 +39,59 @@ func TestJobStatus_Constants(t *testing.T) {
 			if statusStr != wantStr {
 				t.Errorf("JobStatus = %s, want %s", statusStr, wantStr)
 			}
+		})
+	}
+}
+
+func TestLabConfig_IsClosed(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	future := now.Add(24 * time.Hour)
+	justPassed := now.Add(-time.Second)
+
+	tests := []struct {
+		name   string
+		config *LabConfig
+		want   bool
+	}{
+		{name: "nil config", config: nil, want: false},
+		{name: "no close date", config: &LabConfig{}, want: false},
+		{name: "future close date", config: &LabConfig{LabCloseDate: &future}, want: false},
+		{name: "close date just passed", config: &LabConfig{LabCloseDate: &justPassed}, want: true},
+		{name: "disabled alone", config: &LabConfig{Disabled: true}, want: true},
+		{name: "disabled with a future date", config: &LabConfig{Disabled: true, LabCloseDate: &future}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, tt.config.IsClosed())
+		})
+	}
+}
+
+func TestLabConfig_IsCloseDue(t *testing.T) {
+	t.Parallel()
+
+	at := time.Date(2030, 6, 1, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name   string
+		config *LabConfig
+		now    time.Time
+		want   bool
+	}{
+		{name: "nil config", config: nil, now: at, want: false},
+		{name: "no close date", config: &LabConfig{}, now: at, want: false},
+		{name: "before the date", config: &LabConfig{LabCloseDate: &at}, now: at.Add(-time.Nanosecond), want: false},
+		{name: "exactly at the date", config: &LabConfig{LabCloseDate: &at}, now: at, want: true},
+		{name: "after the date", config: &LabConfig{LabCloseDate: &at}, now: at.Add(time.Hour), want: true},
+		{name: "disabled flag alone is not a due schedule", config: &LabConfig{Disabled: true}, now: at, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, tt.config.isCloseDue(tt.now))
 		})
 	}
 }

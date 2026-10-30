@@ -180,6 +180,110 @@ func TestUpdateLabLifecycle_DeletionDateInPast(t *testing.T) {
 	job.mu.RUnlock()
 }
 
+func TestUpdateLabLifecycle_CloseDate(t *testing.T) {
+	t.Parallel()
+
+	futureDateStr := time.Now().AddDate(0, 0, 3).Format("2006-01-02")
+	existing := time.Now().Add(72 * time.Hour)
+
+	tests := []struct {
+		name       string
+		existing   *time.Time
+		form       url.Values
+		wantStatus int
+		wantErr    string
+		wantDate   string // "2006-01-02 15:04"; "" means no close date afterwards
+		wantKept   bool   // the pre-existing schedule must survive untouched
+	}{
+		{
+			name:       "future date and time is stored",
+			form:       url.Values{"lab_close_date": {futureDateStr}, "lab_close_time": {"18:15"}},
+			wantStatus: http.StatusOK,
+			wantDate:   futureDateStr + " 18:15",
+		},
+		{
+			name:       "time defaults to 23:59",
+			form:       url.Values{"lab_close_date": {futureDateStr}},
+			wantStatus: http.StatusOK,
+			wantDate:   futureDateStr + " 23:59",
+		},
+		{
+			name:       "blank date clears an existing schedule",
+			existing:   &existing,
+			form:       url.Values{"lab_close_date": {""}},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "past date is refused and changes nothing",
+			existing:   &existing,
+			form:       url.Values{"lab_close_date": {"2000-01-01"}, "workspace_lifetime_hours": {"7"}},
+			wantStatus: http.StatusBadRequest,
+			wantErr:    "the close date must be in the future",
+			wantKept:   true,
+		},
+		{
+			name:       "invalid date is refused",
+			existing:   &existing,
+			form:       url.Values{"lab_close_date": {"soon"}},
+			wantStatus: http.StatusBadRequest,
+			wantErr:    "not a valid date",
+			wantKept:   true,
+		},
+		{
+			name:       "invalid time is refused",
+			existing:   &existing,
+			form:       url.Values{"lab_close_date": {futureDateStr}, "lab_close_time": {"noon"}},
+			wantStatus: http.StatusBadRequest,
+			wantErr:    "not a valid time",
+			wantKept:   true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			h, jm := newUploadTestHandler(t)
+			as, err := NewAuditStore(t.TempDir())
+			require.NoError(t, err)
+			h.SetAuditStore(as)
+			id := completedLab(t, jm)
+			h.updateJobConfig(id, func(c *LabConfig) { c.LabCloseDate = tt.existing })
+
+			rec := postLifecycle(h, id, tt.form.Encode())
+			require.Equal(t, tt.wantStatus, rec.Code, "body: %s", rec.Body.String())
+			if tt.wantErr != "" {
+				assert.Contains(t, rec.Body.String(), tt.wantErr)
+			}
+
+			job, _ := jm.GetJob(id)
+			job.mu.RLock()
+			got := job.Config.LabCloseDate
+			hours := job.Config.WorkspaceLifetimeHours
+			job.mu.RUnlock()
+
+			switch {
+			case tt.wantKept:
+				require.NotNil(t, got)
+				assert.True(t, got.Equal(*tt.existing), "a rejected update leaves the schedule alone")
+				assert.Zero(t, hours, "a rejected update changes nothing else either")
+			case tt.wantDate == "":
+				assert.Nil(t, got)
+			default:
+				require.NotNil(t, got)
+				assert.Equal(t, tt.wantDate, got.Format("2006-01-02 15:04"))
+			}
+
+			if tt.wantStatus == http.StatusOK {
+				entries := waitForAuditEntry(t, as, "lab.lifecycle_update")
+				want := "lab_close_date=none"
+				if tt.wantDate != "" {
+					want = "lab_close_date=" + tt.wantDate
+				}
+				assert.Contains(t, entries[0].Detail, want)
+			}
+		})
+	}
+}
+
 func TestUpdateLabLifecycle_NotCompleted(t *testing.T) {
 	t.Parallel()
 

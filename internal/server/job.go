@@ -365,6 +365,12 @@ type LabConfig struct {
 	WorkspaceTemplates     []WorkspaceTemplate `json:"workspace_templates,omitempty"`
 	WorkspaceLifetimeHours int                 `json:"workspace_lifetime_hours,omitempty"`
 	LabDeletionDate        *time.Time          `json:"lab_deletion_date,omitempty"`
+	// LabCloseDate closes the lab to new students at this date and time — the
+	// scheduled form of Disabled below, and deliberately not a deletion: nothing
+	// is destroyed, existing workspaces keep running and their owners keep access.
+	// The cleanup pass that reaches it (closeScheduledLabs) sets Disabled and
+	// clears this, so a spent schedule cannot undo a later reopen.
+	LabCloseDate *time.Time `json:"lab_close_date,omitempty"`
 	// WorkspaceIdleTimeoutMinutes pauses a workspace nobody has used for this long
 	// (its files are kept and its owner resumes it from the student pages). 0
 	// disables it; see minWorkspaceIdleTimeoutMinutes for the lower bound.
@@ -518,6 +524,29 @@ func (c *LabConfig) IsTemplateDisabled(name string) bool {
 		return false
 	}
 	return c.DisabledTemplates[name]
+}
+
+// IsClosed reports whether the lab is closed to new students, either because an
+// admin closed it (Disabled) or because its scheduled close date has passed
+// (LabCloseDate). Everything that turns a student away reads this rather than
+// Disabled alone: the pass that materializes a scheduled close only runs every
+// few minutes (closeScheduledLabs), and no student should be handed a workspace
+// in that gap.
+func (c *LabConfig) IsClosed() bool {
+	if c == nil {
+		return false
+	}
+	return c.Disabled || c.isCloseDue(time.Now())
+}
+
+// isCloseDue reports whether the lab has a scheduled close date that now has
+// reached. It ignores Disabled: callers that need "closed either way" use
+// IsClosed.
+func (c *LabConfig) isCloseDue(now time.Time) bool {
+	if c == nil || c.LabCloseDate == nil {
+		return false
+	}
+	return !now.Before(*c.LabCloseDate)
 }
 
 // JobManager manages Pulumi execution jobs

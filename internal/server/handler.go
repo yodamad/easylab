@@ -845,6 +845,13 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 		}
 	}
 
+	// A close date that is malformed or already past is dropped rather than
+	// rejected, the same way the deletion date above ignores a date it cannot
+	// parse: a lab is created to be used, so it is never born closed.
+	if closeDate, err := parseLabCloseDate(r); err == nil {
+		config.LabCloseDate = closeDate
+	}
+
 	if !useExistingCluster {
 		// Parse integer fields only for new infrastructure
 		desiredNodeCount, _ := strconv.Atoi(r.FormValue("nodepool_desired_node_count"))
@@ -1814,7 +1821,7 @@ func (h *Handler) ListLabTemplates(w http.ResponseWriter, r *http.Request) {
 	var templates []WorkspaceTemplate
 	if job.Config != nil {
 		templates = job.Config.GetWorkspaceTemplates()
-		labDisabled = job.Config.Disabled
+		labDisabled = job.Config.IsClosed()
 		disabledTemplates = job.Config.DisabledTemplates
 	}
 	job.mu.RUnlock()
@@ -2230,7 +2237,7 @@ func (h *Handler) ListLabs(w http.ResponseWriter, r *http.Request) {
 		}
 		sanitized, err := job.sanitizedCopy(false)
 		c := candidate{job: sanitized}
-		if job.Config != nil && job.Config.Disabled {
+		if job.Config.IsClosed() {
 			c.closed = &closedLab{
 				id:         job.ID,
 				kubeconfig: extractStringFromConfigValue(job.Kubeconfig),
@@ -2350,7 +2357,7 @@ func (h *Handler) RequestWorkspace(w http.ResponseWriter, r *http.Request) {
 		ingressService = job.Config.NginxIngressServiceName
 		templates = job.Config.GetWorkspaceTemplates()
 		bakedImages = job.Config.BakedImages
-		labDisabled = job.Config.Disabled
+		labDisabled = job.Config.IsClosed()
 		disabledTemplates = job.Config.DisabledTemplates
 	}
 	job.mu.RUnlock()
@@ -4114,33 +4121,44 @@ func shortenLabID(id string) string {
 // LabSummary is the display-safe summary of a lab (job), shared by the labs
 // list and the lab detail page.
 type LabSummary struct {
-	ID                        string
-	IDShort                   string
-	Status                    string
-	CreatedAt                 string
-	UpdatedAt                 string
-	StackName                 string
-	Description               string
-	Provider                  string
-	Domain                    string
-	K8sClusterName            string
-	NodePoolFlavor            string
-	NodePoolDesiredNodeCount  int
-	DNSProvider               string
-	UseExistingCluster        bool
-	IsDryRun                  bool
-	HasError                  bool
-	ErrorMsg                  string
-	HasKubeconfig             bool
-	IsDestroyed               bool
-	WorkspaceLifetimeHours    int
-	WorkspaceIdleTimeout      int // minutes; 0 = idle workspaces are never paused
-	LabDeletionDate           string
-	LabDeletionDateValue      string
-	LabDeletionTimeValue      string
-	HasDeletionDate           bool
+	ID                       string
+	IDShort                  string
+	Status                   string
+	CreatedAt                string
+	UpdatedAt                string
+	StackName                string
+	Description              string
+	Provider                 string
+	Domain                   string
+	K8sClusterName           string
+	NodePoolFlavor           string
+	NodePoolDesiredNodeCount int
+	DNSProvider              string
+	UseExistingCluster       bool
+	IsDryRun                 bool
+	HasError                 bool
+	ErrorMsg                 string
+	HasKubeconfig            bool
+	IsDestroyed              bool
+	WorkspaceLifetimeHours   int
+	WorkspaceIdleTimeout     int // minutes; 0 = idle workspaces are never paused
+	LabDeletionDate          string
+	LabDeletionDateValue     string
+	LabDeletionTimeValue     string
+	HasDeletionDate          bool
+	// LabCloseDate and friends are the lab's scheduled close to new students
+	// (LabConfig.LabCloseDate), in the same three shapes as the deletion date
+	// above: one for display, two for the date and time inputs of the lifecycle
+	// form. A schedule already materialized by the cleanup pass is gone from the
+	// config, so HasCloseDate is false and Disabled below is true instead.
+	LabCloseDate              string
+	LabCloseDateValue         string
+	LabCloseTimeValue         string
+	HasCloseDate              bool
 	WorkspaceTemplateNamesCSV string
-	// Disabled reports a lab closed to new students (LabConfig.Disabled).
+	// Disabled reports a lab closed to new students (LabConfig.IsClosed, so a
+	// scheduled close whose date has passed already counts, even before the
+	// cleanup pass writes it into the config).
 	Disabled bool
 	// AutoBake reports LabConfig.AutoBake — the "Add Template" drawer's default for
 	// baking a new devcontainer template as it is added.
@@ -4168,11 +4186,15 @@ func buildLabSummary(job *Job) LabSummary {
 	labDeletionDateValue := ""
 	labDeletionTimeValue := ""
 	hasLabDeletionDate := false
+	labCloseDate := ""
+	labCloseDateValue := ""
+	labCloseTimeValue := ""
+	hasLabCloseDate := false
 	var templateNames []string
 	disabled := false
 	autoBake := false
 	if job.Config != nil {
-		disabled = job.Config.Disabled
+		disabled = job.Config.IsClosed()
 		autoBake = job.Config.AutoBake
 		stackName = job.Config.StackName
 		description = job.Config.Description
@@ -4190,6 +4212,12 @@ func buildLabSummary(job *Job) LabSummary {
 			labDeletionDateValue = job.Config.LabDeletionDate.Format("2006-01-02")
 			labDeletionTimeValue = job.Config.LabDeletionDate.Format("15:04")
 			hasLabDeletionDate = true
+		}
+		if job.Config.LabCloseDate != nil {
+			labCloseDate = job.Config.LabCloseDate.Format("Jan 02, 2006 at 15:04")
+			labCloseDateValue = job.Config.LabCloseDate.Format("2006-01-02")
+			labCloseTimeValue = job.Config.LabCloseDate.Format("15:04")
+			hasLabCloseDate = true
 		}
 		for _, t := range job.Config.WorkspaceTemplates {
 			templateNames = append(templateNames, t.Name)
@@ -4222,6 +4250,10 @@ func buildLabSummary(job *Job) LabSummary {
 		LabDeletionDateValue:      labDeletionDateValue,
 		LabDeletionTimeValue:      labDeletionTimeValue,
 		HasDeletionDate:           hasLabDeletionDate,
+		LabCloseDate:              labCloseDate,
+		LabCloseDateValue:         labCloseDateValue,
+		LabCloseTimeValue:         labCloseTimeValue,
+		HasCloseDate:              hasLabCloseDate,
 		WorkspaceTemplateNamesCSV: strings.Join(templateNames, ", "),
 		Disabled:                  disabled,
 		AutoBake:                  autoBake,
@@ -4392,7 +4424,7 @@ func (h *Handler) buildWorkspacesViewModel(ctx context.Context, job *Job) (*Work
 		stackName = job.Config.StackName
 		templates = job.Config.GetWorkspaceTemplates()
 		bakedImages = job.Config.BakedImages
-		labDisabled = job.Config.Disabled
+		labDisabled = job.Config.IsClosed()
 		disabledTemplates = job.Config.DisabledTemplates
 	}
 	events := append([]WorkspaceEvent(nil), job.WorkspaceEvents...)
@@ -5025,6 +5057,12 @@ func (h *Handler) UpdateLabLifecycle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	closeDate, err := parseLabCloseDate(r)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	idleTimeout, err := parseIdleTimeout(r)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
@@ -5034,6 +5072,7 @@ func (h *Handler) UpdateLabLifecycle(w http.ResponseWriter, r *http.Request) {
 	h.updateJobConfig(jobID, func(config *LabConfig) {
 		config.WorkspaceLifetimeHours = lifetime
 		config.LabDeletionDate = deletionDate
+		config.LabCloseDate = closeDate
 		config.WorkspaceIdleTimeoutMinutes = idleTimeout
 	})
 	// Off the response's critical path — see the comment on the SaveJob call in
@@ -5043,7 +5082,11 @@ func (h *Handler) UpdateLabLifecycle(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Failed to persist lifecycle update for lab %s: %v", jobID, err)
 		}
 	}()
-	h.recordAudit(adminActor(r), "admin", "lab.lifecycle_update", jobID, fmt.Sprintf("workspace_lifetime_hours=%d workspace_idle_timeout_minutes=%d", lifetime, idleTimeout))
+	closeDetail := "none"
+	if closeDate != nil {
+		closeDetail = closeDate.Format("2006-01-02 15:04")
+	}
+	h.recordAudit(adminActor(r), "admin", "lab.lifecycle_update", jobID, fmt.Sprintf("workspace_lifetime_hours=%d workspace_idle_timeout_minutes=%d lab_close_date=%s", lifetime, idleTimeout, closeDetail))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
@@ -5078,6 +5121,39 @@ func parseRecreateDeletionDate(r *http.Request) (*time.Time, error) {
 		return nil, fmt.Errorf("the deletion date must be in the future")
 	}
 	return &deletion, nil
+}
+
+// parseLabCloseDate reads the date and time a lab is to close itself to new
+// students (fields lab_close_date / lab_close_time, mirroring the deletion pair).
+// A blank date means "no scheduled close" and returns (nil, nil); the time
+// defaults to the end of the day, as the deletion time does.
+//
+// A date in the past is rejected rather than accepted as "close it now": the
+// "Close lab to new students" button already does that immediately, and a past
+// date here would be indistinguishable from a typo (2025 for 2026) that closes
+// a workshop's lab on the very next cleanup tick.
+func parseLabCloseDate(r *http.Request) (*time.Time, error) {
+	dateStr := strings.TrimSpace(r.FormValue("lab_close_date"))
+	if dateStr == "" {
+		return nil, nil
+	}
+	d, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		return nil, fmt.Errorf("the close date is not a valid date")
+	}
+	hour, minute := 23, 59
+	if timeStr := strings.TrimSpace(r.FormValue("lab_close_time")); timeStr != "" {
+		t, err := time.Parse("15:04", timeStr)
+		if err != nil {
+			return nil, fmt.Errorf("the close time is not a valid time")
+		}
+		hour, minute = t.Hour(), t.Minute()
+	}
+	closeAt := time.Date(d.Year(), d.Month(), d.Day(), hour, minute, 0, 0, time.Local)
+	if !closeAt.After(time.Now()) {
+		return nil, fmt.Errorf("the close date must be in the future")
+	}
+	return &closeAt, nil
 }
 
 // RecreateLab handles recreating a lab from a destroyed job
@@ -5146,6 +5222,15 @@ func (h *Handler) RecreateLab(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		config.LabDeletionDate = newDeletion
+	}
+
+	// A scheduled close is the same trap one step smaller: the destroyed lab's
+	// close date is in the past now, so keeping it would close the recreated lab
+	// to new students on the next cleanup tick. There is no prompt for it — a lab
+	// is recreated to be used — so a spent schedule is simply dropped, and the
+	// admin can set a new one from the lab's Lifecycle & Cleanup section.
+	if config.LabCloseDate != nil && !config.LabCloseDate.After(time.Now()) {
+		config.LabCloseDate = nil
 	}
 
 	// Provider credentials are not persisted with the job — repopulate them from

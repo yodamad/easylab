@@ -84,7 +84,7 @@ lab, organized into tabs at the top:
 * **Notify** — send a message to this lab's students mid-workshop and see what is
   currently showing. See [Notify students](#notify-students).
 * **Lifecycle & Cleanup** — an inline form for the workspace lifetime, the idle
-  timeout after which unused workspaces are paused, and the lab deletion date/time (this replaces the old **Edit Lifecycle** modal), plus a history table of
+  timeout after which unused workspaces are paused, the date/time the lab closes to new students, and the lab deletion date/time (this replaces the old **Edit Lifecycle** modal), plus a history table of
   every automatic cleanup sweep that has run.
 * **Activity** — this lab's entries from the [audit log](audit-log.md), filtered to just
   this lab.
@@ -644,6 +644,37 @@ What doesn't change:
 
 The [audit log](audit-log.md) records each close and reopen.
 
+#### Close it on a schedule
+
+A lab can close itself at a date and time you choose, for instance at the end of a
+workshop. Set **Close to New Students** (a **Date** and an optional **Time**, 23:59 by
+default) in the creation wizard's [Lifecycle step](admin-lab-creation.md#close-to-new-students),
+or later in the **Lifecycle & Cleanup** section of a completed lab's detail page. While the
+lab is still open, the **Workspaces & Templates** strip reads "Closes to new students
+automatically on <date>." and the lab's lifecycle strip shows a **Scheduled close** point.
+
+* Students are turned away from the moment the date passes. This does not wait for the
+  next cleanup pass.
+* The date must be in the future. The lifecycle form refuses a past one; to close a lab
+  right now, use **Close lab to new students**.
+* At the date the lab behaves exactly as one you closed by hand: the **Closed** badge
+  appears, students see what they see for a closed lab, and nothing is deleted.
+* The schedule is then spent and cleared, so **Reopen lab** works normally and the lab is
+  not closed again on the next check. Clearing the date in the form removes a schedule
+  you no longer want.
+* A schedule still in the future survives a manual close and reopen: reopening a lab
+  now says nothing about tonight's close. Only a date that has already passed is dropped
+  on reopen.
+* It is independent of the lab's deletion date. Closing never destroys the lab; the
+  deletion date still decides when that happens.
+* A [recreated](#retry-or-recreate-a-lab) lab drops a close date that is already in the past.
+* The in-lab [student portal](student-portal.md) honours the schedule on its own, even if
+  the central instance is down.
+
+The close is applied by the cleanup service, which runs every
+`CLEANUP_INTERVAL_MINUTES` (default 5), and is recorded in the [audit log](audit-log.md)
+as `lab.disable` by `system`, with the lab name and the scheduled time as detail.
+
 Closing is different from removing: [removing a template](#remove-a-template-from-a-lab)
 deletes its workspaces.
 
@@ -691,7 +722,7 @@ for changing the **Workspace Lifetime** and **Lab Deletion** date/time set durin
 creation (see [Cleaning Configuration](admin-lab-creation.md#cleaning-configuration-step-7) above) without
 recreating the lab — this replaces the old **Edit Lifecycle** modal:
 
-![Edit Lifecycle](screens/edit-lifecycle.png){width=450}
+![Lifecycle & Cleanup form](screens/edit-lifecycle.png){width=700}
 
 > **Note:** this screenshot still shows the old modal and needs retaking against the
 > inline form described here, which also has the **Pause Idle Workspaces** field.
@@ -705,6 +736,9 @@ recreating the lab — this replaces the old **Edit Lifecycle** modal:
   workspaces that are already paused — their owners do, from the student pages.
   It has no effect on [OpenChamber](templates.md#ai-labs-with-openchamber) templates,
   which are never auto-paused; pause those from the workspace list below when you need to.
+* Set, change, or clear **Close to New Students** (a date and an optional time, 23:59
+  by default). A cleared date removes the schedule; a date must be in the future, and the
+  form refuses a past one. See [Close it on a schedule](#close-it-on-a-schedule).
 * Set, change, or clear the lab's scheduled deletion date and time. A cleared date
   disables scheduled lab deletion; a date must be in the future.
 

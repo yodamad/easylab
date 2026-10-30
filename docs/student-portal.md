@@ -181,6 +181,10 @@ The central instance remains where everything is decided and recorded:
   what you see there is current. If the admin is down, the portal keeps it until it is back.
 * **Automatic cleanup** (workspace lifetime, lab deletion date) still runs from the
   central instance.
+* **A scheduled close** ([Close to New Students](admin-lab-management.md#close-it-on-a-schedule))
+  is copied to the portal with the rest of the lab, and the portal turns new students away
+  when the date passes without asking the central instance. The Closed badge and the audit
+  entry come from the central instance's next cleanup check.
 * **Upgrades** — after you upgrade the central instance, each portal is moved to the new
   image on the next cycle.
 * **Opening a student's workspace** as a teacher works as before, and the student is told

@@ -36,9 +36,14 @@ type PortalState struct {
 	WorkspaceLifetimeHours int                 `json:"workspace_lifetime_hours,omitempty"`
 	LabDeletionDate        *time.Time          `json:"lab_deletion_date,omitempty"`
 
-	BakedImages       map[string]BakedImage `json:"baked_images,omitempty"`
-	Disabled          bool                  `json:"disabled,omitempty"`
-	DisabledTemplates map[string]bool       `json:"disabled_templates,omitempty"`
+	BakedImages map[string]BakedImage `json:"baked_images,omitempty"`
+	Disabled    bool                  `json:"disabled,omitempty"`
+	// LabCloseDate is synced so the portal closes its own lab on time. It serves
+	// students with no connection back to the admin, and the admin only
+	// materializes a scheduled close every few minutes — without the date itself,
+	// a portal would keep handing out workspaces until the next sync reached it.
+	LabCloseDate      *time.Time      `json:"lab_close_date,omitempty"`
+	DisabledTemplates map[string]bool `json:"disabled_templates,omitempty"`
 
 	// Domain, DNSProvider and ClusterIssuerName decide how a workspace is exposed
 	// (see RequestWorkspace). DNSProvider is only ever read as "is there one".
@@ -151,6 +156,7 @@ func portalStateFromJob(job *Job, auth StudentAuthSnapshot, publicURL string) Po
 		state.LabDeletionDate = cfg.LabDeletionDate
 		state.BakedImages = cfg.BakedImages
 		state.Disabled = cfg.Disabled
+		state.LabCloseDate = cfg.LabCloseDate
 		state.DisabledTemplates = cfg.DisabledTemplates
 		state.Domain = cfg.Domain
 		state.DNSProvider = cfg.DNSProvider
@@ -170,6 +176,7 @@ func (s PortalState) labConfig() *LabConfig {
 		LabDeletionDate:        s.LabDeletionDate,
 		BakedImages:            s.BakedImages,
 		Disabled:               s.Disabled,
+		LabCloseDate:           s.LabCloseDate,
 		DisabledTemplates:      s.DisabledTemplates,
 		Domain:                 s.Domain,
 		DNSProvider:            s.DNSProvider,

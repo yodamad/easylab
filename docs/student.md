@@ -76,7 +76,7 @@ You need to provide:
 
 Your email address is automatically filled in from your login session and is not editable on this form.
 
-The organiser can close a lab or a template to new students. A closed one no longer appears here unless you already have a workspace on it. In that case its card has a dashed border and reads *"Closed to new students. Your workspace is still here."*, and the button becomes **Open my workspace**: it gives you back the link and connection token of your existing workspace instead of creating a new one. Your workspace also stays on the **My Workspaces** page.
+The organiser can close a lab or a template to new students, and can schedule a lab to close itself at a given date and time. A closed one no longer appears here unless you already have a workspace on it. In that case its card has a dashed border and reads *"Closed to new students. Your workspace is still here."*, and the button becomes **Open my workspace**: it gives you back the link and connection token of your existing workspace instead of creating a new one. Your workspace also stays on the **My Workspaces** page.
 
 ![A closed template you still have a workspace on](screens/student-closed-template.png){width=85%}
 

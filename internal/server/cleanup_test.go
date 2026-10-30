@@ -374,6 +374,106 @@ func TestCleanupDeleteConcurrency_Zero(t *testing.T) {
 	assert.Equal(t, 5, cleanupDeleteConcurrency())
 }
 
+// --- closeScheduledLabs tests ---
+
+func TestCloseScheduledLabs(t *testing.T) {
+	t.Parallel()
+
+	past := time.Now().Add(-time.Hour)
+	future := time.Now().Add(24 * time.Hour)
+
+	tests := []struct {
+		name         string
+		status       JobStatus
+		disabled     bool
+		closeDate    *time.Time
+		wantDisabled bool
+		wantDate     bool // the close date is still set afterwards
+		wantAudit    bool
+	}{
+		{name: "completed and due is closed", status: JobStatusCompleted, closeDate: &past, wantDisabled: true, wantAudit: true},
+		{name: "future date is left untouched", status: JobStatusCompleted, closeDate: &future, wantDate: true},
+		{name: "no date is left untouched", status: JobStatusCompleted},
+		{name: "pending job is skipped", status: JobStatusPending, closeDate: &past, wantDate: true},
+		{name: "failed job is skipped", status: JobStatusFailed, closeDate: &past, wantDate: true},
+		{name: "already disabled records nothing", status: JobStatusCompleted, disabled: true, closeDate: &past, wantDisabled: true, wantDate: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			jm := NewJobManager("")
+			h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+			as, err := NewAuditStore(t.TempDir())
+			require.NoError(t, err)
+			h.SetAuditStore(as)
+
+			id := jm.CreateJob(&LabConfig{StackName: "workshop", Disabled: tt.disabled, LabCloseDate: tt.closeDate})
+			require.NoError(t, jm.UpdateJobStatus(id, tt.status))
+
+			h.closeScheduledLabs()
+
+			job, ok := jm.GetJob(id)
+			require.True(t, ok)
+			job.mu.RLock()
+			disabled := job.Config.Disabled
+			hasDate := job.Config.LabCloseDate != nil
+			job.mu.RUnlock()
+			assert.Equal(t, tt.wantDisabled, disabled)
+			assert.Equal(t, tt.wantDate, hasDate)
+
+			if tt.wantAudit {
+				entries := waitForAuditEntry(t, as, "lab.disable")
+				require.Len(t, entries, 1)
+				assert.Equal(t, "system", entries[0].Actor)
+				assert.Equal(t, "system", entries[0].Role)
+				assert.Equal(t, id, entries[0].LabID)
+				assert.Equal(t, "workshop: scheduled close "+past.Format("2006-01-02 15:04")+" reached", entries[0].Detail)
+				return
+			}
+			// recordAudit writes off-thread: give a stray entry time to land.
+			time.Sleep(100 * time.Millisecond)
+			entries, err := as.Recent(0)
+			require.NoError(t, err)
+			assert.Empty(t, entries, "nothing may be recorded when no lab is closed")
+		})
+	}
+}
+
+// The schedule is spent once honored: a second pass must neither close the lab
+// again nor record a second entry, and a reopened lab stays open.
+func TestCloseScheduledLabs_ReopenedLabStaysOpen(t *testing.T) {
+	t.Parallel()
+
+	past := time.Now().Add(-time.Hour)
+	jm := NewJobManager("")
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	as, err := NewAuditStore(t.TempDir())
+	require.NoError(t, err)
+	h.SetAuditStore(as)
+	id := jm.CreateJob(&LabConfig{StackName: "workshop", LabCloseDate: &past})
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusCompleted))
+
+	h.closeScheduledLabs()
+	h.updateJobConfig(id, func(c *LabConfig) { c.Disabled = false })
+	h.closeScheduledLabs()
+
+	job, _ := jm.GetJob(id)
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	assert.False(t, job.Config.Disabled)
+	assert.False(t, job.Config.IsClosed())
+	time.Sleep(100 * time.Millisecond)
+	entries, err := as.Recent(0)
+	require.NoError(t, err)
+	assert.Len(t, entries, 1)
+}
+
+func TestCloseScheduledLabs_NoJobs(t *testing.T) {
+	t.Parallel()
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	h.closeScheduledLabs()
+}
+
 // --- cleanupExpiredLabs tests ---
 
 func TestCleanupExpiredLabs_NoJobs(t *testing.T) {

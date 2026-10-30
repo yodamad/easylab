@@ -1197,6 +1197,52 @@ func TestParseRecreateDeletionDate_BlankClearsSchedule(t *testing.T) {
 	assert.Nil(t, got)
 }
 
+// A destroyed lab's scheduled close is in the past by the time it is recreated,
+// and keeping it would close the fresh lab to new students on the next cleanup
+// tick. A close still in the future is kept: the admin scheduled it for a reason.
+func TestRecreateLab_SpentCloseDateIsDropped(t *testing.T) {
+	tests := []struct {
+		name      string
+		closeDate *time.Time
+		wantSet   bool
+	}{
+		{name: "passed close date is dropped", closeDate: timePtr(time.Now().Add(-72 * time.Hour))},
+		{name: "future close date survives", closeDate: timePtr(time.Now().Add(72 * time.Hour)), wantSet: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jm := NewJobManager("")
+			h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+			// A BYO-cluster lab, so recreate needs no provider credentials.
+			labID := jm.CreateJob(&LabConfig{
+				StackName:          "workshop",
+				UseExistingCluster: true,
+				ExternalKubeconfig: "kc",
+				LabCloseDate:       tt.closeDate,
+			})
+			require.NoError(t, jm.UpdateJobStatus(labID, JobStatusDestroyed))
+			// Keep the recreated job from actually running Pulumi.
+			h.pulumiExec.afterProvision = nil
+
+			rec := httptest.NewRecorder()
+			h.RecreateLab(rec, postForm(t, "/api/labs/recreate", url.Values{"job_id": {labID}}))
+
+			var newJobID string
+			for _, j := range jm.GetAllJobs() {
+				if j.ID != labID {
+					newJobID = j.ID
+				}
+			}
+			require.NotEmpty(t, newJobID, "recreate should have created a new job")
+			job, ok := jm.GetJob(newJobID)
+			require.True(t, ok)
+			job.mu.RLock()
+			defer job.mu.RUnlock()
+			assert.Equal(t, tt.wantSet, job.Config.LabCloseDate != nil)
+		})
+	}
+}
+
 func TestBuildLabSummary(t *testing.T) {
 	t.Parallel()
 
@@ -1227,6 +1273,113 @@ func TestBuildLabSummary(t *testing.T) {
 	assert.Equal(t, 4, summary.WorkspaceLifetimeHours)
 	assert.True(t, summary.HasDeletionDate)
 	assert.Equal(t, "code-server, extra", summary.WorkspaceTemplateNamesCSV)
+}
+
+func TestParseLabCloseDate(t *testing.T) {
+	t.Parallel()
+
+	future := time.Now().AddDate(0, 0, 3)
+	futureDate := future.Format("2006-01-02")
+
+	tests := []struct {
+		name     string
+		form     url.Values
+		wantNil  bool
+		wantTime string // "2006-01-02 15:04" in local time
+		wantErr  string
+	}{
+		{name: "blank date", form: url.Values{"lab_close_date": {""}}, wantNil: true},
+		{name: "no fields", form: url.Values{}, wantNil: true},
+		{name: "whitespace date", form: url.Values{"lab_close_date": {"   "}}, wantNil: true},
+		{name: "blank date ignores a time", form: url.Values{"lab_close_date": {""}, "lab_close_time": {"09:30"}}, wantNil: true},
+		{name: "date only defaults to 23:59", form: url.Values{"lab_close_date": {futureDate}}, wantTime: futureDate + " 23:59"},
+		{name: "blank time defaults to 23:59", form: url.Values{"lab_close_date": {futureDate}, "lab_close_time": {""}}, wantTime: futureDate + " 23:59"},
+		{name: "date and time", form: url.Values{"lab_close_date": {futureDate}, "lab_close_time": {"09:30"}}, wantTime: futureDate + " 09:30"},
+		{name: "invalid date", form: url.Values{"lab_close_date": {"not-a-date"}}, wantErr: "not a valid date"},
+		{name: "impossible date", form: url.Values{"lab_close_date": {"2030-02-31"}}, wantErr: "not a valid date"},
+		{name: "invalid time", form: url.Values{"lab_close_date": {futureDate}, "lab_close_time": {"25:99"}}, wantErr: "not a valid time"},
+		{name: "past date", form: url.Values{"lab_close_date": {"2000-01-01"}}, wantErr: "the close date must be in the future"},
+		{name: "past date with a time", form: url.Values{"lab_close_date": {"2000-01-01"}, "lab_close_time": {"09:30"}}, wantErr: "the close date must be in the future"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tt.form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+			got, err := parseLabCloseDate(req)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				assert.Nil(t, got)
+				return
+			}
+			require.NoError(t, err)
+			if tt.wantNil {
+				assert.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			assert.Equal(t, tt.wantTime, got.Format("2006-01-02 15:04"))
+			assert.Equal(t, time.Local, got.Location())
+		})
+	}
+}
+
+func TestBuildLabSummary_CloseDate(t *testing.T) {
+	t.Parallel()
+
+	future := time.Date(2099, 3, 4, 17, 45, 0, 0, time.Local)
+	passed := time.Now().Add(-time.Hour)
+
+	tests := []struct {
+		name         string
+		config       LabConfig
+		wantHas      bool
+		wantLabel    string
+		wantDate     string
+		wantTime     string
+		wantDisabled bool
+	}{
+		{name: "no schedule", config: LabConfig{StackName: "lab"}},
+		{
+			name:      "future schedule keeps the lab open",
+			config:    LabConfig{StackName: "lab", LabCloseDate: &future},
+			wantHas:   true,
+			wantLabel: "Mar 04, 2099 at 17:45",
+			wantDate:  "2099-03-04",
+			wantTime:  "17:45",
+		},
+		{
+			name:         "passed schedule reports closed before the flag is set",
+			config:       LabConfig{StackName: "lab", LabCloseDate: &passed},
+			wantHas:      true,
+			wantLabel:    passed.Format("Jan 02, 2006 at 15:04"),
+			wantDate:     passed.Format("2006-01-02"),
+			wantTime:     passed.Format("15:04"),
+			wantDisabled: true,
+		},
+		{name: "flag alone", config: LabConfig{StackName: "lab", Disabled: true}, wantDisabled: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := tt.config
+			jm := NewJobManager("")
+			id := jm.CreateJob(&cfg)
+			job, ok := jm.GetJob(id)
+			require.True(t, ok)
+
+			summary := buildLabSummary(job)
+
+			assert.Equal(t, tt.wantHas, summary.HasCloseDate)
+			assert.Equal(t, tt.wantLabel, summary.LabCloseDate)
+			assert.Equal(t, tt.wantDate, summary.LabCloseDateValue)
+			assert.Equal(t, tt.wantTime, summary.LabCloseTimeValue)
+			assert.Equal(t, tt.wantDisabled, summary.Disabled)
+			assert.False(t, summary.HasDeletionDate, "the close date is independent of the deletion date")
+		})
+	}
 }
 
 func TestBuildLabSummary_DestroyedNoConfig(t *testing.T) {
@@ -1565,6 +1718,50 @@ func TestCreateLabConfigFromForm_Description(t *testing.T) {
 			if cfg.Description != tt.want {
 				t.Errorf("Description = %q, want %q", cfg.Description, tt.want)
 			}
+		})
+	}
+}
+
+// The creation wizard drops a scheduled close it cannot use instead of refusing
+// the lab: a malformed or past date leaves the new lab open rather than born
+// closed to the students it was created for.
+func TestCreateLabConfigFromForm_CloseDate(t *testing.T) {
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	futureDate := time.Now().Add(48 * time.Hour).Format("2006-01-02")
+	pastDate := time.Now().Add(-48 * time.Hour).Format("2006-01-02")
+
+	tests := []struct {
+		name       string
+		date       string
+		closeTime  string
+		wantSet    bool
+		wantHour   int
+		wantMinute int
+	}{
+		{name: "no date means no schedule", date: ""},
+		{name: "date alone closes at end of day", date: futureDate, wantSet: true, wantHour: 23, wantMinute: 59},
+		{name: "date and time", date: futureDate, closeTime: "17:30", wantSet: true, wantHour: 17, wantMinute: 30},
+		{name: "past date is ignored", date: pastDate, closeTime: "17:30"},
+		{name: "malformed date is ignored", date: "not-a-date"},
+		{name: "malformed time is ignored", date: futureDate, closeTime: "25:00"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/", nil)
+			req.Form = map[string][]string{
+				"stack_name":     {"my-stack"},
+				"lab_close_date": {tt.date},
+				"lab_close_time": {tt.closeTime},
+			}
+			cfg := h.createLabConfigFromForm(req, nil)
+			if !tt.wantSet {
+				assert.Nil(t, cfg.LabCloseDate, "an unusable close date must leave the lab open")
+				return
+			}
+			require.NotNil(t, cfg.LabCloseDate)
+			assert.Equal(t, futureDate, cfg.LabCloseDate.Format("2006-01-02"))
+			assert.Equal(t, tt.wantHour, cfg.LabCloseDate.Hour())
+			assert.Equal(t, tt.wantMinute, cfg.LabCloseDate.Minute())
 		})
 	}
 }

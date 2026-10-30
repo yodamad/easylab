@@ -91,6 +91,56 @@ func TestPortalStateFromJob_CarriesNoCredentials(t *testing.T) {
 	assert.Empty(t, rebuilt.ExternalKubeconfig)
 }
 
+// The lab's own portal closes on time without the admin instance, so the close
+// date must survive the sync to the cluster and the rebuild on the portal side.
+func TestPortalState_LabCloseDate(t *testing.T) {
+	t.Parallel()
+
+	closeAt := time.Date(2099, 5, 6, 7, 8, 0, 0, time.UTC)
+	past := time.Now().Add(-time.Hour)
+
+	tests := []struct {
+		name       string
+		closeDate  *time.Time
+		wantClosed bool
+	}{
+		{name: "no date", closeDate: nil},
+		{name: "future date", closeDate: &closeAt},
+		{name: "passed date closes the portal's lab", closeDate: &past, wantClosed: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			jm := NewJobManager("")
+			id := jm.CreateJob(&LabConfig{StackName: "workshop", LabCloseDate: tt.closeDate})
+			job, _ := jm.GetJob(id)
+
+			state := portalStateFromJob(job, StudentAuthSnapshot{}, "")
+			if tt.closeDate == nil {
+				assert.Nil(t, state.LabCloseDate)
+			} else {
+				require.NotNil(t, state.LabCloseDate)
+				assert.True(t, tt.closeDate.Equal(*state.LabCloseDate))
+			}
+
+			encoded, err := encodePortalState(state)
+			require.NoError(t, err)
+			decoded, err := decodePortalState(encoded)
+			require.NoError(t, err)
+
+			rebuilt := decoded.labConfig()
+			if tt.closeDate == nil {
+				assert.Nil(t, rebuilt.LabCloseDate)
+			} else {
+				require.NotNil(t, rebuilt.LabCloseDate)
+				assert.True(t, tt.closeDate.Equal(*rebuilt.LabCloseDate))
+			}
+			assert.False(t, rebuilt.Disabled, "the flag itself is not set by a schedule")
+			assert.Equal(t, tt.wantClosed, rebuilt.IsClosed())
+		})
+	}
+}
+
 // Providers are brokered by the admin instance: without a public URL to send
 // students to (or a secret to verify the answer with) the portal must not offer
 // them — and must not hide the password form either, or nobody could sign in.

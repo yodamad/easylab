@@ -2443,6 +2443,19 @@ function applyPrefillDeletionDate(isoDate) {
     setFieldValue('lab_deletion_time', pad(d.getHours()) + ':' + pad(d.getMinutes()));
 }
 
+// applyPrefillCloseDate does the same for the scheduled close date. A date that
+// has already passed is skipped: the (re-)created lab would be closed to new
+// students from birth.
+function applyPrefillCloseDate(isoDate) {
+    if (!isoDate) return;
+    const d = new Date(isoDate);
+    if (isNaN(d.getTime()) || d <= new Date()) return;
+
+    const pad = n => String(n).padStart(2, '0');
+    setFieldValue('lab_close_date', d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()));
+    setFieldValue('lab_close_time', pad(d.getHours()) + ':' + pad(d.getMinutes()));
+}
+
 // showPrefillNotice reveals the "editing a copy of an existing lab" banner.
 function showPrefillNotice(jobId, action) {
     const notice = document.getElementById('prefill-notice');
@@ -2600,6 +2613,7 @@ async function applyPrefill(config, templatesYaml, jobId, action) {
     setFieldValue('workspace_lifetime_unit', 'hours');
     setFieldValue('workspace_idle_timeout_minutes', config.workspace_idle_timeout_minutes);
     applyPrefillDeletionDate(config.lab_deletion_date);
+    applyPrefillCloseDate(config.lab_close_date);
 
     // Retry reuses the same Pulumi stack, so its name cannot change here, and
     // the wizard must submit to the edited-retry endpoint instead of plain lab

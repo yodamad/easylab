@@ -45,6 +45,13 @@
                     <span class="lab-lifecycle-time">{{.At}}</span>
                 </div>
                 {{end}}
+                {{if .Lab.HasCloseDate}}
+                <div class="lab-lifecycle-point is-current">
+                    <span class="lab-lifecycle-dot"></span>
+                    <span class="lab-lifecycle-label">Scheduled close</span>
+                    <span class="lab-lifecycle-time">{{.Lab.LabCloseDate}}</span>
+                </div>
+                {{end}}
                 {{if .Lab.IsDestroyed}}
                 <div class="lab-lifecycle-point is-danger">
                     <span class="lab-lifecycle-dot"></span>
@@ -225,6 +232,9 @@
                         {{else}}
                         <span class="lab-access-state">Open to students</span>
                         <span class="lab-access-hint">Students can pick this lab and request a workspace.</span>
+                        {{if $.Lab.HasCloseDate}}
+                        <span class="lab-access-hint">Closes to new students automatically on {{$.Lab.LabCloseDate}}.</span>
+                        {{end}}
                         {{end}}
                     </div>
                     {{if .LabDisabled}}
@@ -659,6 +669,21 @@
                             <span class="lifetime-input-unit">minutes</span>
                         </div>
                         <small>Pause a workspace nobody has had open for this long: its files are kept and the student resumes it in one click. Minimum 10; pick something longer than your breaks (60–90). Leave 0 to disable.</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Close to New Students (Optional)</label>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="lifecycle-close-date">Date</label>
+                                <input type="date" id="lifecycle-close-date" name="lab_close_date" value="{{.Lab.LabCloseDateValue}}">
+                            </div>
+                            <div class="form-group">
+                                <label for="lifecycle-close-time">Time</label>
+                                <input type="time" id="lifecycle-close-time" name="lab_close_time" placeholder="23:59" value="{{.Lab.LabCloseTimeValue}}">
+                            </div>
+                        </div>
+                        <small>Stop offering this lab to new students at the specified date and time. Nothing is deleted: workspaces already created keep running and their owners keep access. Time defaults to end of day (23:59) if not set. Leave date empty to disable.</small>
                     </div>
 
                     <div class="form-group">

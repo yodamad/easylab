@@ -35,7 +35,7 @@ lab's history rather than scanning the global log.
 * Admin viewing the shared student portal login password
 * Admin saving the [GitHub login](github.md) settings (`github_auth.update`, with whether it is enabled and for which organizations as detail — never the client secret)
 * Admin saving the [GitLab login](gitlab.md) settings (`gitlab_auth.update`, with whether it is enabled, the GitLab host and the allowed groups as detail — never the secret)
-* Automatic (system) actions: workspaces deleted for exceeding their configured lifetime, labs auto-destroyed past their scheduled deletion date
+* Automatic (system) actions: workspaces deleted for exceeding their configured lifetime, labs auto-destroyed past their scheduled deletion date, and labs closed to new students when their scheduled close date is reached (`lab.disable`, actor `system`, with the lab name and the scheduled time as detail)
 
 ## Admin identity caveat
 

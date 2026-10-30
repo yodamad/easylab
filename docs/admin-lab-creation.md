@@ -738,6 +738,15 @@ Leave the field at `0` or empty to never pause workspaces.
 
     `activity not reported by the IDE` counts OpenChamber workspaces, which are never auto-paused (see the bullet above). Because that is a permanent property of the lab rather than something that changed, it is not on its own a reason to log the line — a lab whose templates are all OpenChamber simply logs nothing.
 
+#### Close to New Students
+
+Set a **Date** (and optionally a **Time**) for the lab to stop being offered to new students. From that moment the lab behaves exactly as if you had pressed **Close lab to new students**: students without a workspace no longer see it and cannot request one, while existing workspaces keep running and their owners keep access. Nothing is deleted. See [Close it on a schedule](admin-lab-management.md#close-it-on-a-schedule).
+
+* If only a date is set, the lab closes at 23:59 that day (server local time).
+* Leave the date empty for no scheduled close. The field is optional.
+* A date that is not in the future is ignored at creation: the lab is created open, with no schedule, rather than born closed.
+* This is independent of **Lab Deletion** below. Closing a lab does not destroy it.
+
 #### Lab Deletion
 
 Set a **Date** (and optionally a **Time**) for the entire lab to be automatically destroyed. When the scheduled date/time is reached, EasyLab runs `pulumi destroy` on the lab without any manual action.
