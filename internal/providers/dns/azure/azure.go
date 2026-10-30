@@ -42,6 +42,9 @@ func (p *AzureDNSProvider) SetupCertManagerDNS01(
 	zone string,
 	credSecretName string,
 	_ string,
+	// Azure DNS-01 goes through cert-manager's own built-in solver, so there is
+	// no webhook to install and nothing for a joining lab to skip.
+	_ bool,
 	_ []pulumi.Resource,
 ) (dns.SolverSpec, *helmv3.Release, error) {
 	clientID := utils.DNSConfigOptional(ctx, utils.DNSAzureClientId)

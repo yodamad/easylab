@@ -179,7 +179,16 @@ func SetupHTTPS(
 	// credential secret on this same cert-manager: skip recreating them and just
 	// reuse them by their well-known names. This lab's own A-records still need
 	// creating, since every lab has its own domain and ingress IP.
+	//
+	// Reusing the issuer means reusing the credentials it was built with, because
+	// one ClusterIssuer carries one solver with one secret reference. ownIssuer is
+	// the other way to join an occupied cluster, for when those credentials cannot
+	// write this lab's zone: this lab builds its own secret and its own issuer
+	// under its own names, against the webhook that is already installed. The
+	// webhook is cluster-wide and serves any number of issuers, so only its
+	// install — not the solver spec, which carries the credentials — is skipped.
 	skipClusterIssuer := utils.DNSConfigOptional(ctx, utils.DNSAlreadyConfigured) == "true" && dnsProviderName != ""
+	ownIssuer := !skipClusterIssuer && utils.DNSConfigOptional(ctx, utils.DNSOwnIssuer) == "true" && dnsProviderName != ""
 	// Declared here (rather than inside the DNS-01 block below) so the second
 	// dnsProviderName != "" block further down — which wires up ExternalDNS — can
 	// also see it.
@@ -205,7 +214,7 @@ func SetupHTTPS(
 			}
 
 			webhookSolver, webhookRelease, setupErr := dnsProvider.SetupCertManagerDNS01(
-				ctx, k8sProvider, zone, credSecret, certManagerNsName, certDeps,
+				ctx, k8sProvider, zone, credSecret, certManagerNsName, !ownIssuer, certDeps,
 			)
 			if setupErr != nil {
 				return nil, pulumi.StringOutput{}, fmt.Errorf("failed to setup DNS-01 solver: %w", setupErr)
@@ -214,50 +223,15 @@ func SetupHTTPS(
 				certDeps = append(certDeps, webhookRelease)
 			}
 
-			// Grant the webhook SA permission to read secrets in the cert-manager namespace.
-			// cert-manager passes ResourceNamespace=cert-manager for ClusterIssuer challenges,
-			// so credentials must live there and the webhook must be able to read them.
-			webhookRole, rbacErr := rbacv1.NewRole(ctx, "cert-manager-webhook-ovh-secret-reader", &rbacv1.RoleArgs{
-				Metadata: &metav1.ObjectMetaArgs{
-					Name:      pulumi.String("cert-manager-webhook-ovh-secret-reader"),
-					Namespace: pulumi.String(certManagerNsName),
-				},
-				Rules: rbacv1.PolicyRuleArray{
-					&rbacv1.PolicyRuleArgs{
-						ApiGroups: pulumi.StringArray{pulumi.String("")},
-						Resources: pulumi.StringArray{pulumi.String("secrets")},
-						Verbs:     pulumi.StringArray{pulumi.String("get"), pulumi.String("list")},
-					},
-				},
-			}, pulumi.Provider(k8sProvider), pulumi.DependsOn(certDeps))
-			if rbacErr != nil {
-				return nil, pulumi.StringOutput{}, fmt.Errorf("failed to create webhook RBAC role: %w", rbacErr)
-			}
-
-			_, rbacErr = rbacv1.NewRoleBinding(ctx, "cert-manager-webhook-ovh-secret-reader", &rbacv1.RoleBindingArgs{
-				Metadata: &metav1.ObjectMetaArgs{
-					Name:      pulumi.String("cert-manager-webhook-ovh-secret-reader"),
-					Namespace: pulumi.String(certManagerNsName),
-				},
-				RoleRef: &rbacv1.RoleRefArgs{
-					ApiGroup: pulumi.String("rbac.authorization.k8s.io"),
-					Kind:     pulumi.String("Role"),
-					Name:     pulumi.String("cert-manager-webhook-ovh-secret-reader"),
-				},
-				Subjects: rbacv1.SubjectArray{
-					&rbacv1.SubjectArgs{
-						Kind:      pulumi.String("ServiceAccount"),
-						Name:      pulumi.String("cert-manager-webhook-ovh"),
-						Namespace: pulumi.String("cert-manager-webhook-ovh"),
-					},
-				},
-			}, pulumi.Provider(k8sProvider), pulumi.DependsOn([]pulumi.Resource{webhookRole}))
-			if rbacErr != nil {
-				return nil, pulumi.StringOutput{}, fmt.Errorf("failed to create webhook RBAC role binding: %w", rbacErr)
-			}
-			certDeps = append(certDeps, webhookRole)
-
 			solverSpec = map[string]any{"dns01": map[string]any(webhookSolver)}
+
+			// The RBAC grant belongs to the webhook install, not to this lab: it is
+			// a single get/list over every secret in the cert-manager namespace, so
+			// the grant the installing lab created already covers this lab's own
+			// credential secret. Recreating it would conflict on its fixed name.
+			if err := grantWebhookSecretAccess(ctx, k8sProvider, certManagerNsName, ownIssuer, &certDeps); err != nil {
+				return nil, pulumi.StringOutput{}, err
+			}
 		}
 
 		// Resolve the LoadBalancer IP here — after the webhook Helm install, which
@@ -474,8 +448,76 @@ func GetIngressIP(kubeconfigOut pulumi.StringOutput, ingressRelease *helmv3.Rele
 	return internalK8s.GetServiceIP(kubeconfigOut, trigger, namespace, serviceName), nil
 }
 
+// grantWebhookSecretAccess lets the DNS-01 solver webhook's ServiceAccount read
+// secrets in the cert-manager namespace. cert-manager passes
+// ResourceNamespace=cert-manager for ClusterIssuer challenges, so credentials
+// must live there and the webhook must be able to read them.
+//
+// The grant covers every secret in the namespace under one fixed name, so it
+// belongs to whichever lab installed the webhook: a lab joining the cluster is
+// already covered by it and recreating it would conflict. alreadyGranted skips
+// it for exactly that case.
+func grantWebhookSecretAccess(
+	ctx *pulumi.Context,
+	k8sProvider *k8s.Provider,
+	certManagerNsName string,
+	alreadyGranted bool,
+	certDeps *[]pulumi.Resource,
+) error {
+	if alreadyGranted {
+		return nil
+	}
+
+	webhookRole, err := rbacv1.NewRole(ctx, "cert-manager-webhook-ovh-secret-reader", &rbacv1.RoleArgs{
+		Metadata: &metav1.ObjectMetaArgs{
+			Name:      pulumi.String("cert-manager-webhook-ovh-secret-reader"),
+			Namespace: pulumi.String(certManagerNsName),
+		},
+		Rules: rbacv1.PolicyRuleArray{
+			&rbacv1.PolicyRuleArgs{
+				ApiGroups: pulumi.StringArray{pulumi.String("")},
+				Resources: pulumi.StringArray{pulumi.String("secrets")},
+				Verbs:     pulumi.StringArray{pulumi.String("get"), pulumi.String("list")},
+			},
+		},
+	}, pulumi.Provider(k8sProvider), pulumi.DependsOn(*certDeps))
+	if err != nil {
+		return fmt.Errorf("failed to create webhook RBAC role: %w", err)
+	}
+
+	_, err = rbacv1.NewRoleBinding(ctx, "cert-manager-webhook-ovh-secret-reader", &rbacv1.RoleBindingArgs{
+		Metadata: &metav1.ObjectMetaArgs{
+			Name:      pulumi.String("cert-manager-webhook-ovh-secret-reader"),
+			Namespace: pulumi.String(certManagerNsName),
+		},
+		RoleRef: &rbacv1.RoleRefArgs{
+			ApiGroup: pulumi.String("rbac.authorization.k8s.io"),
+			Kind:     pulumi.String("Role"),
+			Name:     pulumi.String("cert-manager-webhook-ovh-secret-reader"),
+		},
+		Subjects: rbacv1.SubjectArray{
+			&rbacv1.SubjectArgs{
+				Kind:      pulumi.String("ServiceAccount"),
+				Name:      pulumi.String("cert-manager-webhook-ovh"),
+				Namespace: pulumi.String("cert-manager-webhook-ovh"),
+			},
+		},
+	}, pulumi.Provider(k8sProvider), pulumi.DependsOn([]pulumi.Resource{webhookRole}))
+	if err != nil {
+		return fmt.Errorf("failed to create webhook RBAC role binding: %w", err)
+	}
+
+	*certDeps = append(*certDeps, webhookRole)
+	return nil
+}
+
 // createDNSCredentialSecret stores DNS provider API credentials in a Kubernetes Secret
 // in the cert-manager namespace so cert-manager webhooks can access them.
+//
+// The name comes from DNSCredentialSecretName when a lab has one, which is how
+// two labs whose zones need different credentials coexist on one cluster. Empty
+// means the shared, provider-wide name every lab used before per-lab issuers
+// existed — so a lab deployed earlier keeps exactly the object it has.
 func createDNSCredentialSecret(
 	ctx *pulumi.Context,
 	k8sProvider *k8s.Provider,
@@ -483,7 +525,10 @@ func createDNSCredentialSecret(
 	providerName string,
 	dnsProvider dnsregistry.Provider,
 ) (string, error) {
-	secretName := "dns-credentials-" + providerName
+	secretName := utils.DNSConfigOptional(ctx, utils.DNSCredentialSecretName)
+	if secretName == "" {
+		secretName = "dns-credentials-" + providerName
+	}
 	secretData := pulumi.StringMap{}
 
 	for _, f := range dnsProvider.GetCredentialFields() {

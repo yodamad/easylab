@@ -31,12 +31,20 @@ type Provider interface {
 	// certManagerNamespace is the namespace cert-manager's own controller runs in
 	// (defaults to "cert-manager" when empty) — a webhook chart's RBAC must grant
 	// that exact ServiceAccount access, or DNS-01 challenges never resolve.
+	//
+	// installWebhook false returns the solver spec without installing anything,
+	// for a lab joining a cluster whose webhook is already there. The webhook is
+	// cluster-wide and serves any number of ClusterIssuers, each carrying its own
+	// credentials through the solver spec, so a joining lab builds its own issuer
+	// against the existing install. The returned Helm release is then nil, which
+	// callers already handle for providers that install no webhook at all.
 	SetupCertManagerDNS01(
 		ctx *pulumi.Context,
 		k8sProvider *k8s.Provider,
 		zone string,
 		credSecretName string,
 		certManagerNamespace string,
+		installWebhook bool,
 		deps []pulumi.Resource,
 	) (SolverSpec, *helmv3.Release, error)
 

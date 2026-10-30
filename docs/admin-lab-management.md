@@ -280,7 +280,9 @@ leave orphan resources running and billing. There is nothing to enable.
   download.
 * On a **Use Existing Cluster** lab, cert-manager, Traefik, the ClusterIssuer and the
   DNS-01 setup are left in place, exactly as when destroying such a
-  lab: other labs on the same cluster may rely on them.
+  lab: other labs on the same cluster may rely on them. A workspace namespace another
+  lab is using is preserved on the same terms — a failed deployment must not be able
+  to roll back over a lab that is already running in that namespace.
 * If the rollback itself fails, the lab's error says so (`automatic rollback failed`),
   the stack state is kept, and the kubeconfig stays available when the cluster exists so
   you can inspect it. Resources may then still exist: fix the cause and **Retry**, or

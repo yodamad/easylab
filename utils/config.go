@@ -139,7 +139,30 @@ const DNSExternalDNS = "externalDns"
 // DNSAlreadyConfigured skips creating the ClusterIssuer, DNS-01 webhook, and DNS
 // credential secret, reusing the ones an earlier lab already created on this same
 // cert-manager. Set to "true" to enable; only meaningful with DNSProviderKey set.
+//
+// It reuses the earlier lab's *credentials* along with its ClusterIssuer, since
+// one ClusterIssuer carries one solver with one secret reference. That is only
+// correct when the same credentials can write this lab's zone too. When they
+// cannot, use DNSOwnIssuer instead.
 const DNSAlreadyConfigured = "alreadyConfigured"
+
+// DNSOwnIssuer gives a lab its own DNS credential secret and its own
+// ClusterIssuer while reusing the DNS-01 solver webhook already installed on the
+// cluster. It is what lets two labs whose zones need different provider
+// credentials share one cluster: the webhook is cluster-wide infrastructure and
+// serves any number of issuers, but each issuer carries its own credentials.
+//
+// Set to "true" to enable; only meaningful with DNSProviderKey set, and mutually
+// exclusive with DNSAlreadyConfigured, which reuses the existing issuer wholesale.
+// The names of the per-lab objects come from DNSCredentialSecretName and
+// LabClusterIssuerName.
+const DNSOwnIssuer = "ownIssuer"
+
+// DNSCredentialSecretName overrides the name of the Kubernetes Secret holding
+// this lab's DNS provider credentials. Empty means the shared, provider-wide
+// default ("dns-credentials-<provider>"), which is what every lab created before
+// DNSOwnIssuer existed uses — so leaving it unset keeps those labs byte-identical.
+const DNSCredentialSecretName = "credentialSecretName"
 const DNSOvhAppKey = "ovhAppKey"
 const DNSOvhAppSecret = "ovhAppSecret"
 const DNSOvhConsumerKey = "ovhConsumerKey"

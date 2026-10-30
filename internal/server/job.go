@@ -504,7 +504,23 @@ type LabConfig struct {
 	// DNS credential secret, reusing the ones an earlier lab already created on
 	// this same cert-manager. This lab's own A-records are still created. Only
 	// meaningful with DNSProvider set and cert-manager not being freshly installed.
+	//
+	// Reusing the ClusterIssuer reuses the credentials behind it, since one issuer
+	// carries one solver with one secret reference. Where those credentials cannot
+	// write this lab's zone, use DNSOwnIssuer instead.
 	DNSAlreadyConfigured bool `json:"dns_already_configured,omitempty"`
+
+	// DNSOwnIssuer gives this lab its own DNS credential secret and its own
+	// ClusterIssuer, while reusing the DNS-01 solver webhook already installed on
+	// the cluster. It is what lets two labs whose zones need different provider
+	// credentials share one cluster. Mutually exclusive with
+	// DNSAlreadyConfigured, which reuses the existing issuer wholesale.
+	DNSOwnIssuer bool `json:"dns_own_issuer,omitempty"`
+
+	// DNSCredentialSecretName names this lab's own DNS credential secret, set
+	// alongside DNSOwnIssuer. Empty means the shared, provider-wide default,
+	// which is what every lab predating per-lab issuers uses.
+	DNSCredentialSecretName string `json:"dns_credential_secret_name,omitempty"`
 }
 
 // GetWorkspaceTemplates returns the lab's workspace templates. When none are

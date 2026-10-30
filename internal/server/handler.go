@@ -1277,6 +1277,11 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 	}
 
 	// Handle kubeconfig for BYOK mode
+	//
+	// clusterKeyForLab identifies the cluster this lab lands on, for comparing it
+	// against the labs already there. It stays empty for a lab that provisions
+	// its own cluster, which is alone on it by construction.
+	var clusterKeyForLab string
 	if useExistingCluster {
 		kubeconfigContent, clusterProfile, err := h.kubeconfigFromFormOrProfile(r)
 		if err != nil {
@@ -1298,6 +1303,31 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 			config.ExternalKubeconfig = kubeconfigContent
 			config.ClusterProfile = clusterProfile
 		})
+		clusterKeyForLab = clusterKey(&LabConfig{
+			UseExistingCluster: true,
+			ExternalKubeconfig: kubeconfigContent,
+			ClusterProfile:     clusterProfile,
+		})
+	}
+
+	// Joining a cluster that already has labs on it means giving this one a
+	// namespace of its own and reusing the shared ingress/cert-manager/DNS-01
+	// plumbing rather than installing a second copy. Runs here because it needs
+	// the kubeconfig resolved above to tell which cluster this is, and before
+	// executeLabJobWithID below, which turns the config into Pulumi settings.
+	//
+	// The neighbours are collected before the config is locked for writing:
+	// gathering them takes a read lock on every other job, and taking those
+	// while holding this job's write lock would invert the lock order.
+	var clusterNotices []string
+	neighbours := clusterNeighbours(h.jobManager.GetAllJobs(), clusterKeyForLab, jobID)
+	if len(neighbours) > 0 {
+		h.updateJobConfig(jobID, func(config *LabConfig) {
+			clusterNotices = adoptSharedCluster(config, jobID, neighbours)
+		})
+		for _, notice := range clusterNotices {
+			log.Printf("Lab %s joining a shared cluster: %s", jobID, notice)
+		}
 	}
 
 	auditAction := "lab.create"
@@ -1311,6 +1341,7 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 	// Return job status div for HTMX to display with proper polling, preceded by
 	// any warning about a configuration that deploys but will not work.
 	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprint(w, renderClusterNotices(clusterNotices))
 	fmt.Fprint(w, renderConfigWarnings(labConfigWarnings(initialConfig)))
 	fmt.Fprint(w, html)
 }
@@ -1325,6 +1356,24 @@ func renderConfigWarnings(warnings []string) string {
 	b.WriteString(`<div class="warning-message"><h3>Check your DNS setup</h3><ul>`)
 	for _, warning := range warnings {
 		fmt.Fprintf(&b, `<li>%s</li>`, template.HTMLEscapeString(warning))
+	}
+	b.WriteString(`</ul></div>`)
+	return b.String()
+}
+
+// renderClusterNotices renders what joining an already-occupied cluster changed
+// about a lab's configuration, returning "" for the ordinary case of a lab that
+// has the cluster to itself. Separate from renderConfigWarnings because these
+// are not DNS warnings: they are settings EasyLab altered on the admin's behalf,
+// and saying so is the whole point.
+func renderClusterNotices(notices []string) string {
+	if len(notices) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="warning-message"><h3>This cluster already hosts another lab</h3><ul>`)
+	for _, notice := range notices {
+		fmt.Fprintf(&b, `<li>%s</li>`, template.HTMLEscapeString(notice))
 	}
 	b.WriteString(`</ul></div>`)
 	return b.String()
@@ -5516,6 +5565,16 @@ func (h *Handler) RetryJobWithConfig(w http.ResponseWriter, r *http.Request) {
 		editedConfig.DNSCredentials = originalConfig.DNSCredentials
 		editedConfig.DNSProfile = originalConfig.DNSProfile
 	}
+
+	// A lab that joined a shared cluster with its own ClusterIssuer and DNS
+	// credential secret keeps them. These two are decided by EasyLab at deploy
+	// time, not by the admin, so the edit form has no field to round-trip them —
+	// and losing them is not a cosmetic reset. The lab would fall back to the
+	// cluster-wide secret name and apply its own credentials over the one a
+	// sibling lab owns, reinstall the fixed-name solver webhook over the existing
+	// one, and on destroy leave its own credentials behind on the cluster.
+	editedConfig.DNSOwnIssuer = originalConfig.DNSOwnIssuer
+	editedConfig.DNSCredentialSecretName = originalConfig.DNSCredentialSecretName
 
 	// A DNS-provider selection with no (or a mismatched) zone can only fail deep
 	// inside pulumi up, after minutes of provisioning. Reject it here.

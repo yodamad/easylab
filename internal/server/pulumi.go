@@ -1182,7 +1182,11 @@ func (pe *PulumiExecutor) Destroy(jobID string) error {
 // what it does not own would make exactly those labs impossible to destroy.
 func (pe *PulumiExecutor) destroyOptions(ctx context.Context, jobID string, stack auto.Stack, writer *jobOutputWriter, stackName string, useExistingCluster bool) []optdestroy.Option {
 	// Keep only the URNs this stack actually holds.
-	sharedURNs := sharedInfraURNs(stackName, useExistingCluster)
+	sharedURNs := sharedInfraURNs(stackName, destroyExclusions{
+		useExistingCluster:       useExistingCluster,
+		sharedWorkspaceNamespace: pe.workspaceNamespaceShared(jobID),
+		ownsDNSIssuer:            pe.ownsDNSIssuer(jobID),
+	})
 	if len(sharedURNs) > 0 {
 		knownURNs, urnErr := stackResourceURNs(ctx, stack)
 		if urnErr != nil {
@@ -1345,22 +1349,61 @@ func (pe *PulumiExecutor) handleFailedUp(jobID string, prep *JobPreparation, upR
 // Kubernetes provider, hence on the cluster, its node pool, network and
 // gateway. Excluding them there leaves the whole cloud infrastructure running
 // while the lab is reported destroyed.
-func sharedInfraURNs(stackName string, useExistingCluster bool) []string {
-	if !useExistingCluster {
+// destroyExclusions describes what a lab shares with the other labs on its
+// cluster, and so what its teardown must leave standing. Grouped into a struct
+// because these are independent facts about one lab, and four positional
+// booleans at the call site would be unreadable.
+type destroyExclusions struct {
+	// useExistingCluster gates everything: on a dedicated cluster nothing may be
+	// excluded, since an excluded resource keeps the whole cluster alive with it.
+	useExistingCluster bool
+	// sharedWorkspaceNamespace is true while another lab is in this lab's
+	// workspace namespace.
+	sharedWorkspaceNamespace bool
+	// ownsDNSIssuer is true for a lab with its own ClusterIssuer and credential
+	// secret, rather than the cluster-wide ones.
+	ownsDNSIssuer bool
+}
+
+func sharedInfraURNs(stackName string, opts destroyExclusions) []string {
+	if !opts.useExistingCluster {
 		return nil
 	}
-	return []string{
+	urns := []string{
 		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:core/v1:Namespace::cert-manager-ns", stackName),
 		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:helm.sh/v3:Release::cert-manager", stackName),
 		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:core/v1:Namespace::traefik-ns", stackName),
 		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:helm.sh/v3:Release::traefik", stackName),
-		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:cert-manager.io/v1:ClusterIssuer::letsencrypt-prod-issuer", stackName),
-		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:core/v1:Secret::dns-credentials-secret", stackName),
 		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:rbac.authorization.k8s.io/v1:Role::cert-manager-webhook-ovh-secret-reader", stackName),
 		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:rbac.authorization.k8s.io/v1:RoleBinding::cert-manager-webhook-ovh-secret-reader", stackName),
 		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:core/v1:Namespace::cert-manager-webhook-ovh-ns", stackName),
 		fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:helm.sh/v3:Release::cert-manager-webhook-ovh", stackName),
 	}
+
+	// The ClusterIssuer and the DNS credential secret are shared only while they
+	// carry the cluster-wide names. A lab with its own issuer owns both outright —
+	// nothing else references them — so it has to take them with it, or every
+	// such destroy leaves a dead issuer and a live copy of its DNS credentials
+	// behind on the cluster.
+	if !opts.ownsDNSIssuer {
+		urns = append(urns,
+			fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:cert-manager.io/v1:ClusterIssuer::letsencrypt-prod-issuer", stackName),
+			fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:core/v1:Secret::dns-credentials-secret", stackName),
+		)
+	}
+
+	// Every lab's program creates the workspace namespace, so on a shared
+	// cluster the second lab's stack adopts the first lab's namespace rather
+	// than making its own — and deleting it on teardown would take the other
+	// lab's workspaces, volumes, portal and wildcard certificate with it. Only
+	// excluded while another lab is actually in there: a lab alone in its
+	// namespace must still be able to remove it, or every destroy leaves a
+	// namespace and its volumes behind.
+	if opts.sharedWorkspaceNamespace {
+		urns = append(urns, fmt.Sprintf("urn:pulumi:%s::easylab::kubernetes:core/v1:Namespace::workspace-namespace", stackName))
+	}
+
+	return urns
 }
 
 // stackResourceURNs returns the set of resource URNs currently recorded in the
@@ -1586,6 +1629,16 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 		}
 		if config.DNSAlreadyConfigured {
 			commands = append(commands, configCommand{"dns:alreadyConfigured", "true", false})
+		}
+		// Per-lab issuer and secret names are emitted only for the labs that have
+		// them. A lab created before per-lab issuers existed emits neither, the
+		// program falls back to the shared provider-wide names, and its stack sees
+		// byte-identical objects under identical URNs.
+		if config.DNSOwnIssuer {
+			commands = append(commands, configCommand{"dns:ownIssuer", "true", false})
+		}
+		if config.DNSCredentialSecretName != "" {
+			commands = append(commands, configCommand{"dns:credentialSecretName", config.DNSCredentialSecretName, false})
 		}
 		if dnsP, _ := dnsregistry.Get(config.DNSProvider); dnsP != nil {
 			for _, f := range dnsP.GetCredentialFields() {

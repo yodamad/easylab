@@ -501,6 +501,46 @@ func TestGetConfigCommands_DNSAlreadyConfigured(t *testing.T) {
 	}
 }
 
+// A lab deployed before per-lab issuers existed carries neither new field, and
+// must emit neither new config key: the Pulumi program then falls back to the
+// cluster-wide names and the stack sees the objects it already has. This is the
+// unit-testable half of the "no existing stack churns" guarantee; the other half
+// is a zero-change `pulumi preview` on a deployed lab.
+func TestGetConfigCommands_PerLabIssuerKeysAreOptIn(t *testing.T) {
+	legacy := &LabConfig{
+		Domain:      "lab.example.com",
+		DNSProvider: "ovh",
+		DNSZone:     "example.com",
+	}
+	perLab := &LabConfig{
+		Domain:                  "two.example.com",
+		DNSProvider:             "ovh",
+		DNSZone:                 "two.example",
+		DNSOwnIssuer:            true,
+		DNSCredentialSecretName: "dns-credentials-ovh-two",
+		ClusterIssuerName:       "easylab-two",
+	}
+
+	keys := func(cfg *LabConfig) map[string]string {
+		pe := &PulumiExecutor{}
+		out := map[string]string{}
+		for _, c := range pe.getConfigCommands(cfg) {
+			out[c.key] = c.value
+		}
+		return out
+	}
+
+	legacyKeys := keys(legacy)
+	assert.NotContains(t, legacyKeys, "dns:ownIssuer")
+	assert.NotContains(t, legacyKeys, "dns:credentialSecretName")
+	assert.NotContains(t, legacyKeys, "lab:clusterIssuerName")
+
+	perLabKeys := keys(perLab)
+	assert.Equal(t, "true", perLabKeys["dns:ownIssuer"])
+	assert.Equal(t, "dns-credentials-ovh-two", perLabKeys["dns:credentialSecretName"])
+	assert.Equal(t, "easylab-two", perLabKeys["lab:clusterIssuerName"])
+}
+
 func TestGetConfigCommands_ClusterIssuerName(t *testing.T) {
 	installCertM := false
 
@@ -840,7 +880,7 @@ func TestSharedInfraURNs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			urns := sharedInfraURNs("dev", tt.useExistingCluster)
+			urns := sharedInfraURNs("dev", destroyExclusions{useExistingCluster: tt.useExistingCluster})
 			require.Len(t, urns, tt.expectedCount)
 			for _, urn := range urns {
 				assert.True(t, strings.HasPrefix(urn, "urn:pulumi:dev::easylab::kubernetes:"), urn)

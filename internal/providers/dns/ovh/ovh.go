@@ -46,46 +46,22 @@ func (p *OVHDNSProvider) SetupCertManagerDNS01(
 	zone string,
 	credSecretName string,
 	certManagerNamespace string,
+	installWebhook bool,
 	deps []pulumi.Resource,
 ) (dns.SolverSpec, *helmv3.Release, error) {
 	if strings.TrimSpace(certManagerNamespace) == "" {
 		certManagerNamespace = "cert-manager"
 	}
 
-	webhookNs, err := k8score.NewNamespace(ctx, "cert-manager-webhook-ovh-ns", &k8score.NamespaceArgs{
-		Metadata: &k8smeta.ObjectMetaArgs{
-			Name: pulumi.String("cert-manager-webhook-ovh"),
-		},
-	}, pulumi.Provider(k8sProvider), pulumi.DependsOn(deps))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create webhook namespace: %w", err)
-	}
-
-	webhookDeps := append(deps, webhookNs)
-
-	webhookRelease, err := helmv3.NewRelease(ctx, "cert-manager-webhook-ovh", &helmv3.ReleaseArgs{
-		Chart:           pulumi.String("cert-manager-webhook-ovh"),
-		Name:            pulumi.String("cert-manager-webhook-ovh"),
-		Namespace:       webhookNs.Metadata.Name(),
-		CreateNamespace: pulumi.Bool(false),
-		RepositoryOpts: &helmv3.RepositoryOptsArgs{
-			Repo: pulumi.String("https://aureq.github.io/cert-manager-webhook-ovh"),
-		},
-		Version: pulumi.String("0.9.10"),
-		Values: pulumi.Map{
-			"groupName": pulumi.String("acme.baarde.ch"),
-			// The chart's domain-solver ClusterRoleBinding subject is built from
-			// this: without it, it silently falls back to its own default
-			// ("cert-manager"), which is wrong whenever cert-manager runs
-			// elsewhere and leaves DNS-01 challenges stuck forever.
-			"certManager": pulumi.Map{
-				"namespace": pulumi.String(certManagerNamespace),
-			},
-		},
-		Timeout: pulumi.Int(600),
-	}, pulumi.Provider(k8sProvider), pulumi.DependsOn(webhookDeps))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to install cert-manager-webhook-ovh: %w", err)
+	// The webhook is one cluster-wide install serving every ClusterIssuer on the
+	// cluster; only its namespace and Helm release are skipped here, never the
+	// solver spec below, which is what carries this lab's own credentials.
+	var webhookRelease *helmv3.Release
+	if installWebhook {
+		var err error
+		if webhookRelease, err = installOVHWebhook(ctx, k8sProvider, certManagerNamespace, deps); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	endpoint := utils.DNSConfigOptional(ctx, utils.DNSOvhEndpoint)
@@ -117,6 +93,53 @@ func (p *OVHDNSProvider) SetupCertManagerDNS01(
 	}
 
 	return solverSpec, webhookRelease, nil
+}
+
+// installOVHWebhook installs the DNS-01 solver webhook and the namespace it runs
+// in. Both carry fixed names, so exactly one lab per cluster may do this.
+func installOVHWebhook(
+	ctx *pulumi.Context,
+	k8sProvider *k8s.Provider,
+	certManagerNamespace string,
+	deps []pulumi.Resource,
+) (*helmv3.Release, error) {
+	webhookNs, err := k8score.NewNamespace(ctx, "cert-manager-webhook-ovh-ns", &k8score.NamespaceArgs{
+		Metadata: &k8smeta.ObjectMetaArgs{
+			Name: pulumi.String("cert-manager-webhook-ovh"),
+		},
+	}, pulumi.Provider(k8sProvider), pulumi.DependsOn(deps))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create webhook namespace: %w", err)
+	}
+
+	webhookDeps := append(deps, webhookNs)
+
+	webhookRelease, err := helmv3.NewRelease(ctx, "cert-manager-webhook-ovh", &helmv3.ReleaseArgs{
+		Chart:           pulumi.String("cert-manager-webhook-ovh"),
+		Name:            pulumi.String("cert-manager-webhook-ovh"),
+		Namespace:       webhookNs.Metadata.Name(),
+		CreateNamespace: pulumi.Bool(false),
+		RepositoryOpts: &helmv3.RepositoryOptsArgs{
+			Repo: pulumi.String("https://aureq.github.io/cert-manager-webhook-ovh"),
+		},
+		Version: pulumi.String("0.9.10"),
+		Values: pulumi.Map{
+			"groupName": pulumi.String("acme.baarde.ch"),
+			// The chart's domain-solver ClusterRoleBinding subject is built from
+			// this: without it, it silently falls back to its own default
+			// ("cert-manager"), which is wrong whenever cert-manager runs
+			// elsewhere and leaves DNS-01 challenges stuck forever.
+			"certManager": pulumi.Map{
+				"namespace": pulumi.String(certManagerNamespace),
+			},
+		},
+		Timeout: pulumi.Int(600),
+	}, pulumi.Provider(k8sProvider), pulumi.DependsOn(webhookDeps))
+	if err != nil {
+		return nil, fmt.Errorf("failed to install cert-manager-webhook-ovh: %w", err)
+	}
+
+	return webhookRelease, nil
 }
 
 // CreateARecord creates an A record in the OVH DNS zone: subdomain.zone → ip.

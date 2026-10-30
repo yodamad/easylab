@@ -538,6 +538,48 @@ The following components are deployed into the cluster:
     Infrastructure** cluster this has no visible effect either, since the
     underlying Kubernetes cluster is destroyed anyway.
 
+    The **workspace namespace** is preserved on the same terms, but only while
+    another lab is actually in it: deleting a namespace a sibling lab shares would
+    take that lab's workspaces, volumes, portal and wildcard certificate with it.
+    A lab alone in its namespace still removes it, so an ordinary destroy does not
+    leave a namespace and its volumes behind. Labs created on a shared cluster get
+    [a namespace each](#running-a-second-domain-on-the-same-cluster) anyway, so
+    this applies mainly to labs that were already sharing one.
+
+    A lab with **its own ClusterIssuer and credential secret** — see [how
+    certificates are issued on a shared
+    cluster](#how-certificates-are-issued-on-a-shared-cluster) — is the one
+    exception that destroys them with itself. Nothing else references them, so
+    leaving them would strand a dead issuer and a live copy of that lab's DNS
+    credentials on the cluster. The shared solver webhook is still left alone.
+    cert-manager's own ACME account key for that issuer (a Secret named after it,
+    in the cert-manager namespace) is not Pulumi's to delete and does stay behind;
+    it is an account key, not provider credentials, but it accumulates one per lab
+    on a long-lived cluster.
+
+!!! warning "What the shared-cluster checks can and cannot see"
+    EasyLab decides what a lab shares by comparing it against the labs **in its own
+    job history**. Three cases fall outside that, and in each the namespace is
+    treated as this lab's alone and removed with it:
+
+    * a workspace namespace that already existed on the cluster before any lab used
+      it — including one **Detect from cluster** offered you, since it offers a
+      namespace precisely because it exists;
+    * a lab created by a *different* EasyLab instance pointed at the same cluster;
+    * a lab whose job record was pruned, or lost with the data directory.
+
+    Clusters are matched on their API server address, normalised for case, default
+    port and trailing slash. Two kubeconfigs that name one cluster differently in
+    substance — an IP in one and a DNS name in the other — still read as two
+    clusters, and then neither lab is protected from the other. Use the same
+    [cluster profile](admin.md#cluster-profiles) for every lab on a cluster and this
+    does not arise.
+
+    Also note that the **first** lab on a cluster keeps the provider-wide
+    `dns-credentials-<provider>` secret, which is deliberately never destroyed — so
+    its DNS credentials remain in the cert-manager namespace even after it is the
+    last lab to go. Remove it by hand when retiring a cluster.
+
 !!! note "The nip.io fallback needs a routable LoadBalancer IP"
     nip.io resolves an IP embedded in the hostname, so the fallback only applies when
     the ingress controller has an external **IP**. On a cluster whose LoadBalancer
@@ -617,6 +659,10 @@ pool, or for co-locating them with a specific pool for cost or locality reasons.
     Leave it on **Set it up for me** (the default) for the first lab on a cluster, or
     if you're not sure.
 
+    You rarely have to set this by hand: as described in [Running a second domain on
+    the same cluster](#running-a-second-domain-on-the-same-cluster) below, EasyLab
+    recognises a cluster that already has a lab on it and switches this on for you.
+
     Choosing **Already configured** also reveals **Existing ClusterIssuer Name**.
     EasyLab requests certificates from a ClusterIssuer named `letsencrypt-prod` by
     default and, on a fresh cert-manager, creates one under that name itself — but
@@ -635,6 +681,64 @@ pool, or for co-locating them with a specific pool for cost or locality reasons.
     automatic** and **Already configured**, because this field is only reachable
     there and a DNS-01 issuer has nothing to issue for a Quick start lab. The Apply
     note says so before you press it, and the domain mode stays editable afterwards.
+
+#### Running a second domain on the same cluster
+
+Several labs, each with its own domain, can share one [Use Existing
+Cluster](#use-existing-cluster) Kubernetes cluster. EasyLab sets this up for you: when
+you deploy a lab onto a cluster that already has a lab on it, it recognises the cluster
+(by its API server, or by the [cluster profile](admin.md#cluster-profiles) you picked)
+and adjusts the new lab before any infrastructure is created. The lab page lists every
+change it made under **This cluster already hosts another lab**.
+
+What it changes:
+
+* **A workspace namespace of its own**, derived from the lab's stack name — `workshops-<stack>`, falling back to a unique suffix if that is taken too. This is the change that makes a second domain possible at all. Each lab's wildcard certificate is named `easylab-wildcard-tls` inside its namespace, and one certificate cannot cover two unrelated domains, so two labs sharing a namespace would fight over it. Separate namespaces also keep each lab's student workspaces, volumes and image registry apart. A namespace you set yourself is respected, unless another lab already holds it.
+* **Reuse of the ingress controller and cert-manager** already on the cluster, instead of installing a second copy. A second install fails outright, because the Helm release names are fixed.
+* **A working DNS-01 setup**, in one of two ways depending on your DNS credentials — see below. Recreating the ClusterIssuer, solver webhook and DNS credential secret is what produces a `had an apply conflict` failure on `dns-credentials-<provider>`: the credential secret is one fixed-name object per DNS provider, and the second lab's deployment cannot take fields the first lab's owns.
+
+Each lab still gets its own A-records, since each has its own domain and ingress IP, and
+you still fill in the DNS provider, zone and credentials.
+
+##### How certificates are issued on a shared cluster
+
+A cert-manager `ClusterIssuer` carries exactly one DNS-01 solver with one credential
+secret reference. So whether a joining lab can reuse the existing issuer depends
+entirely on whether the credentials behind it can also write *this* lab's zone — and
+EasyLab decides by comparing the credentials you entered against the sitting lab's:
+
+| Your DNS credentials | What happens |
+|---|---|
+| **Same** as the lab already on the cluster | The existing ClusterIssuer, solver webhook and credential secret are reused as-is. This is the **Already configured** setting, applied for you. |
+| **Different** — e.g. a per-zone OVH consumer key | The lab gets **its own ClusterIssuer and its own credential secret**, named after the lab, and reuses only the DNS-01 solver webhook. The webhook is cluster-wide and serves any number of issuers, each carrying its own credentials. |
+| **Left blank** | The existing issuer is reused, and certificates are issued with the other lab's credentials — there is nothing else to build an issuer from. |
+
+This comparison **overrides an explicit Already configured choice**, including one
+applied by [Detect from cluster](#detect-from-cluster). Reusing an issuer whose
+credentials cannot write your zone is not a setting that merely performs worse — it
+cannot work, and it fails without an error at deploy time: the solver webhook answers
+the ACME challenge with the other account's keys and OVH returns
+`404 Client::NotFound: "This service does not exist"` for a zone that account does not
+hold. The lab deploys green and no certificate is ever issued. The notice on the lab
+page says when this override happened and why.
+
+The second case is why two domains in zones needing different provider keys can share
+one cluster. Reusing the issuer there would be silent failure, not an error:
+cert-manager would attempt the challenge with credentials that cannot write the zone,
+the `CertificateRequest` would sit pending forever, and workspaces would be served the
+ingress controller's own self-signed certificate.
+
+Only the lab that *installs* the solver webhook may install it — its namespace, Helm
+release and the secret-reader RBAC grant all carry fixed names. That grant covers every
+secret in the cert-manager namespace, so it already covers a joining lab's own
+credential secret.
+
+!!! warning "ExternalDNS cannot be shared"
+    Its namespace, credential secret and Helm release all have fixed names and are
+    created even when DNS-01 is already configured, so a second lab with the
+    [ExternalDNS](#externaldns-optional) strategy conflicts no matter how it is
+    configured. Use the **Wildcard record** strategy for at least one of the two labs.
+    EasyLab warns if it sees this combination.
 
 #### DNS Provider (Optional)
 
