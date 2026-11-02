@@ -196,6 +196,308 @@ var TemplateEditor = (function () {
                 var idx = parseInt(row.getAttribute('data-template-index'), 10) || 0;
                 var container = row.querySelector(spec[1]);
                 if (container) container.appendChild(spec[2](idx, '', ''));
+                renderSummary(row);
+            });
+        });
+        wireRowState(row);
+    }
+
+    // The row-level listeners, bound once per row element. wireRowButtons is called
+    // again after every reindex, and unlike the "+ Add …" buttons these are not
+    // re-created by that, so a flag is what keeps them from stacking.
+    function wireRowState(row) {
+        if (!row.hasAttribute('data-ws-bound')) {
+            row.setAttribute('data-ws-bound', 'true');
+            row.addEventListener('input', function () {
+                forgetPreset(row);
+                renderSummary(row);
+            });
+            row.addEventListener('change', function (e) {
+                forgetPreset(row);
+                var field = e.target && e.target.getAttribute && e.target.getAttribute('data-field');
+                if (field === 'ide') setTemplateIDE(row, rowIDE(row));
+                else renderSummary(row);
+            });
+        }
+        setTemplateIDE(row, rowIDE(row));
+    }
+
+    // ---- "What students will get" -------------------------------------------
+
+    // The defaults the kube backend applies when a field is left blank
+    // (internal/providers/workspace/kube). They are repeated here so the summary
+    // can state them rather than leaving the admin to guess what empty means.
+    var DEFAULT_IMAGE = 'codercom/code-server:latest';
+    var DEFAULT_CPU = '500m';
+    var DEFAULT_MEMORY = '1Gi';
+    var DEFAULT_DISK = '5Gi';
+
+    function fieldValue(row, field) {
+        var node = row.querySelector('[data-field="' + field + '"]');
+        return node && node.value ? node.value.trim() : '';
+    }
+
+    function fieldChecked(row, field) {
+        var node = row.querySelector('input[type="checkbox"][data-field="' + field + '"]');
+        return !!(node && node.checked);
+    }
+
+    function rowIDE(row) {
+        var checked = row.querySelector('input[type="radio"][data-field="ide"]:checked');
+        return checked ? checked.value : '';
+    }
+
+    // setTemplateIDE applies everything that follows from the editor choice.
+    //
+    // The conflicting fields are disabled rather than just hidden, because
+    // disabled fields are not submitted: validateIDEFeatures rejects extensions,
+    // a subfolder or a home_dir that does not belong to the chosen IDE outright,
+    // so a value left behind by a change of mind would fail the whole lab.
+    function setTemplateIDE(row, ide) {
+        var openchamber = ide === 'openchamber';
+        row.classList.toggle('is-openchamber', openchamber);
+        ['git_folder', 'extensions'].forEach(function (field) {
+            var node = row.querySelector('[data-field="' + field + '"]');
+            if (!node) return;
+            if (openchamber) node.value = '';
+            node.disabled = openchamber;
+        });
+        var home = row.querySelector('[data-field="home_dir"]');
+        if (home) {
+            if (!openchamber) home.value = '';
+            home.disabled = !openchamber;
+        }
+        renderSummary(row);
+    }
+
+    // renderSummary restates the row as the sentence a student would recognise.
+    // Every field in the form is optional, so without this a beginner who touches
+    // nothing has no way of telling that the lab already hands out a working IDE.
+    function renderSummary(row) {
+        var list = row.querySelector('.ws-summary-lines');
+        if (!list) return;
+
+        var openchamber = rowIDE(row) === 'openchamber';
+        var image = fieldValue(row, 'image');
+        var lines = [];
+
+        lines.push(openchamber
+            ? 'An AI coding agent (OpenChamber)'
+            : 'VS Code in the browser (code-server)');
+
+        if (image) lines.push('Runs ' + image);
+        else if (openchamber) lines.push('No image set yet — an agent workspace needs one');
+        else lines.push('Runs ' + DEFAULT_IMAGE + ' (the default)');
+
+        var repo = fieldValue(row, 'git_repo');
+        if (repo) {
+            var clone = 'Clones ' + repo;
+            var branch = fieldValue(row, 'git_branch');
+            if (branch) clone += ' (' + branch + ')';
+            var folder = fieldValue(row, 'git_folder');
+            if (folder) clone += ', opening ' + folder + '/';
+            lines.push(clone);
+        } else {
+            lines.push('Nothing cloned — an empty workspace');
+        }
+
+        lines.push((fieldValue(row, 'cpu') || DEFAULT_CPU) + ' CPU, ' +
+            (fieldValue(row, 'memory') || DEFAULT_MEMORY) + ' memory');
+
+        lines.push(fieldChecked(row, 'ephemeral')
+            ? 'Ephemeral — the student’s work is lost whenever the pod moves'
+            : (fieldValue(row, 'disk_size') || DEFAULT_DISK) + ' volume — the student’s work is kept');
+
+        var extras = [];
+        [
+            ['.template-sidecars-container .template-variable-row', 'sidecar', 'sidecars'],
+            ['.template-mounts-container .template-variable-row', 'mount', 'mounts'],
+            ['.template-variables-container .template-variable-row', 'environment variable', 'environment variables'],
+        ].forEach(function (spec) {
+            var n = row.querySelectorAll(spec[0]).length;
+            if (n) extras.push(n + ' ' + (n === 1 ? spec[1] : spec[2]));
+        });
+        var extensions = fieldValue(row, 'extensions')
+            .split(',')
+            .map(function (s) { return s.trim(); })
+            .filter(function (s) { return s !== ''; });
+        if (extensions.length) {
+            extras.push(extensions.length + (extensions.length === 1 ? ' extension' : ' extensions'));
+        }
+        if (fieldValue(row, 'startup_script')) extras.push('a startup script');
+        if (extras.length) lines.push('Plus ' + extras.join(', '));
+
+        list.innerHTML = '';
+        lines.forEach(function (text) {
+            var li = document.createElement('li');
+            li.className = 'ws-summary-line';
+            li.textContent = text;
+            list.appendChild(li);
+        });
+    }
+
+    // ---- Starting points ----------------------------------------------------
+
+    function setByName(scope, name, value) {
+        var node = scope.querySelector('[name="' + name + '"]');
+        if (node) node.value = value == null ? '' : String(value);
+    }
+
+    // Env maps reach the sidecar form as one "KEY=VAL,KEY2=VAL2" string, which is
+    // the shape parseSidecarsFromForm expects.
+    function envPairs(env) {
+        return Object.keys(env || {}).map(function (k) { return k + '=' + env[k]; }).join(',');
+    }
+
+    // clearRow resets a row to its defaults, so a preset describes the whole
+    // template rather than merging into whatever was there before.
+    function clearRow(row) {
+        row.querySelectorAll('[data-field]').forEach(function (node) {
+            if (node.type === 'checkbox') node.checked = false;
+            else if (node.type === 'radio') node.checked = node.value === '';
+            else node.value = '';
+        });
+        ['.template-variables-container', '.template-sidecars-container',
+            '.template-mounts-container', '.template-nodeselector-container'].forEach(function (sel) {
+            var container = row.querySelector(sel);
+            if (container) container.innerHTML = '';
+        });
+    }
+
+    // The row remembers which starting point put its values there, so switching
+    // between two of them is one click rather than a confirmation each time. The
+    // first edit the admin makes drops the claim, and from then on a preset would
+    // be overwriting their own work.
+    function forgetPreset(row) {
+        if (!row.hasAttribute('data-ws-preset')) return;
+        row.removeAttribute('data-ws-preset');
+        document.querySelectorAll('#templates-presets .ws-preset').forEach(function (card) {
+            card.classList.remove('selected');
+        });
+    }
+
+    // A row nobody has filled in yet can be replaced without asking.
+    function rowIsPristine(row) {
+        var filled = false;
+        row.querySelectorAll('[data-field]').forEach(function (node) {
+            if (filled) return;
+            if (node.type === 'checkbox') filled = node.checked;
+            else if (node.type === 'radio') filled = node.checked && node.value !== '';
+            else if (node.getAttribute('data-field') !== 'name') filled = node.value.trim() !== '';
+        });
+        return !filled && row.querySelectorAll('.template-variable-row').length === 0;
+    }
+
+    function applyPreset(row, preset) {
+        if (!preset) return;
+        var idx = parseInt(row.getAttribute('data-template-index'), 10) || 0;
+        clearRow(row);
+
+        var ide = preset.ide || '';
+        var ideRadio = row.querySelector('input[type="radio"][data-field="ide"][value="' + ide + '"]');
+        if (ideRadio) ideRadio.checked = true;
+        // Before the rest: it decides which of the fields below are submittable.
+        setTemplateIDE(row, ide);
+
+        ['name', 'description', 'image', 'home_dir', 'git_repo', 'git_branch', 'git_folder',
+            'cpu', 'cpu_limit', 'memory', 'memory_limit', 'disk_size', 'storage_class',
+            'startup_script', 'dotfiles_repo'].forEach(function (field) {
+            var node = row.querySelector('[data-field="' + field + '"]');
+            if (node && preset[field] != null) node.value = preset[field];
+        });
+
+        var extensions = row.querySelector('[data-field="extensions"]');
+        if (extensions && preset.extensions) extensions.value = preset.extensions.join(', ');
+
+        [['git_shallow', 'git_shallow'], ['ephemeral', 'ephemeral']].forEach(function (pair) {
+            var node = row.querySelector('input[type="checkbox"][data-field="' + pair[0] + '"]');
+            if (node) node.checked = !!preset[pair[1]];
+        });
+
+        var envContainer = row.querySelector('.template-variables-container');
+        if (envContainer && preset.env) {
+            Object.keys(preset.env).forEach(function (key) {
+                envContainer.appendChild(createVariableRow(idx, key, preset.env[key]));
+            });
+        }
+
+        var sidecarContainer = row.querySelector('.template-sidecars-container');
+        if (sidecarContainer && preset.sidecars) {
+            preset.sidecars.forEach(function (sidecar) {
+                var div = createSidecarRow(idx);
+                setByName(div, 'template_' + idx + '_sidecar_name', sidecar.name);
+                setByName(div, 'template_' + idx + '_sidecar_image', sidecar.image);
+                setByName(div, 'template_' + idx + '_sidecar_ports', (sidecar.ports || []).join(','));
+                setByName(div, 'template_' + idx + '_sidecar_env', envPairs(sidecar.env));
+                setByName(div, 'template_' + idx + '_sidecar_capabilities', (sidecar.capabilities || []).join(','));
+                if (sidecar.privileged) {
+                    // The checkbox is cosmetic; the hidden input beside it is what posts.
+                    var hidden = div.querySelector('input[type="hidden"][name$="_sidecar_privileged"]');
+                    var box = div.querySelector('.sidecar-privileged input[type="checkbox"]');
+                    if (hidden) hidden.value = 'true';
+                    if (box) box.checked = true;
+                }
+                sidecarContainer.appendChild(div);
+            });
+        }
+
+        var mountContainer = row.querySelector('.template-mounts-container');
+        if (mountContainer && preset.mounts) {
+            preset.mounts.forEach(function (mount) {
+                var div = createMountRow(idx);
+                setByName(div, 'template_' + idx + '_mount_type', mount.type);
+                setByName(div, 'template_' + idx + '_mount_name', mount.name);
+                setByName(div, 'template_' + idx + '_mount_path', mount.path);
+                mountContainer.appendChild(div);
+            });
+        }
+
+        var nodeSelectorContainer = row.querySelector('.template-nodeselector-container');
+        if (nodeSelectorContainer && preset.node_selector) {
+            Object.keys(preset.node_selector).forEach(function (key) {
+                nodeSelectorContainer.appendChild(
+                    createNodeSelectorRow(idx, key, preset.node_selector[key]));
+            });
+        }
+
+        // Open the groups the preset wrote into, so what it did is visible rather
+        // than hidden behind a collapsed disclosure the admin never opens.
+        row.querySelectorAll('details.ws-group').forEach(function (group) {
+            var touched = false;
+            group.querySelectorAll('[data-field]').forEach(function (node) {
+                if (node.type === 'checkbox') touched = touched || node.checked;
+                else touched = touched || node.value.trim() !== '';
+            });
+            if (group.querySelectorAll('.template-variable-row').length) touched = true;
+            if (touched) group.open = true;
+        });
+
+        renderSummary(row);
+    }
+
+    // The preset cards fill the first template row — the only one a beginner has,
+    // and the one the drawer always has.
+    function wirePresets() {
+        var cards = document.querySelectorAll('#templates-presets .ws-preset');
+        if (!cards.length) return;
+        cards.forEach(function (card) {
+            card.addEventListener('click', function () {
+                var row = document.querySelector('#workspace-templates-container .template-row');
+                if (!row) return;
+                var title = (card.querySelector('.ws-preset-title') || {}).textContent || 'this preset';
+                if (!row.hasAttribute('data-ws-preset') && !rowIsPristine(row) &&
+                    !confirm('Replace what you have filled in with the "' + title.trim() + '" starting point?')) {
+                    return;
+                }
+                var preset;
+                try {
+                    preset = JSON.parse(card.getAttribute('data-preset') || '{}');
+                } catch (err) {
+                    return;
+                }
+                applyPreset(row, preset);
+                row.setAttribute('data-ws-preset', card.getAttribute('data-preset-id') || '');
+                cards.forEach(function (other) { other.classList.toggle('selected', other === card); });
             });
         });
     }
@@ -240,6 +542,10 @@ var TemplateEditor = (function () {
         var formMode = el('templates-form-mode');
         var dcMode = el('templates-devcontainer-mode');
         var yamlMode = el('templates-yaml-mode');
+        // The starting points fill the form builder's fields, so they belong to it:
+        // the other two paths have their own (a real repo, and "Insert skeleton").
+        var presets = el('templates-presets');
+        if (presets) presets.style.display = useForm ? '' : 'none';
         if (formMode) formMode.style.display = useForm ? '' : 'none';
         if (dcMode) dcMode.style.display = mode === 'devcontainer' ? '' : 'none';
         if (yamlMode) yamlMode.style.display = mode === 'yaml' ? '' : 'none';
@@ -254,6 +560,13 @@ var TemplateEditor = (function () {
             formMode.querySelectorAll('input, select, textarea').forEach(function (field) {
                 field.disabled = !useForm;
             });
+            // Re-enabling the section just undid the per-row IDE gating, which
+            // also works by disabling fields. Put it back.
+            if (useForm) {
+                formMode.querySelectorAll('.template-row').forEach(function (row) {
+                    setTemplateIDE(row, rowIDE(row));
+                });
+            }
         }
         if (dcMode) {
             dcMode.querySelectorAll('input, select, textarea').forEach(function (field) {
@@ -495,10 +808,14 @@ var TemplateEditor = (function () {
         }
 
         document.querySelectorAll('#templates-form-mode .template-row').forEach(wireRowButtons);
+        wirePresets();
         refreshCredentialOptions();
 
-        var modeInput = el('templates_mode');
-        setTemplatesMode(modeInput ? modeInput.value : 'form');
+        // The hidden templates_mode input cannot tell devcontainer from yaml (both
+        // submit "yaml"), so the opening mode is whichever picker button the markup
+        // renders as selected.
+        var selectedMode = document.querySelector('[data-templates-mode].selected');
+        setTemplatesMode(selectedMode ? selectedMode.getAttribute('data-templates-mode') : 'form');
         setDevcontainerSource('git');
     }
 
@@ -511,6 +828,8 @@ var TemplateEditor = (function () {
         createSidecarRow: createSidecarRow,
         createMountRow: createMountRow,
         wireRowButtons: wireRowButtons,
+        renderSummary: renderSummary,
+        applyPreset: applyPreset,
         templatesFormData: templatesFormData,
         setTemplatesMode: setTemplatesMode,
         setDevcontainerSource: setDevcontainerSource,

@@ -941,7 +941,8 @@ main {
     font-size: 0.875rem;
 }
 
-.ut-step-body > .checkbox-label input[type="checkbox"] {
+.ut-step-body > .checkbox-label input[type="checkbox"],
+.ut-step-body > .checkbox-label input[type="radio"] {
     width: auto;
     flex: none;
     margin: 0;
@@ -1001,6 +1002,178 @@ main {
     .wizard-credentials > summary::before {
         transition: none;
     }
+}
+
+/* Grouped disclosures inside a template row: one per purpose (size, setup,
+   image, extras, placement) instead of a single "Advanced options" pile, each
+   naming what is inside so an admin knows before opening whether to bother. */
+.ws-group > summary {
+    flex-wrap: wrap;
+}
+
+.ws-group-hint {
+    margin-left: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 400;
+    color: var(--text-light);
+}
+
+/* The numbered steps are not .form-group, so their hints need the same treatment
+   .form-group small already gets. */
+.ut-step-body > small {
+    display: block;
+    margin-top: 0.5rem;
+    color: var(--text-light);
+    font-size: 0.75rem;
+}
+
+/* The editor choice. The note belongs to the radio above it, so it is pulled
+   tight under it and indented past the box. */
+.ut-step-body > .ws-ide-note {
+    margin: 0.125rem 0 0.75rem 1.65rem;
+}
+
+.ut-step-body > .ws-ide-note:last-child {
+    margin-bottom: 0;
+}
+
+/* Fields the chosen IDE cannot honour. JS disables them as well as hiding them,
+   since a value left behind would be submitted and rejected. */
+.template-row .ws-openchamber-only,
+.template-row.is-openchamber .ws-vscode-only {
+    display: none;
+}
+
+.template-row.is-openchamber .ws-openchamber-only {
+    display: block;
+}
+
+/* ---- Starting points ---- */
+
+.ws-presets {
+    margin-bottom: 1.5rem;
+}
+
+.ws-presets-label {
+    display: block;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.ws-presets-hint {
+    margin: 0.25rem 0 0.75rem;
+    font-size: 0.875rem;
+    color: var(--text-light);
+}
+
+.ws-preset-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 0.75rem;
+}
+
+.ws-preset {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.875rem;
+    text-align: left;
+    background: var(--background);
+    border: 2px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    font-family: inherit;
+}
+
+.ws-preset:hover {
+    border-color: var(--primary-color);
+    box-shadow: var(--shadow);
+}
+
+.ws-preset:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+.ws-preset.selected {
+    border-color: var(--primary-color);
+    background: rgba(37, 99, 235, 0.06);
+}
+
+.ws-preset-icon {
+    font-size: 1.25rem;
+    line-height: 1;
+}
+
+.ws-preset-title {
+    font-weight: 600;
+    color: var(--text);
+}
+
+.ws-preset-desc {
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    color: var(--text-light);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ws-preset {
+        transition: none;
+    }
+}
+
+/* ---- "What students will get" ---- */
+
+.ws-summary {
+    margin-bottom: 1rem;
+    padding: 0.75rem 0.875rem;
+    background: var(--background);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--primary-color);
+    border-radius: var(--radius);
+}
+
+.ws-summary-title {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-light);
+}
+
+.ws-summary-lines {
+    margin: 0.375rem 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ws-summary-line {
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--text);
+}
+
+.ws-add-template-hint {
+    display: block;
+    margin-top: 0.5rem;
+    font-size: 0.8125rem;
+    color: var(--text-light);
+}
+
+/* ---- The workspace source picker (leads the Templates step) ---- */
+
+.ws-source-picker {
+    margin-bottom: 1.5rem;
+}
+
+.ws-source-picker-label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text);
 }
 
 .form-actions {

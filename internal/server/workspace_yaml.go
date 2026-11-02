@@ -662,10 +662,25 @@ func validateMounts(where string, mounts []WorkspaceMount) error {
 // active mode: the wizard's inputs are only hidden, not removed, so preferring
 // them here would silently deploy something other than what the admin sees.
 func workspaceTemplatesFromRequest(r *http.Request) ([]WorkspaceTemplate, error) {
-	if getFormValue(r, "templates_mode") != "yaml" {
-		return parseWorkspaceTemplatesFromForm(r), nil
+	if getFormValue(r, "templates_mode") == "yaml" {
+		return parseWorkspaceTemplatesYAML(getFormValue(r, "templates_yaml"))
 	}
-	return parseWorkspaceTemplatesYAML(getFormValue(r, "templates_yaml"))
+
+	templates := parseWorkspaceTemplatesFromForm(r)
+	// An empty form is not an error: a lab with no template at all falls back to
+	// a default code-server workspace. Anything the admin did fill in, though,
+	// goes through exactly the checks the YAML editor applies — duplicate names,
+	// an OpenChamber template with no image, ephemeral combined with a disk size.
+	// Form mode skipped all of them until now, so those labs were accepted here
+	// and broke later, when a student asked for a workspace.
+	if len(templates) == 0 {
+		return nil, nil
+	}
+	if err := validateWorkspaceTemplates(templates); err != nil {
+		return nil, err
+	}
+	normalizeIDE(templates)
+	return templates, nil
 }
 
 // filenameSafe strips anything that could break out of a Content-Disposition header.

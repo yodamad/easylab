@@ -512,22 +512,25 @@ recreating the lab.
 The drawer *is* the wizard's [**Workspace Templates**
 step](admin-lab-creation.md#configure-workspaces) — the same editor, rendered from the
 same source — so every option available when creating a lab is available here, and the
-three ways to define a workspace are the same:
+three ways to define a workspace are the same, in the same order. The drawer opens
+on **From a devcontainer**; click **Build with a form** for the form builder:
 
 ![Add Template drawer](screens/add-template-drawer.png){width=480}
 
-* **Build with a form** — template name and description, git repository (branch and
-  subfolder), then **Advanced options** for the git credential, image,
-  CPU/memory/disk with independent limits, startup script, dotfiles, extensions,
-  environment variables, sidecars, mounts, and node selectors.
 * **From a devcontainer** — name and describe the template, then point at a workshop
   repository (or upload a `devcontainer.json` / repository `.zip`). The devcontainer
   can live in the workshop repository or in a separate, shared config repository; the
   build cache can be an external registry or one EasyLab hosts in the cluster; and
-  resource overrides sit under **Advanced options**. EasyLab reads the devcontainer,
+  resource overrides sit under the importer's own **Advanced options**. EasyLab reads the devcontainer,
   generates the template YAML, and opens it for review before you add it. The name is
   required here too, so an import cannot silently reuse the name of a template already
   on the lab.
+* **Build with a form** — the same **Start from** cards, the same **What students
+  will get** summary, and the same three visible decisions (name, editor, exercises
+  repository), with the rest in the **Size & storage**, **Setup on start**, **Image
+  & private access**, **Extras** and **Placement** groups. The credential pickers
+  list the lab's real credentials rather than ones being defined, since this lab
+  already has a cluster.
 * **Paste YAML** — write (or **Validate**, or **Insert skeleton**, or **Upload file**)
   the template YAML directly. The document may define more than one template, and all
   are appended.
@@ -772,7 +775,7 @@ Two kinds:
 * **Git repository** — a username and token. Referenced from a workspace template
   as `git_auth_secret`. In the wizard's **Build with a form** path a single git
   credential is wired into every template with a private repo automatically; with
-  several, pick the one each template uses under its **Advanced options → Git
+  several, pick the one each template uses under its **Image & private access → Git
   credential**. Leave the username blank and it defaults to `oauth2`, which is what
   GitLab expects with a personal access token.
 

@@ -701,6 +701,113 @@ func TestWorkspaceTemplatesFromRequest(t *testing.T) {
 	}
 }
 
+// Form mode used to skip validateWorkspaceTemplates entirely, so a lab could be
+// created from the wizard with config the YAML editor would have refused and only
+// break later, when a student asked for a workspace.
+func TestWorkspaceTemplatesFromRequest_ValidatesFormMode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		form    url.Values
+		wantErr string
+	}{
+		{
+			name: "duplicate template names",
+			form: url.Values{
+				"templates_mode":  {"form"},
+				"template_0_name": {"workspace"},
+				"template_1_name": {"workspace"},
+			},
+			wantErr: "duplicate template name",
+		},
+		{
+			name: "openchamber without an image",
+			form: url.Values{
+				"templates_mode":  {"form"},
+				"template_0_name": {"agent-lab"},
+				"template_0_ide":  {"openchamber"},
+			},
+			wantErr: "requires image",
+		},
+		{
+			name: "ephemeral combined with a disk size",
+			form: url.Values{
+				"templates_mode":       {"form"},
+				"template_0_name":      {"workspace"},
+				"template_0_ephemeral": {"true"},
+				"template_0_disk_size": {"10Gi"},
+			},
+			wantErr: "ephemeral",
+		},
+		{
+			name: "home_dir on a code-server template",
+			form: url.Values{
+				"templates_mode":      {"form"},
+				"template_0_name":     {"workspace"},
+				"template_0_home_dir": {"/home/coder"},
+			},
+			wantErr: "home_dir",
+		},
+		{
+			name: "git repo that is not a URL",
+			form: url.Values{
+				"templates_mode":      {"form"},
+				"template_0_name":     {"workspace"},
+				"template_0_git_repo": {"not a url"},
+			},
+			wantErr: "git_repo",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			req := postForm(t, "/api/labs", tt.form)
+			require.NoError(t, req.ParseForm())
+
+			_, err := workspaceTemplatesFromRequest(req)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+// A wizard submitted with no template at all still means "give students the
+// default code-server workspace", so an empty form must not be rejected as
+// "no workspace templates defined".
+func TestWorkspaceTemplatesFromRequest_EmptyFormIsNotAnError(t *testing.T) {
+	t.Parallel()
+
+	req := postForm(t, "/api/labs", url.Values{"templates_mode": {"form"}})
+	require.NoError(t, req.ParseForm())
+
+	got, err := workspaceTemplatesFromRequest(req)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+// The form is the only place an admin can pick OpenChamber, and template_N_ide
+// was read by the parser long before any input emitted it.
+func TestWorkspaceTemplatesFromRequest_FormCarriesIDEAndHomeDir(t *testing.T) {
+	t.Parallel()
+
+	req := postForm(t, "/api/labs", url.Values{
+		"templates_mode":      {"form"},
+		"template_0_name":     {"agent-lab"},
+		"template_0_ide":      {"openchamber"},
+		"template_0_image":    {"registry.example.com/openchamber:1"},
+		"template_0_home_dir": {"/home/node"},
+	})
+	require.NoError(t, req.ParseForm())
+
+	got, err := workspaceTemplatesFromRequest(req)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, workspace.IDEOpenChamber, got[0].IDE)
+	assert.Equal(t, "/home/node", got[0].HomeDir)
+}
+
 func TestWorkspaceTemplatesFromRequest_InvalidYAMLErrors(t *testing.T) {
 	t.Parallel()
 

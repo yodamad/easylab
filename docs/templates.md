@@ -14,9 +14,18 @@ reference and the wizard form, see [Configure workspaces](admin-lab-creation.md#
 
 ## Using these examples
 
+Five of the recipes below are also one click in the editor itself: the **Start
+from** cards on the wizard's **Templates** step (and in the **Add Template**
+drawer) fill the form with
+[Minimal](#minimal), [A git-backed workshop](#a-git-backed-workshop),
+[A database sidecar](#a-database-sidecar),
+[Docker inside a workspace](#docker-inside-a-workspace) and
+[AI labs with OpenChamber](#ai-labs-with-openchamber). Use those when you want to
+edit the setup in the form; use the YAML below when you want the whole document.
+
 1. Go to **New Lab** and walk through to the **Templates** step — or open **Add
    Template** on an existing lab's detail page, which is the same editor.
-2. Choose **Paste YAML**.
+2. At the top of the step, under **How do you want to define your workspace?**, choose **Paste YAML**.
 3. Paste an example below (or save it as a `.yaml` file and use **Upload file**).
 4. Click **Validate** — it checks the document without creating anything.
 5. Finish the wizard and click **Create Lab** (or **Add Template** in the drawer).
@@ -55,6 +64,7 @@ validation instead of silently shipping a lab without its image.
 | `env` | map | Environment variables for the workspace container. |
 | `sidecars` | list | Extra containers in the pod: `name`, `image`, `ports`, `env`, `privileged`, `capabilities`. |
 | `mounts` | list | Existing ConfigMaps/Secrets: `type` (`configmap` \| `secret`), `name`, `path`. Mounted **read-only**. |
+| `node_selector` | map | Node labels this template's workspace pods are pinned to, e.g. `pool: workspaces`. Only meaningful on a cluster whose nodes carry matching labels. |
 | `image_pull_secrets` | list | Names of registry credentials used to pull this template's images. See [Private registries and repositories](#private-registries-and-repositories). |
 | `git_auth_secret` | string | Name of a git credential used to clone a private `git_repo`. **http(s) only.** See [Private registries and repositories](#private-registries-and-repositories). |
 | `devcontainer` | map | Builds the image from the repo's `devcontainer.json` instead of using `image`. See [Devcontainer workshops](#devcontainer-workshops). |
@@ -619,8 +629,8 @@ see [Private registries and repositories](#private-registries-and-repositories).
 
 ### Importing a devcontainer
 
-Rather than writing the block by hand, choose **From a devcontainer** in the
-Templates step — or in the **Add Template** drawer on an existing lab. It reads a
+Rather than writing the block by hand, choose **From a devcontainer** (the first
+source, and the one selected when it opens) in the Templates step — or in the **Add Template** drawer on an existing lab. It reads a
 `devcontainer.json` — by cloning a repo, or from a `devcontainer.json` / repository
 `.zip` you upload — fills the template in, and reports anything in the devcontainer
 that will not take effect. The result is ordinary YAML: review and edit it before
@@ -807,7 +817,9 @@ the bake still works, without that guarantee.)
 
 ## AI labs with OpenChamber
 
-For a workshop about *working with an AI coding agent*, set `ide: openchamber`.
+For a workshop about *working with an AI coding agent*, set `ide: openchamber` —
+in YAML, or by picking **An AI coding agent** under **Editor** on the form's
+**Templates** step.
 [OpenChamber](https://github.com/openchamber/openchamber) is an MIT-licensed web UI
 around the [OpenCode](https://opencode.ai) agent: agent chats, several models run in
 parallel on the same task in their own git worktrees, inline diff review, session

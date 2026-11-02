@@ -2388,7 +2388,6 @@ if (btnAddTemplate && templateRowTmpl) {
             el.setAttribute('for', 'template_file_' + nextIdx);
         });
         newRow.querySelector('input[data-field="name"]').value = '';
-        newRow.querySelector('input[data-field="git_branch"]').value = 'main';
         templatesContainer.appendChild(newRow);
         reindexTemplateRows();
         updateRowSourceVisibility(newRow);

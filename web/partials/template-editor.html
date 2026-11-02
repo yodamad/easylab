@@ -10,12 +10,20 @@
 
   Two entry points:
 
-    template-editor-wizard   modes + credential rows + N templates
-    template-editor-drawer   modes + one template + auto-bake
+    template-editor-wizard   presets + N templates + credential rows + modes
+    template-editor-drawer   presets + one template + modes + auto-bake
 
-  A third, template-editor-autobake, is the automatic bake option on its own: the
-  drawer ends with it, and the wizard renders it in its Workspace step (Step 5)
-  rather than here, since there it is a setting of the lab, not of one template.
+  The order on screen is deliberate. The step asks for the source first: the mode
+  picker leads, and the step opens on the devcontainer import, since most
+  workshops already have a repo with a .devcontainer. The form builder is one click
+  away on the picker; choosing it reveals a row of ready-made starting points, then
+  the template itself, with each row opening on a summary of what a student
+  actually ends up with. The YAML editor is the third choice on the picker.
+
+  A third define, template-editor-autobake, is the automatic bake option on its
+  own: the drawer ends with it, and the wizard renders it in its Workspace step
+  (Step 5) rather than here, since there it is a setting of the lab, not of one
+  template.
 
   The credential *rows* are wizard-only: they create credentials that are written
   to the cluster once it is provisioned. A lab that already exists has a live
@@ -28,15 +36,17 @@
 */}}
 
 {{define "template-editor-wizard"}}
-{{template "template-editor-modes" .}}
+{{template "template-editor-modes"}}
+{{template "template-editor-presets" .WorkspacePresets}}
+{{template "template-editor-panels" true}}
 
 <details class="wizard-credentials">
     <summary>
-        <span class="wizard-credentials-title">Registry &amp; Git credentials</span>
-        <span class="wizard-credentials-hint">Optional — define private tokens your templates can reference</span>
+        <span class="wizard-credentials-title">Private repositories &amp; registries</span>
+        <span class="wizard-credentials-hint">Optional — only if a template above pulls from somewhere that needs a token</span>
     </summary>
     <p class="wizard-credentials-intro">
-        Add a registry or git token here if a template below references one
+        Add a registry or git token here if a template above references one
         (<code>image_pull_secrets</code>, <code>git_auth_secret</code>, or a
         devcontainer <code>registry_auth_secret</code>). Tokens are written to the
         lab's cluster once it is provisioned and are not stored anywhere else.
@@ -77,12 +87,12 @@
     </div>
 </template>
 
-{{template "template-editor-panels" true}}
 {{end}}
 
 
 {{define "template-editor-drawer"}}
-{{template "template-editor-modes" .}}
+{{template "template-editor-modes"}}
+{{template "template-editor-presets" .WorkspacePresets}}
 {{template "template-editor-panels" false}}
 {{template "template-editor-autobake" .Lab.AutoBake}}
 {{end}}
@@ -106,25 +116,55 @@
 {{end}}
 
 
-{{/* The three-way source picker. templates_mode only ever holds "form" or
-     "yaml" — the devcontainer path resolves to yaml, since it fills the editor
-     with a generated document the admin reviews before submitting. */}}
-{{define "template-editor-modes"}}
-<div class="form-group">
-    <label>How do you want to define your workspace?</label>
-    <div class="button-group">
-        <button type="button" class="source-button selected" data-templates-mode="form" id="templates-mode-form">
-            <span class="source-icon">&#128221;</span>
-            <div class="source-content">
-                <span class="source-title">Build with a form</span>
-                <span class="source-description">Fill in the fields for each workspace</span>
-            </div>
+{{/* Ready-made starting points, from internal/server/workspace_presets.go. Each
+     card carries its whole template as JSON; clicking one is purely client-side
+     (TemplateEditor.applyPreset), so a preset is a head start the admin then edits
+     rather than anything the lab records. . is the preset slice.
+
+     Shown with the form builder only — the devcontainer and YAML paths have their
+     own starting points (an actual repo, and "Insert skeleton"), so
+     setTemplatesMode hides this block alongside #templates-form-mode. The step
+     opens on the devcontainer import, so these cards appear once the admin picks
+     "Build with a form". */}}
+{{define "template-editor-presets"}}
+<div id="templates-presets" class="ws-presets">
+    <span class="ws-presets-label">Start from</span>
+    <p class="ws-presets-hint">Fills the form below with a setup that works, ready to edit. Skip it and you get a plain VS Code workspace.</p>
+    <div class="ws-preset-grid">
+        {{range .}}
+        <button type="button" class="ws-preset" data-preset-id="{{.ID}}" data-preset="{{.TemplateJSON}}">
+            <span class="ws-preset-icon" aria-hidden="true">{{.Icon}}</span>
+            <span class="ws-preset-title">{{.Title}}</span>
+            <span class="ws-preset-desc">{{.Description}}</span>
         </button>
-        <button type="button" class="source-button" data-templates-mode="devcontainer" id="templates-mode-devcontainer">
+        {{end}}
+    </div>
+</div>
+{{end}}
+
+
+{{/* The three-way source picker, rendered first: the step asks where the
+     workspace is defined before showing any fields, and opens on the devcontainer
+     import (the button carrying "selected"; template-editor.js init() reads it).
+     templates_mode only ever holds "form" or "yaml" — the devcontainer path
+     resolves to yaml, since it fills the editor with a generated document the admin
+     reviews before submitting — so it renders as "yaml" to match the opening mode. */}}
+{{define "template-editor-modes"}}
+<div class="ws-source-picker">
+    <span class="ws-source-picker-label">How do you want to define your workspace?</span>
+    <div class="button-group">
+        <button type="button" class="source-button selected" data-templates-mode="devcontainer" id="templates-mode-devcontainer">
             <span class="source-icon">&#128230;</span>
             <div class="source-content">
                 <span class="source-title">From a devcontainer</span>
                 <span class="source-description">Import a repo's .devcontainer</span>
+            </div>
+        </button>
+        <button type="button" class="source-button" data-templates-mode="form" id="templates-mode-form">
+            <span class="source-icon">&#128221;</span>
+            <div class="source-content">
+                <span class="source-title">Build with a form</span>
+                <span class="source-description">Fill in the fields below</span>
             </div>
         </button>
         <button type="button" class="source-button" data-templates-mode="yaml" id="templates-mode-yaml">
@@ -135,7 +175,7 @@
             </div>
         </button>
     </div>
-    <input type="hidden" id="templates_mode" name="templates_mode" value="form">
+    <input type="hidden" id="templates_mode" name="templates_mode" value="yaml">
 </div>
 {{end}}
 
@@ -359,8 +399,9 @@
     </div>
     {{if .}}
     <button type="button" id="btn-add-template" class="btn btn-secondary btn-add-template">
-        <span class="btn-icon">+</span> Add Template
+        <span class="btn-icon">+</span> Add another template
     </button>
+    <small class="ws-add-template-hint">A second template gives students a choice when they open the lab. One is enough for most workshops.</small>
     {{end}}
 </div>
 
@@ -375,7 +416,18 @@
 
 {{/* One template's fields. Always emitted at index 0 — the wizard reindexes
      cloned rows in JS, and the drawer only ever has this one. . is the
-     multi-template flag, which decides whether the row is removable. */}}
+     multi-template flag, which decides whether the row is removable.
+
+     Three things are always visible — the name, the editor and the repo — because
+     they are the three decisions that change what a student sees. Everything else
+     is grouped by what it is for rather than piled into one "Advanced options"
+     list, so an admin opening a group knows before they open it whether their
+     question is answered inside.
+
+     The .ws-summary card at the top is written by TemplateEditor.renderSummary
+     from the fields below, defaults included. It exists because every field here
+     is optional: without it, a beginner who touches nothing has no way of knowing
+     the lab already gives their students a working IDE. */}}
 {{define "template-editor-row"}}
 <div class="template-row" data-template-index="0">
     {{if .}}
@@ -385,20 +437,43 @@
     </div>
     {{end}}
     <div class="template-row-content">
+        <div class="ws-summary">
+            <span class="ws-summary-title">What students will get</span>
+            <ul class="ws-summary-lines" aria-live="polite"></ul>
+        </div>
         <div class="ut-step">
             <div class="ut-step-header">
                 <span class="ut-step-number" aria-hidden="true">1</span>
-                <span class="ut-step-label">Template name</span>
+                <span class="ut-step-label">Name it</span>
             </div>
             <div class="ut-step-body">
                 <input type="text" name="template_0_name" data-field="name" class="ut-name-input"{{if .}} value="default"{{else}} placeholder="e.g. docker-workspace" autocomplete="off"{{end}} required>
                 <input type="text" name="template_0_description" data-field="description" class="ut-name-input" placeholder="Description (optional) — what this template provides">
+                <small>Students see both when they pick a workspace. The name must be unique within the lab.</small>
             </div>
         </div>
         <div class="ut-step">
             <div class="ut-step-header">
                 <span class="ut-step-number" aria-hidden="true">2</span>
-                <span class="ut-step-label">Git repository</span>
+                <span class="ut-step-label">Editor</span>
+            </div>
+            <div class="ut-step-body">
+                <label class="checkbox-label">
+                    <input type="radio" name="template_0_ide" data-field="ide" value="" checked>
+                    VS Code in the browser
+                </label>
+                <small class="ws-ide-note">code-server. Nothing to supply — this is what a workshop normally wants.</small>
+                <label class="checkbox-label">
+                    <input type="radio" name="template_0_ide" data-field="ide" value="openchamber">
+                    An AI coding agent
+                </label>
+                <small class="ws-ide-note">OpenChamber, for a lab about working with an agent. It publishes no image, so you supply one below — and it has no VS Code extensions or subfolder to open.</small>
+            </div>
+        </div>
+        <div class="ut-step">
+            <div class="ut-step-header">
+                <span class="ut-step-number" aria-hidden="true">3</span>
+                <span class="ut-step-label">Exercises repository</span>
                 <span class="ut-optional-badge">optional</span>
             </div>
             <div class="ut-step-body">
@@ -411,23 +486,12 @@
                     <input type="checkbox" name="template_0_git_shallow" data-field="git_shallow" value="true">
                     Shallow clone — faster start, no git history
                 </label>
+                <small>Cloned once, on the student's first start. Leave it empty for a workspace students fill themselves.</small>
             </div>
         </div>
-        <details class="template-advanced">
-            <summary>Advanced options</summary>
+        <details class="template-advanced ws-group">
+            <summary>Size &amp; storage<span class="ws-group-hint">CPU, memory, disk, whether work is kept</span></summary>
             <div class="template-advanced-body">
-                <div class="form-group">
-                    <label>Git credential (Optional)</label>
-                    <select name="template_0_git_auth_secret" data-field="git_auth_secret" class="template-git-cred-select">
-                        <option value="">None</option>
-                    </select>
-                    <small>Which credential from the <strong>Credentials</strong> section unlocks a private Git Repository. With a single git credential this is applied automatically.</small>
-                </div>
-                <div class="form-group">
-                    <label>Image (Optional)</label>
-                    <input type="text" name="template_0_image" data-field="image" placeholder="codercom/code-server:latest">
-                    <small>Container image override. Defaults to the code-server image.</small>
-                </div>
                 <div class="template-resources">
                     <div class="form-group">
                         <label>CPU (Optional)</label>
@@ -467,17 +531,22 @@
                     </div>
                     <small>Every workspace gets a persistent volume by default (5Gi unless Disk Size says otherwise), covering the student's whole home directory so their files, IDE settings and installed extensions survive the pod being rescheduled. Check Ephemeral only for throwaway labs: student work is then lost whenever the pod moves. Storage Class overrides the cluster default — needed on a bring-your-own cluster whose default provisioner is node-local (local-path, hostPath), which would pin the volume to one node.</small>
                 </div>
+            </div>
+        </details>
+        <details class="template-advanced ws-group">
+            <summary>Setup on start<span class="ws-group-hint">Packages, dotfiles, extensions, environment variables</span></summary>
+            <div class="template-advanced-body">
                 <div class="form-group">
                     <label>Startup Script (Optional)</label>
                     <textarea name="template_0_startup_script" data-field="startup_script" rows="4" class="monospace" placeholder="# runs before the IDE starts"></textarea>
-                    <small>Runs (best-effort) on start. code-server has passwordless sudo, so the script can install system packages with apt.</small>
+                    <small>Runs (best-effort) on start. code-server has passwordless sudo, so the script can install system packages with apt. Every student pays this cost on every start — bake anything slow into an image instead.</small>
                 </div>
                 <div class="form-group">
                     <label>Dotfiles Repository (Optional)</label>
                     <input type="text" name="template_0_dotfiles_repo" data-field="dotfiles_repo" placeholder="https://github.com/you/dotfiles">
                     <small>Cloned to ~/.dotfiles; its install.sh / setup.sh / bootstrap.sh is run if present.</small>
                 </div>
-                <div class="form-group">
+                <div class="form-group ws-vscode-only">
                     <label>Extensions (Optional)</label>
                     <input type="text" name="template_0_extensions" data-field="extensions" placeholder="golang.go, ms-python.python">
                     <small>Comma-separated VS Code extension IDs installed on start.</small>
@@ -492,6 +561,33 @@
                     <small>Environment variables passed to the workspace container.</small>
                     <div class="template-variables-container"></div>
                 </div>
+            </div>
+        </details>
+        <details class="template-advanced ws-group">
+            <summary>Image &amp; private access<span class="ws-group-hint">Run your own image, or clone a private repo</span></summary>
+            <div class="template-advanced-body">
+                <div class="form-group">
+                    <label>Image (Optional)</label>
+                    <input type="text" name="template_0_image" data-field="image" placeholder="codercom/code-server:latest">
+                    <small>Container image override. Defaults to the code-server image; <strong>required</strong> for an AI agent workspace, which has no default to fall back to.</small>
+                </div>
+                <div class="form-group ws-openchamber-only">
+                    <label>Home Directory (Optional)</label>
+                    <input type="text" name="template_0_home_dir" data-field="home_dir" placeholder="/home/openchamber">
+                    <small>The home directory inside your own image, where the workspace volume is mounted. Upstream's image uses <code>/home/openchamber</code>; set this only if yours is built on another base. Agent workspaces only.</small>
+                </div>
+                <div class="form-group">
+                    <label>Git credential (Optional)</label>
+                    <select name="template_0_git_auth_secret" data-field="git_auth_secret" class="template-git-cred-select">
+                        <option value="">None</option>
+                    </select>
+                    <small>Which credential from the <strong>Private repositories &amp; registries</strong> section unlocks a private Git Repository. With a single git credential this is applied automatically.</small>
+                </div>
+            </div>
+        </details>
+        <details class="template-advanced ws-group">
+            <summary>Extras<span class="ws-group-hint">A database or other sidecar, mounted config</span></summary>
+            <div class="template-advanced-body">
                 <div class="template-variables-section">
                     <div class="template-variables-header">
                         <label>Sidecars</label>
@@ -499,7 +595,7 @@
                             <button type="button" class="btn btn-secondary btn-add-sidecar">+ Add Sidecar</button>
                         </div>
                     </div>
-                    <small>Extra containers in the pod (e.g. a database), reachable from the IDE at localhost:&lt;port&gt;.</small>
+                    <small>Extra containers in the pod (e.g. a database), reachable from the IDE at localhost:&lt;port&gt;. Each student gets their own.</small>
                     <div class="template-sidecars-container"></div>
                 </div>
                 <div class="template-variables-section">
@@ -512,7 +608,12 @@
                     <small>Mount an existing ConfigMap/Secret (in the workspace namespace) into the container.</small>
                     <div class="template-mounts-container"></div>
                 </div>
-                <div class="template-variables-section template-nodeselector-section">
+            </div>
+        </details>
+        <details class="template-advanced ws-group template-nodeselector-section">
+            <summary>Placement<span class="ws-group-hint">Which nodes these workspaces run on</span></summary>
+            <div class="template-advanced-body">
+                <div class="template-variables-section">
                     <div class="template-variables-header">
                         <label>Node Selector</label>
                         <div class="template-variables-actions">

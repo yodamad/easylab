@@ -28,15 +28,32 @@ test.describe('Workspace template editor', () => {
     await expect(page.locator('.wizard-step[data-step="6"]')).toBeVisible();
   });
 
+  // The row's knobs are split across grouped disclosures (size, setup, image,
+  // extras, placement) rather than one "Advanced options" list.
+  async function openGroups(scope: any) {
+    await scope.locator('details.ws-group')
+      .evaluateAll((groups: HTMLDetailsElement[]) => groups.forEach(g => { g.open = true; }));
+  }
+
+  // The step opens on the devcontainer import, so anything driving the form
+  // builder's fields has to pick it first.
+  async function openFormBuilder(page: any) {
+    await page.locator('#templates-mode-form').click();
+    await expect(page.locator('#templates-form-mode')).toBeVisible();
+  }
+
   test('offers every field the form builder submits', async ({ page }) => {
+    await openFormBuilder(page);
     const fields = [
       'name', 'description', 'git_repo', 'git_branch', 'git_folder', 'git_shallow',
-      'git_auth_secret', 'image', 'cpu', 'cpu_limit', 'memory',
+      'git_auth_secret', 'image', 'home_dir', 'cpu', 'cpu_limit', 'memory',
       'memory_limit', 'disk_size', 'startup_script', 'dotfiles_repo', 'extensions',
     ];
     for (const field of fields) {
       await expect(page.locator(`#templates-form-mode [name="template_0_${field}"]`)).toHaveCount(1);
     }
+    // The editor choice is a radio group, so it has one input per IDE.
+    await expect(page.locator('#templates-form-mode [name="template_0_ide"]')).toHaveCount(2);
 
     // The four kinds of repeating row.
     for (const container of [
@@ -45,6 +62,67 @@ test.describe('Workspace template editor', () => {
     ]) {
       await expect(page.locator(`#templates-form-mode ${container}`)).toHaveCount(1);
     }
+  });
+
+  test('says what students get before anything is filled in', async ({ page }) => {
+    await openFormBuilder(page);
+    const summary = page.locator('#workspace-templates-container .template-row .ws-summary').first();
+    await expect(summary).toBeVisible();
+    // Every field on the step is optional, so the untouched defaults have to be
+    // stated somewhere or a beginner cannot tell the lab already works.
+    await expect(summary).toContainText('code-server');
+    await expect(summary).toContainText('codercom/code-server:latest');
+    await expect(summary).toContainText('Nothing cloned');
+    await expect(summary).toContainText('5Gi volume');
+
+    await page.locator('#templates-form-mode [name="template_0_git_repo"]').fill('https://gitlab.com/o/r.git');
+    await expect(summary).toContainText('Clones https://gitlab.com/o/r.git');
+  });
+
+  test('a starting point fills the form and opens what it touched', async ({ page }) => {
+    // The starting points belong to the form builder, so they are hidden until it
+    // is chosen.
+    await expect(page.locator('#templates-presets')).toBeHidden();
+    await openFormBuilder(page);
+    await expect(page.locator('#templates-presets')).toBeVisible();
+    await page.locator('.ws-preset[data-preset-id="workshop-database"]').click();
+
+    await expect(page.locator('#templates-form-mode [name="template_0_name"]')).toHaveValue('api-workshop');
+    await expect(page.locator('#templates-form-mode [name="template_0_git_repo"]')).not.toHaveValue('');
+    await expect(page.locator('[name="template_0_sidecar_image"]')).toHaveValue('postgres:16');
+    await expect(page.locator('[name="template_0_env_name"]')).toHaveValue('DATABASE_URL');
+    // The groups a preset wrote into open, so its work is visible rather than
+    // buried in a collapsed disclosure.
+    await expect(page.locator('[name="template_0_sidecar_image"]')).toBeVisible();
+
+    const summary = page.locator('#workspace-templates-container .template-row .ws-summary').first();
+    await expect(summary).toContainText('1 sidecar');
+  });
+
+  test('choosing the agent IDE withdraws the fields it cannot honour', async ({ page }) => {
+    await openFormBuilder(page);
+    const extensions = page.locator('#templates-form-mode [name="template_0_extensions"]');
+    const gitFolder = page.locator('#templates-form-mode [name="template_0_git_folder"]');
+    const homeDir = page.locator('#templates-form-mode [name="template_0_home_dir"]');
+
+    await expect(homeDir).toBeDisabled();
+    await expect(extensions).toBeEnabled();
+
+    await page.locator('#templates-form-mode [name="template_0_ide"][value="openchamber"]').check();
+
+    // validateIDEFeatures rejects these outright for OpenChamber, so they are
+    // disabled (and therefore not submitted) rather than merely hidden.
+    await expect(extensions).toBeDisabled();
+    await expect(gitFolder).toBeDisabled();
+    await expect(homeDir).toBeEnabled();
+
+    const summary = page.locator('#workspace-templates-container .template-row .ws-summary').first();
+    await expect(summary).toContainText('OpenChamber');
+    await expect(summary).toContainText('No image set yet');
+
+    await page.locator('#templates-form-mode [name="template_0_ide"][value=""]').check();
+    await expect(extensions).toBeEnabled();
+    await expect(homeDir).toBeDisabled();
   });
 
   test('automatic baking is a workspace setting, off by default and submitted with the lab', async ({ page }) => {
@@ -72,25 +150,33 @@ test.describe('Workspace template editor', () => {
     const templateName = page.locator('#templates-form-mode [name="template_0_name"]');
     const devcontainerName = page.locator('#devcontainer_template_name');
 
-    await expect(mode).toHaveValue('form');
-    await expect(page.locator('#templates-form-mode')).toBeVisible();
-
-    await page.locator('#templates-mode-devcontainer').click();
+    // The picker leads the step and opens on the devcontainer import. The server
+    // only knows form vs yaml; the devcontainer path resolves to yaml.
+    await expect(page.locator('#templates-mode-devcontainer')).toHaveClass(/selected/);
+    await expect(page.locator('#templates-mode-form')).not.toHaveClass(/selected/);
+    await expect(mode).toHaveValue('yaml');
     await expect(page.locator('#templates-devcontainer-mode')).toBeVisible();
+    await expect(page.locator('#templates-form-mode')).toBeHidden();
     // Hiding is not enough: a hidden-but-required field blocks submission with an
     // error the admin cannot see, so the inactive panel is disabled outright.
     await expect(templateName).toBeDisabled();
     await expect(devcontainerName).toBeEnabled();
-    // The server only knows form vs yaml; the devcontainer path resolves to yaml.
-    await expect(mode).toHaveValue('yaml');
 
     await page.locator('#templates-mode-form').click();
+    await expect(page.locator('#templates-form-mode')).toBeVisible();
     await expect(templateName).toBeEnabled();
     await expect(devcontainerName).toBeDisabled();
     await expect(mode).toHaveValue('form');
+
+    await page.locator('#templates-mode-devcontainer').click();
+    await expect(page.locator('#templates-devcontainer-mode')).toBeVisible();
+    await expect(templateName).toBeDisabled();
+    await expect(devcontainerName).toBeEnabled();
+    await expect(mode).toHaveValue('yaml');
   });
 
   test('carries the repo and name into the devcontainer importer', async ({ page }) => {
+    await openFormBuilder(page);
     await page.locator('#templates-form-mode [name="template_0_name"]').fill('go-basics');
     await page.locator('#templates-form-mode [name="template_0_git_repo"]').fill('https://gitlab.com/o/r.git');
 
@@ -101,6 +187,7 @@ test.describe('Workspace template editor', () => {
   });
 
   test('seeds the YAML editor from the form', async ({ page }) => {
+    await openFormBuilder(page);
     await page.locator('#templates-form-mode [name="template_0_name"]').fill('go-basics');
     await page.locator('#templates-form-mode [name="template_0_git_repo"]').fill('https://gitlab.com/o/r.git');
 
@@ -154,8 +241,9 @@ test.describe('Workspace template editor', () => {
   });
 
   test('adds a repeating row of each kind, named for its template index', async ({ page }) => {
+    await openFormBuilder(page);
     const row = page.locator('#workspace-templates-container .template-row').first();
-    await row.locator('details.template-advanced > summary').click();
+    await openGroups(row);
 
     await row.locator('.btn-add-variable').click();
     await row.locator('.btn-add-sidecar').click();
@@ -169,6 +257,7 @@ test.describe('Workspace template editor', () => {
   });
 
   test('a second template reindexes, and its rows follow', async ({ page }) => {
+    await openFormBuilder(page);
     await page.locator('#btn-add-template').click();
 
     const rows = page.locator('#workspace-templates-container .template-row');
@@ -180,12 +269,13 @@ test.describe('Workspace template editor', () => {
     const second = rows.nth(1);
     await expect(second.locator('[name="template_1_name"]')).toBeVisible();
 
-    await second.locator('details.template-advanced > summary').click();
+    await openGroups(second);
     await second.locator('.btn-add-nodeselector').click();
     await expect(second.locator('[name="template_1_nodeselector_key"]')).toBeVisible();
   });
 
   test('credentials defined in the wizard reach every picker', async ({ page }) => {
+    await openFormBuilder(page);
     await page.locator('details.wizard-credentials > summary').click();
     await page.locator('#btn-add-credential').click();
 
@@ -194,7 +284,7 @@ test.describe('Workspace template editor', () => {
     await credential.locator('[name="secret_name"]').fill('gitlab-token');
 
     // A single git credential is applied automatically, which the empty option says.
-    await page.locator('#workspace-templates-container details.template-advanced > summary').first().click();
+    await openGroups(page.locator('#workspace-templates-container'));
     const picker = page.locator('#templates-form-mode .template-git-cred-select').first();
     await expect(picker.locator('option')).toHaveCount(2);
     await expect(picker.locator('option').first()).toHaveText('Auto — use gitlab-token');

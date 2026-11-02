@@ -561,8 +561,8 @@ function showUploadTemplateModal(labId, labName, existingCsv) {
     var reviewBtn = utEl('btn-devcontainer-review-yaml'); if (reviewBtn) reviewBtn.style.display = 'none';
     utResetSubmitBtn();
 
-    // Always open on the form mode with a git devcontainer source.
-    TemplateEditor.setTemplatesMode('form');
+    // Always open on the devcontainer mode with a git devcontainer source.
+    TemplateEditor.setTemplatesMode('devcontainer');
     TemplateEditor.setDevcontainerSource('git');
     TemplateEditor.setDevcontainerCacheMode('in-cluster');
 
@@ -588,6 +588,11 @@ function utClearFormContainers() {
      '.template-mounts-container', '.template-nodeselector-container'].forEach(function (sel) {
         var c = document.querySelector('#templates-form-mode ' + sel);
         if (c) c.innerHTML = '';
+    });
+    // form.reset() clears the fields a starting point filled in, so the card that
+    // filled them must stop looking chosen too.
+    document.querySelectorAll('#templates-presets .ws-preset').forEach(function (card) {
+        card.classList.remove('selected');
     });
 }
 
