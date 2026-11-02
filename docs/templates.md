@@ -25,7 +25,7 @@ edit the setup in the form; use the YAML below when you want the whole document.
 
 1. Go to **New Lab** and walk through to the **Templates** step — or open **Add
    Template** on an existing lab's detail page, which is the same editor.
-2. At the bottom of the step, choose **Paste YAML**.
+2. At the top of the step, under **How do you want to define your workspace?**, choose **Paste YAML**.
 3. Paste an example below (or save it as a `.yaml` file and use **Upload file**).
 4. Click **Validate** — it checks the document without creating anything.
 5. Finish the wizard and click **Create Lab** (or **Add Template** in the drawer).
@@ -629,8 +629,8 @@ see [Private registries and repositories](#private-registries-and-repositories).
 
 ### Importing a devcontainer
 
-Rather than writing the block by hand, choose **From a devcontainer** in the
-Templates step — or in the **Add Template** drawer on an existing lab. It reads a
+Rather than writing the block by hand, choose **From a devcontainer** (the first
+source, and the one selected when it opens) in the Templates step — or in the **Add Template** drawer on an existing lab. It reads a
 `devcontainer.json` — by cloning a repo, or from a `devcontainer.json` / repository
 `.zip` you upload — fills the template in, and reports anything in the devcontainer
 that will not take effect. The result is ordinary YAML: review and edit it before

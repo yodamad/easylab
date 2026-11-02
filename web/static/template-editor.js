@@ -811,8 +811,11 @@ var TemplateEditor = (function () {
         wirePresets();
         refreshCredentialOptions();
 
-        var modeInput = el('templates_mode');
-        setTemplatesMode(modeInput ? modeInput.value : 'form');
+        // The hidden templates_mode input cannot tell devcontainer from yaml (both
+        // submit "yaml"), so the opening mode is whichever picker button the markup
+        // renders as selected.
+        var selectedMode = document.querySelector('[data-templates-mode].selected');
+        setTemplatesMode(selectedMode ? selectedMode.getAttribute('data-templates-mode') : 'form');
         setDevcontainerSource('git');
     }
 

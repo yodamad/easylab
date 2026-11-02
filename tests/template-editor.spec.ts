@@ -35,7 +35,15 @@ test.describe('Workspace template editor', () => {
       .evaluateAll((groups: HTMLDetailsElement[]) => groups.forEach(g => { g.open = true; }));
   }
 
+  // The step opens on the devcontainer import, so anything driving the form
+  // builder's fields has to pick it first.
+  async function openFormBuilder(page: any) {
+    await page.locator('#templates-mode-form').click();
+    await expect(page.locator('#templates-form-mode')).toBeVisible();
+  }
+
   test('offers every field the form builder submits', async ({ page }) => {
+    await openFormBuilder(page);
     const fields = [
       'name', 'description', 'git_repo', 'git_branch', 'git_folder', 'git_shallow',
       'git_auth_secret', 'image', 'home_dir', 'cpu', 'cpu_limit', 'memory',
@@ -57,6 +65,7 @@ test.describe('Workspace template editor', () => {
   });
 
   test('says what students get before anything is filled in', async ({ page }) => {
+    await openFormBuilder(page);
     const summary = page.locator('#workspace-templates-container .template-row .ws-summary').first();
     await expect(summary).toBeVisible();
     // Every field on the step is optional, so the untouched defaults have to be
@@ -71,6 +80,11 @@ test.describe('Workspace template editor', () => {
   });
 
   test('a starting point fills the form and opens what it touched', async ({ page }) => {
+    // The starting points belong to the form builder, so they are hidden until it
+    // is chosen.
+    await expect(page.locator('#templates-presets')).toBeHidden();
+    await openFormBuilder(page);
+    await expect(page.locator('#templates-presets')).toBeVisible();
     await page.locator('.ws-preset[data-preset-id="workshop-database"]').click();
 
     await expect(page.locator('#templates-form-mode [name="template_0_name"]')).toHaveValue('api-workshop');
@@ -86,6 +100,7 @@ test.describe('Workspace template editor', () => {
   });
 
   test('choosing the agent IDE withdraws the fields it cannot honour', async ({ page }) => {
+    await openFormBuilder(page);
     const extensions = page.locator('#templates-form-mode [name="template_0_extensions"]');
     const gitFolder = page.locator('#templates-form-mode [name="template_0_git_folder"]');
     const homeDir = page.locator('#templates-form-mode [name="template_0_home_dir"]');
@@ -135,25 +150,33 @@ test.describe('Workspace template editor', () => {
     const templateName = page.locator('#templates-form-mode [name="template_0_name"]');
     const devcontainerName = page.locator('#devcontainer_template_name');
 
-    await expect(mode).toHaveValue('form');
-    await expect(page.locator('#templates-form-mode')).toBeVisible();
-
-    await page.locator('#templates-mode-devcontainer').click();
+    // The picker leads the step and opens on the devcontainer import. The server
+    // only knows form vs yaml; the devcontainer path resolves to yaml.
+    await expect(page.locator('#templates-mode-devcontainer')).toHaveClass(/selected/);
+    await expect(page.locator('#templates-mode-form')).not.toHaveClass(/selected/);
+    await expect(mode).toHaveValue('yaml');
     await expect(page.locator('#templates-devcontainer-mode')).toBeVisible();
+    await expect(page.locator('#templates-form-mode')).toBeHidden();
     // Hiding is not enough: a hidden-but-required field blocks submission with an
     // error the admin cannot see, so the inactive panel is disabled outright.
     await expect(templateName).toBeDisabled();
     await expect(devcontainerName).toBeEnabled();
-    // The server only knows form vs yaml; the devcontainer path resolves to yaml.
-    await expect(mode).toHaveValue('yaml');
 
     await page.locator('#templates-mode-form').click();
+    await expect(page.locator('#templates-form-mode')).toBeVisible();
     await expect(templateName).toBeEnabled();
     await expect(devcontainerName).toBeDisabled();
     await expect(mode).toHaveValue('form');
+
+    await page.locator('#templates-mode-devcontainer').click();
+    await expect(page.locator('#templates-devcontainer-mode')).toBeVisible();
+    await expect(templateName).toBeDisabled();
+    await expect(devcontainerName).toBeEnabled();
+    await expect(mode).toHaveValue('yaml');
   });
 
   test('carries the repo and name into the devcontainer importer', async ({ page }) => {
+    await openFormBuilder(page);
     await page.locator('#templates-form-mode [name="template_0_name"]').fill('go-basics');
     await page.locator('#templates-form-mode [name="template_0_git_repo"]').fill('https://gitlab.com/o/r.git');
 
@@ -164,6 +187,7 @@ test.describe('Workspace template editor', () => {
   });
 
   test('seeds the YAML editor from the form', async ({ page }) => {
+    await openFormBuilder(page);
     await page.locator('#templates-form-mode [name="template_0_name"]').fill('go-basics');
     await page.locator('#templates-form-mode [name="template_0_git_repo"]').fill('https://gitlab.com/o/r.git');
 
@@ -217,6 +241,7 @@ test.describe('Workspace template editor', () => {
   });
 
   test('adds a repeating row of each kind, named for its template index', async ({ page }) => {
+    await openFormBuilder(page);
     const row = page.locator('#workspace-templates-container .template-row').first();
     await openGroups(row);
 
@@ -232,6 +257,7 @@ test.describe('Workspace template editor', () => {
   });
 
   test('a second template reindexes, and its rows follow', async ({ page }) => {
+    await openFormBuilder(page);
     await page.locator('#btn-add-template').click();
 
     const rows = page.locator('#workspace-templates-container .template-row');
@@ -249,6 +275,7 @@ test.describe('Workspace template editor', () => {
   });
 
   test('credentials defined in the wizard reach every picker', async ({ page }) => {
+    await openFormBuilder(page);
     await page.locator('details.wizard-credentials > summary').click();
     await page.locator('#btn-add-credential').click();
 

@@ -209,6 +209,12 @@ for the lab. A template is one kind of workspace: the editor a student opens in
 their browser, optionally with your exercises repository already cloned, and how
 big it is. One template is enough for most workshops.
 
+The step starts with **How do you want to define your workspace?**, where you pick
+the source first: **From a devcontainer**, **Build with a form** or **Paste YAML**.
+The step opens on **From a devcontainer**, the import panel described in
+[Workshops with a devcontainer](#workshops-with-a-devcontainer); click **Build with
+a form** to get the fields and **Start from** cards below.
+
 Every field on this step is optional. A template you leave alone gives students
 **code-server** (VS Code in the browser) on `codercom/code-server:latest`, with
 500m CPU, 1Gi of memory and a 5Gi volume that keeps their work across restarts.
@@ -220,7 +226,7 @@ back through the fields.
 
 ##### Start from
 
-The row of cards above the template fills it in with a setup that already works,
+In **Build with a form** mode, the row of cards above the template fills it in with a setup that already works,
 ready to edit. Each one matches a recipe in
 [Workspace template examples](templates.md):
 
@@ -302,11 +308,13 @@ combined with a Disk Size, or a Git Repository that is not a URL are refused wit
 an explanation rather than producing a lab that breaks when the first student
 asks for a workspace.
 
-Below the templates, **Already have the workspace defined elsewhere?** offers two
-ways past the form:
+At the top of the step, **How do you want to define your workspace?** offers three
+ways to define it, in this order:
 
-* **From a devcontainer** — import a workshop repository's `.devcontainer`; see
+* **From a devcontainer** (selected when the step opens) — import a workshop
+  repository's `.devcontainer`; see
   [Workshops with a devcontainer](#workshops-with-a-devcontainer).
+* **Build with a form** — the fields described above, with the **Start from** cards.
 * **Paste YAML** — edit the templates as YAML directly; see
   [Editing templates as YAML](#editing-templates-as-yaml).
 
@@ -316,7 +324,7 @@ A template can also build its workspace from a workshop repository's
 
 #### Editing templates as YAML
 
-At the bottom of the **Templates** step, pick **Paste YAML** to edit the lab's
+At the top of the **Templates** step, pick **Paste YAML** to edit the lab's
 workspace templates directly instead of filling in the form — useful for labs
 with several templates, for reusing a previous workshop, or for keeping the
 configuration in a git repository. It is also the only place to reach the keys the
@@ -388,7 +396,7 @@ template can build the workspace from it instead of naming an **Image**. The
 devcontainer is built inside each student's workspace on first start, so the
 workshop's own `Dockerfile` and `features` work as written.
 
-Choose **From a devcontainer** at the top of the **Templates** step:
+The **Templates** step opens on **From a devcontainer** (if you have switched away, choose it again at the top of the step):
 
 1. Give the workspace a **Template name** — this is how students see it, and it
    must be unique within the lab. It is lowercased with dashes for anything else,

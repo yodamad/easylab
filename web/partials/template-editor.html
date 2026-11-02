@@ -13,12 +13,12 @@
     template-editor-wizard   presets + N templates + credential rows + modes
     template-editor-drawer   presets + one template + modes + auto-bake
 
-  The order on screen is deliberate. The form builder is what an admin who has
-  never written a workspace template needs, so it leads: a row of ready-made
-  starting points, then the template itself, with each row opening on a summary of
-  what a student actually ends up with. The devcontainer import and the YAML editor
-  are escape hatches for people who already know they want them, so the mode picker
-  sits at the bottom rather than asking a question first.
+  The order on screen is deliberate. The step asks for the source first: the mode
+  picker leads, and the step opens on the devcontainer import, since most
+  workshops already have a repo with a .devcontainer. The form builder is one click
+  away on the picker; choosing it reveals a row of ready-made starting points, then
+  the template itself, with each row opening on a summary of what a student
+  actually ends up with. The YAML editor is the third choice on the picker.
 
   A third define, template-editor-autobake, is the automatic bake option on its
   own: the drawer ends with it, and the wizard renders it in its Workspace step
@@ -36,6 +36,7 @@
 */}}
 
 {{define "template-editor-wizard"}}
+{{template "template-editor-modes"}}
 {{template "template-editor-presets" .WorkspacePresets}}
 {{template "template-editor-panels" true}}
 
@@ -86,14 +87,13 @@
     </div>
 </template>
 
-{{template "template-editor-modes"}}
 {{end}}
 
 
 {{define "template-editor-drawer"}}
+{{template "template-editor-modes"}}
 {{template "template-editor-presets" .WorkspacePresets}}
 {{template "template-editor-panels" false}}
-{{template "template-editor-modes"}}
 {{template "template-editor-autobake" .Lab.AutoBake}}
 {{end}}
 
@@ -123,7 +123,9 @@
 
      Shown with the form builder only — the devcontainer and YAML paths have their
      own starting points (an actual repo, and "Insert skeleton"), so
-     setTemplatesMode hides this block alongside #templates-form-mode. */}}
+     setTemplatesMode hides this block alongside #templates-form-mode. The step
+     opens on the devcontainer import, so these cards appear once the admin picks
+     "Build with a form". */}}
 {{define "template-editor-presets"}}
 <div id="templates-presets" class="ws-presets">
     <span class="ws-presets-label">Start from</span>
@@ -141,27 +143,28 @@
 {{end}}
 
 
-{{/* The three-way source picker, rendered last: the form builder is the default
-     and needs no choosing, so this reads as a way out of it rather than as the
-     first question of the step. templates_mode only ever holds "form" or "yaml" —
-     the devcontainer path resolves to yaml, since it fills the editor with a
-     generated document the admin reviews before submitting. */}}
+{{/* The three-way source picker, rendered first: the step asks where the
+     workspace is defined before showing any fields, and opens on the devcontainer
+     import (the button carrying "selected"; template-editor.js init() reads it).
+     templates_mode only ever holds "form" or "yaml" — the devcontainer path
+     resolves to yaml, since it fills the editor with a generated document the admin
+     reviews before submitting — so it renders as "yaml" to match the opening mode. */}}
 {{define "template-editor-modes"}}
-<div class="ws-escape-hatch">
-    <span class="ws-escape-hatch-label">Already have the workspace defined elsewhere?</span>
+<div class="ws-source-picker">
+    <span class="ws-source-picker-label">How do you want to define your workspace?</span>
     <div class="button-group">
-        <button type="button" class="source-button selected" data-templates-mode="form" id="templates-mode-form">
-            <span class="source-icon">&#128221;</span>
-            <div class="source-content">
-                <span class="source-title">Build with a form</span>
-                <span class="source-description">The fields above</span>
-            </div>
-        </button>
-        <button type="button" class="source-button" data-templates-mode="devcontainer" id="templates-mode-devcontainer">
+        <button type="button" class="source-button selected" data-templates-mode="devcontainer" id="templates-mode-devcontainer">
             <span class="source-icon">&#128230;</span>
             <div class="source-content">
                 <span class="source-title">From a devcontainer</span>
                 <span class="source-description">Import a repo's .devcontainer</span>
+            </div>
+        </button>
+        <button type="button" class="source-button" data-templates-mode="form" id="templates-mode-form">
+            <span class="source-icon">&#128221;</span>
+            <div class="source-content">
+                <span class="source-title">Build with a form</span>
+                <span class="source-description">Fill in the fields below</span>
             </div>
         </button>
         <button type="button" class="source-button" data-templates-mode="yaml" id="templates-mode-yaml">
@@ -172,7 +175,7 @@
             </div>
         </button>
     </div>
-    <input type="hidden" id="templates_mode" name="templates_mode" value="form">
+    <input type="hidden" id="templates_mode" name="templates_mode" value="yaml">
 </div>
 {{end}}
 

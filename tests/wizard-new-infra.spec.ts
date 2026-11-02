@@ -47,6 +47,8 @@ test.describe('Lab wizard — Create New Infrastructure path', () => {
   // The row's knobs live in several grouped disclosures (size, setup, image,
   // extras, placement) rather than one "Advanced options" list, so open them all.
   async function openTemplateAdvanced(page: any) {
+    // Step 6 opens on the devcontainer import; the groups belong to the form builder.
+    await page.locator('#templates-mode-form').click();
     await page.locator('#workspace-templates-container .template-row details.ws-group')
       .evaluateAll((groups: HTMLDetailsElement[]) => groups.forEach(g => { g.open = true; }));
   }

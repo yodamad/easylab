@@ -561,8 +561,8 @@ function showUploadTemplateModal(labId, labName, existingCsv) {
     var reviewBtn = utEl('btn-devcontainer-review-yaml'); if (reviewBtn) reviewBtn.style.display = 'none';
     utResetSubmitBtn();
 
-    // Always open on the form mode with a git devcontainer source.
-    TemplateEditor.setTemplatesMode('form');
+    // Always open on the devcontainer mode with a git devcontainer source.
+    TemplateEditor.setTemplatesMode('devcontainer');
     TemplateEditor.setDevcontainerSource('git');
     TemplateEditor.setDevcontainerCacheMode('in-cluster');
 

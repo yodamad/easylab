@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	stdhtml "html"
 	"os"
 	"strings"
 	"testing"
@@ -152,6 +153,52 @@ func TestTemplateEditorFieldsOnBothSurfaces(t *testing.T) {
 	}
 }
 
+// The step asks for the source first and opens on the devcontainer import. The
+// hidden templates_mode only ever holds form or yaml, so it renders as yaml, and
+// the opening mode comes from whichever picker button carries "selected".
+func TestTemplateEditorOpensOnDevcontainerPicker(t *testing.T) {
+	wizard, drawer := renderBothSurfaces(t)
+
+	surfaces := []struct {
+		name string
+		html string
+	}{
+		{"wizard step 6", wizard},
+		{"add template drawer", drawer},
+	}
+
+	buttonTag := func(html, id string) string {
+		i := strings.Index(html, `id="`+id+`"`)
+		require.GreaterOrEqual(t, i, 0, "button %q missing", id)
+		start := strings.LastIndex(html[:i], "<button")
+		end := i + strings.Index(html[i:], ">")
+		return html[start : end+1]
+	}
+
+	for _, s := range surfaces {
+		t.Run(s.name, func(t *testing.T) {
+			assert.Contains(t, buttonTag(s.html, "templates-mode-devcontainer"), "selected", "devcontainer must be the opening mode")
+			assert.NotContains(t, buttonTag(s.html, "templates-mode-form"), "selected")
+			assert.NotContains(t, buttonTag(s.html, "templates-mode-yaml"), "selected")
+
+			picker := strings.Index(s.html, `class="ws-source-picker"`)
+			presets := strings.Index(s.html, `id="templates-presets"`)
+			require.GreaterOrEqual(t, picker, 0, "source picker missing")
+			require.GreaterOrEqual(t, presets, 0, "starting points block missing")
+			assert.Less(t, picker, presets, "the source picker must come before the starting points")
+
+			dc := strings.Index(s.html, `id="templates-mode-devcontainer"`)
+			form := strings.Index(s.html, `id="templates-mode-form"`)
+			yaml := strings.Index(s.html, `id="templates-mode-yaml"`)
+			assert.True(t, dc < form && form < yaml, "buttons must read devcontainer, form, YAML")
+
+			assert.Contains(t, s.html, "How do you want to define your workspace?")
+			assert.Contains(t, s.html, "Fill in the fields below")
+			assert.Regexp(t, `name="templates_mode"\s+value="yaml"`, s.html)
+		})
+	}
+}
+
 // The starting points are rendered from the page's data, so this is what proves a
 // card actually reaches the markup carrying the template JS reads back from it.
 func TestTemplateEditorPresetsRender(t *testing.T) {
@@ -165,9 +212,15 @@ func TestTemplateEditorPresetsRender(t *testing.T) {
 	require.NoError(t, tmpl.ExecuteTemplate(&buf, "template-editor-presets", workspacePresets()))
 	html := buf.String()
 
+	// html/template escapes more than the five named entities — "Workshop + database"
+	// comes out as "Workshop &#43; database", since "+" is escaped as a UTF-7
+	// defence. Comparing against the unescaped document keeps the titles here
+	// readable instead of teaching each assertion about the escaping.
+	plain := stdhtml.UnescapeString(html)
+
 	for _, preset := range workspacePresets() {
 		assert.Contains(t, html, `data-preset-id="`+preset.ID+`"`, "preset %q missing a card", preset.ID)
-		assert.Contains(t, html, preset.Title)
+		assert.Contains(t, plain, preset.Title)
 	}
 	// The JSON is attribute-escaped by html/template, so the raw quotes are gone —
 	// the template name is what survives recognisably.

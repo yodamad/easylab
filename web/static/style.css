@@ -1162,20 +1162,18 @@ main {
     color: var(--text-light);
 }
 
-/* ---- The devcontainer / YAML escape hatch ---- */
+/* ---- The workspace source picker (leads the Templates step) ---- */
 
-.ws-escape-hatch {
-    margin-top: 1.5rem;
-    padding-top: 1.25rem;
-    border-top: 1px solid var(--border);
+.ws-source-picker {
+    margin-bottom: 1.5rem;
 }
 
-.ws-escape-hatch-label {
+.ws-source-picker-label {
     display: block;
     margin-bottom: 0.5rem;
     font-size: 0.875rem;
     font-weight: 600;
-    color: var(--text-light);
+    color: var(--text);
 }
 
 .form-actions {

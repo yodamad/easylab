@@ -512,16 +512,11 @@ recreating the lab.
 The drawer *is* the wizard's [**Workspace Templates**
 step](admin-lab-creation.md#configure-workspaces) — the same editor, rendered from the
 same source — so every option available when creating a lab is available here, and the
-three ways to define a workspace are the same:
+three ways to define a workspace are the same, in the same order. The drawer opens
+on **From a devcontainer**; click **Build with a form** for the form builder:
 
 ![Add Template drawer](screens/add-template-drawer.png){width=480}
 
-* **Build with a form** — the same **Start from** cards, the same **What students
-  will get** summary, and the same three visible decisions (name, editor, exercises
-  repository), with the rest in the **Size & storage**, **Setup on start**, **Image
-  & private access**, **Extras** and **Placement** groups. The credential pickers
-  list the lab's real credentials rather than ones being defined, since this lab
-  already has a cluster.
 * **From a devcontainer** — name and describe the template, then point at a workshop
   repository (or upload a `devcontainer.json` / repository `.zip`). The devcontainer
   can live in the workshop repository or in a separate, shared config repository; the
@@ -530,6 +525,12 @@ three ways to define a workspace are the same:
   generates the template YAML, and opens it for review before you add it. The name is
   required here too, so an import cannot silently reuse the name of a template already
   on the lab.
+* **Build with a form** — the same **Start from** cards, the same **What students
+  will get** summary, and the same three visible decisions (name, editor, exercises
+  repository), with the rest in the **Size & storage**, **Setup on start**, **Image
+  & private access**, **Extras** and **Placement** groups. The credential pickers
+  list the lab's real credentials rather than ones being defined, since this lab
+  already has a cluster.
 * **Paste YAML** — write (or **Validate**, or **Insert skeleton**, or **Upload file**)
   the template YAML directly. The document may define more than one template, and all
   are appended.
