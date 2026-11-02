@@ -1,3 +1,28 @@
+{{- /* Guards for every ClusterIssuer path. Rendered outside the create/enabled
+       conditions below so a misconfiguration fails the render instead of
+       installing something that silently never issues a certificate. */}}
+{{- $ovhCreds := .Values.dns.ovh.credentials | default dict }}
+{{- $legacyIssuers := (index .Values "cert-manager-webhook-ovh" | default dict).issuers | default list }}
+{{- if $legacyIssuers }}
+{{ fail "cert-manager-webhook-ovh.issuers is no longer used: this chart now creates the OVH ClusterIssuer, its credential Secret and its RBAC itself. Move the credentials to dns.ovh.credentials (applicationKey / applicationSecret / applicationConsumerKey), set certManager.clusterIssuer.create=true with certManager.clusterIssuer.email, and delete the cert-manager-webhook-ovh.issuers block — see the migration note in docs/helm.md." }}
+{{- end }}
+{{- if and .Values.dns.ovh.enabled .Values.dns.azure.enabled }}
+{{ fail "dns.ovh.enabled and dns.azure.enabled are mutually exclusive — the chart creates a single ClusterIssuer, which carries exactly one DNS-01 solver." }}
+{{- end }}
+{{- if and .Values.dns.ovh.enabled .Values.certManager.clusterIssuer.create }}
+{{- if not (and $ovhCreds.applicationKey $ovhCreds.applicationSecret $ovhCreds.applicationConsumerKey) }}
+{{ fail "dns.ovh.enabled=true with certManager.clusterIssuer.create=true requires dns.ovh.credentials.applicationKey, dns.ovh.credentials.applicationSecret and dns.ovh.credentials.applicationConsumerKey (create them at https://api.ovh.com/createToken/ with GET/POST/PUT/DELETE on /domain/zone/*)." }}
+{{- end }}
+{{- end }}
+{{- /* The chart annotates its own Ingress with certManager.clusterIssuer.name,
+       but a user-supplied annotation wins on merge (see ingress.yaml) — so a
+       stale one silently points cert-manager at an issuer that does not
+       exist. This is the OVH issuer-name mismatch that keeps recurring. */}}
+{{- if and .Values.ingress.enabled .Values.certManager.clusterIssuer.create (hasKey (.Values.ingress.annotations | default dict) "cert-manager.io/cluster-issuer") }}
+{{- if ne (index .Values.ingress.annotations "cert-manager.io/cluster-issuer") .Values.certManager.clusterIssuer.name }}
+{{ fail (printf "ingress.annotations.\"cert-manager.io/cluster-issuer\" is %q but this chart creates the ClusterIssuer %q — cert-manager would look for an issuer that does not exist. Drop the annotation (the chart adds it for you) or set certManager.clusterIssuer.name to the issuer you want to use." (index .Values.ingress.annotations "cert-manager.io/cluster-issuer") .Values.certManager.clusterIssuer.name) }}
+{{- end }}
+{{- end }}
 {{- if .Values.certManager.clusterIssuer.create }}
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -8,6 +33,9 @@ metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-delete-policy: before-hook-creation
+    {{- /* Above cert-manager's own startupapicheck hook (weight 1), so the
+           issuer is created only once its validating webhook answers. */}}
+    helm.sh/hook-weight: "5"
 spec:
   acme:
     server: {{ .Values.certManager.clusterIssuer.server }}
@@ -27,6 +55,24 @@ spec:
             clientSecretSecretRef:
               name: {{ include "easylab.fullname" . }}-azure-dns-credentials
               key: client-secret
+      {{- else if .Values.dns.ovh.enabled }}
+      - dns01:
+          cnameStrategy: "None"
+          webhook:
+            solverName: ovh
+            groupName: {{ (index .Values "cert-manager-webhook-ovh" | default dict).groupName | quote }}
+            config:
+              endpoint: {{ .Values.dns.ovh.endpoint | default "ovh-eu" | quote }}
+              authenticationMethod: "application"
+              applicationKeyRef:
+                name: {{ include "easylab.ovhDnsSecretName" . }}
+                key: applicationKey
+              applicationSecretRef:
+                name: {{ include "easylab.ovhDnsSecretName" . }}
+                key: applicationSecret
+              applicationConsumerKeyRef:
+                name: {{ include "easylab.ovhDnsSecretName" . }}
+                key: applicationConsumerKey
       {{- else }}
       - http01:
           ingress:
@@ -45,4 +91,59 @@ metadata:
 type: Opaque
 stringData:
   client-secret: {{ .Values.dns.azure.clientSecret | quote }}
+{{- end }}
+{{- if and .Values.dns.ovh.enabled .Values.certManager.clusterIssuer.create }}
+---
+{{- /* Unlike the Azure secret above, which cert-manager itself reads from
+       certManager.namespace, this one is read by the solver webhook — so it
+       belongs in the release namespace, where that webhook and its
+       ServiceAccount live. Left in the main pass (like the Azure secret): it
+       is needed when a Challenge runs, not when the issuer is created. */}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "easylab.ovhDnsSecretName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "easylab.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  applicationKey: {{ $ovhCreds.applicationKey | quote }}
+  applicationSecret: {{ $ovhCreds.applicationSecret | quote }}
+  applicationConsumerKey: {{ $ovhCreds.applicationConsumerKey | quote }}
+---
+{{- /* The webhook's ServiceAccount has no access to the Secret above by
+       default; this is what the subchart's own :secret-reader Role granted
+       while it owned the issuer. A plain Role is enough because the Secret is
+       in the same namespace as the webhook. */}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "easylab.fullname" . }}-ovh-dns-secret-reader
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "easylab.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "watch"]
+    resourceNames:
+      - {{ include "easylab.ovhDnsSecretName" . | quote }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "easylab.fullname" . }}-ovh-dns-secret-reader
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "easylab.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "easylab.fullname" . }}-ovh-dns-secret-reader
+subjects:
+  - apiGroup: ""
+    kind: ServiceAccount
+    name: {{ include "easylab.ovhWebhookFullname" . }}
+    namespace: {{ .Release.Namespace }}
 {{- end }}

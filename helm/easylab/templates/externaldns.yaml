@@ -8,7 +8,10 @@
 {{- if and .Values.dns.ovh.enabled (not .Values.dns.ovh.zone) }}
 {{ fail "dns.ovh.zone is required when dns.externalDns.enabled=true and dns.ovh.enabled=true (the OVH DNS zone, e.g. \"labdevrel.ovh\" — not the ingress host)." }}
 {{- end }}
-{{- $ovhIssuer := index .Values "cert-manager-webhook-ovh" "issuers" 0 }}
+{{- $ovhCredentials := .Values.dns.ovh.credentials | default dict }}
+{{- if and .Values.dns.ovh.enabled (not (and $ovhCredentials.applicationKey $ovhCredentials.applicationSecret $ovhCredentials.applicationConsumerKey)) }}
+{{ fail "dns.externalDns.enabled=true with dns.ovh.enabled=true requires dns.ovh.credentials.applicationKey, dns.ovh.credentials.applicationSecret and dns.ovh.credentials.applicationConsumerKey — ExternalDNS calls the OVH API with the same credentials as the DNS-01 solver." }}
+{{- end }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -59,9 +62,9 @@ metadata:
 type: Opaque
 stringData:
   {{- if .Values.dns.ovh.enabled }}
-  OVH_APPLICATION_KEY: {{ $ovhIssuer.ovhAuthentication.applicationKey | quote }}
-  OVH_APPLICATION_SECRET: {{ $ovhIssuer.ovhAuthentication.applicationSecret | quote }}
-  OVH_CONSUMER_KEY: {{ $ovhIssuer.ovhAuthentication.applicationConsumerKey | quote }}
+  OVH_APPLICATION_KEY: {{ $ovhCredentials.applicationKey | quote }}
+  OVH_APPLICATION_SECRET: {{ $ovhCredentials.applicationSecret | quote }}
+  OVH_CONSUMER_KEY: {{ $ovhCredentials.applicationConsumerKey | quote }}
   {{- else }}
   azure.json: |
     {{- (dict
@@ -102,7 +105,7 @@ spec:
             - --registry=txt
             - --txt-owner-id={{ .Values.dns.externalDns.txtOwnerId | default (include "easylab.fullname" .) }}
             {{- if .Values.dns.ovh.enabled }}
-            - --ovh-endpoint={{ $ovhIssuer.ovhEndpointName | default "ovh-eu" }}
+            - --ovh-endpoint={{ .Values.dns.ovh.endpoint | default "ovh-eu" }}
             {{- else }}
             - --azure-resource-group={{ .Values.dns.azure.resourceGroup }}
             {{- end }}

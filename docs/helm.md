@@ -111,16 +111,18 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 | `cert-manager.enabled` | Install cert-manager as part of this chart | `false` |
 | `cert-manager.crds.enabled` | Install cert-manager CRDs (required on first install) | `true` |
 | `certManager.namespace` | Namespace cert-manager's controller runs in — must match wherever it's actually installed | `cert-manager` |
-| `certManager.clusterIssuer.create` | Create a Let's Encrypt ClusterIssuer for the EasyLab ingress (HTTP-01, or Azure DNS-01 if `dns.azure.enabled=true`) | `false` |
+| `certManager.clusterIssuer.create` | Create a Let's Encrypt ClusterIssuer for the EasyLab ingress — HTTP-01, or DNS-01 if `dns.azure.enabled=true` / `dns.ovh.enabled=true`. Required for all three solvers | `false` |
 | `certManager.clusterIssuer.name` | ClusterIssuer name | `letsencrypt` |
 | `certManager.clusterIssuer.email` | ACME account email | `""` |
 | `certManager.clusterIssuer.server` | ACME server URL | `https://acme-v02.api.letsencrypt.org/directory` |
 | `dns.azure.enabled` | Use Azure DNS-01 (cert-manager's built-in `azureDNS` solver) instead of HTTP-01 | `false` |
 | `dns.azure.zone` | Azure DNS hosted zone name | `""` |
 | `dns.azure.tenantId` / `.subscriptionId` / `.resourceGroup` / `.clientId` / `.clientSecret` | Azure service principal credentials | `""` |
-| `dns.ovh.enabled` | Install `cert-manager-webhook-ovh` and let it create its own OVH DNS-01 ClusterIssuer — see [Certificates for the EasyLab ingress](#certificates-for-the-easylab-ingress) | `false` |
+| `dns.ovh.enabled` | Install the `cert-manager-webhook-ovh` DNS-01 solver and use it for `certManager.clusterIssuer` — see [Certificates for the EasyLab ingress](#certificates-for-the-easylab-ingress) | `false` |
 | `dns.ovh.zone` | OVH DNS zone `ingress.host` is a subdomain of, e.g. `example.com` — only needed when `dns.externalDns.enabled=true`, see [Automatic DNS record for the EasyLab ingress](#automatic-dns-record-for-the-easylab-ingress-externaldns) | `""` |
-| `cert-manager-webhook-ovh.*` | Raw values for the vendored OVH webhook chart (issuer name, ACME email, OVH credentials, etc.) — deeply nested, see [upstream chart values](https://github.com/aureq/cert-manager-webhook-ovh) | see `values.yaml` |
+| `dns.ovh.endpoint` | OVH API endpoint name: `ovh-eu`, `ovh-ca`, `kimsufi-eu`, `kimsufi-ca`, `soyoustart-eu`, `soyoustart-ca`, `runabove-ca` | `ovh-eu` |
+| `dns.ovh.credentials.applicationKey` / `.applicationSecret` / `.applicationConsumerKey` | OVH API credentials for the DNS-01 solver, from [api.ovh.com/createToken](https://api.ovh.com/createToken/) with `GET`/`POST`/`PUT`/`DELETE` on `/domain/zone/*`. The chart stores them in its own Secret and points the ClusterIssuer at it | `""` |
+| `cert-manager-webhook-ovh.*` | Raw values for the vendored OVH webhook chart — only the solver webhook itself (`groupName`, `certManager.namespace`, `certManager.serviceAccountName`). Its `issuers` list is deliberately empty and must stay empty: this chart owns the issuer. See [upstream chart values](https://github.com/aureq/cert-manager-webhook-ovh) | see `values.yaml` |
 | `dns.externalDns.enabled` | Run a persistent ExternalDNS controller that keeps `ingress.host`'s A record pointed at the ingress controller's LoadBalancer IP — see [Automatic DNS record for the EasyLab ingress](#automatic-dns-record-for-the-easylab-ingress-externaldns) | `false` |
 | `dns.externalDns.image.repository` / `.tag` | ExternalDNS container image | `registry.k8s.io/external-dns/external-dns` / `v0.22.0` |
 | `dns.externalDns.policy` | `sync` also deletes the record if it's no longer needed; `upsert-only` never deletes | `sync` |
@@ -217,7 +219,7 @@ kubectl get pods -n cert-manager
 
 If cert-manager is pre-installed separately, use its actual namespace instead (commonly `cert-manager`).
 
-Enable only **one** ClusterIssuer mechanism at a time: `certManager.clusterIssuer.create` (HTTP-01 or Azure DNS-01) *or* `dns.ovh.enabled` (OVH DNS-01) — not both.
+All three solvers go through the same single ClusterIssuer, so `certManager.clusterIssuer.create=true` is required for any of them — including OVH. What is mutually exclusive is the DNS provider: enable at most one of `dns.azure.enabled` / `dns.ovh.enabled` (the chart fails the render if both are on).
 
 **HTTP-01 (default solver, no DNS provider)**
 
@@ -270,7 +272,7 @@ A ready-to-edit values file for this scenario (AKS + Azure DNS-01 + ExternalDNS,
 
 **OVH DNS-01**
 
-Vendors the [`cert-manager-webhook-ovh`](https://github.com/aureq/cert-manager-webhook-ovh) chart, which manages its own `ClusterIssuer`, credential `Secret`, and RBAC end-to-end — the same webhook EasyLab's own Pulumi-provisioned student clusters use for DNS-01. Its values are deeply nested, so a values file is easier than a long `--set` chain:
+Vendors the [`cert-manager-webhook-ovh`](https://github.com/aureq/cert-manager-webhook-ovh) chart as the DNS-01 solver — the same webhook EasyLab's own Pulumi-provisioned student clusters use. The chart creates the `ClusterIssuer` that uses it, the credential `Secret` and the RBAC letting the webhook read that Secret, so the configuration is the same shape as the Azure one above: three credentials and a flag.
 
 ```yaml
 # ovh-dns01-values.yaml
@@ -282,34 +284,27 @@ traefik:
 cert-manager:
   enabled: true
 
+certManager:
+  clusterIssuer:
+    create: true
+    email: "you@example.com"
+
 dns:
   ovh:
     enabled: true
-
-cert-manager-webhook-ovh:
-  issuers:
-    - name: letsencrypt-ovh
-      create: true
-      kind: ClusterIssuer
-      acmeServerUrl: https://acme-v02.api.letsencrypt.org/directory
-      email: "you@example.com"
-      ovhEndpointName: ovh-eu
-      ovhAuthenticationMethod: application
-      ovhAuthentication:
-        applicationKey: "your-app-key"
-        applicationSecret: "your-app-secret"
-        applicationConsumerKey: "your-consumer-key"
+    credentials:
+      applicationKey: "your-app-key"
+      applicationSecret: "your-app-secret"
+      applicationConsumerKey: "your-consumer-key"
 
 ingress:
   enabled: true
   host: easylab.example.com
   tls:
     enabled: true
-  # The auto-annotation only covers certManager.clusterIssuer.create (HTTP-01/
-  # Azure) above — for OVH, match this to cert-manager-webhook-ovh.issuers[0].name:
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-ovh
 ```
+
+Create the three credentials at [api.ovh.com/createToken](https://api.ovh.com/createToken/) with `GET`, `POST`, `PUT` and `DELETE` on `/domain/zone/*`. The ingress is annotated with the issuer automatically — do not add a `cert-manager.io/cluster-issuer` annotation of your own, since a stale one would win on merge and point cert-manager at an issuer that does not exist (the chart refuses to render if yours disagrees with `certManager.clusterIssuer.name`).
 
 ```bash
 helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
@@ -319,39 +314,45 @@ helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
   --wait --timeout 5m
 ```
 
-Unlike the HTTP-01/Azure path above, the OVH issuer is created directly by the vendored webhook chart's own templates, not deferred to a post-install hook — `--wait --timeout 5m` reduces but does not fully eliminate a possible webhook-readiness race on a fresh combined install. If the first install fails on this, a `helm upgrade` retry with the same values succeeds once cert-manager is up. See the [`cert-manager-webhook-ovh` values reference](https://github.com/aureq/cert-manager-webhook-ovh/blob/main/charts/cert-manager-webhook-ovh/values.yaml) for the full set of `issuers[]` fields (OAuth2 authentication, EAB, alternate OVH endpoints, etc.).
+The issuer is created by a `post-install,post-upgrade` hook weighted to run after cert-manager's own `startupapicheck`, so it is not applied until cert-manager's webhook answers — the same treatment the HTTP-01/Azure paths get. One consequence: if `startupapicheck` fails, the release now fails without creating the issuer, rather than creating an issuer that nothing can use.
 
-!!! warning "Fresh cluster with `dns.ovh.enabled=true`: install in two steps"
+Only OVH's `application` authentication method is supported here. OAuth2 credentials, external account bindings and per-issuer ACME servers are not exposed by this chart; use the [upstream chart](https://github.com/aureq/cert-manager-webhook-ovh) directly as its own release if you need them.
+
+!!! warning "Migrating from a values file with a `cert-manager-webhook-ovh.issuers[]` block"
+    OVH DNS-01 used to be configured through that nested block, which created its own `ClusterIssuer` named `letsencrypt-ovh`. It is gone: filling it in now fails the render with a message pointing at `dns.ovh.credentials`. Two things to know before upgrading:
+
+    - **The issuer is renamed** to `certManager.clusterIssuer.name` (default `letsencrypt`). On upgrade Helm deletes the old `letsencrypt-ovh` ClusterIssuer and its `letsencrypt-ovh-ovh-credentials` Secret — they were release resources — and the hook creates the new one afterwards, so there is a short window with no OVH issuer. EasyLab's own ingress is re-annotated for you, but **any other `Ingress` or `Certificate` still annotated `cert-manager.io/cluster-issuer: letsencrypt-ovh` stops renewing** (existing certificates keep serving until they expire). To avoid touching them, set `certManager.clusterIssuer.name: letsencrypt-ovh` and keep the old name.
+    - **A new ACME account is registered** when the name changes, because `privateKeySecretRef` follows the issuer name. Harmless in itself, but it counts against Let's Encrypt's new-account rate limits, so don't rename back and forth.
+
+!!! warning "Fresh cluster with `dns.ovh.enabled=true`: two phases, one command"
+    If cert-manager is **already** on the cluster, nothing special is needed — a single `helm install` with `dns.ovh.enabled=true` works. The rest of this box is only for a bare cluster where this chart installs cert-manager too.
+
     Combining `cert-manager.enabled=true` and `dns.ovh.enabled=true` in a single `helm install` on a cluster that has no cert-manager CRDs yet fails with errors like:
     ```
     Error: INSTALLATION FAILED: unable to build kubernetes objects from release manifest:
-    [resource mapping not found for name: "letsencrypt-ovh" namespace: "" from "":
-    no matches for kind "ClusterIssuer" in version "cert-manager.io/v1"
+    [resource mapping not found for name: "easylab-cert-manager-webhook-ovh-ca" namespace: "" from "":
+    no matches for kind "Certificate" in version "cert-manager.io/v1"
     ensure CRDs are installed first, ...]
     ```
-    This is a general Helm/cert-manager limitation (related to the CRD-upgrade caveat above), not specific to bad values: Helm validates the *entire* combined manifest — EasyLab, cert-manager, and the `cert-manager-webhook-ovh` subchart — against the cluster's API discovery cache before applying anything. Since the `cert-manager-webhook-ovh` subchart's `Certificate`/`Issuer`/`ClusterIssuer` resources are validated in that same pass, and the cert-manager CRDs those kinds depend on don't exist on the API server yet, the whole install aborts before creating anything — including cert-manager itself.
+    This is a general Helm/cert-manager limitation (related to the CRD-upgrade caveat above), not bad values: Helm resolves every kind in the *entire* combined manifest — EasyLab, cert-manager and the `cert-manager-webhook-ovh` subchart — against the cluster's API discovery before applying anything. The webhook subchart's own PKI (a self-signed `Issuer`, a CA `Certificate` and its serving `Certificate`) is made of `cert-manager.io/v1` kinds and is **not** optional, so the whole install aborts before creating anything — including cert-manager itself. Deferring the EasyLab ClusterIssuer to a hook, which this chart does, is not enough to avoid it.
 
-    Fix by splitting into two steps. First, install cert-manager and its CRDs only, with the OVH webhook disabled (`dns.ovh.enabled` is the `condition:` gate for that entire dependency in `Chart.yaml`, so setting it `false` drops its templates from the render):
+    Run both phases as one command: install with the webhook disabled so the CRDs land, then upgrade with the same values file now that they are registered.
     ```bash
     helm install easylab oci://registry-1.docker.io/yodamad/easylab-helm \
       --version __VERSION__ \
       --namespace cert-manager --create-namespace \
-      --set secrets.adminPassword="SuperAdmin" \
-      --set traefik.enabled=true \
-      --set cert-manager.enabled=true \
-      --set cert-manager.crds.enabled=true \
+      -f ovh-dns01-values.yaml \
       --set dns.ovh.enabled=false \
-      --wait --timeout 5m
-    ```
-    Then upgrade with your full values file (`dns.ovh.enabled: true` included), now that the CRDs are registered:
-    ```bash
-    helm upgrade easylab oci://registry-1.docker.io/yodamad/easylab-helm \
+      --wait --timeout 5m \
+    && helm upgrade easylab oci://registry-1.docker.io/yodamad/easylab-helm \
       --version __VERSION__ \
       --namespace cert-manager \
       -f ovh-dns01-values.yaml \
       --wait --timeout 5m
     ```
-    Verify the CRDs landed after step 1 if you want to confirm before upgrading: `kubectl get crd | grep cert-manager.io`.
+    Pass `-f` to **both** phases. `helm upgrade` does not inherit the previous release's values, so an upgrade with only `--set dns.ovh.enabled=true` falls back to the chart defaults and fails on the missing credentials.
+
+    Verify the CRDs landed after phase one if you want to confirm before the upgrade: `kubectl get crd | grep cert-manager.io`.
 
 Once any of the above is applied, check certificate status with:
 
@@ -638,14 +639,43 @@ helm upgrade easylab oci://registry-1.docker.io/yodamad/easylab-helm \
 ## Uninstall
 
 ```bash
-helm uninstall easylab
+helm uninstall easylab --cascade foreground --wait --timeout 5m
 ```
+
+`--cascade foreground --wait` is worth the extra minute whenever `dns.ovh.enabled=true` — it makes Helm finish deleting each resource before starting the next, instead of firing all the deletes off at once. See the namespace warning below for what that avoids.
 
 !!! warning "PersistentVolumeClaims are not deleted by `helm uninstall`"
     To fully clean up, delete the PVCs manually:
     ```bash
     kubectl delete pvc -n easylab -l app.kubernetes.io/name=easylab
     ```
+
+!!! warning "The ClusterIssuer is not deleted by `helm uninstall` either"
+    It is created by a Helm hook, and hook resources are not part of the release manifest, so neither `helm uninstall` nor `helm rollback` removes it. Left behind with `dns.ovh.enabled=true` it points at a solver webhook that no longer exists, and any `Certificate` still referencing it waits forever. Delete it by hand:
+    ```bash
+    kubectl delete clusterissuer letsencrypt    # or your certManager.clusterIssuer.name
+    ```
+
+!!! warning "Namespace stuck in `Terminating` after uninstall (`dns.ovh.enabled=true`)"
+    With `namespace.create=true` (the default) the namespace is itself a release resource, so `helm uninstall` deletes it — and the `cert-manager-webhook-ovh` subchart registers an **aggregated APIService** (`v1alpha1.<groupName>`, default `v1alpha1.acme.easylab.local`) whose backing Service lives *inside that same namespace*.
+
+    If the webhook's pod and Service go away while the APIService object still exists, the API aggregation layer reports that group unavailable. Namespace finalization needs a complete API discovery pass to enumerate what is left to delete, so the failing group wedges the namespace in `Terminating` indefinitely. It blocks **every** namespace deletion on the cluster for as long as the stale APIService is there, not only EasyLab's.
+
+    Confirm and recover:
+    ```bash
+    kubectl get ns easylab -o json | jq '.status.conditions[] | select(.status=="True")'
+    kubectl get apiservices | grep -v 'True'
+    kubectl delete apiservice v1alpha1.acme.easylab.local
+    ```
+    A `NamespaceDeletionDiscoveryFailure` condition is this problem; the namespace finalizes within seconds of deleting the APIService. A `NamespaceDeletionContentFailure` is a different one — leftover objects holding finalizers, which you can find with:
+    ```bash
+    kubectl api-resources --verbs=list --namespaced -o name \
+      | xargs -n1 kubectl get -n easylab --ignore-not-found --no-headers 2>/dev/null
+    ```
+
+    Do **not** clear the namespace's own finalizers (`kubectl patch ns easylab -p '{"metadata":{"finalizers":[]}}' --type=merge`). That drops the namespace record while its contents still exist, orphaning resources that are then very hard to track down.
+
+    Avoid it next time with `--cascade foreground --wait` as above, or by setting `namespace.create=false` and managing the namespace yourself, so `helm uninstall` never tries to delete it.
 
 ## Generate raw Kubernetes manifests
 

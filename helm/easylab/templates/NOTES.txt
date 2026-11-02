@@ -29,10 +29,34 @@ Certificate issuance can take a minute or two. Check status with:
   kubectl describe certificate -n {{ include "easylab.namespace" . }} {{ .Values.ingress.tls.secretName }}
 {{- end }}
 {{- if .Values.dns.ovh.enabled }}
+{{- if .Values.certManager.clusterIssuer.create }}
 
-An OVH ClusterIssuer was created by the cert-manager-webhook-ovh subchart.
-Check status with:
-  kubectl describe clusterissuer <name from cert-manager-webhook-ovh.issuers[].name>
+That ClusterIssuer solves DNS-01 through the OVH webhook. Its credentials are in
+the Secret {{ include "easylab.ovhDnsSecretName" . }} (namespace {{ .Release.Namespace }}),
+which the webhook reads via the Role {{ include "easylab.fullname" . }}-ovh-dns-secret-reader.
+
+A Ready ClusterIssuer is not proof the solver works — the webhook is only called
+once a certificate is requested. Check the whole path:
+  kubectl get apiservice v1alpha1.{{ (index .Values "cert-manager-webhook-ovh" | default dict).groupName }}
+  kubectl logs -n {{ .Release.Namespace }} deploy/{{ include "easylab.ovhWebhookFullname" . }}
+  kubectl get challenge -A
+{{- if ne .Release.Namespace .Values.certManager.namespace }}
+
+NOTE: this release is in namespace "{{ .Release.Namespace }}" while
+certManager.namespace is "{{ .Values.certManager.namespace }}". The solver webhook and its
+credential Secret live here, in the release namespace; cert-manager must be the
+one running in "{{ .Values.certManager.namespace }}" for the solver's RBAC to line up.
+Verify with: kubectl get pods -n {{ .Values.certManager.namespace }}
+{{- end }}
+{{- else }}
+
+NOTE: dns.ovh.enabled is true, so the OVH DNS-01 solver webhook was installed,
+but this release created no ClusterIssuer for it (certManager.clusterIssuer.create
+is false). That is a valid setup when the issuers are created elsewhere — e.g.
+one per lab, as EasyLab itself does on a shared cluster. If you meant this
+release to own the issuer, set certManager.clusterIssuer.create=true with
+certManager.clusterIssuer.email and dns.ovh.credentials.
+{{- end }}
 {{- end }}
 {{- if .Values.dns.externalDns.enabled }}
 

@@ -104,6 +104,42 @@ does, so the rendered value does not churn between upgrades.
 {{/*
 Namespace to use.
 */}}
+{{/*
+Name of the Secret holding the OVH DNS-01 credentials.
+Referenced by the ClusterIssuer's solver config, the Secret itself and the
+Role that lets the solver webhook read it, so it is defined once here.
+*/}}
+{{- define "easylab.ovhDnsSecretName" -}}
+{{- printf "%s-ovh-dns-credentials" (include "easylab.fullname" .) }}
+{{- end }}
+
+{{/*
+Resource name the cert-manager-webhook-ovh subchart gives itself, which is also
+its ServiceAccount name — needed to bind that account to the Role granting it
+read access to the DNS-01 credential Secret.
+
+This deliberately mirrors cert-manager-webhook-ovh's own fullname helper rather
+than pinning its fullnameOverride: pinning would rename that subchart's live
+Deployment, Service, ServiceAccount, APIService backing reference and serving
+certificate for any release not named "easylab", forcing a delete/recreate and a
+DNS-01 outage on upgrade. Keep in sync when bumping the subchart version — the
+check is that the RoleBinding's subject matches the webhook Deployment's
+serviceAccountName for a release name other than "easylab".
+*/}}
+{{- define "easylab.ovhWebhookFullname" -}}
+{{- $sub := index .Values "cert-manager-webhook-ovh" | default dict -}}
+{{- if $sub.fullnameOverride -}}
+{{- $sub.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- $name := $sub.nameOverride | default "cert-manager-webhook-ovh" -}}
+{{- if contains $name .Release.Name -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
 {{- define "easylab.namespace" -}}
 {{- .Values.namespace.name | default "easylab" }}
 {{- end }}

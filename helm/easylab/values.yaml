@@ -153,9 +153,11 @@ cert-manager:
 #     reachable on port 80 for the ACME challenge.
 #   - Azure DNS-01 (set dns.azure.enabled=true below): uses cert-manager's
 #     built-in azureDNS solver, no port-80 requirement.
-# For OVH DNS-01, use dns.ovh below instead — it manages its own ClusterIssuer
-# end-to-end via the vendored cert-manager-webhook-ovh chart. Enable only one
-# mechanism at a time (certManager.clusterIssuer.create OR dns.ovh.enabled).
+#   - OVH DNS-01 (set dns.ovh.enabled=true below): uses the vendored
+#     cert-manager-webhook-ovh solver, no port-80 requirement.
+# All three go through this one ClusterIssuer, so clusterIssuer.create must be
+# true for any of them — including OVH. Only the DNS providers are mutually
+# exclusive: enable at most one of dns.ovh.enabled / dns.azure.enabled.
 certManager:
   namespace: cert-manager
   clusterIssuer:
@@ -182,25 +184,40 @@ dns:
     clientSecret: ""
 
   # OVH DNS-01: enabled: true installs the cert-manager-webhook-ovh chart as a
-  # dependency (see Chart.yaml), which creates its own ClusterIssuer,
-  # credential Secret, and RBAC end-to-end — nothing under certManager above
-  # needs to be set for OVH beyond cert-manager being present. The nested
-  # cert-manager-webhook-ovh block below configures that subchart directly
-  # (it enforces its own values schema, so it cannot carry an "enabled" field
-  # itself — that lives here instead). Its certManager.namespace /
-  # certManager.serviceAccountName must match your actual cert-manager install
-  # (defaults assume `helm install easylab` with cert-manager.enabled=true and
-  # --namespace cert-manager — see the namespace alignment note above).
+  # dependency (see Chart.yaml), which provides the DNS-01 solver webhook. The
+  # ClusterIssuer that uses it, its credential Secret and the RBAC letting the
+  # webhook read that Secret are created by this chart from the keys below, so
+  # set certManager.clusterIssuer.create=true (and its email) as well.
+  #
+  # The nested cert-manager-webhook-ovh block further down configures the
+  # webhook deployment itself (it enforces its own values schema, so it cannot
+  # carry an "enabled" field — that lives here instead). Its
+  # certManager.namespace / certManager.serviceAccountName must match your
+  # actual cert-manager install (defaults assume `helm install easylab` with
+  # cert-manager.enabled=true and --namespace cert-manager — see the namespace
+  # alignment note above).
   ovh:
     enabled: false
     # The OVH DNS zone ingress.host is a subdomain of, e.g. "example.com" for
-    # an ingress.host of "easylab.example.com". cert-manager-webhook-ovh above
-    # derives its own zone automatically from the ACME domain, so this is not
-    # needed for DNS-01 alone — only required when dns.externalDns.enabled is
-    # also true, since ExternalDNS's --domain-filter needs the zone itself
-    # (passing the ingress hostname instead makes every zone lookup return
-    # empty and ExternalDNS silently creates no record).
+    # an ingress.host of "easylab.example.com". The DNS-01 solver derives the
+    # zone itself from the ACME domain, so this is not needed for DNS-01
+    # alone — only required when dns.externalDns.enabled is also true, since
+    # ExternalDNS's --domain-filter needs the zone itself (passing the ingress
+    # hostname instead makes every zone lookup return empty and ExternalDNS
+    # silently creates no record).
     zone: ""
+    # OVH API endpoint name, one of: ovh-eu, ovh-ca, kimsufi-eu, kimsufi-ca,
+    # soyoustart-eu, soyoustart-ca, runabove-ca.
+    endpoint: ovh-eu
+    # OVH API credentials for the DNS-01 solver, created at
+    # https://api.ovh.com/createToken/ with GET/POST/PUT/DELETE on
+    # /domain/zone/*. The chart stores these in its own Secret in the release
+    # namespace and points the ClusterIssuer at it — only the "application"
+    # authentication method is supported here.
+    credentials:
+      applicationKey: ""
+      applicationSecret: ""
+      applicationConsumerKey: ""
 
   # Persistent ExternalDNS controller that keeps ingress.host's A record
   # pointed at the ingress controller's LoadBalancer IP — automates the "go
@@ -238,22 +255,15 @@ dns:
         cpu: "200m"
 
 # Raw values for the vendored cert-manager-webhook-ovh chart (see dns.ovh
-# above). Deeply nested — see
-# https://github.com/aureq/cert-manager-webhook-ovh for the full schema.
+# above) — see https://github.com/aureq/cert-manager-webhook-ovh for the full
+# schema. This configures the solver webhook only; the ClusterIssuer that uses
+# it comes from dns.ovh.credentials + certManager.clusterIssuer above.
 cert-manager-webhook-ovh:
   groupName: acme.easylab.local
   certManager:
     namespace: cert-manager
     serviceAccountName: easylab-cert-manager
-  issuers:
-    - name: letsencrypt-ovh
-      create: true
-      kind: ClusterIssuer
-      acmeServerUrl: https://acme-v02.api.letsencrypt.org/directory
-      email: ""
-      ovhEndpointName: ovh-eu
-      ovhAuthenticationMethod: application
-      ovhAuthentication:
-        applicationKey: ""
-        applicationSecret: ""
-        applicationConsumerKey: ""
+  # Intentionally empty: this chart owns the ClusterIssuer, its credential
+  # Secret and its RBAC. Filling this list in is rejected with a migration
+  # message — put the credentials in dns.ovh.credentials instead.
+  issuers: []
