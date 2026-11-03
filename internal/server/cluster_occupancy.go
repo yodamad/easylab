@@ -264,9 +264,11 @@ func reuseSharedIngress(cfg *LabConfig, host clusterNeighbour) []string {
 	}
 
 	cfg.InstallNginxIngress = boolPtr(false)
-	if cfg.NginxIngressNamespace == "" {
-		cfg.NginxIngressNamespace = host.ingressNamespace
-	}
+	// Overwritten rather than only filled when empty: the early return above means
+	// the admin had chosen to *install*, so any namespace they set was a target to
+	// create, not where the controller already runs. Keeping it would send the
+	// Service lookup to a namespace holding nothing.
+	cfg.NginxIngressNamespace = host.ingressNamespace
 	if cfg.NginxIngressServiceName == "" {
 		cfg.NginxIngressServiceName = host.ingressServiceName
 	}
@@ -288,9 +290,10 @@ func reuseSharedCertManager(cfg *LabConfig, host clusterNeighbour, jobID string)
 
 	if cfg.InstallCertManager == nil || *cfg.InstallCertManager {
 		cfg.InstallCertManager = boolPtr(false)
-		if cfg.CertManagerNamespace == "" {
-			cfg.CertManagerNamespace = host.certManagerNamespace
-		}
+		// Same reasoning as reuseSharedIngress: this branch only runs when the
+		// admin had chosen to install, so their namespace was an install target,
+		// not where cert-manager already runs.
+		cfg.CertManagerNamespace = host.certManagerNamespace
 		notices = append(notices, fmt.Sprintf(
 			"Reusing the cert-manager already on this cluster instead of installing another: lab %q "+
 				"installed it, and a second install fails on the Helm release name.", host.stackName))

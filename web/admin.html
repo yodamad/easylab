@@ -423,13 +423,14 @@
                             </div>
                             <input type="hidden" id="install_nginx_ingress" name="install_nginx_ingress" value="true">
                         </div>
+                        <div class="form-group byok-only" id="ingress-namespace-group">
+                            <label for="nginx_ingress_namespace">Ingress Namespace</label>
+                            <input type="text" id="nginx_ingress_namespace" name="nginx_ingress_namespace" placeholder="traefik">
+                            <small id="ingress-namespace-hint-install">Namespace Traefik is installed into &mdash; created if it does not exist. Defaults to <code>traefik</code>.</small>
+                            <small id="ingress-namespace-hint-existing" style="display: none;">Namespace where the ingress controller is already installed. Defaults to <code>traefik</code>.</small>
+                        </div>
                         <div id="ingress-existing-fields" class="byok-only" style="display: none;">
                             <div class="form-row">
-                                <div class="form-group">
-                                    <label for="nginx_ingress_namespace">Ingress Namespace</label>
-                                    <input type="text" id="nginx_ingress_namespace" name="nginx_ingress_namespace" placeholder="traefik">
-                                    <small>Namespace where the ingress controller is installed. Defaults to <code>traefik</code>.</small>
-                                </div>
                                 <div class="form-group">
                                     <label for="nginx_ingress_service_name">Controller Service Name</label>
                                     <input type="text" id="nginx_ingress_service_name" name="nginx_ingress_service_name" placeholder="traefik">
@@ -491,12 +492,11 @@
                                 </div>
                                 <input type="hidden" id="install_cert_manager" name="install_cert_manager" value="true">
                             </div>
-                            <div id="certmanager-existing-fields" style="display: none;">
-                                <div class="form-group">
-                                    <label for="cert_manager_namespace">cert-manager Namespace</label>
-                                    <input type="text" id="cert_manager_namespace" name="cert_manager_namespace" placeholder="cert-manager">
-                                    <small>Namespace where cert-manager is installed. Defaults to <code>cert-manager</code>.</small>
-                                </div>
+                            <div class="form-group" id="certmanager-namespace-group">
+                                <label for="cert_manager_namespace">cert-manager Namespace</label>
+                                <input type="text" id="cert_manager_namespace" name="cert_manager_namespace" placeholder="cert-manager">
+                                <small id="certmanager-namespace-hint-install">Namespace cert-manager is installed into, along with the DNS-01 solver and its credentials &mdash; created if it does not exist. Defaults to <code>cert-manager</code>.</small>
+                                <small id="certmanager-namespace-hint-existing" style="display: none;">Namespace where cert-manager is already installed. Defaults to <code>cert-manager</code>.</small>
                             </div>
                             <div id="certmanager-nodeselector-fields">
                                 <div class="template-variables-section">

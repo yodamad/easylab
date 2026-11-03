@@ -689,16 +689,30 @@ Two infrastructure toggles sit in the main flow, not tucked behind a click, so y
 can find them even if you're just skimming: **Ingress Controller** (always shown) and
 **cert-manager** (shown once a custom domain is selected — it has nothing to do in
 Quick start mode). Both default to "install a new one"; switch to "use existing" if
-your cluster already has one, and the namespace and service-name overrides appear (for
-the ingress controller: **Ingress Namespace**, **Controller Service Name** and
-**Ingress Class**, which defaults to `traefik`).
+your cluster already has one, and the reuse-only overrides appear (**Controller Service
+Name** and **Ingress Class**, which defaults to `traefik`).
+
+**Ingress Namespace** and **cert-manager Namespace** are offered either way, because
+the namespace means something in both modes:
+
+| Mode | What the namespace field means |
+|---|---|
+| **Install** | Where EasyLab creates the component. The namespace is created if it does not exist. For cert-manager this also places the DNS-01 solver webhook and the DNS credential secret, which must live beside it. |
+| **Use existing** | Where EasyLab looks the component up — the namespace holding the ingress controller's Service, or the one cert-manager is running in. |
+
+Both default to the conventional names (`traefik` and `cert-manager`) when left empty,
+so leave them alone unless your cluster has a naming convention to respect — a cluster
+where `traefik` is already taken by something else, or one where platform components
+all live in a single namespace.
 
 The lab's **Ingress Class** is honoured by workspace, portal and registry Ingresses
 alike, so reusing a non-Traefik controller such as ingress-nginx works: set the class
 to match. One limitation remains: in **Quick start** (nip.io) mode the lab's base URL is
 still derived from the ingress controller in Traefik's conventional location, so a lab
-that reuses a controller in another namespace *and* has no domain will not show a
-nip.io base URL. Use a custom domain in that case.
+whose controller sits in another namespace — whether reused there or installed there —
+*and* which has no domain will not show a nip.io base URL. The workspaces themselves
+still get their nip.io addresses; it is the lab-level base URL that is missing. Use a
+custom domain, or leave the namespace at its default, if you want it.
 
 [**Detect from cluster**](#detect-from-cluster) fills these in for you:
 
@@ -762,7 +776,7 @@ change it made under **This cluster already hosts another lab**.
 What it changes:
 
 * **A workspace namespace of its own**, derived from the lab's stack name — `workshops-<stack>`, falling back to a unique suffix if that is taken too. This is the change that makes a second domain possible at all. Each lab's wildcard certificate is named `easylab-wildcard-tls` inside its namespace, and one certificate cannot cover two unrelated domains, so two labs sharing a namespace would fight over it. Separate namespaces also keep each lab's student workspaces, volumes and image registry apart. A namespace you set yourself is respected, unless another lab already holds it.
-* **Reuse of the ingress controller and cert-manager** already on the cluster, instead of installing a second copy. A second install fails outright, because the Helm release names are fixed.
+* **Reuse of the ingress controller and cert-manager** already on the cluster, instead of installing a second copy. A second install fails outright, because the Helm release names are fixed. A namespace you typed next to **Install** is replaced by the namespace the sitting lab's components actually run in — it was a target to create, and once the lab is reusing instead of installing, nothing of yours is there to find.
 * **A working DNS-01 setup**, in one of two ways depending on your DNS credentials — see below. Recreating the ClusterIssuer, solver webhook and DNS credential secret is what produces a `had an apply conflict` failure on `dns-credentials-<provider>`: the credential secret is one fixed-name object per DNS provider, and the second lab's deployment cannot take fields the first lab's owns.
 
 Each lab still gets its own A-records, since each has its own domain and ingress IP, and

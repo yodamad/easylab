@@ -1780,6 +1780,61 @@ func TestCreateLabConfigFromForm_BYOK(t *testing.T) {
 	}
 }
 
+// The ingress and cert-manager namespaces are read in both modes: reusing a
+// component they say where to find it, installing one they say where to create
+// it. The two fields that only describe a component already on the cluster — the
+// controller's Service name and its IngressClass — stay reuse-only, since one
+// EasyLab installs itself is Traefik at a known Service name by construction.
+func TestCreateLabConfigFromForm_ComponentNamespaces(t *testing.T) {
+	tests := []struct {
+		name            string
+		installIngress  string
+		installCertM    string
+		wantServiceName string
+		wantClass       string
+	}{
+		{
+			name:           "installing both reads the namespaces as install targets",
+			installIngress: "true",
+			installCertM:   "true",
+		},
+		{
+			name:            "reusing both reads them plus the reuse-only fields",
+			installIngress:  "false",
+			installCertM:    "false",
+			wantServiceName: "ingress-nginx-controller",
+			wantClass:       "nginx",
+		},
+		{
+			name:           "installing the ingress controller while reusing cert-manager",
+			installIngress: "true",
+			installCertM:   "false",
+		},
+	}
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/", nil)
+			req.Form = map[string][]string{
+				"stack_name":                 {"ns-stack"},
+				"use_existing_cluster":       {"true"},
+				"install_nginx_ingress":      {tt.installIngress},
+				"nginx_ingress_namespace":    {"  edge  "},
+				"nginx_ingress_service_name": {"ingress-nginx-controller"},
+				"ingress_class_name":         {"nginx"},
+				"install_cert_manager":       {tt.installCertM},
+				"cert_manager_namespace":     {"  pki  "},
+			}
+			cfg := h.createLabConfigFromForm(req, nil)
+			// Trimmed: on the install path this becomes a Kubernetes namespace name.
+			assert.Equal(t, "edge", cfg.NginxIngressNamespace, "ingress namespace")
+			assert.Equal(t, "pki", cfg.CertManagerNamespace, "cert-manager namespace")
+			assert.Equal(t, tt.wantServiceName, cfg.NginxIngressServiceName, "controller service name")
+			assert.Equal(t, tt.wantClass, cfg.IngressClassName, "ingress class")
+		})
+	}
+}
+
 func TestCreateLabConfigFromForm_AzureProvider(t *testing.T) {
 	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
 	req := httptest.NewRequest("POST", "/", nil)

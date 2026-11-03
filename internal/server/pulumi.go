@@ -1579,12 +1579,10 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 	// Ingress controller configuration. This applies with or without a domain:
 	// domainless labs expose workspaces over plain HTTP via nip.io on the ingress
 	// controller's LoadBalancer IP.
-	// Only emit when false (skip install). Absent = install (backward compat with old jobs).
+	// Only emit the install flag when false (skip install). Absent = install
+	// (backward compat with old jobs). The namespace is emitted either way, below.
 	if config.InstallNginxIngress != nil && !*config.InstallNginxIngress {
 		commands = append(commands, configCommand{"lab:installNginxIngress", "false", false})
-		if config.NginxIngressNamespace != "" {
-			commands = append(commands, configCommand{"lab:nginxIngressNamespace", config.NginxIngressNamespace, false})
-		}
 		if config.NginxIngressServiceName != "" {
 			commands = append(commands, configCommand{"lab:nginxIngressServiceName", config.NginxIngressServiceName, false})
 		}
@@ -1592,6 +1590,12 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 		if b, err := json.Marshal(config.TraefikNodeSelector); err == nil {
 			commands = append(commands, configCommand{"lab:traefikNodeSelector", string(b), false})
 		}
+	}
+	// The namespace carries in either mode: ingress.SetupHTTPS reads it as the
+	// namespace to create and install Traefik into when installing, and as the
+	// namespace to look the existing controller's Service up in when reusing.
+	if config.NginxIngressNamespace != "" {
+		commands = append(commands, configCommand{"lab:nginxIngressNamespace", config.NginxIngressNamespace, false})
 	}
 
 	// HTTPS / TLS configuration — only meaningful when a domain is set.
@@ -1605,13 +1609,16 @@ func (pe *PulumiExecutor) getConfigCommands(config *LabConfig) []configCommand {
 		}
 		if config.InstallCertManager != nil && !*config.InstallCertManager {
 			commands = append(commands, configCommand{"lab:installCertManager", "false", false})
-			if config.CertManagerNamespace != "" {
-				commands = append(commands, configCommand{"lab:certManagerNamespace", config.CertManagerNamespace, false})
-			}
 		} else if len(config.CertManagerNodeSelector) > 0 {
 			if b, err := json.Marshal(config.CertManagerNodeSelector); err == nil {
 				commands = append(commands, configCommand{"lab:certManagerNodeSelector", string(b), false})
 			}
+		}
+		// As with the ingress namespace: the install target when installing, the
+		// lookup namespace when reusing. It also places the DNS-01 credential
+		// secret and solver webhook, which must land beside cert-manager.
+		if config.CertManagerNamespace != "" {
+			commands = append(commands, configCommand{"lab:certManagerNamespace", config.CertManagerNamespace, false})
 		}
 		if config.ClusterIssuerName != "" {
 			commands = append(commands, configCommand{"lab:clusterIssuerName", config.ClusterIssuerName, false})

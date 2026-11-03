@@ -799,8 +799,11 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 
 	installNginx := r.FormValue("install_nginx_ingress") == "true"
 	config.InstallNginxIngress = &installNginx
+	// Read in both modes: reusing a controller it says where to find it,
+	// installing one it says where to put it. Trimmed because on the install path
+	// it becomes a Kubernetes namespace name, which cannot carry whitespace.
+	config.NginxIngressNamespace = strings.TrimSpace(r.FormValue("nginx_ingress_namespace"))
 	if !installNginx {
-		config.NginxIngressNamespace = r.FormValue("nginx_ingress_namespace")
 		config.NginxIngressServiceName = r.FormValue("nginx_ingress_service_name")
 		// Only read when reusing a controller: one EasyLab installs itself is
 		// always Traefik, so there is no class to choose.
@@ -810,8 +813,10 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 	}
 	installCertM := r.FormValue("install_cert_manager") == "true"
 	config.InstallCertManager = &installCertM
+	// Same as the ingress namespace above: the target namespace on the install
+	// path, the lookup namespace when reusing.
+	config.CertManagerNamespace = strings.TrimSpace(r.FormValue("cert_manager_namespace"))
 	if !installCertM {
-		config.CertManagerNamespace = r.FormValue("cert_manager_namespace")
 		config.ClusterIssuerName = r.FormValue("cluster_issuer_name")
 	} else {
 		config.CertManagerNodeSelector = parseNodeSelectorFromForm(r, "certmanager_nodeselector_key", "certmanager_nodeselector_value")

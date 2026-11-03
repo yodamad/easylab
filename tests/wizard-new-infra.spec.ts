@@ -15,6 +15,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Lab wizard — Create New Infrastructure path', () => {
   const byokOnly = [
     '#ingress-mode-group',
+    '#ingress-namespace-group',
     '#ingress-existing-fields',
     '#traefik-nodeselector-fields',
     '#certmanager-toggle-group',
@@ -118,6 +119,8 @@ test.describe('Lab wizard — Create New Infrastructure path', () => {
     await page.locator('#ingress-existing-btn').click();
     await page.locator('#certmanager-existing-btn').click();
     await expect(page.locator('#install_nginx_ingress')).toHaveValue('false');
+    await page.locator('#nginx_ingress_namespace').fill('ingress-nginx');
+    await page.locator('#cert_manager_namespace').fill('certs');
 
     await page.evaluate(() => {
       (window as any).wizard.currentStep = 1;
@@ -126,5 +129,45 @@ test.describe('Lab wizard — Create New Infrastructure path', () => {
     await page.locator('#cluster-mode-new').click();
     await expect(page.locator('#install_nginx_ingress')).toHaveValue('true');
     await expect(page.locator('#install_cert_manager')).toHaveValue('true');
+
+    // The namespace overrides are byok-only and now hidden, but a hidden input
+    // still submits — and on the install path the server reads them as the
+    // namespace to create. They must not survive the switch.
+    await expect(page.locator('#nginx_ingress_namespace')).toHaveValue('');
+    await expect(page.locator('#cert_manager_namespace')).toHaveValue('');
+  });
+
+  // The namespace is the one field that serves both modes: where to create the
+  // component when installing it, where to find it when reusing one. Only the
+  // hint under it changes.
+  test('offers a target namespace for a component it installs', async ({ page }) => {
+    await chooseModeThenGoTo(page, 'existing', 4);
+    await page.locator('#domain-mode-auto-btn').click();
+
+    // Install is the default for both.
+    await expect(page.locator('#nginx_ingress_namespace')).toBeVisible();
+    await expect(page.locator('#ingress-namespace-hint-install')).toBeVisible();
+    await expect(page.locator('#ingress-namespace-hint-existing')).toBeHidden();
+    await expect(page.locator('#cert_manager_namespace')).toBeVisible();
+    await expect(page.locator('#certmanager-namespace-hint-install')).toBeVisible();
+    await expect(page.locator('#certmanager-namespace-hint-existing')).toBeHidden();
+
+    // The reuse-only fields stay out of the way until a controller is reused.
+    await expect(page.locator('#ingress-existing-fields')).toBeHidden();
+
+    await page.locator('#nginx_ingress_namespace').fill('edge');
+    await page.locator('#cert_manager_namespace').fill('pki');
+
+    await page.locator('#ingress-existing-btn').click();
+    await page.locator('#certmanager-existing-btn').click();
+
+    // Switching mode re-labels the field without discarding what was typed: the
+    // same namespace is a plausible answer to either question.
+    await expect(page.locator('#ingress-namespace-hint-install')).toBeHidden();
+    await expect(page.locator('#ingress-namespace-hint-existing')).toBeVisible();
+    await expect(page.locator('#certmanager-namespace-hint-existing')).toBeVisible();
+    await expect(page.locator('#ingress-existing-fields')).toBeVisible();
+    await expect(page.locator('#nginx_ingress_namespace')).toHaveValue('edge');
+    await expect(page.locator('#cert_manager_namespace')).toHaveValue('pki');
   });
 });

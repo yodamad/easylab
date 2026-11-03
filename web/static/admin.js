@@ -1,3 +1,13 @@
+// A field that serves both the "install" and the "use existing" mode carries one
+// hint per mode, named "<prefix>-install" and "<prefix>-existing". Shows the one
+// matching the mode and hides the other.
+function setHintForMode(prefix, mode) {
+    const install = document.getElementById(prefix + '-install');
+    const existing = document.getElementById(prefix + '-existing');
+    if (install) install.style.display = mode === 'install' ? '' : 'none';
+    if (existing) existing.style.display = mode === 'existing' ? '' : 'none';
+}
+
 // Wizard functionality
 const wizard = {
     currentStep: 1,
@@ -122,20 +132,21 @@ const wizard = {
         fields.style.display = mode === 'existing' ? '' : 'none';
         if (nodeSelectorFields) nodeSelectorFields.style.display = mode === 'install' ? '' : 'none';
         hidden.value = mode === 'install' ? 'true' : 'false';
+        // The namespace field serves both modes — only what it means changes.
+        setHintForMode('ingress-namespace-hint', mode);
     },
 
     setCertManagerMode(mode) {
         const installBtn = document.getElementById('certmanager-install-btn');
         const existingBtn = document.getElementById('certmanager-existing-btn');
-        const fields = document.getElementById('certmanager-existing-fields');
         const nodeSelectorFields = document.getElementById('certmanager-nodeselector-fields');
         const hidden = document.getElementById('install_cert_manager');
 
         installBtn.classList.toggle('selected', mode === 'install');
         existingBtn.classList.toggle('selected', mode === 'existing');
-        fields.style.display = mode === 'existing' ? '' : 'none';
         if (nodeSelectorFields) nodeSelectorFields.style.display = mode === 'install' ? '' : 'none';
         hidden.value = mode === 'install' ? 'true' : 'false';
+        setHintForMode('certmanager-namespace-hint', mode);
         this.updateDNSAlreadyConfiguredVisibility();
     },
 
@@ -320,6 +331,14 @@ const wizard = {
         if (!useExisting) {
             this.setIngressMode('install');
             this.setCertManagerMode('install');
+            // The namespace overrides are byok-only, so they are now hidden — but a
+            // hidden input still submits, and on the install path the server reads
+            // them as the namespace to create. Drop whatever was typed in BYOK mode
+            // rather than installing into it behind a field the admin cannot see.
+            ['nginx_ingress_namespace', 'cert_manager_namespace'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
         }
         this.updateInstallNote();
 

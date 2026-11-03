@@ -286,6 +286,56 @@ func TestAdoptSharedClusterRespectsExplicitChoices(t *testing.T) {
 	assert.NotContains(t, strings.Join(notices, "\n"), "ingress controller already on this cluster")
 }
 
+// A namespace typed next to "Install Traefik" / "Install cert-manager" is where
+// the admin wanted the component created. Flipping the lab to reuse the one
+// already on the cluster makes that namespace a lookup address instead, and the
+// admin's install target is the wrong one — nothing of theirs is there. It has to
+// be replaced by the host's, or the Service lookup behind every nip.io URL misses.
+func TestAdoptSharedClusterReplacesAnInstallTargetNamespace(t *testing.T) {
+	t.Parallel()
+
+	neighbour := sittingLab()
+	neighbour.ingressNamespace = "edge"
+	neighbour.certManagerNamespace = "certs"
+
+	cfg := joiningLab()
+	cfg.InstallNginxIngress = boolPtr(true)
+	cfg.NginxIngressNamespace = "my-traefik"
+	cfg.InstallCertManager = boolPtr(true)
+	cfg.CertManagerNamespace = "my-certs"
+
+	notices := adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{neighbour})
+
+	require.NotNil(t, cfg.InstallNginxIngress)
+	assert.False(t, *cfg.InstallNginxIngress)
+	assert.Equal(t, "edge", cfg.NginxIngressNamespace)
+	require.NotNil(t, cfg.InstallCertManager)
+	assert.False(t, *cfg.InstallCertManager)
+	assert.Equal(t, "certs", cfg.CertManagerNamespace)
+	assert.Contains(t, strings.Join(notices, "\n"), "ingress controller already on this cluster")
+}
+
+// Same flip, but the sitting lab used the defaults and so recorded no namespaces.
+// The admin's install target still has to go: an empty value means "the default",
+// which is where the host's components actually are.
+func TestAdoptSharedClusterClearsAnInstallTargetWhenTheHostUsedDefaults(t *testing.T) {
+	t.Parallel()
+
+	neighbour := sittingLab()
+	neighbour.ingressNamespace = ""
+	neighbour.certManagerNamespace = ""
+
+	cfg := joiningLab()
+	cfg.InstallNginxIngress = boolPtr(true)
+	cfg.NginxIngressNamespace = "my-traefik"
+	cfg.CertManagerNamespace = "my-certs"
+
+	adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{neighbour})
+
+	assert.Empty(t, cfg.NginxIngressNamespace)
+	assert.Empty(t, cfg.CertManagerNamespace)
+}
+
 func TestAdoptSharedClusterWithoutADNS01Host(t *testing.T) {
 	t.Parallel()
 

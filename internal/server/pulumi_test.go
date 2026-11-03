@@ -678,6 +678,103 @@ func TestGetConfigCommands_NodeSelectors(t *testing.T) {
 	}
 }
 
+// The namespaces are admin-configurable on both paths, so they have to reach the
+// stack when EasyLab installs the component as well as when it reuses one:
+// ingress.SetupHTTPS reads a single key for both and creates the namespace on the
+// install path. Unlike the node selectors above, these are not suppressed by the
+// reuse choice — only their meaning changes.
+func TestGetConfigCommands_ComponentNamespaces(t *testing.T) {
+	installTrue := true
+	installFalse := false
+
+	tests := []struct {
+		name          string
+		cfg           *LabConfig
+		wantIngressNs string
+		wantCertManNs string
+	}{
+		{
+			name: "installing both passes the namespaces as install targets",
+			cfg: &LabConfig{
+				Domain:                "lab.example.com",
+				AcmeEmail:             "acme@example.com",
+				InstallNginxIngress:   &installTrue,
+				InstallCertManager:    &installTrue,
+				NginxIngressNamespace: "edge",
+				CertManagerNamespace:  "pki",
+			},
+			wantIngressNs: "edge",
+			wantCertManNs: "pki",
+		},
+		{
+			name: "reusing both still passes them as lookup namespaces",
+			cfg: &LabConfig{
+				Domain:                "lab.example.com",
+				AcmeEmail:             "acme@example.com",
+				InstallNginxIngress:   &installFalse,
+				InstallCertManager:    &installFalse,
+				NginxIngressNamespace: "ingress-nginx",
+				CertManagerNamespace:  "certs",
+			},
+			wantIngressNs: "ingress-nginx",
+			wantCertManNs: "certs",
+		},
+		{
+			name: "nil install pointer (backward-compat default) passes them too",
+			cfg: &LabConfig{
+				Domain:                "lab.example.com",
+				AcmeEmail:             "acme@example.com",
+				NginxIngressNamespace: "edge",
+				CertManagerNamespace:  "pki",
+			},
+			wantIngressNs: "edge",
+			wantCertManNs: "pki",
+		},
+		{
+			name: "unset namespaces emit nothing, leaving the chart defaults",
+			cfg: &LabConfig{
+				Domain:              "lab.example.com",
+				AcmeEmail:           "acme@example.com",
+				InstallNginxIngress: &installTrue,
+				InstallCertManager:  &installTrue,
+			},
+		},
+		{
+			// A domainless lab has no certificate to issue, so cert-manager is never
+			// installed and its namespace is meaningless — but the ingress controller
+			// is still what serves workspaces over nip.io.
+			name: "without a domain only the ingress namespace is passed",
+			cfg: &LabConfig{
+				InstallNginxIngress:   &installTrue,
+				InstallCertManager:    &installTrue,
+				NginxIngressNamespace: "edge",
+				CertManagerNamespace:  "pki",
+			},
+			wantIngressNs: "edge",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			pe := &PulumiExecutor{}
+			cmds := pe.getConfigCommands(tt.cfg)
+
+			var gotIngressNs, gotCertManNs string
+			for _, c := range cmds {
+				switch c.key {
+				case "lab:nginxIngressNamespace":
+					gotIngressNs = c.value
+				case "lab:certManagerNamespace":
+					gotCertManNs = c.value
+				}
+			}
+			assert.Equal(t, tt.wantIngressNs, gotIngressNs, "lab:nginxIngressNamespace")
+			assert.Equal(t, tt.wantCertManNs, gotCertManNs, "lab:certManagerNamespace")
+		})
+	}
+}
+
 func TestIsJobDirectoryReady_AllFiles(t *testing.T) {
 	dir := t.TempDir()
 	pe := &PulumiExecutor{workDir: dir}
