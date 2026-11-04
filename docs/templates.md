@@ -1035,10 +1035,12 @@ the templates are exported — credentials are never included.
 This makes template documents easy to keep in a git repository and reuse from one
 workshop edition to the next.
 
-To copy a single template between two labs that are both up, skip the file: each
-template card on the lab detail page has a **Promote** button that copies it to
-another lab, optionally under a new name. See
-[Promote a template to another lab](admin-lab-management.md#promote-a-template-to-another-lab).
+To copy a single template to another lab, skip the file: each template card on the lab
+detail page has a **Promote** button that copies it to a lab that is already up
+(optionally under a new name), or to a new lab that does not exist yet, where you only
+say which cluster and which URL. See
+[Promote a template to another lab](admin-lab-management.md#promote-a-template-to-another-lab)
+and [To a new lab](admin-lab-management.md#to-a-new-lab).
 
 ## Troubleshooting
 

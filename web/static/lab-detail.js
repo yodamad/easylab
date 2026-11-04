@@ -691,12 +691,17 @@ function toggleTemplateRemove(button, open) {
 
 // toggleTemplatePromote opens or closes a template card's promote panel. The
 // panel posts itself with HTMX; closing it clears the last outcome.
+//
+// Both of the panel's shapes pass through here. With another lab up it is the
+// target-lab form; with none it is a plain div offering only the new-lab page, and
+// that one has neither a result region nor a select — hence the null guards.
 function toggleTemplatePromote(button, open) {
     var card = button.closest('.template-status-card');
     card.classList.toggle('is-promoting', open);
-    if (!open) card.querySelector('.template-promote-result').textContent = '';
+    var result = card.querySelector('.template-promote-result');
+    if (!open && result) result.textContent = '';
     var focusTarget = open
-        ? card.querySelector('.template-promote-panel select')
+        ? card.querySelector('.template-promote-panel select, .template-promote-panel a.btn')
         : card.querySelector('.template-remove-row .template-promote-trigger');
     if (focusTarget) focusTarget.focus();
 }

@@ -1100,6 +1100,7 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 		"labs-list.html":          "web/labs-list.html",
 		"lab-detail.html":         "web/lab-detail.html",
 		"admin-stats.html":        "web/admin-stats.html",
+		"promote-new-lab.html":    "web/promote-new-lab.html",
 	}
 
 	tmplPath, ok := templatePaths[filename]
@@ -1115,6 +1116,7 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 		"credentials.html":      {"web/partials/credential-storage.html"},
 		"dns-profiles.html":     {"web/partials/credential-storage.html"},
 		"cluster-profiles.html": {"web/partials/credential-storage.html"},
+		"promote-new-lab.html":  {"web/partials/credential-storage.html"},
 	}
 
 	var err error
@@ -1343,6 +1345,10 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 		auditAction = "lab.dry_run"
 	}
 	h.recordAudit(adminActor(r), "admin", auditAction, jobID, initialConfig.StackName)
+
+	// A lab created by promoting a template records the promotion too. A no-op for
+	// every other creation path — see recordPromotedLabAudit in promote_new_lab.go.
+	h.recordPromotedLabAudit(r, jobID)
 
 	_, html := h.executeLabJobWithID(initialConfig, isDryRun, jobID)
 
@@ -4455,8 +4461,9 @@ type WorkspacesViewModel struct {
 	// of Templates are individually closed.
 	LabDisabled bool
 	ClosedCount int
-	// PromoteTargets lists the other labs a template can be promoted to; empty
-	// hides the Promote control.
+	// PromoteTargets lists the existing labs a template can be promoted to; empty
+	// leaves only the "promote to a new lab" path (see promote_new_lab.go), which
+	// needs no target lab and is therefore always offered.
 	PromoteTargets []PromoteTarget
 }
 

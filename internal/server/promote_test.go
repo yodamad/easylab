@@ -398,15 +398,18 @@ func TestCloneWorkspaceTemplate(t *testing.T) {
 func TestLabDetail_PromoteTemplateControl(t *testing.T) {
 	t.Chdir("../..") // getTemplate resolves web/ relative to the working directory
 
+	// Promote always has somewhere to go, because "a new lab" needs no target —
+	// so the trigger and the panel render whatever else exists. What an existing
+	// lab that is up adds is the target-lab form inside that panel.
 	tests := []struct {
-		name        string
-		others      func(jm *JobManager) []string // returns the IDs expected as targets
-		wantPromote bool
+		name                  string
+		others                func(jm *JobManager) []string // returns the IDs expected as targets
+		wantExistingLabOption bool
 	}{
 		{
-			name:        "no other lab",
-			others:      func(*JobManager) []string { return nil },
-			wantPromote: false,
+			name:                  "no other lab",
+			others:                func(*JobManager) []string { return nil },
+			wantExistingLabOption: false,
 		},
 		{
 			name: "another lab that is not up",
@@ -414,7 +417,7 @@ func TestLabDetail_PromoteTemplateControl(t *testing.T) {
 				jm.CreateJob(&LabConfig{StackName: "pending"})
 				return nil
 			},
-			wantPromote: false,
+			wantExistingLabOption: false,
 		},
 		{
 			name: "another lab that is up",
@@ -424,7 +427,7 @@ func TestLabDetail_PromoteTemplateControl(t *testing.T) {
 				jm.UpdateJobStatus(id, JobStatusCompleted)
 				return []string{id}
 			},
-			wantPromote: true,
+			wantExistingLabOption: true,
 		},
 	}
 
@@ -445,14 +448,26 @@ func TestLabDetail_PromoteTemplateControl(t *testing.T) {
 			body := rec.Body.String()
 			require.Contains(t, body, "template-status-card", "the templates panel must render")
 
-			assert.Equal(t, tt.wantPromote, strings.Contains(body, "template-promote-panel"))
-			assert.Equal(t, tt.wantPromote, strings.Contains(body, `hx-post="/api/labs/`+labID+`/templates/go/promote"`))
+			// Always available: a lab that does not exist yet is always a possible
+			// target, so neither the trigger nor the panel depends on a sibling lab.
+			assert.Contains(t, body, "template-promote-trigger")
+			assert.Contains(t, body, "template-promote-panel")
+			assert.Contains(t, body, `href="/admin/promote?lab_id=`+labID+`&amp;template=go"`)
+
+			// Only with a sibling lab that is up: the target-lab form.
+			assert.Equal(t, tt.wantExistingLabOption, strings.Contains(body, `hx-post="/api/labs/`+labID+`/templates/go/promote"`))
+			assert.Equal(t, tt.wantExistingLabOption, strings.Contains(body, `name="target_lab_id"`))
 			for _, id := range targets {
 				assert.Contains(t, body, `<option value="`+id+`">prod-workshop</option>`)
 			}
-			if tt.wantPromote {
+			if tt.wantExistingLabOption {
 				assert.NotContains(t, body, `<option value="`+labID+`">`, "a lab is not its own promotion target")
 				assert.Equal(t, 1, strings.Count(body, `name="bake" value="true"`), "only the devcontainer template offers a bake")
+				// toggleTemplatePromote focuses the first of "select, a.btn" it
+				// finds, and querySelector goes by document order — so the new-lab
+				// link must come last or it steals focus from the target lab.
+				assert.Less(t, strings.Index(body, `name="target_lab_id"`), strings.Index(body, "template-promote-newlab"),
+					"the target lab select must precede the new-lab link")
 			}
 		})
 	}

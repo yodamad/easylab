@@ -96,6 +96,8 @@ func TestBuildMux_RoutesPerMode(t *testing.T) {
 		{name: "DNS profile fields", path: "/api/dns-profiles/fields", all: true, admin: true},
 		{name: "DNS profile delete", path: "/api/dns-profiles/delete", all: true, admin: true},
 		{name: "Cluster profiles page", path: "/admin/clusters", all: true, admin: true},
+		{name: "Promote to a new lab page", path: "/admin/promote", all: true, admin: true},
+		{name: "Promote cluster detect", path: "/api/promote/detect-cluster", all: true, admin: true},
 		{name: "Cluster profiles API", path: "/api/cluster-profiles", all: true, admin: true},
 		{name: "Cluster profile delete", path: "/api/cluster-profiles/delete", all: true, admin: true},
 		{name: "credential storage passphrase", path: "/api/credential-vault/passphrase", all: true, admin: true},

@@ -588,6 +588,13 @@ func registerAdminRoutes(mux *http.ServeMux, handler *server.Handler, authHandle
 	mux.HandleFunc("/admin/clusters", authHandler.RequireAuth(handler.ServeClusterProfiles))
 	mux.HandleFunc("/api/cluster-profiles", authHandler.RequireAuth(handler.SaveClusterProfile))
 	mux.HandleFunc("/api/cluster-profiles/delete", authHandler.RequireAuth(handler.DeleteClusterProfile))
+	// Promoting a template into a lab that does not exist yet. Top-level rather
+	// than under /labs/ or /api/labs/: the former is a catch-all that would send
+	// this to ServeLabDetail (see below), and the latter dispatches through
+	// resolveLabRoute's ordered match, which a new page route has no business in.
+	// The page's form itself posts to /api/labs, like the wizard's.
+	mux.HandleFunc("/admin/promote", authHandler.RequireAuth(handler.ServePromoteToNewLab))
+	mux.HandleFunc("/api/promote/detect-cluster", authHandler.RequireAuth(handler.DetectClusterForPromote))
 	mux.HandleFunc("/api/credential-vault/passphrase", authHandler.RequireAuth(handler.SetVaultPassphrase))
 	mux.HandleFunc("/api/credential-vault/unlock", authHandler.RequireAuth(handler.UnlockVault))
 	mux.HandleFunc("/api/credential-vault/lock", authHandler.RequireAuth(handler.LockVault))

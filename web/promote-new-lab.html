@@ -1,0 +1,258 @@
+{{define "title"}}Promote {{.TemplateName}} to a new lab{{end}}
+{{define "body-class"}}admin-page{{end}}
+{{define "head-extra"}}
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.0/dist/htmx.min.js" integrity="sha384-wS5l5IKJBvK6sPTKa2WZ1js3d947pvWXbPJ1OmWfEuxLgeHcEbjUUA5i9V5ZkpCw" crossorigin="anonymous"></script>
+<!--
+  The kubeconfig file input is visually hidden behind a styled label, so something
+  has to report which file was picked. cluster-profiles.js does exactly that, keyed
+  off the same two ids this page uses, and no-ops when they are absent — so it is
+  loaded here rather than copied.
+-->
+<script src="{{asset "/static/cluster-profiles.js"}}" defer></script>
+{{end}}
+
+{{define "body"}}
+<div class="admin-layout">
+    {{template "admin-sidebar" .}}
+    <div class="admin-main">
+        <div class="admin-page-header">
+            <h1>Promote to a new lab</h1>
+        </div>
+        <div class="admin-page-body">
+        <div class="admin-content-narrow">
+
+        {{template "credential-storage" .Storage}}
+
+        <section class="form-section">
+            <h2>What is being promoted</h2>
+            <p class="section-description">
+                A copy of <strong>{{.TemplateName}}</strong> from
+                <a href="/labs/{{.SourceLabID}}#workspaces">{{if .SourceStack}}{{.SourceStack}}{{else}}{{.SourceLabID}}{{end}}</a>
+                goes into a lab that does not exist yet. Say which cluster and which URL, and EasyLab
+                creates the lab with this template on it. The source lab is not changed.
+            </p>
+            <table class="options-table options-table--compact">
+                <tbody>
+                    <tr><td class="col-name">Template</td><td class="col-name-mono">{{.TemplateName}}</td></tr>
+                    {{if .TemplateImage}}<tr><td class="col-name">Image</td><td class="col-name-mono">{{.TemplateImage}}</td></tr>{{end}}
+                    {{if .TemplateRepo}}<tr><td class="col-name">Git repository</td><td class="col-name-mono">{{.TemplateRepo}}</td></tr>{{end}}
+                    {{if .TemplateIDE}}<tr><td class="col-name">IDE</td><td class="col-name-mono">{{.TemplateIDE}}</td></tr>{{end}}
+                    {{if .IsDevcontainer}}<tr><td class="col-name">Devcontainer</td><td>Built from the repository. Baked on the new lab when auto-bake is on.</td></tr>{{end}}
+                    <tr><td class="col-name">Source lab status</td><td>{{.SourceStatus}}</td></tr>
+                </tbody>
+            </table>
+
+        </section>
+
+        {{if .CredentialNames}}
+        <div class="warning-message">
+            <h3>This template needs credentials the new lab will not have</h3>
+            <p>
+                It references
+                {{range $i, $name := .CredentialNames}}{{if $i}}, {{end}}<strong>{{$name}}</strong>{{end}}.
+                Credentials live in each lab's own cluster and never travel with a template, so add them
+                under the same name in the new lab's <strong>Credentials</strong> panel once it is up —
+                workspaces needing them fail until then.
+            </p>
+        </div>
+        {{end}}
+
+        <form id="promote-form"
+              method="POST"
+              action="/api/labs"
+              enctype="multipart/form-data"
+              hx-post="/api/labs"
+              hx-encoding="multipart/form-data"
+              hx-target="#promote-response"
+              hx-swap="innerHTML"
+              hx-boost="false">
+
+            <!--
+              Fixed for this page. use_existing_cluster skips provider credentials and
+              every network/compute field in processLabRequest; templates_mode makes the
+              YAML above authoritative; promoted_* are read only by recordPromotedLabAudit.
+            -->
+            <input type="hidden" name="use_existing_cluster" value="true">
+            <input type="hidden" name="templates_mode" value="yaml">
+            <input type="hidden" name="promoted_from" value="{{.SourceLabID}}">
+            <input type="hidden" name="promoted_template" value="{{.TemplateName}}">
+
+            <div class="form-section">
+                <h2>The template definition that travels</h2>
+                <p class="section-description">
+                    Edit it to change the copy — bumping an image tag between editions, say. The source
+                    lab's template is untouched either way. A baked image and the closed-to-students state
+                    are per lab and never travel.
+                </p>
+                <details class="promote-yaml">
+                    <summary>Show the YAML</summary>
+                    <div class="form-group">
+                        <label for="templates_yaml">Workspace template YAML</label>
+                        <textarea id="templates_yaml" name="templates_yaml" rows="16" class="monospace" spellcheck="false">{{.TemplatesYAML}}</textarea>
+                    </div>
+                </details>
+            </div>
+
+            <div class="form-section">
+                <h2>Which cluster</h2>
+                <p class="section-description">The new lab runs on a Kubernetes cluster you already have. Pick a saved one, or provide its kubeconfig.</p>
+
+                <div class="form-group">
+                    <label for="cluster_profile">Saved cluster</label>
+                    <select id="cluster_profile" name="cluster_profile">
+                        <option value="">Upload or paste a kubeconfig</option>
+                        {{range .ClusterProfiles}}
+                        <option value="{{.ID}}">{{.Name}}</option>
+                        {{end}}
+                    </select>
+                    {{if .ClusterProfilesLocked}}
+                    <small>Saved clusters are locked. <a href="/admin/clusters">Unlock credential storage</a> to use them.</small>
+                    {{else}}
+                    <small>Reuse a kubeconfig saved on the <a href="/admin/clusters">Clusters</a> page instead of providing it here.</small>
+                    {{end}}
+                </div>
+
+                <div class="form-group">
+                    <label for="kubeconfig_file">&hellip;or upload a kubeconfig file</label>
+                    <div class="file-upload-wrapper">
+                        <input type="file" id="kubeconfig_file" name="kubeconfig_file" accept=".yaml,.yml,.conf,.config" class="file-input">
+                        <label for="kubeconfig_file" class="file-upload-label">
+                            <span class="file-upload-icon">&#128196;</span>
+                            <span class="file-upload-text">Choose file or drag it here</span>
+                            <span class="file-upload-button">Browse</span>
+                        </label>
+                        <div class="file-name-display" id="kubeconfig-file-name-display"></div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="kubeconfig_content">&hellip;or paste it</label>
+                    <textarea id="kubeconfig_content" name="kubeconfig_content" rows="8" class="monospace" spellcheck="false" placeholder="apiVersion: v1&#10;kind: Config&#10;clusters:&#10;- cluster:&#10;    server: https://...&#10;  name: my-cluster&#10;..."></textarea>
+                    <small>An uploaded file wins over pasted content, and both win over the saved cluster above.</small>
+                </div>
+            </div>
+
+            <div class="form-section">
+                <h2>Which URL</h2>
+                <p class="section-description">Students reach their workspace at <code>{workspace}.{domain}</code>.</p>
+
+                <div class="form-group">
+                    <label for="stack_name">New lab name *</label>
+                    <input type="text" id="stack_name" name="stack_name" value="{{.SuggestedStackName}}" required
+                           pattern="[a-zA-Z0-9_\-]+" autocomplete="off"
+                           title="Only letters, numbers, hyphens and underscores allowed">
+                    <small>Used as the prefix for every resource this lab creates.</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="domain">Domain</label>
+                    <input type="text" id="domain" name="domain" placeholder="lab.example.com" autocomplete="off">
+                    <small>Leave blank to hand out <code>nip.io</code> URLs from the ingress IP instead, with no certificate of your own.</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="acme_email">Let's Encrypt email</label>
+                    <input type="email" id="acme_email" name="acme_email" value="{{.AcmeEmail}}" autocomplete="off">
+                    <small>Where expiry notices go. Needed for a certificate on the domain above.</small>
+                </div>
+
+                <h3 class="subsection-title">Where is this domain's DNS hosted?</h3>
+                <div class="form-group">
+                    <label for="dns_profile">Saved DNS profile</label>
+                    <select id="dns_profile" name="dns_profile">
+                        <option value="">No DNS provider — I manage the records myself</option>
+                        {{range .DNSProfiles}}
+                        <option value="{{.ID}}"{{if eq .ID $.SelectedDNSProfileID}} selected{{end}}>{{.Name}} ({{.ProviderLabel}})</option>
+                        {{end}}
+                    </select>
+                    {{if .DNSProfilesLocked}}
+                    <small>Saved DNS profiles are locked. <a href="/admin/dns">Unlock credential storage</a> to use them.</small>
+                    {{else}}
+                    <small>
+                        EasyLab creates the DNS records and one certificate covering every workspace.
+                        A profile carries the provider and its credentials, so nothing secret is typed here —
+                        manage them on the <a href="/admin/dns">DNS profiles</a> page.
+                    </small>
+                    {{end}}
+                </div>
+
+                <div class="form-group">
+                    <label for="dns_zone">DNS zone</label>
+                    <input type="text" id="dns_zone" name="dns_zone" value="{{.DNSZone}}" placeholder="example.com" autocomplete="off">
+                    <small>The zone that contains the domain above. Left blank, the profile's own zone is used.</small>
+                </div>
+            </div>
+
+            <div class="form-section cluster-detect">
+                <h2>What is already on that cluster</h2>
+                <div class="cluster-detect-prompt">
+                    <p class="cluster-detect-lede">
+                        Read the ingress controller, cert-manager, ClusterIssuer and storage settings off the
+                        cluster instead of looking them up. Nothing on the cluster is changed, and whatever is
+                        found is reused rather than installed a second time.
+                    </p>
+                    <button type="button" class="btn btn-strong"
+                            hx-post="/api/promote/detect-cluster"
+                            hx-encoding="multipart/form-data"
+                            hx-target="#promote-detect"
+                            hx-swap="outerHTML"
+                            hx-disabled-elt="this">Detect from cluster</button>
+                </div>
+                {{.DetectContainer}}
+            </div>
+
+            <div class="form-section">
+                <h2>Carried over from {{if .SourceStack}}{{.SourceStack}}{{else}}the source lab{{end}}</h2>
+                <p class="section-description">Already filled in from the source lab. Change them here, or later from the new lab's Lifecycle &amp; Cleanup section.</p>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="workspace_namespace">Workspace namespace</label>
+                        <input type="text" id="workspace_namespace" name="workspace_namespace" value="{{.Inherited.WorkspaceNamespace}}" autocomplete="off">
+                        <small>Where student workspaces are created. If another lab on this cluster already holds it, EasyLab moves this lab to a free name and says so.</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="workspace_lifetime_hours">Workspace lifetime (hours)</label>
+                        <input type="number" id="workspace_lifetime_hours" name="workspace_lifetime_hours" value="{{.Inherited.WorkspaceLifetimeHours}}" min="0">
+                        <small>0 keeps workspaces until you delete them.</small>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="workspace_idle_timeout_minutes">Pause an idle workspace after (minutes)</label>
+                    <input type="number" id="workspace_idle_timeout_minutes" name="workspace_idle_timeout_minutes" value="{{.Inherited.WorkspaceIdleTimeoutMinutes}}" min="0">
+                    <small>0 never pauses. Files are kept and the student resumes it themselves.</small>
+                </div>
+
+                <div class="form-group">
+                    <label class="promote-checkbox">
+                        <input type="checkbox" id="student_portal" name="student_portal" value="true"{{if .Inherited.StudentPortal}} checked{{end}}>
+                        Give this lab its own student portal
+                    </label>
+                    <label class="promote-checkbox">
+                        <input type="checkbox" id="auto_bake" name="auto_bake" value="true"{{if .Inherited.AutoBake}} checked{{end}}>
+                        Bake devcontainer images as soon as the cluster is up
+                    </label>
+                    <small>A scheduled close or deletion date is not carried over — the source lab's has usually already passed. Set one on the new lab once it exists.</small>
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-success">Create lab</button>
+                <button type="button" class="btn btn-secondary"
+                        hx-post="/api/labs/dry-run"
+                        hx-encoding="multipart/form-data"
+                        hx-target="#promote-response"
+                        hx-swap="innerHTML"
+                        hx-disabled-elt="this">Dry run</button>
+                <a href="/labs/{{.SourceLabID}}#workspaces" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+
+        <div id="promote-response" aria-live="polite"></div>
+
+        </div>
+        </div>
+    </div>
+</div>
+{{end}}

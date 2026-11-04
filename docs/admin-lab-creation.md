@@ -113,6 +113,12 @@ stays enabled whatever it finds.
 See [Reusing components already on the cluster](#reusing-components-already-on-the-cluster)
 for exactly what gets prefilled, and when it deliberately suggests nothing.
 
+The same scan is offered on the page that
+[promotes a template to a new lab](admin-lab-management.md#detect-from-cluster-on-this-page).
+It differs in two ways: there is no separate **Apply to this lab** step, because that
+page has no visible fields to fill, so what is found is applied as soon as the scan
+returns; and the workspace namespace is reported rather than overwritten.
+
 #### Splitting EasyLab and workspaces across node pools
 
 If your existing cluster has more than one node pool, you can run the EasyLab

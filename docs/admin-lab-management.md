@@ -568,13 +568,20 @@ template, which has nothing to bake.
 
 Once a template works on one lab — a test lab, say, or last edition's — **Promote**
 copies it straight to another lab, without the export, download and upload round
-trip.
+trip. The target can be a lab that is already up, or a lab that does not exist yet:
+when a workshop moves to a new edition, the lab it will run on usually has not been
+created.
 
-Each card in the **Templates on this lab** panel has a **Promote** button. It opens a
-panel inside the card:
+Each card in the **Templates on this lab** panel has a **Promote** button. It is always
+shown, including when this is the only lab you have. It opens a panel inside the card.
 
-* **Target lab** — any other lab that is up. The button is not shown when there is no
-  such lab.
+![Promote panel](screens/promote-panel.png){width=700}
+
+#### To a lab that is already up
+
+The panel offers:
+
+* **Target lab** — any other lab that is up.
 * **Name on the target lab** — filled in with the template's current name. Change it
   to promote the template under another name.
 * **Bake its image on the target lab** — shown for a devcontainer template, and
@@ -606,8 +613,138 @@ Only the template's definition is promoted:
 * The two templates are independent from then on. Changing or removing one does not
   affect the other.
 
+#### To a new lab
+
+When the target lab does not exist yet, the panel's footer reads **Target lab not
+created yet?** with a **Promote to a new lab** button. When no other lab is up, that
+is the only thing the panel offers: it says so and proposes to promote the template
+into a **new** lab instead, with a **Close** button beside it.
+
+The button opens a single compact page (`/admin/promote`), not the seven-step
+[New Lab wizard](admin-lab-creation.md). You say which cluster and which URL; EasyLab
+creates the lab with this template on it. Nothing is deployed until you press
+**Create lab**.
+
+![Promote to a new lab](screens/promote-new-lab.png){width=700}
+
+The page has these sections, in order:
+
+1. **What is being promoted** — a read-only summary of the template (name, image, git
+   repository, IDE, devcontainer if any) and the status of the source lab, with a link
+   back to it.
+2. **Credentials** — shown only when the template references credentials (a git
+   credential, image pull secrets, or a devcontainer registry credential). It lists
+   their names. Credentials live in each lab's own cluster and never travel with a
+   template, so add them under the same name in the new lab's **Credentials** panel
+   once it is up; workspaces that need them fail until then. The page deliberately
+   does not collect them: the new lab has no cluster yet to hold them.
+3. **The template definition that travels** — collapsed by default; it holds the
+   template YAML in an editable box. Editing it changes the copy only, for example to
+   bump an image tag between editions. The source lab's template is untouched either
+   way.
+4. **Which cluster** — pick a saved cluster (from the
+   [Clusters](admin.md#cluster-profiles) page), upload a kubeconfig file, or paste one.
+   If you give more than one, an uploaded file wins over pasted content, which wins over
+   the saved cluster. When credential storage is locked, the saved clusters are not
+   available and the page links to **Clusters** to unlock them.
+5. **Which URL**:
+    * **New lab name** (required) — prefilled with a free name derived from the source
+      lab's, for example `devoxx-2025` becomes `devoxx-2025-2`.
+    * **Domain** — leave blank to hand out `nip.io` URLs built from the ingress IP,
+      with no certificate of your own.
+    * **Let's Encrypt email** — prefilled from the source lab.
+    * **Saved DNS profile** — prefilled with the source lab's profile when it still
+      exists. The other choice is **No DNS provider — I manage the records myself**.
+    * **DNS zone** — prefilled from the source lab; blank uses the profile's own zone.
+
+    There are no DNS credential fields on this page. A [saved DNS profile](admin.md#dns-profiles)
+    carries the provider and its credentials and EasyLab reads them from the vault when
+    it creates the lab, so nothing secret is typed or rendered here. Manage profiles on
+    the **DNS** page.
+6. **What is already on that cluster** — the **Detect from cluster** button, below.
+7. **Carried over from the source lab** — workspace namespace, workspace lifetime
+   (hours), idle-pause minutes, **Give this lab its own student portal** and **Bake
+   devcontainer images as soon as the cluster is up**. All are prefilled from the source
+   lab and editable.
+8. **Create lab**, **Dry run** or **Cancel**. **Dry run** previews first and then offers
+   **Launch Real Deployment**, exactly as the wizard does.
+
+##### Detect from cluster on this page
+
+This is the same read-only scan as the wizard's
+[**Detect from cluster**](admin-lab-creation.md#detect-from-cluster) (ingress
+controller, external address, cert-manager, ClusterIssuer, default StorageClass, node
+labels, workspace namespace, permissions), shown as the same findings list — the
+[readout pictured there](admin-lab-creation.md#detect-from-cluster) is what you get here
+too. Nothing on the cluster is changed. Two things differ:
+
+* **There is no separate Apply step.** Whatever is found is applied to the lab's hidden
+  settings as soon as the scan returns, because this page has no visible fields for them
+  to overwrite.
+* **The workspace namespace is reported, not overwritten.** The value in **Carried over**
+  stays as you left it; if the namespace is taken, the findings say so.
+
+Until a scan runs, or if it fails, the lab is created as if the cluster were empty:
+EasyLab installs its own ingress controller and cert-manager. When a scan succeeds,
+reuse is deliberately conservative:
+
+* A ClusterIssuer is adopted only when it is Ready and has a DNS-01 solver, cert-manager
+  is being reused, **and** a DNS profile is selected. Without a DNS profile there is
+  nothing to give it the credentials it needs.
+* A check that was refused (**couldn't check**) never turns into "reuse". Not being
+  allowed to look is not the same as nothing being there.
+* If the cluster's default StorageClass is node-local, the findings say so; set
+  `storage_class` on the template (see [Persistence](templates.md#persistence)) so a
+  rescheduled workspace does not come back empty.
+
+##### What travels and what does not
+
+| Travels | Does not travel |
+|---|---|
+| The one template's definition | The cluster, kubeconfig or saved-cluster choice |
+| Workspace namespace | The domain and wildcard domain |
+| Workspace lifetime | DNS credential **values** — only the profile selection travels, and the server resolves it from the vault |
+| Idle timeout | The baked image, which is built for one lab |
+| Student portal flag (only when this build ships a portal image) | The closed-to-students state |
+| Auto-bake | Any scheduled close or deletion date |
+| The DNS profile selection and DNS zone, as defaults | |
+| The Let's Encrypt email, as a default | |
+
+Scheduled dates are left behind because the source lab's has usually already passed,
+and a close date in the past is rejected outright. Set new ones on the new lab from its
+**Lifecycle & Cleanup** section.
+
+If the new lab lands on a cluster that already hosts another EasyLab lab, the normal
+shared-cluster handling applies and the response reports what it changed: the lab is
+moved to a free workspace namespace, and the ingress controller, cert-manager and DNS-01
+plumbing already there are reused rather than installed a second time.
+
+The source lab is only read, never changed. A failed or destroyed source lab can still
+be promoted from through a direct link, although the **Promote** button on the lab
+detail page needs the source lab's cluster to be reachable to render at all.
+
+This page is a shortcut for the common case, so it does not do everything the wizard
+does. Use the full [New Lab wizard](admin-lab-creation.md) when you need any of:
+
+* **A new cluster.** The page works with an existing cluster only; it cannot provision
+  one.
+* **Traefik or cert-manager node selectors.**
+* **Credentials entered up front.** Add them to the new lab afterwards, as above.
+* **A different name for the template.** The template keeps its name on the way; only
+  the panel for a lab that is already up can rename it.
+* **DNS credentials typed in directly.** The page takes a saved DNS profile and nothing
+  else, so a one-off set of credentials has to be saved as a profile first — or the
+  wizard used instead.
+
+Any saved DNS profile can be picked, whatever provider the source lab used. Note that
+**DNS zone** is prefilled from the source lab, so change it when the new domain sits in
+a different zone: a domain outside its zone is refused when you press **Create lab**.
+
 The [audit log](audit-log.md) records the promotion on the target lab as
-`lab.template_promote`, with the template's name and the lab it came from.
+`lab.template_promote`, with the template's name and the lab it came from. For a new
+lab it sits beside that lab's `lab.create`, with the detail `<template> from lab
+<source-lab-id>`. **Detect from cluster** on the promote page records `cluster.detect`,
+as in the wizard, and a dry run records `lab.dry_run` plus `lab.template_promote`.
 
 ### Close a lab or a template to new students
 

@@ -329,7 +329,7 @@
                                 {{else}}
                                 <button type="button" class="btn btn-secondary btn-sm" data-url="/api/labs/{{$ws.LabID}}/templates/{{.Name}}/availability" data-disabled="true" data-done="Closed {{.Name}} to new students" onclick="setAvailability(this)">Close to new students</button>
                                 {{end}}
-                                {{if $ws.PromoteTargets}}<button type="button" class="btn btn-secondary btn-sm template-promote-trigger" onclick="toggleTemplatePromote(this, true)">Promote</button>{{end}}
+                                <button type="button" class="btn btn-secondary btn-sm template-promote-trigger" onclick="toggleTemplatePromote(this, true)">Promote</button>
                                 {{if .Removable}}<button type="button" class="btn btn-secondary btn-sm template-remove-trigger" onclick="toggleTemplateRemove(this, true)">Remove</button>{{end}}
                             </div>
                             {{if $ws.PromoteTargets}}
@@ -355,7 +355,25 @@
                                     <button type="submit" class="btn btn-primary btn-sm">Promote</button>
                                     <button type="button" class="btn btn-secondary btn-sm" onclick="toggleTemplatePromote(this, false)">Close</button>
                                 </div>
+                                <!--
+                                  Last, and an <a> rather than a nested <form>: it leaves the page
+                                  instead of submitting the fields above. Its position also keeps the
+                                  target-lab select first in document order, which is what
+                                  toggleTemplatePromote focuses when the panel opens.
+                                -->
+                                <div class="template-promote-newlab">
+                                    <span>Target lab not created yet?</span>
+                                    <a class="btn btn-secondary btn-sm" href="/admin/promote?lab_id={{$ws.LabID}}&amp;template={{.Name}}">Promote to a new lab</a>
+                                </div>
                             </form>
+                            {{else}}
+                            <div class="template-promote-panel" role="group" aria-label="Promote {{.Name}} to a new lab">
+                                <p class="template-remove-text">No other lab is up. Promote <strong>{{.Name}}</strong> into a <strong>new</strong> lab instead: say which cluster and which URL, and EasyLab creates the lab with this template on it.</p>
+                                <div class="template-remove-actions">
+                                    <a class="btn btn-primary btn-sm" href="/admin/promote?lab_id={{$ws.LabID}}&amp;template={{.Name}}">Promote to a new lab</a>
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleTemplatePromote(this, false)">Close</button>
+                                </div>
+                            </div>
                             {{end}}
                             {{if .Removable}}
                             <div class="template-remove-confirm" role="group" aria-label="Remove {{.Name}}">

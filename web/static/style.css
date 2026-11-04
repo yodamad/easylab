@@ -7809,6 +7809,43 @@ details[open] > .secrets-summary::after {
     margin: 0;
 }
 
+/* The second destination: a lab that does not exist yet. Sits at the foot of the
+   panel, separated from the target-lab fields above it, because it leaves the
+   page rather than submitting them. */
+.template-promote-newlab {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.6rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.82rem;
+    color: var(--text-light);
+}
+
+/* Promote to a new lab page: the template definition is folded away by default —
+   it is the payload, not a decision, and most promotions never touch it. */
+.promote-yaml summary {
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-light);
+}
+
+.promote-yaml .form-group {
+    margin-top: 0.75rem;
+}
+
+.promote-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin-bottom: 0.4rem;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
+}
+
 /* Closed to new students: a dashed outline is the one sign for "closed", on the
    lab badge, the lab strip, the template card and the student picker tile. It
    stays clear of amber (pending, expiring) and grey fill (destroyed); a closed
