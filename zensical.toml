@@ -42,7 +42,8 @@ nav = [
     ]},
     { "Deployment" = [
         "docker.md",
-        "helm.md"
+        "helm.md",
+        "helm-recipes.md"
     ]}
 ]
 

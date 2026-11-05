@@ -334,7 +334,7 @@ pages:
   before_script:
     - apk add --no-cache git
     - export LATEST_VERSION=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "latest")
-    - sed -i "s/__VERSION__/${LATEST_VERSION}/g" docs/helm.md
+    - sed -i "s/__VERSION__/${LATEST_VERSION}/g" docs/helm.md docs/helm-recipes.md
   script:
     - uv add --dev zensical
     - uv run zensical build
