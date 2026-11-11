@@ -42,6 +42,8 @@ func TestBuildMux_RoutesPerMode(t *testing.T) {
 		// Read from inside a student's IDE, which reaches whichever instance it
 		// can — its lab's own portal or the central one — so every mode answers it.
 		{name: "workspace notifications", path: "/api/workspace/notifications", all: true, admin: true, student: true},
+		// A student asking for help from inside their IDE, like the line above.
+		{name: "workspace help", path: "/api/workspace/help", all: true, admin: true, student: true},
 
 		// Student portal.
 		{name: "student login", path: "/student/login", all: true, student: true},
@@ -56,6 +58,8 @@ func TestBuildMux_RoutesPerMode(t *testing.T) {
 		{name: "student workspace delete", path: "/api/student/workspace/delete", all: true, student: true},
 		{name: "student notifications API", path: "/api/student/notifications", all: true, student: true},
 		{name: "student feedback API", path: "/api/student/feedback", all: true, student: true},
+		{name: "student help API", path: "/api/student/help", all: true, student: true},
+		{name: "student help cancel", path: "/api/student/help/cancel", all: true, student: true},
 
 		// Provider sign-in starts on the same path everywhere: run here on the
 		// central instance, handed to it on a portal.
@@ -77,6 +81,11 @@ func TestBuildMux_RoutesPerMode(t *testing.T) {
 		{name: "admin feedback", path: "/admin/feedback", all: true, admin: true},
 		{name: "audit log", path: "/admin/audit-log", all: true, admin: true},
 		{name: "stats", path: "/admin/stats", all: true, admin: true},
+		{name: "help requests page", path: "/admin/help-requests", all: true, admin: true},
+		{name: "help requests API", path: "/api/admin/help-requests", all: true, admin: true},
+		{name: "help requests panel", path: "/api/admin/help-requests/panel", all: true, admin: true},
+		{name: "help request ack", path: "/api/admin/help-requests/ack", all: true, admin: true},
+		{name: "help request resolve", path: "/api/admin/help-requests/resolve", all: true, admin: true},
 		{name: "labs list", path: "/labs", all: true, admin: true},
 		{name: "lab detail", path: "/labs/job-1", all: true, admin: true},
 		{name: "legacy jobs list", path: "/jobs", all: true, admin: true},
@@ -134,10 +143,17 @@ func TestBuildMux_OtherAreaIsNotFound(t *testing.T) {
 		{name: "admin-only instance has no student dashboard", mode: server.ModeAdmin, path: "/student/dashboard"},
 		{name: "admin-only instance has no student login", mode: server.ModeAdmin, path: "/student/login"},
 		{name: "admin-only instance has no student API", mode: server.ModeAdmin, path: "/api/student/labs"},
+		{name: "admin-only instance has no student help API", mode: server.ModeAdmin, path: "/api/student/help"},
+		{name: "admin-only instance has no student help cancel", mode: server.ModeAdmin, path: "/api/student/help/cancel"},
 		{name: "portal has no admin UI", mode: server.ModeStudent, path: "/admin"},
 		{name: "portal has no admin login", mode: server.ModeStudent, path: "/login"},
 		{name: "portal has no lab API", mode: server.ModeStudent, path: "/api/labs/job-1/kubeconfig"},
 		{name: "portal has no credentials API", mode: server.ModeStudent, path: "/api/credentials"},
+		{name: "portal has no help requests page", mode: server.ModeStudent, path: "/admin/help-requests"},
+		{name: "portal has no help requests API", mode: server.ModeStudent, path: "/api/admin/help-requests"},
+		{name: "portal has no help request panel", mode: server.ModeStudent, path: "/api/admin/help-requests/panel"},
+		{name: "portal has no help request ack", mode: server.ModeStudent, path: "/api/admin/help-requests/ack"},
+		{name: "portal has no help request resolve", mode: server.ModeStudent, path: "/api/admin/help-requests/resolve"},
 		{name: "portal runs no provider callback", mode: server.ModeStudent, path: "/student/auth/github/callback"},
 	}
 	for _, tt := range tests {

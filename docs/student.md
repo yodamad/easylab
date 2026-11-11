@@ -217,6 +217,44 @@ more ways a message reaches you:
 If you have no EasyLab tab open and no workspace running, you will see the message the
 next time you open the portal — provided it has not run out by then.
 
+## Ask for help
+
+Stuck, and nobody has noticed? Raise your hand without leaving your desk.
+
+1. Click **Ask for help** in the portal header.
+2. In the dialog, pick the **lab** you need help with. The picker only appears when you are
+   in more than one lab.
+3. Optionally, add a short note of up to 300 characters — "my pod will not start" is plenty.
+4. Send it.
+
+![Ask for help](screens/student-ask-for-help.png){width=700}
+
+Your organiser sees your request in a queue, with your note, and how long you have been
+waiting. The button then follows what happens to it:
+
+* **Help requested** — your request is in the queue.
+* **Help on the way** — an organiser has picked it up. You are not told who.
+
+You can only have one open request per lab. Asking again updates your note and the time you
+asked, but it does not put you back at the end of the queue, and it does not undo an
+organiser having picked it up. If you sorted it out yourself, click **Withdraw** and the
+request is removed. A request that nobody answers goes away on its own after four hours.
+
+To help, the organiser can open your workspace. You are already told when a teacher does:
+see the *Teacher access note* under [My workspaces](#my-workspaces).
+
+### From inside your IDE
+
+You do not have to leave code-server to ask. Either click the **Ask for help** button in the
+status bar, bottom left, or run **EasyLab: Ask for help** from the command palette. A box
+asks what you need help with; type a note, or leave it empty and press Enter to just ask
+someone to come over. Press Escape to cancel. This reaches the same queue, and the portal
+shows the request's state the next time you open it.
+
+The button and the command are available in the same workspaces that get
+[messages in the IDE](#see-them-while-you-are-working-in-your-ide). If your workspace does
+not offer them, use the **Ask for help** button on the portal instead.
+
 ## Submit feedback
 
 After completing a lab session, you can share your experience via the **Feedback** page, accessible from the student portal header.

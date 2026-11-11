@@ -59,6 +59,12 @@ type PortalState struct {
 	// secret, but they do reach the lab's cluster in this state — which is why
 	// admins are told not to send credentials this way.
 	Notifications []StudentNotification `json:"notifications,omitempty"`
+	// HelpRequests are this lab's students currently waiting for help (see
+	// help.go). They travel in both directions: a portal reports a raised request
+	// through its outbox, and this is how the admin's answer — picked up, or
+	// resolved — gets back to the student's own portal. A student's note reaches
+	// the lab's cluster in this state, like a notification does.
+	HelpRequests []HelpRequest `json:"help_requests,omitempty"`
 	// NotifySecret lets the portal verify the tokens the lab's workspaces carry
 	// when they read their notifications from inside the IDE. Signing key only: it
 	// grants nothing but reading one owner's messages in this one lab.
@@ -146,6 +152,12 @@ func portalStateFromJob(job *Job, auth StudentAuthSnapshot, publicURL string) Po
 	if len(state.Notifications) == 0 {
 		state.Notifications = nil
 	}
+	// Same reasoning as the notifications above: only what is still open, and the
+	// state is written to a Secret, so it stays small.
+	state.HelpRequests = pruneHelpRequests(job.HelpRequests, time.Now())
+	if len(state.HelpRequests) == 0 {
+		state.HelpRequests = nil
+	}
 	state.NotifySecret = job.NotifySecret
 	if cfg := job.Config; cfg != nil {
 		state.StackName = cfg.StackName
@@ -215,6 +227,7 @@ const (
 	portalRecordFeedback       = "feedback"
 	portalRecordWorkspaceEvent = "workspace_event"
 	portalRecordAudit          = "audit"
+	portalRecordHelpRequest    = "help_request"
 )
 
 // portalRecord is one entry of a portal's outbox. Exactly one payload is set,
@@ -224,6 +237,11 @@ type portalRecord struct {
 	Feedback       *Feedback       `json:"feedback,omitempty"`
 	WorkspaceEvent *WorkspaceEvent `json:"workspace_event,omitempty"`
 	Audit          *AuditEntry     `json:"audit,omitempty"`
+	// HelpRequest carries both a student raising a request and withdrawing one —
+	// a withdrawal is the same request with Cancelled set. Records are applied in
+	// key order, which sorts by the time they were queued, so asking and then
+	// changing your mind resolves the way it happened.
+	HelpRequest *HelpRequest `json:"help_request,omitempty"`
 }
 
 // newPortalRecordID returns an outbox key that sorts by creation time — the admin

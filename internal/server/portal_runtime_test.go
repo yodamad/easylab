@@ -314,3 +314,231 @@ func TestPortalRuntime_RunFlushesOnShutdown(t *testing.T) {
 	}
 	assert.Len(t, fb.outboxRecords(), 1)
 }
+
+func localHelpCount(p *PortalRuntime) int {
+	p.localHelpMu.Lock()
+	defer p.localHelpMu.Unlock()
+	return len(p.localHelp)
+}
+
+// Raising a request on a portal reports it to the admin and remembers it, so the
+// student keeps seeing it until the admin has been seen to hold it.
+func TestPortalRuntime_ReportHelpRequest(t *testing.T) {
+	t.Parallel()
+
+	fb := newFakePortalBackend()
+	_, p := newTestPortal(t, fb, portalTestState())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go p.Run(ctx)
+
+	hr := HelpRequest{ID: "r1", At: time.Now(), Student: "alice@example.com", Message: "stuck", Status: HelpStatusWaiting}
+	require.NoError(t, p.reportHelpRequest(ctx, hr))
+
+	records := decodedOutbox(t, fb)
+	require.Len(t, records[portalRecordHelpRequest], 1)
+	assert.Equal(t, "r1", records[portalRecordHelpRequest][0].HelpRequest.ID)
+	assert.Equal(t, 1, localHelpCount(p))
+
+	// A withdrawal is the same record, flagged, and forgets the local copy.
+	hr.Cancelled = true
+	require.NoError(t, p.reportHelpRequest(ctx, hr))
+	records = decodedOutbox(t, fb)
+	require.Len(t, records[portalRecordHelpRequest], 2)
+	assert.Equal(t, 0, localHelpCount(p))
+}
+
+// An outbox that cannot be written must not leave the student believing someone
+// has been told.
+func TestPortalRuntime_ReportHelpRequest_OutboxUnreachable(t *testing.T) {
+	t.Parallel()
+
+	fb := newFakePortalBackend()
+	fb.appendErr = fmt.Errorf("connection refused to 10.0.0.1")
+	_, p := newTestPortal(t, fb, portalTestState())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go p.Run(ctx)
+
+	err := p.reportHelpRequest(ctx, HelpRequest{ID: "r1", At: time.Now(), Student: "alice@example.com"})
+	require.Error(t, err)
+	assert.Equal(t, 0, localHelpCount(p), "a request that never left is not remembered as raised")
+}
+
+func TestPortalRuntime_ReportHelpRequest_ContextDone(t *testing.T) {
+	t.Parallel()
+
+	_, p := newTestPortal(t, newFakePortalBackend(), portalTestState())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Nothing is flushing the outbox, and the caller has given up.
+	err := p.reportHelpRequest(ctx, HelpRequest{ID: "r1", At: time.Now(), Student: "alice@example.com"})
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 0, localHelpCount(p))
+}
+
+// The portal's lab is a mirror the admin overwrites every few seconds, so a
+// request raised here has to survive a sync that does not carry it yet — and only
+// until the admin has been seen to hold it, or been given up on.
+func TestPortalRuntime_ReapplyLocalHelp(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	raised := HelpRequest{ID: "r1", At: now.Add(-time.Minute), Student: "alice@example.com", Message: "stuck", Status: HelpStatusWaiting}
+
+	t.Run("survives a sync that does not carry it", func(t *testing.T) {
+		t.Parallel()
+		h, p := newTestPortal(t, newFakePortalBackend(), portalTestState())
+		p.localHelp[raised.ID] = raised
+
+		// A sync overwrites the queue, then the runtime puts the request back.
+		state := portalTestState()
+		h.jobManager.setPortalJob(state)
+		require.Empty(t, storedHelpRequests(t, h.jobManager, "job-lab"))
+		p.reapplyLocalHelp(state)
+
+		stored := storedHelpRequests(t, h.jobManager, "job-lab")
+		require.Len(t, stored, 1)
+		assert.Equal(t, "r1", stored[0].ID)
+		assert.Equal(t, 1, localHelpCount(p), "still waiting to be seen in a synced state")
+	})
+
+	t.Run("is dropped once seen in a synced state", func(t *testing.T) {
+		t.Parallel()
+		_, p := newTestPortal(t, newFakePortalBackend(), portalTestState())
+		p.localHelp[raised.ID] = raised
+
+		synced := raised
+		synced.Status = HelpStatusHandling
+		synced.AcknowledgedBy = "teacher@example.com"
+		state := portalTestState()
+		state.HelpRequests = []HelpRequest{synced}
+		p.jobManager.setPortalJob(state)
+		p.reapplyLocalHelp(state)
+
+		assert.Equal(t, 0, localHelpCount(p))
+		stored := storedHelpRequests(t, p.jobManager, "job-lab")
+		require.Len(t, stored, 1)
+		assert.Equal(t, HelpStatusHandling, stored[0].Status, "the synced copy is the authoritative one")
+	})
+
+	t.Run("an admin resolving it clears it for good", func(t *testing.T) {
+		t.Parallel()
+		_, p := newTestPortal(t, newFakePortalBackend(), portalTestState())
+		p.localHelp[raised.ID] = raised
+
+		// First sync: the admin holds it.
+		withIt := portalTestState()
+		withIt.HelpRequests = []HelpRequest{raised}
+		p.jobManager.setPortalJob(withIt)
+		p.reapplyLocalHelp(withIt)
+		require.Len(t, storedHelpRequests(t, p.jobManager, "job-lab"), 1)
+
+		// Second sync: the admin resolved it, so it is simply not there — and must
+		// not be resurrected from the local copy.
+		resolved := portalTestState()
+		p.jobManager.setPortalJob(resolved)
+		p.reapplyLocalHelp(resolved)
+		assert.Empty(t, storedHelpRequests(t, p.jobManager, "job-lab"))
+		assert.Equal(t, 0, localHelpCount(p))
+	})
+
+	t.Run("is given up on past the grace period", func(t *testing.T) {
+		t.Parallel()
+		_, p := newTestPortal(t, newFakePortalBackend(), portalTestState())
+		neglected := raised
+		neglected.At = now.Add(-localHelpGrace - time.Second)
+		p.localHelp[neglected.ID] = neglected
+
+		state := portalTestState()
+		p.jobManager.setPortalJob(state)
+		p.reapplyLocalHelp(state)
+
+		assert.Empty(t, storedHelpRequests(t, p.jobManager, "job-lab"))
+		assert.Equal(t, 0, localHelpCount(p))
+	})
+
+	t.Run("one just inside the grace period is kept", func(t *testing.T) {
+		t.Parallel()
+		_, p := newTestPortal(t, newFakePortalBackend(), portalTestState())
+		fresh := raised
+		fresh.At = now.Add(-localHelpGrace + time.Minute)
+		p.localHelp[fresh.ID] = fresh
+
+		state := portalTestState()
+		p.jobManager.setPortalJob(state)
+		p.reapplyLocalHelp(state)
+
+		assert.Len(t, storedHelpRequests(t, p.jobManager, "job-lab"), 1)
+		assert.Equal(t, 1, localHelpCount(p))
+	})
+
+	t.Run("nothing local is a no-op", func(t *testing.T) {
+		t.Parallel()
+		_, p := newTestPortal(t, newFakePortalBackend(), portalTestState())
+		state := portalTestState()
+		state.HelpRequests = []HelpRequest{raised}
+		p.jobManager.setPortalJob(state)
+		p.reapplyLocalHelp(state)
+		assert.Len(t, storedHelpRequests(t, p.jobManager, "job-lab"), 1)
+	})
+
+	t.Run("a mix: held ones go, the uncollected one stays", func(t *testing.T) {
+		t.Parallel()
+		_, p := newTestPortal(t, newFakePortalBackend(), portalTestState())
+		other := HelpRequest{ID: "r2", At: now.Add(-30 * time.Second), Student: "bob@example.com", Status: HelpStatusWaiting}
+		p.localHelp[raised.ID] = raised
+		p.localHelp[other.ID] = other
+
+		state := portalTestState()
+		state.HelpRequests = []HelpRequest{raised}
+		p.jobManager.setPortalJob(state)
+		p.reapplyLocalHelp(state)
+
+		stored := storedHelpRequests(t, p.jobManager, "job-lab")
+		require.Len(t, stored, 2)
+		assert.Equal(t, 1, localHelpCount(p))
+		_, stillLocal := p.localHelp["r2"]
+		assert.True(t, stillLocal)
+	})
+}
+
+// Load puts the request back after installing the admin's state, which would
+// otherwise wipe it from the student's own screen.
+func TestPortalRuntime_Load_ReappliesLocalHelp(t *testing.T) {
+	t.Parallel()
+
+	fb := newFakePortalBackend()
+	h, p := newTestPortal(t, fb, portalTestState())
+	hr := HelpRequest{ID: "r1", At: time.Now(), Student: "alice@example.com", Message: "stuck", Status: HelpStatusWaiting}
+	p.localHelp[hr.ID] = hr
+
+	require.NoError(t, p.Load(context.Background()))
+
+	mine, ok := h.jobManager.StudentHelpRequest("job-lab", "alice@example.com")
+	require.True(t, ok)
+	assert.Equal(t, "stuck", mine.Message)
+}
+
+func TestSetPortalJob_HelpRequests(t *testing.T) {
+	t.Parallel()
+
+	req := func(id string) []HelpRequest {
+		return []HelpRequest{{ID: id, At: time.Now(), Student: "alice@example.com"}}
+	}
+
+	jm := NewJobManager("")
+	jm.setPortalJob(PortalState{LabID: "lab-1", HelpRequests: req("created")})
+	job, ok := jm.GetJob("lab-1")
+	require.True(t, ok)
+	assert.Equal(t, "created", storedHelpRequests(t, jm, "lab-1")[0].ID, "the create branch takes the state's queue")
+
+	jm.setPortalJob(PortalState{LabID: "lab-1", HelpRequests: req("updated")})
+	again, _ := jm.GetJob("lab-1")
+	assert.Same(t, job, again)
+	assert.Equal(t, "updated", storedHelpRequests(t, jm, "lab-1")[0].ID, "the in-place branch replaces it")
+
+	jm.setPortalJob(PortalState{LabID: "lab-1"})
+	assert.Empty(t, storedHelpRequests(t, jm, "lab-1"))
+}

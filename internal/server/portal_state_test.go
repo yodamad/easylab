@@ -428,3 +428,147 @@ func TestPortalConfigFor_MintsNotifySecret(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, minted, state.NotifySecret)
 }
+
+// Help requests ride the same state as notifications: only what is still open is
+// synced, and nothing at all when the queue is empty.
+func TestPortalStateFromJob_HelpRequests(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	live := HelpRequest{ID: "live", At: now.Add(-time.Minute), Student: "alice@example.com", Message: "stuck", Status: HelpStatusWaiting, Source: HelpSourcePortal}
+	stale := HelpRequest{ID: "stale", At: now.Add(-2 * helpRequestTTL), Student: "bob@example.com", Status: HelpStatusWaiting}
+
+	tests := []struct {
+		name     string
+		requests []HelpRequest
+		wantIDs  []string
+	}{
+		{name: "none", requests: nil, wantIDs: nil},
+		{name: "an empty queue", requests: []HelpRequest{}, wantIDs: nil},
+		{name: "only expired ones leaves the field nil", requests: []HelpRequest{stale}, wantIDs: nil},
+		{name: "a live one", requests: []HelpRequest{live}, wantIDs: []string{"live"}},
+		{name: "expired entries are pruned, order kept", requests: []HelpRequest{stale, live}, wantIDs: []string{"live"}},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			jm := NewJobManager("")
+			id := jm.CreateJob(&LabConfig{StackName: "workshop"})
+			job, ok := jm.GetJob(id)
+			require.True(t, ok)
+			job.mu.Lock()
+			job.HelpRequests = tt.requests
+			job.mu.Unlock()
+
+			state := portalStateFromJob(job, StudentAuthSnapshot{}, "")
+			if tt.wantIDs == nil {
+				assert.Nil(t, state.HelpRequests)
+				raw, err := json.Marshal(state)
+				require.NoError(t, err)
+				assert.NotContains(t, string(raw), "help_requests")
+				return
+			}
+			var got []string
+			for _, hr := range state.HelpRequests {
+				got = append(got, hr.ID)
+			}
+			assert.Equal(t, tt.wantIDs, got)
+		})
+	}
+}
+
+func TestPortalState_HelpRequestsRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	acked := time.Date(2030, 1, 1, 10, 5, 0, 0, time.UTC)
+	state := PortalState{
+		LabID: "lab-1",
+		HelpRequests: []HelpRequest{{
+			ID:             "r1",
+			At:             time.Date(2030, 1, 1, 10, 0, 0, 0, time.UTC),
+			Student:        "alice@example.com",
+			StudentEmail:   "Alice@Example.com",
+			Message:        "pod will not start",
+			WorkspaceName:  "ws-alice",
+			Status:         HelpStatusHandling,
+			AcknowledgedAt: &acked,
+			AcknowledgedBy: "teacher@example.com",
+			Source:         HelpSourceIDE,
+		}},
+	}
+
+	config, err := encodePortalState(state)
+	require.NoError(t, err)
+	decoded, err := decodePortalState(config)
+	require.NoError(t, err)
+
+	require.Len(t, decoded.HelpRequests, 1)
+	got := decoded.HelpRequests[0]
+	want := state.HelpRequests[0]
+	assert.Equal(t, want.ID, got.ID)
+	assert.True(t, want.At.Equal(got.At))
+	assert.Equal(t, want.Student, got.Student)
+	assert.Equal(t, want.StudentEmail, got.StudentEmail)
+	assert.Equal(t, want.Message, got.Message)
+	assert.Equal(t, want.WorkspaceName, got.WorkspaceName)
+	assert.Equal(t, want.Status, got.Status)
+	require.NotNil(t, got.AcknowledgedAt)
+	assert.True(t, acked.Equal(*got.AcknowledgedAt))
+	assert.Equal(t, want.AcknowledgedBy, got.AcknowledgedBy)
+	assert.Equal(t, want.Source, got.Source)
+
+	// And the portal's mirror of the lab serves the request from there.
+	portalJobs := NewJobManager("")
+	portalJobs.setPortalJob(PortalState{LabID: "lab-1", HelpRequests: []HelpRequest{{
+		ID: "r1", At: time.Now(), Student: "alice@example.com", Status: HelpStatusHandling,
+	}}})
+	mine, ok := portalJobs.StudentHelpRequest("lab-1", "alice@example.com")
+	require.True(t, ok)
+	assert.Equal(t, HelpStatusHandling, mine.Status)
+
+	// A later sync replaces the queue in place — which is how the admin resolving
+	// a request reaches the student.
+	portalJobs.setPortalJob(PortalState{LabID: "lab-1"})
+	_, ok = portalJobs.StudentHelpRequest("lab-1", "alice@example.com")
+	assert.False(t, ok)
+}
+
+func TestPortalRecord_HelpRequestRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	at := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	record := portalRecord{Kind: portalRecordHelpRequest, HelpRequest: &HelpRequest{
+		ID: "r1", At: at, Student: "alice@example.com", Cancelled: true,
+	}}
+	raw, err := json.Marshal(record)
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), "feedback")
+	assert.NotContains(t, string(raw), "audit")
+
+	var decoded portalRecord
+	require.NoError(t, json.Unmarshal(raw, &decoded))
+	assert.Equal(t, portalRecordHelpRequest, decoded.Kind)
+	require.NotNil(t, decoded.HelpRequest)
+	assert.True(t, decoded.HelpRequest.Cancelled, "a withdrawal is the same record with Cancelled set")
+	assert.True(t, decoded.HelpRequest.At.Equal(at))
+}
+
+// A request is a student's own words about a lab: it is persisted with the lab,
+// and never part of what a job API response carries.
+func TestJob_HelpRequestsAreNotExposed(t *testing.T) {
+	t.Parallel()
+
+	job := &Job{ID: "job-1", HelpRequests: []HelpRequest{{ID: "r1", Student: "alice@example.com", Message: "stuck", At: time.Now()}}}
+
+	exposed, err := job.sanitizedCopy(false)
+	require.NoError(t, err)
+	assert.Empty(t, exposed.HelpRequests)
+
+	persisted, err := job.sanitizedCopy(true)
+	require.NoError(t, err)
+	require.Len(t, persisted.HelpRequests, 1)
+	assert.Equal(t, "stuck", persisted.HelpRequests[0].Message)
+}

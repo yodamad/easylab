@@ -25,6 +25,12 @@ const (
 	// written. Past it the oldest are dropped: an unreachable API server must not
 	// grow the portal until it is killed.
 	portalMaxPending = 5000
+	// localHelpGrace is how long a portal keeps showing a student a help request
+	// the admin has not acknowledged receiving yet (see reapplyLocalHelp). Past
+	// it the request is dropped from the portal's own view: an outbox nobody is
+	// collecting — a portal just removed, a broken role — must not leave a
+	// student believing somebody is coming.
+	localHelpGrace = 10 * time.Minute
 )
 
 // pendingPortalRecord is a report waiting to be written to the outbox. done is
@@ -56,6 +62,13 @@ type PortalRuntime struct {
 	pending []pendingPortalRecord
 	// kick wakes the flush loop early; buffered so a producer never blocks on it.
 	kick chan struct{}
+
+	// localHelp holds the help requests raised here that the admin has not been
+	// seen to hold yet. The lab is a mirror the admin overwrites every few
+	// seconds, so without this a student's request would vanish from their own
+	// screen the moment after they made it (see reapplyLocalHelp).
+	localHelpMu sync.Mutex
+	localHelp   map[string]HelpRequest
 }
 
 // NewPortalRuntime builds the runtime for labID on top of a backend reaching the
@@ -75,6 +88,7 @@ func NewPortalRuntime(labID string, backend workspace.Backend, jobManager *JobMa
 		jobManager: jobManager,
 		auth:       auth,
 		kick:       make(chan struct{}, 1),
+		localHelp:  make(map[string]HelpRequest),
 	}
 	jobManager.workspaceEventSink = p.reportWorkspaceEvent
 	return p, nil
@@ -109,6 +123,9 @@ func (p *PortalRuntime) Load(ctx context.Context) error {
 		return fmt.Errorf("portal state is for lab %s, not %s", state.LabID, p.labID)
 	}
 	p.jobManager.setPortalJob(state)
+	// After the state is installed, because it replaces the lab's help queue with
+	// the admin's — which does not carry what was raised here a moment ago.
+	p.reapplyLocalHelp(state)
 	if p.auth != nil {
 		p.auth.ConfigurePortalAuth(state.LabID, state.Auth)
 	}
@@ -177,6 +194,7 @@ func (jm *JobManager) setPortalJob(state PortalState) {
 			Kubeconfig:        portalKubeconfigSentinel,
 			WorkspaceAccesses: state.WorkspaceAccesses,
 			Notifications:     state.Notifications,
+			HelpRequests:      state.HelpRequests,
 			NotifySecret:      state.NotifySecret,
 			DeletionRetries:   make(map[string]*WorkspaceDeletionRetry),
 		}
@@ -186,6 +204,7 @@ func (jm *JobManager) setPortalJob(state PortalState) {
 	job.Config = config
 	job.WorkspaceAccesses = state.WorkspaceAccesses
 	job.Notifications = state.Notifications
+	job.HelpRequests = state.HelpRequests
 	// Only a real key replaces the one in force. An admin running a build that
 	// does not mint one yet would otherwise clear it on every sync, ten seconds
 	// apart, and every token this lab's workspaces carry would stop verifying —
@@ -296,4 +315,66 @@ func (p *PortalRuntime) reportFeedback(ctx context.Context, f Feedback) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// reportHelpRequest hands a student raising a help request — or withdrawing one —
+// to the admin, and only returns once it is safely in the outbox, like feedback:
+// the student is told somebody has it.
+//
+// A raised request is also remembered locally, so the next sync does not take it
+// off the student's screen before the admin has collected it.
+func (p *PortalRuntime) reportHelpRequest(ctx context.Context, hr HelpRequest) error {
+	done, err := p.enqueue(portalRecord{Kind: portalRecordHelpRequest, HelpRequest: &hr}, true)
+	if err != nil {
+		return err
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			return err
+		}
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	p.localHelpMu.Lock()
+	defer p.localHelpMu.Unlock()
+	if hr.Cancelled {
+		delete(p.localHelp, hr.ID)
+		return nil
+	}
+	p.localHelp[hr.ID] = hr
+	return nil
+}
+
+// reapplyLocalHelp puts back the help requests raised here that the state the
+// admin just synced does not carry yet.
+//
+// A request leaves localHelp the first time it comes back in a synced state: the
+// admin holds it from then on, so a later sync without it is them having
+// resolved it — which must clear the student's screen rather than resurrect the
+// request forever. One that is never collected at all is given up on after
+// localHelpGrace.
+func (p *PortalRuntime) reapplyLocalHelp(state PortalState) {
+	p.localHelpMu.Lock()
+	if len(p.localHelp) == 0 {
+		p.localHelpMu.Unlock()
+		return
+	}
+	synced := make(map[string]bool, len(state.HelpRequests))
+	for _, hr := range state.HelpRequests {
+		synced[hr.ID] = true
+	}
+	now := time.Now()
+	var pending []HelpRequest
+	for id, hr := range p.localHelp {
+		if synced[id] || !hr.At.Add(localHelpGrace).After(now) {
+			delete(p.localHelp, id)
+			continue
+		}
+		pending = append(pending, hr)
+	}
+	p.localHelpMu.Unlock()
+
+	p.jobManager.MergeLocalHelpRequests(p.labID, pending)
 }

@@ -241,6 +241,7 @@ Documentation is part of the deliverable, not a follow-up task. Any change to a 
 | Lab creation wizard (infrastructure, workspace templates, HTTPS/DNS, cleaning policies) | `docs/admin-lab-creation.md` |
 | Lab management (labs list, lab detail page, retry/recreate, workspace history, lab credentials) | `docs/admin-lab-management.md` |
 | Student feedback collection and admin feedback view | `docs/feedbacks.md` |
+| Help-request queue (admin) and student "Ask for help" | `docs/help-requests.md` |
 | Stats / KPI dashboard | `docs/stats.md` |
 | Audit log (admin/student/system action history) | `docs/audit-log.md` |
 | Azure AD authentication setup and admin group configuration | `docs/azure-ad.md` |
@@ -267,3 +268,19 @@ This table lists current mappings but is not exhaustive — if a doc file exists
 When adding a new cloud provider or DNS provider, document its required credential fields and any setup steps in the relevant provider doc.
 
 If the user explicitly asks not to touch docs, skip documentation updates for that change.
+
+## Agent routing
+
+Delegate to this project's subagents in `.claude/agents/` without being asked. This is a standing request, so it overrides the default of not spawning agents unprompted.
+
+- Broad codebase searches (more than a couple of lookups) -> `code-scout`
+- After implementing a feature or fix, its tests and docs -> `test-and-docs`
+- Before any infrastructure change (Pulumi programs, cloud provisioning, Kubernetes, ingress, cert-manager, DNS), and to diagnose a failed deploy or destroy -> `infra-architect`
+- New or changed screens, forms, templates, HTMX interactions or CSS -> `ui-htmx`
+- Before commit or merge, when a change touches handlers, auth flows, templates, credential handling or dependencies -> `security-reviewer`
+- Running the Playwright suite, or retaking documentation screenshots after a documented screen changed -> `e2e-runner`
+- Committing, branching, pushing or opening a merge request, only once I have asked for that operation -> `git-ops`. Pass it the intent of the change and the attribution trailers to append.
+
+The other agents in `.claude/agents/` (`go-backend`, `guardrails-checker`, `kube-workspace-ops`, `penetration-tester`) apply per their own descriptions.
+
+Do the work inline when it is a single lookup or a small edit. Do not fall back to a generic agent just to satisfy this rule.

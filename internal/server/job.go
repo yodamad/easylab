@@ -98,6 +98,10 @@ type Job struct {
 	// not expired yet (see notifications.go). Short-lived by design: entries are
 	// pruned on every write rather than kept as history.
 	Notifications []StudentNotification `json:"notifications,omitempty"`
+	// HelpRequests holds this lab's students who are currently waiting for help
+	// (see help.go). Like Notifications it is a queue and not a history: a request
+	// is removed once it is dealt with, and entries are pruned on every write.
+	HelpRequests []HelpRequest `json:"help_requests,omitempty"`
 	// NotifySecret signs the tokens a student's workspace uses to read its own
 	// notifications from inside the IDE, where there is no session cookie (see
 	// notifyToken). Generated the first time a workspace needs one; encrypted at
@@ -899,6 +903,7 @@ func (j *Job) sanitizedCopy(encryptSecrets bool) (*Job, error) {
 	if encryptSecrets {
 		cp.WorkspaceAccesses = j.WorkspaceAccesses
 		cp.Notifications = j.Notifications
+		cp.HelpRequests = j.HelpRequests
 	}
 
 	// atRest encrypts when persisting and blanks when exposing via the API.

@@ -1,0 +1,40 @@
+{{define "title"}}Help Requests{{end}}
+{{define "body-class"}}admin-page{{end}}
+{{define "head-extra"}}
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.0/dist/htmx.min.js" integrity="sha384-wS5l5IKJBvK6sPTKa2WZ1js3d947pvWXbPJ1OmWfEuxLgeHcEbjUUA5i9V5ZkpCw" crossorigin="anonymous"></script>
+{{end}}
+
+{{define "body"}}
+<div class="admin-layout">
+    {{template "admin-sidebar" .}}
+    <div class="admin-main">
+        <div class="admin-page-header">
+            <h1>Help Requests</h1>
+            <button type="button" id="help-bell" class="btn btn-secondary btn-sm help-bell" title="Turn on desktop notifications" aria-label="Turn on desktop notifications">
+                <span class="help-bell-icon" aria-hidden="true">🔔</span>
+                <span class="help-bell-label">Desktop alerts</span>
+            </button>
+        </div>
+        <div class="admin-page-body">
+        <div class="admin-content-narrow">
+            <p class="help-request-intro">
+                Students waiting for help, across every lab, the longest wait first. A student asks from
+                their portal or from inside their IDE; the count beside <strong>Help requests</strong> in
+                the sidebar follows this list from whichever admin page you are on.
+            </p>
+            <p class="help-request-intro">
+                <strong>Open workspace</strong> signs you into that student's IDE and marks their request as
+                being dealt with. <strong>On my way</strong> does the same without opening anything, for when
+                you walk over instead. <strong>Resolve</strong> takes the request off the list — it is
+                recorded in the <a href="/admin/audit-log">audit log</a>, so nothing is lost.
+            </p>
+
+            <div id="help-requests-panel" class="help-request-list"
+                 hx-get="/api/admin/help-requests/panel" hx-trigger="load, every 15s" hx-swap="innerHTML">
+                <p class="help-request-empty">Loading requests…</p>
+            </div>
+        </div>
+        </div>
+    </div>
+</div>
+{{end}}

@@ -39,6 +39,11 @@
             <span class="admin-nav-icon">💬</span>
             <span class="admin-nav-label">Feedback</span>
         </a>
+        <a href="/admin/help-requests" class="admin-nav-item" data-matchexact="/admin/help-requests">
+            <span class="admin-nav-icon">✋</span>
+            <span class="admin-nav-label">Help requests</span>
+            <span class="admin-nav-badge is-empty" id="help-requests-badge" aria-live="polite"></span>
+        </a>
         <a href="/admin/audit-log" class="admin-nav-item" data-matchexact="/admin/audit-log">
             <span class="admin-nav-icon">📜</span>
             <span class="admin-nav-label">Audit Log</span>
@@ -105,10 +110,42 @@
     });
 })();
 </script>
+<script src="{{asset "/static/admin-help-requests.js"}}"></script>
 {{end}}
 
 {{define "copyright-notice"}}&copy; yodamad 2026 &middot; EasyLab v{{appVersion}}{{end}}
 
 {{define "student-footer"}}
 <footer class="student-footer">{{template "copyright-notice"}}</footer>
+{{end}}
+
+{{define "student-help-dialog"}}
+<div id="student-help-dialog" class="student-help-dialog-overlay" role="dialog" aria-modal="true"
+     aria-labelledby="student-help-title" aria-hidden="true" style="display: none;">
+    <div class="student-help-dialog">
+        <div class="student-help-dialog-head">
+            <h2 id="student-help-title">Ask for help</h2>
+            <button type="button" id="student-help-close" class="student-help-dialog-close" aria-label="Close">&times;</button>
+        </div>
+        <form id="student-help-form" class="student-help-form">
+            <div class="student-help-field" id="student-help-lab-row">
+                <label for="student-help-lab">Which lab?</label>
+                <select id="student-help-lab" name="lab_id"></select>
+            </div>
+            <div class="student-help-field">
+                <label for="student-help-message">What is going on? <span class="student-help-optional">(optional)</span></label>
+                <input type="text" id="student-help-message" name="message" maxlength="300"
+                       placeholder="My workspace will not start" autocomplete="off">
+            </div>
+            <p class="student-help-hint">
+                Your organiser sees your name, your lab and this note, and can open your workspace to help.
+            </p>
+            <p class="error-message student-help-error" id="student-help-error" style="display: none;"></p>
+            <div class="student-help-dialog-actions">
+                <button type="button" id="student-help-cancel" class="student-btn student-btn-danger" style="display: none;">Withdraw</button>
+                <button type="submit" id="student-help-submit" class="student-btn">Ask for help</button>
+            </div>
+        </form>
+    </div>
+</div>
 {{end}}

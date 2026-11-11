@@ -142,6 +142,12 @@ type Handler struct {
 	// portalURLs caches each lab's portal URL as its last deployment reported it,
 	// so brokering a sign-in does not cost a cluster call. Guarded by portalErrorsMu.
 	portalURLs map[string]string
+	// helpDrainAt remembers when each lab's portal outbox was last collected on
+	// behalf of the admin's help-request poll, which every admin page runs (see
+	// drainPortalsForHelp). It is a rate limiter, not state worth keeping: a
+	// restart simply means the next poll collects once more.
+	helpDrainAt map[string]time.Time
+	helpDrainMu sync.Mutex
 	// portalLocks holds one *sync.Mutex per lab ID, serializing that lab's portal
 	// deployments and state syncs: two racing writers could otherwise leave the
 	// older state in the cluster.
@@ -360,6 +366,7 @@ func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsM
 		pendingSecrets:      newPendingSecretStore(),
 		portalErrors:        make(map[string]string),
 		portalURLs:          make(map[string]string),
+		helpDrainAt:         make(map[string]time.Time),
 	}
 	// Credentials captured in the wizard are written once the lab's cluster is up.
 	// The executor owns that moment; the handler owns the cluster connection — so
@@ -1079,28 +1086,29 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 
 	// Map filename to full path
 	templatePaths := map[string]string{
-		"index.html":              "web/index.html",
-		"admin.html":              "web/admin.html",
-		"student-dashboard.html":  "web/student-dashboard.html",
-		"student-workspaces.html": "web/student-workspaces.html",
-		"student-feedback.html":   "web/student-feedback.html",
-		"admin-feedback.html":     "web/admin-feedback.html",
-		"admin-audit-log.html":    "web/admin-audit-log.html",
-		"credentials.html":        "web/credentials.html",
-		"dns-profiles.html":       "web/dns-profiles.html",
-		"cluster-profiles.html":   "web/cluster-profiles.html",
-		"ovh-credentials.html":    "web/ovh-credentials.html", // Keep for backward compatibility
-		"ovh-options.html":        "web/ovh-options.html",
-		"azure-options.html":      "web/azure-options.html",
-		"azure-provider.html":     "web/azure-provider.html",
-		"azure-ad.html":           "web/azure-ad.html",
-		"github-auth.html":        "web/github-auth.html",
-		"gitlab-auth.html":        "web/gitlab-auth.html",
-		"portal-settings.html":    "web/portal-settings.html",
-		"labs-list.html":          "web/labs-list.html",
-		"lab-detail.html":         "web/lab-detail.html",
-		"admin-stats.html":        "web/admin-stats.html",
-		"promote-new-lab.html":    "web/promote-new-lab.html",
+		"index.html":               "web/index.html",
+		"admin.html":               "web/admin.html",
+		"student-dashboard.html":   "web/student-dashboard.html",
+		"student-workspaces.html":  "web/student-workspaces.html",
+		"student-feedback.html":    "web/student-feedback.html",
+		"admin-feedback.html":      "web/admin-feedback.html",
+		"admin-audit-log.html":     "web/admin-audit-log.html",
+		"admin-help-requests.html": "web/admin-help-requests.html",
+		"credentials.html":         "web/credentials.html",
+		"dns-profiles.html":        "web/dns-profiles.html",
+		"cluster-profiles.html":    "web/cluster-profiles.html",
+		"ovh-credentials.html":     "web/ovh-credentials.html", // Keep for backward compatibility
+		"ovh-options.html":         "web/ovh-options.html",
+		"azure-options.html":       "web/azure-options.html",
+		"azure-provider.html":      "web/azure-provider.html",
+		"azure-ad.html":            "web/azure-ad.html",
+		"github-auth.html":         "web/github-auth.html",
+		"gitlab-auth.html":         "web/gitlab-auth.html",
+		"portal-settings.html":     "web/portal-settings.html",
+		"labs-list.html":           "web/labs-list.html",
+		"lab-detail.html":          "web/lab-detail.html",
+		"admin-stats.html":         "web/admin-stats.html",
+		"promote-new-lab.html":     "web/promote-new-lab.html",
 	}
 
 	tmplPath, ok := templatePaths[filename]
@@ -3175,6 +3183,14 @@ func (h *Handler) OpenWorkspaceAsAdmin(w http.ResponseWriter, r *http.Request) {
 	wsName := ws.Name
 	if wsName == "" {
 		wsName = workspaceID
+	}
+	// Opening a student's workspace is the answer to their help request, so it
+	// counts as taking it on — the admin does not have to say so twice. A no-op
+	// for a workspace with nothing open, which is every other caller of this
+	// handler (see help.go).
+	if hr, acked := h.jobManager.AckHelpRequestForWorkspace(labID, wsName, adminActor(r)); acked {
+		h.persistHelpChange(labID)
+		h.recordAudit(adminActor(r), "admin", "lab.help_ack", labID, hr.Student)
 	}
 	h.recordAudit(adminActor(r), "admin", "workspace.open", labID, wsName)
 

@@ -8596,3 +8596,249 @@ details[open] > .secrets-summary::after {
     grid-column: 2;
     grid-row: 1 / span 2;
 }
+
+/* ============================================
+   HELP REQUESTS (student → admin "raise hand")
+   ============================================ */
+
+/* The count beside "Help requests" in the admin sidebar. .admin-nav-label is
+   flex:1, so this right-aligns on its own. It is hidden at zero rather than
+   showing a "0", which reads like something is wrong. */
+.admin-nav-badge {
+    font-size: 0.75rem;
+    font-weight: 700;
+    min-width: 1.4rem;
+    text-align: center;
+    padding: 0.05rem 0.45rem;
+    border-radius: 999px;
+    background: var(--error);
+    color: #ffffff;
+}
+
+.admin-nav-badge.is-empty {
+    display: none;
+}
+
+/* The bell on the Help requests page, where desktop-alert permission is asked
+   for once. Mirrors .student-notify-bell's three states. */
+.help-bell {
+    cursor: pointer;
+}
+
+.help-bell--granted {
+    border-color: var(--success);
+    color: var(--success);
+}
+
+.help-bell--denied,
+.help-bell.is-unavailable {
+    opacity: 0.45;
+}
+
+.help-request-intro {
+    color: var(--text-light);
+    font-size: 0.9rem;
+    margin-bottom: 0.75rem;
+    max-width: 70ch;
+}
+
+.help-request-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.help-request-empty {
+    color: var(--text-light);
+    font-size: 0.9rem;
+}
+
+/* One waiting student. The left border is the only sign of state, in the same
+   register as .lab-notify-item: amber while nobody has picked it up, green once
+   somebody has — and the row says so in words too, so colour never carries the
+   meaning alone. */
+.help-request-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--warning);
+    border-radius: var(--radius);
+    padding: 0.85rem 1rem;
+    background: var(--background);
+}
+
+.help-request-item--handling {
+    border-left-color: var(--success);
+}
+
+.help-request-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+}
+
+.help-request-student {
+    font-weight: 600;
+    word-break: break-word;
+}
+
+.help-request-lab {
+    font-size: 0.8rem;
+    padding: 0.05rem 0.5rem;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-light);
+    text-decoration: none;
+}
+
+.help-request-lab:hover {
+    color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.help-request-wait,
+.help-request-source,
+.help-request-no-workspace {
+    color: var(--text-light);
+    font-size: 0.8rem;
+}
+
+.help-request-taken {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--success);
+}
+
+.help-request-message {
+    font-size: 0.95rem;
+    line-height: 1.5;
+    word-break: break-word;
+}
+
+.help-request-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* The forms exist only to carry the hidden lab and request ids, so they must not
+   take part in the row's layout. */
+.help-request-open-form,
+.help-request-action-form {
+    display: inline;
+}
+
+/* --- the student's side --- */
+
+/* The label changes with the request's state, so unlike the header's fixed
+   labels it must not re-wrap as it changes — a three-word state would otherwise
+   stack and leave this button taller than the ones beside it. */
+.student-help-btn {
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.student-help-btn--active {
+    border-color: var(--warning);
+    color: var(--warning);
+}
+
+.student-help-btn--handling {
+    border-color: var(--success);
+    color: var(--success);
+}
+
+.student-help-dialog-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: rgba(15, 23, 42, 0.45);
+}
+
+.student-help-dialog {
+    width: 100%;
+    max-width: 30rem;
+    background: var(--background);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    padding: 1.25rem;
+}
+
+.student-help-dialog-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.student-help-dialog-head h2 {
+    font-size: 1.1rem;
+}
+
+.student-help-dialog-close {
+    cursor: pointer;
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    line-height: 1;
+    color: var(--text-light);
+}
+
+.student-help-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    margin-bottom: 0.85rem;
+}
+
+.student-help-field label {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.student-help-field select,
+.student-help-field input {
+    font-family: inherit;
+    font-size: 0.95rem;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--background);
+    color: var(--text);
+}
+
+.student-help-field select:focus,
+.student-help-field input:focus {
+    outline: none;
+    border-color: var(--student-color);
+}
+
+.student-help-optional {
+    font-weight: 400;
+    color: var(--text-light);
+}
+
+.student-help-hint {
+    color: var(--text-light);
+    font-size: 0.8rem;
+    margin-bottom: 0.85rem;
+}
+
+.student-help-error {
+    margin-bottom: 0.85rem;
+}
+
+.student-help-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}

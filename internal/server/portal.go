@@ -567,6 +567,24 @@ func (h *Handler) applyPortalRecord(labID, raw string) (bool, error) {
 		}
 		return added, nil
 
+	case record.Kind == portalRecordHelpRequest && record.HelpRequest != nil:
+		hr := *record.HelpRequest
+		if hr.Cancelled {
+			// Keyed by the student, not the ID: whatever they have open in this lab
+			// is what they just withdrew.
+			_, removed, err := h.jobManager.CancelHelpRequest(labID, hr.Student)
+			if err != nil {
+				return false, fmt.Errorf("failed to import help request withdrawal: %w", err)
+			}
+			return removed, nil
+		}
+		hr.Cancelled = false
+		changed, err := h.jobManager.ImportHelpRequest(labID, hr)
+		if err != nil {
+			return false, fmt.Errorf("failed to import help request: %w", err)
+		}
+		return changed, nil
+
 	case record.Kind == portalRecordAudit && record.Audit != nil:
 		if h.auditStore == nil {
 			return false, nil

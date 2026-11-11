@@ -187,10 +187,16 @@ func notifyExtensionManifest() map[string]any {
 		"main":             "./extension.js",
 		// The board is reachable from the command palette as well as from the
 		// status bar, so a student who dismissed a message can still find it.
+		// Asking for help is contributed the same way: a student in a terminal
+		// reaches it from the palette without hunting for the status bar.
 		"contributes": map[string]any{
 			"commands": []map[string]any{{
 				"command":  "easylab.showMessages",
 				"title":    "Show workshop messages",
+				"category": "EasyLab",
+			}, {
+				"command":  "easylab.askForHelp",
+				"title":    "Ask for help",
 				"category": "EasyLab",
 			}},
 		},
@@ -211,7 +217,7 @@ func notifyExtensionManifest() map[string]any {
 const notifyExtensionSource = `const vscode = require('vscode');
 const http = require('http');
 const https = require('https');
-const { URL } = require('url');
+const { URL, URLSearchParams } = require('url');
 
 const POLL_MS = 20000;
 const MAX_BYTES = 64 * 1024;
@@ -221,6 +227,11 @@ const STATUS_MAX = 48;
 const BOARD_COMMAND = "easylab.showMessages";
 const BOARD_TITLE = "Workshop messages";
 const OPEN_LABEL = "Open messages";
+const HELP_COMMAND = "easylab.askForHelp";
+const HELP_TITLE = "Ask for help";
+// HELP_MAX matches the server's own cap, so a student is told here rather than
+// having their note quietly clipped.
+const HELP_MAX = 300;
 
 // seen gates the toast, so a message pops exactly once per window. live is the
 // current set, replaced wholesale on every poll: the server stops returning a
@@ -231,6 +242,11 @@ let live = [];
 let timer = null;
 let status = null;
 let panel = null;
+// helpEndpoint is where "Ask for help" posts, derived from the notification URL
+// (see activate). Null when this workspace has nowhere to reach, in which case
+// the command says so rather than failing silently.
+let helpEndpoint = null;
+let helpStatus = null;
 
 function fetchNotifications(endpoint) {
     return new Promise((resolve) => {
@@ -268,6 +284,70 @@ function fetchNotifications(endpoint) {
         req.on('timeout', () => req.destroy());
         req.on('error', () => resolve(null));
     });
+}
+
+// postForm sends one form-encoded POST and resolves to whether the server
+// accepted it. Same discipline as fetchNotifications: Node's own http/https, a
+// timeout, and every failure swallowed into a plain false.
+function postForm(endpoint, fields) {
+    return new Promise((resolve) => {
+        let target;
+        try {
+            target = new URL(endpoint);
+        } catch (e) {
+            resolve(false);
+            return;
+        }
+        const body = new URLSearchParams(fields).toString();
+        const client = target.protocol === 'http:' ? http : https;
+        const req = client.request(target, {
+            method: 'POST',
+            timeout: 10000,
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Content-Length': Buffer.byteLength(body)
+            }
+        }, (res) => {
+            const ok = res.statusCode >= 200 && res.statusCode < 300;
+            res.resume();
+            res.on('end', () => resolve(ok));
+        });
+        req.on('timeout', () => req.destroy());
+        req.on('error', () => resolve(false));
+        req.write(body);
+        req.end();
+    });
+}
+
+// askForHelp is the student raising their hand from where they actually are. The
+// note is optional: dismissing the box without typing still sends the request,
+// because being stuck is the message.
+async function askForHelp() {
+    if (!helpEndpoint) {
+        vscode.window.showWarningMessage('EasyLab: asking for help is not available in this workspace. Use the student portal instead.');
+        return;
+    }
+    let note;
+    try {
+        note = await vscode.window.showInputBox({
+            title: HELP_TITLE,
+            prompt: 'What do you need help with? (optional)',
+            placeHolder: 'My build fails with a permission error',
+            ignoreFocusOut: true
+        });
+    } catch (e) {
+        return;
+    }
+    // Escape means "never mind"; an empty answer means "just come over".
+    if (note === undefined) {
+        return;
+    }
+    const ok = await postForm(helpEndpoint, { message: clip(note, HELP_MAX) });
+    if (ok) {
+        vscode.window.showInformationMessage('EasyLab: your organiser has been told you need help.');
+    } else {
+        vscode.window.showWarningMessage('EasyLab: could not reach your organiser. Try again, or ask from the student portal.');
+    }
 }
 
 function clip(value, max) {
@@ -557,8 +637,9 @@ function activate(context) {
         }
     };
     // Registered whether or not this workspace has an endpoint, so the palette
-    // entry the manifest contributes always resolves to something.
+    // entries the manifest contributes always resolve to something.
     keep(vscode.commands.registerCommand(BOARD_COMMAND, openBoard));
+    keep(vscode.commands.registerCommand(HELP_COMMAND, askForHelp));
 
     const base = process.env.EASYLAB_NOTIFY_URL;
     const token = process.env.EASYLAB_NOTIFY_TOKEN;
@@ -577,8 +658,25 @@ function activate(context) {
         const url = new URL(base);
         url.searchParams.set('token', token);
         endpoint = url.toString();
+        // Asking for help is the same server, the same lab and the same token —
+        // only a different path. Deriving it means the container needs no second
+        // variable, so a workspace is never restarted just to learn this URL.
+        const help = new URL(endpoint);
+        help.pathname = help.pathname.replace(/\/notifications$/, '/help');
+        helpEndpoint = help.pathname === url.pathname ? null : help.toString();
     } catch (e) {
         return;
+    }
+    if (helpEndpoint) {
+        // Right of the board's beacon, and always visible: a student who is stuck
+        // should not have to discover a command to say so.
+        helpStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 999);
+        helpStatus.name = HELP_TITLE;
+        helpStatus.command = HELP_COMMAND;
+        helpStatus.text = '$(question) ' + HELP_TITLE;
+        helpStatus.tooltip = 'Tell your workshop organiser you need help';
+        keep(helpStatus);
+        helpStatus.show();
     }
     const tick = () => {
         poll(endpoint).catch(() => {}).then(() => {

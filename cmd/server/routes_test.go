@@ -414,3 +414,36 @@ func TestNoStoreByDefault(t *testing.T) {
 		})
 	}
 }
+
+// Help requests are addressed by form fields on their own /api/admin routes, not
+// by a path under /api/labs/, so the lab route table is exactly what it was: a
+// path that merely looks like one falls through to the status handler, and the
+// routes next to it keep resolving as before.
+func TestResolveLabRoute_HelpRequestsAddNoLabRoutes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		path   string
+		method string
+		want   labRoute
+	}{
+		{name: "help-requests under a lab is not a route", path: "/api/labs/job-1/help-requests", method: http.MethodPost, want: routeJobStatus},
+		{name: "help-requests/ack under a lab is not a route", path: "/api/labs/job-1/help-requests/ack", method: http.MethodPost, want: routeJobStatus},
+		{name: "help-requests/resolve under a lab is not a route", path: "/api/labs/job-1/help-requests/resolve", method: http.MethodPost, want: routeJobStatus},
+		{name: "help under a lab is not a route", path: "/api/labs/job-1/help", method: http.MethodPost, want: routeJobStatus},
+		{name: "a lab called help still resolves to status", path: "/api/labs/help", method: http.MethodGet, want: routeJobStatus},
+		// What the help queue's "Open workspace" button posts to is the existing route.
+		{name: "open a workspace", path: "/api/labs/job-1/workspaces/ws-alice/open", method: http.MethodPost, want: routeOpenWorkspace},
+		{name: "notifications are unchanged", path: "/api/labs/job-1/notifications", method: http.MethodPost, want: routeSendLabNotification},
+		{name: "delete a lab is unchanged", path: "/api/labs/job-1/delete", method: http.MethodPost, want: routeDeleteLab},
+		{name: "job status is unchanged", path: "/api/labs/job-1", method: http.MethodGet, want: routeJobStatus},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, resolveLabRoute(tt.path, tt.method, ""), "%s %s", tt.method, tt.path)
+		})
+	}
+}

@@ -480,6 +480,14 @@ func TestNotifyExtensionManifest(t *testing.T) {
 		assert.Equal(t, "EasyLab", cmd["category"])
 	})
 
+	t.Run("contributes the help command", func(t *testing.T) {
+		t.Parallel()
+		cmd := notifyManifestCommands(t)[1]
+		assert.Equal(t, "easylab.askForHelp", cmd["command"])
+		assert.Equal(t, "Ask for help", cmd["title"])
+		assert.Equal(t, "EasyLab", cmd["category"])
+	})
+
 	t.Run("round-trips through JSON", func(t *testing.T) {
 		t.Parallel()
 		raw, err := json.Marshal(notifyExtensionManifest())
@@ -491,17 +499,20 @@ func TestNotifyExtensionManifest(t *testing.T) {
 		require.True(t, ok)
 		commands, ok := contributes["commands"].([]any)
 		require.True(t, ok)
-		require.Len(t, commands, 1)
+		require.Len(t, commands, 2)
 		assert.Equal(t, "easylab.showMessages", commands[0].(map[string]any)["command"])
+		assert.Equal(t, "easylab.askForHelp", commands[1].(map[string]any)["command"])
 	})
 
-	t.Run("source registers the id the manifest contributes", func(t *testing.T) {
+	t.Run("source registers every id the manifest contributes", func(t *testing.T) {
 		t.Parallel()
-		id, ok := notifyManifestCommands(t)[0]["command"].(string)
-		require.True(t, ok)
-		require.NotEmpty(t, id)
-		assert.Contains(t, notifyExtensionSource, id,
-			"the manifest and the extension source disagree on the command id: the palette entry and the status bar click would break with no build error")
+		for _, cmd := range notifyManifestCommands(t) {
+			id, ok := cmd["command"].(string)
+			require.True(t, ok)
+			require.NotEmpty(t, id)
+			assert.Contains(t, notifyExtensionSource, id,
+				"the manifest and the extension source disagree on a command id: the palette entry and the status bar click would break with no build error")
+		}
 	})
 }
 
@@ -522,6 +533,12 @@ func TestNotifyExtensionSource_Guards(t *testing.T) {
 		{"status bar sits on the left", "StatusBarAlignment.Left"},
 		{"board text is set via textContent", "textContent = item.message"},
 		{"exports the entry points", "module.exports = { activate, deactivate }"},
+		// The help endpoint is derived from the notification URL rather than
+		// given its own variable, so a workspace is never restarted to learn it
+		// (see reconcileNotifyEnv).
+		{"help endpoint is derived from the notification path", "replace(/\\/notifications$/, '/help')"},
+		{"help posts form-encoded", "application/x-www-form-urlencoded"},
+		{"asking for help is a status bar item too", "helpStatus.command = HELP_COMMAND"},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -548,6 +565,7 @@ func TestNotifyExtensionStep_WritesBothFiles(t *testing.T) {
 	assert.Contains(t, step, `> "$d/extension.js"`)
 	assert.Contains(t, step, notifyExtensionDir)
 	assert.Contains(t, step, "easylab.showMessages", "the manifest's contributed command must be in the emitted bootstrap")
+	assert.Contains(t, step, "easylab.askForHelp", "the help command must be in the emitted bootstrap")
 
 	assert.Empty(t, notifyExtensionStep(workspace.Spec{}, codeServerProfile))
 	assert.Empty(t, notifyExtensionStep(spec, ideProfile{kind: "other", supportsExtensions: false}))

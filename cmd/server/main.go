@@ -485,6 +485,7 @@ func registerCommonRoutes(mux *http.ServeMux, handler *server.Handler) {
 	// can reach — its lab's own portal or the central one — whatever that
 	// instance's mode is.
 	mux.HandleFunc("/api/workspace/notifications", handler.WorkspaceNotifications)
+	mux.HandleFunc("/api/workspace/help", handler.WorkspaceHelp)
 
 	// Public homepage (no auth required)
 	mux.HandleFunc("/", handler.ServeUI)
@@ -513,6 +514,8 @@ func registerStudentRoutes(mux *http.ServeMux, handler *server.Handler, authHand
 	mux.HandleFunc("/api/student/workspace/delete", authHandler.RequireStudentAuth(handler.DeleteStudentWorkspace))
 	mux.HandleFunc("/api/student/workspace/access", authHandler.RequireStudentAuth(handler.WorkspaceTeacherAccess))
 	mux.HandleFunc("/api/student/notifications", authHandler.RequireStudentAuth(handler.StudentNotifications))
+	mux.HandleFunc("/api/student/help", authHandler.RequireStudentAuth(handler.StudentHelp))
+	mux.HandleFunc("/api/student/help/cancel", authHandler.RequireStudentAuth(handler.CancelStudentHelp))
 	mux.HandleFunc("/api/student/feedback", authHandler.RequireStudentAuth(handler.SubmitFeedback))
 }
 
@@ -560,6 +563,11 @@ func registerAdminRoutes(mux *http.ServeMux, handler *server.Handler, authHandle
 	mux.HandleFunc("/admin/feedback", authHandler.RequireAuth(handler.ServeAdminLabFeedback))
 	mux.HandleFunc("/admin/feedback/export", authHandler.RequireAuth(handler.ExportLabFeedbackCSV))
 	mux.HandleFunc("/admin/audit-log", authHandler.RequireAuth(handler.ServeAuditLog))
+	mux.HandleFunc("/admin/help-requests", authHandler.RequireAuth(handler.ServeHelpRequests))
+	mux.HandleFunc("/api/admin/help-requests", authHandler.RequireAuth(handler.ListHelpRequests))
+	mux.HandleFunc("/api/admin/help-requests/panel", authHandler.RequireAuth(handler.ServeHelpRequestsPanel))
+	mux.HandleFunc("/api/admin/help-requests/ack", authHandler.RequireAuth(handler.AckHelpRequest))
+	mux.HandleFunc("/api/admin/help-requests/resolve", authHandler.RequireAuth(handler.ResolveHelpRequest))
 	mux.HandleFunc("/admin/stats", authHandler.RequireAuth(handler.ServeAdminStats))
 	mux.HandleFunc("/api/admin/stats", authHandler.RequireAuth(handler.GetProjectStats))
 	mux.HandleFunc("/labs", authHandler.RequireAuth(handler.ServeLabsList))

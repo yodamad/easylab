@@ -763,3 +763,142 @@ func TestServeLabDetail_StudentPortal(t *testing.T) {
 		})
 	}
 }
+
+func helpRecordJSON(t *testing.T, hr HelpRequest) string {
+	t.Helper()
+	raw, err := json.Marshal(portalRecord{Kind: portalRecordHelpRequest, HelpRequest: &hr})
+	require.NoError(t, err)
+	return string(raw)
+}
+
+// A help request a portal reports lands on the lab it was drained from, is
+// idempotent under at-least-once delivery, and a withdrawal clears it.
+func TestApplyPortalRecord_HelpRequest(t *testing.T) {
+	t.Parallel()
+
+	at := time.Now().Add(-time.Minute)
+	raise := HelpRequest{ID: "r1", At: at, Student: "alice@example.com", StudentEmail: "alice@example.com", Message: "stuck", Status: HelpStatusWaiting, Source: HelpSourcePortal}
+
+	t.Run("a raise imports", func(t *testing.T) {
+		t.Parallel()
+		h, id, _ := newPortalLab(t, nil)
+
+		changed, err := h.applyPortalRecord(id, helpRecordJSON(t, raise))
+		require.NoError(t, err)
+		assert.True(t, changed)
+
+		stored := storedHelpRequests(t, h.jobManager, id)
+		require.Len(t, stored, 1)
+		assert.Equal(t, "r1", stored[0].ID)
+		assert.Equal(t, "alice@example.com", stored[0].Student)
+		assert.Equal(t, "stuck", stored[0].Message)
+		assert.Equal(t, HelpStatusWaiting, stored[0].Status)
+	})
+
+	t.Run("applying it again reports no change", func(t *testing.T) {
+		t.Parallel()
+		h, id, _ := newPortalLab(t, nil)
+
+		_, err := h.applyPortalRecord(id, helpRecordJSON(t, raise))
+		require.NoError(t, err)
+		changed, err := h.applyPortalRecord(id, helpRecordJSON(t, raise))
+		require.NoError(t, err)
+		assert.False(t, changed)
+		assert.Len(t, storedHelpRequests(t, h.jobManager, id), 1)
+	})
+
+	t.Run("asking again from the portal refreshes the one request", func(t *testing.T) {
+		t.Parallel()
+		h, id, _ := newPortalLab(t, nil)
+		_, err := h.applyPortalRecord(id, helpRecordJSON(t, raise))
+		require.NoError(t, err)
+
+		again := raise
+		again.At = at.Add(30 * time.Second)
+		again.Message = "still stuck"
+		changed, err := h.applyPortalRecord(id, helpRecordJSON(t, again))
+		require.NoError(t, err)
+		assert.True(t, changed)
+
+		stored := storedHelpRequests(t, h.jobManager, id)
+		require.Len(t, stored, 1)
+		assert.Equal(t, "still stuck", stored[0].Message)
+	})
+
+	t.Run("a withdrawal removes the student's request", func(t *testing.T) {
+		t.Parallel()
+		h, id, _ := newPortalLab(t, nil)
+		_, err := h.applyPortalRecord(id, helpRecordJSON(t, raise))
+		require.NoError(t, err)
+		other := HelpRequest{ID: "r2", At: at, Student: "bob@example.com", Status: HelpStatusWaiting}
+		_, err = h.applyPortalRecord(id, helpRecordJSON(t, other))
+		require.NoError(t, err)
+
+		// Keyed by the student: the ID on a withdrawal is not what is looked up.
+		withdraw := HelpRequest{ID: "whatever", Student: "alice@example.com", Cancelled: true}
+		changed, err := h.applyPortalRecord(id, helpRecordJSON(t, withdraw))
+		require.NoError(t, err)
+		assert.True(t, changed)
+
+		stored := storedHelpRequests(t, h.jobManager, id)
+		require.Len(t, stored, 1)
+		assert.Equal(t, "r2", stored[0].ID)
+
+		changed, err = h.applyPortalRecord(id, helpRecordJSON(t, withdraw))
+		require.NoError(t, err)
+		assert.False(t, changed, "withdrawing what is already gone changes nothing")
+	})
+
+	t.Run("a raise then a withdrawal, in outbox order, leaves nothing", func(t *testing.T) {
+		h, id, fb := newPortalLab(t, nil)
+		putOutbox(t, fb, "001", portalRecord{Kind: portalRecordHelpRequest, HelpRequest: &raise})
+		putOutbox(t, fb, "002", portalRecord{Kind: portalRecordHelpRequest, HelpRequest: &HelpRequest{ID: "r1", Student: "alice@example.com", Cancelled: true}})
+
+		h.drainPortalOutbox(context.Background(), id)
+		assert.Empty(t, fb.outboxRecords())
+		assert.Empty(t, storedHelpRequests(t, h.jobManager, id))
+	})
+
+	t.Run("the claimed lab is never trusted", func(t *testing.T) {
+		t.Parallel()
+		h, id, _ := newPortalLab(t, nil)
+		otherLab := h.jobManager.CreateJob(&LabConfig{StackName: "other"})
+
+		// The record has no lab field, so the lab is whichever outbox it came from.
+		changed, err := h.applyPortalRecord(id, helpRecordJSON(t, raise))
+		require.NoError(t, err)
+		assert.True(t, changed)
+		assert.Len(t, storedHelpRequests(t, h.jobManager, id), 1)
+		assert.Empty(t, storedHelpRequests(t, h.jobManager, otherLab))
+	})
+
+	t.Run("a cancelled flag on a raise is not stored", func(t *testing.T) {
+		t.Parallel()
+		h, id, _ := newPortalLab(t, nil)
+		// A withdrawal never reaches ImportHelpRequest; an unrelated student's raise
+		// must come out as an ordinary waiting request.
+		_, err := h.applyPortalRecord(id, helpRecordJSON(t, raise))
+		require.NoError(t, err)
+		for _, hr := range storedHelpRequests(t, h.jobManager, id) {
+			assert.False(t, hr.Cancelled)
+		}
+	})
+
+	t.Run("an unknown lab is an error, so the record is retried", func(t *testing.T) {
+		t.Parallel()
+		h, _, _ := newPortalLab(t, nil)
+		_, err := h.applyPortalRecord("job-missing", helpRecordJSON(t, raise))
+		require.Error(t, err)
+		_, err = h.applyPortalRecord("job-missing", helpRecordJSON(t, HelpRequest{Student: "alice@example.com", Cancelled: true}))
+		require.Error(t, err)
+	})
+
+	t.Run("a record with no payload is dropped", func(t *testing.T) {
+		t.Parallel()
+		h, id, _ := newPortalLab(t, nil)
+		changed, err := h.applyPortalRecord(id, `{"kind":"help_request"}`)
+		require.NoError(t, err, "like the other kinds, an unusable record is dropped rather than retried forever")
+		assert.False(t, changed)
+		assert.Empty(t, storedHelpRequests(t, h.jobManager, id))
+	})
+}

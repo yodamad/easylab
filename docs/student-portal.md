@@ -199,6 +199,15 @@ The central instance remains where everything is decided and recorded:
   (such as `http://localhost:8081`) does not count, since a workspace cannot reach it. The
   portal must also run the same EasyLab version as the central instance; an older portal
   image has no notification endpoints and the messages never arrive.
+* **Help requests** travel the same way. A student raises one on the portal, and it is
+  collected into the central instance's [help requests](help-requests.md) queue, which
+  gathers from each lab's portal while an admin page is open, so a request arrives within
+  about half a minute. When you pick one up (**Open workspace** or **On my way**) or
+  resolve it, the change is copied back to the portal within seconds, like every other change to
+  the lab, so the student's button follows. A request the admin has not collected yet stays
+  visible to the student on the portal for up to ten minutes. As with messages, an older portal
+  image has no help endpoints: its students' **Ask for help** does not work until the portal
+  runs the same EasyLab version as the central instance.
 
 On a combined (`all`) instance, a lab with its own portal is still listed in the central
 student space too, so a student in several labs keeps one place that shows all their
