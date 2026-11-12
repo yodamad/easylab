@@ -40,6 +40,11 @@ const (
 	// from its own process environment.
 	envNotifyURL   = "EASYLAB_NOTIFY_URL"
 	envNotifyToken = "EASYLAB_NOTIFY_TOKEN"
+	// envTemplate names the workspace template, so the notification endpoint can
+	// answer with that template's slides link. Set on new workspaces only and
+	// never by reconcileNotifyEnv (a retrofit would restart running workspaces);
+	// an older workspace simply lacks it.
+	envTemplate = "EASYLAB_TEMPLATE"
 )
 
 // notifyExtensionStep returns the bootstrap lines that install the in-IDE
@@ -198,6 +203,10 @@ func notifyExtensionManifest() map[string]any {
 				"command":  "easylab.askForHelp",
 				"title":    "Ask for help",
 				"category": "EasyLab",
+			}, {
+				"command":  "easylab.openSlides",
+				"title":    "Open slides",
+				"category": "EasyLab",
 			}},
 		},
 	}
@@ -232,6 +241,8 @@ const HELP_TITLE = "Ask for help";
 // HELP_MAX matches the server's own cap, so a student is told here rather than
 // having their note quietly clipped.
 const HELP_MAX = 300;
+const SLIDES_COMMAND = "easylab.openSlides";
+const SLIDES_SEEN_KEY = "easylab.slidesSeen";
 
 // seen gates the toast, so a message pops exactly once per window. live is the
 // current set, replaced wholesale on every poll: the server stops returning a
@@ -247,6 +258,11 @@ let panel = null;
 // the command says so rather than failing silently.
 let helpEndpoint = null;
 let helpStatus = null;
+// slidesStatus is the status bar entry for the template's slides, and
+// slidesLink the http(s) link the last poll returned (null when there is none).
+let slidesStatus = null;
+let slidesLink = null;
+let globalState = null;
 
 function fetchNotifications(endpoint) {
     return new Promise((resolve) => {
@@ -610,6 +626,58 @@ function toast(item) {
     }, () => {});
 }
 
+// safeLink returns the link when it is an absolute http(s) URL, else null. The
+// server validates it too; this is the last check before it is opened.
+function safeLink(value) {
+    if (typeof value !== 'string' || !value) {
+        return null;
+    }
+    try {
+        const u = new URL(value);
+        return (u.protocol === 'http:' || u.protocol === 'https:') ? value : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function openSlides() {
+    if (!slidesLink) {
+        vscode.window.showInformationMessage('No slides are linked to this workspace.');
+        return;
+    }
+    vscode.env.openExternal(vscode.Uri.parse(slidesLink));
+}
+
+function updateSlides(link) {
+    slidesLink = link;
+    if (!slidesStatus) {
+        return;
+    }
+    if (!link) {
+        slidesStatus.hide();
+        return;
+    }
+    let host = '';
+    try {
+        host = new URL(link).hostname;
+    } catch (e) {}
+    slidesStatus.text = '$(book) Slides';
+    slidesStatus.tooltip = 'Open the workshop slides (' + host + ')';
+    slidesStatus.show();
+    // Announced once per distinct link, remembered across windows.
+    const known = globalState ? globalState.get(SLIDES_SEEN_KEY) : link;
+    if (known !== link) {
+        if (globalState) {
+            globalState.update(SLIDES_SEEN_KEY, link);
+        }
+        vscode.window.showInformationMessage('Your workshop slides are available.', 'Open slides').then((choice) => {
+            if (choice === 'Open slides') {
+                openSlides();
+            }
+        }, () => {});
+    }
+}
+
 async function poll(endpoint) {
     const payload = await fetchNotifications(endpoint);
     if (!payload || !Array.isArray(payload.notifications)) {
@@ -628,6 +696,7 @@ async function poll(endpoint) {
     }
     updateStatus();
     renderBoard();
+    updateSlides(safeLink(payload.resource_link));
 }
 
 function activate(context) {
@@ -640,6 +709,8 @@ function activate(context) {
     // entries the manifest contributes always resolve to something.
     keep(vscode.commands.registerCommand(BOARD_COMMAND, openBoard));
     keep(vscode.commands.registerCommand(HELP_COMMAND, askForHelp));
+    keep(vscode.commands.registerCommand(SLIDES_COMMAND, openSlides));
+    globalState = context && context.globalState ? context.globalState : null;
 
     const base = process.env.EASYLAB_NOTIFY_URL;
     const token = process.env.EASYLAB_NOTIFY_TOKEN;
@@ -654,10 +725,15 @@ function activate(context) {
     status.command = BOARD_COMMAND;
     keep(status);
     let endpoint;
+    let pollEndpoint;
     try {
         const url = new URL(base);
         url.searchParams.set('token', token);
         endpoint = url.toString();
+        pollEndpoint = endpoint;
+        if (process.env.EASYLAB_TEMPLATE) {
+            pollEndpoint += '&template=' + encodeURIComponent(process.env.EASYLAB_TEMPLATE);
+        }
         // Asking for help is the same server, the same lab and the same token —
         // only a different path. Deriving it means the container needs no second
         // variable, so a workspace is never restarted just to learn this URL.
@@ -678,8 +754,13 @@ function activate(context) {
         keep(helpStatus);
         helpStatus.show();
     }
+    // Left, next to the beacon; hidden until a poll returns a link.
+    slidesStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 998);
+    slidesStatus.name = 'Workshop slides';
+    slidesStatus.command = SLIDES_COMMAND;
+    keep(slidesStatus);
     const tick = () => {
-        poll(endpoint).catch(() => {}).then(() => {
+        poll(pollEndpoint).catch(() => {}).then(() => {
             timer = setTimeout(tick, POLL_MS);
         });
     };

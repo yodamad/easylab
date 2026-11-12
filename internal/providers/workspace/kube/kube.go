@@ -787,6 +787,12 @@ func (b *Backend) createDeployment(ctx context.Context, name string, labels map[
 			corev1.EnvVar{Name: envNotifyURL, Value: url},
 			corev1.EnvVar{Name: envNotifyToken, Value: spec.NotifyToken},
 		)
+		// Lets the extension ask for this template's slides link. Only set on new
+		// workspaces: reconcileNotifyEnv deliberately never adds it, since that
+		// would restart running workspaces.
+		if tpl := strings.TrimSpace(spec.Template); tpl != "" {
+			env = append(env, corev1.EnvVar{Name: envTemplate, Value: tpl})
+		}
 	}
 
 	container := corev1.Container{

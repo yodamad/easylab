@@ -37,12 +37,40 @@ test.describe('Template resource link', () => {
     await page.goto('/student/dashboard');
 
     await expect(page.locator('#template-tiles .template-tile')).toHaveCount(2);
-    const link = page.locator('#template-tiles a.picker-tile-link');
+    const link = page.locator('#template-tiles a.picker-tile-slides');
     await expect(link).toHaveCount(1);
     await expect(link).toHaveAttribute('href', 'https://slides.example.com/go');
     await expect(link).toHaveAttribute('target', '_blank');
     await expect(link).toHaveAttribute('rel', /noopener/);
-    await expect(page.locator('#lab-tiles a.picker-tile-link')).toHaveCount(0);
+    await expect(link).toContainText('Slides');
+    await expect(link).toContainText('slides.example.com');
+    await expect(page.locator('#lab-tiles a.picker-tile-slides')).toHaveCount(0);
+  });
+
+  test('step 3 shows the slides button for the selected template after a request', async ({ page }) => {
+    await mockTemplates(page, [
+      { id: 'go', name: 'go', resource_link: 'https://slides.example.com/go' },
+      { id: 'plain', name: 'plain' },
+    ]);
+    await page.route('**/api/student/workspace/request', route =>
+      route.fulfill({ contentType: 'text/html', body: '<p>Starting your workspace</p>' }),
+    );
+    await page.goto('/student/dashboard');
+    await expect(page.locator('#template-tiles .template-tile')).toHaveCount(2);
+
+    await page.locator('#template-tiles .template-tile', { hasText: 'go' }).click();
+    await page.locator('#submit-btn').click();
+    const slides = page.locator('#dashboard-slides a.workspace-card-slides');
+    await expect(slides).toHaveAttribute('href', 'https://slides.example.com/go');
+    await expect(slides).toHaveAttribute('rel', /noopener/);
+    await expect(page.locator('#dashboard-slides')).toContainText('Follow the workshop slides');
+
+    // The picker is hidden once step 3 shows, so start over for the next request.
+    await page.goto('/student/dashboard');
+    await expect(page.locator('#template-tiles .template-tile')).toHaveCount(2);
+    await page.locator('#template-tiles .template-tile', { hasText: 'plain' }).click();
+    await page.locator('#submit-btn').click();
+    await expect(page.locator('#dashboard-slides a')).toHaveCount(0);
   });
 
   test('template tile drops a javascript: resource link', async ({ page }) => {
@@ -50,7 +78,7 @@ test.describe('Template resource link', () => {
     await page.goto('/student/dashboard');
 
     await expect(page.locator('#template-tiles .template-tile')).toHaveCount(1);
-    await expect(page.locator('a.picker-tile-link')).toHaveCount(0);
+    await expect(page.locator('a.picker-tile-slides')).toHaveCount(0);
   });
 
   test('workspace card shows the template link only when it is http(s)', async ({ page }) => {
@@ -67,10 +95,11 @@ test.describe('Template resource link', () => {
 
     const cards = page.locator('.workspace-card');
     await expect(cards).toHaveCount(2);
-    const link = cards.nth(0).locator('a.workspace-card-link');
+    const link = cards.nth(0).locator('a.workspace-card-slides');
     await expect(link).toHaveAttribute('href', 'https://slides.example.com/x');
     await expect(link).toHaveAttribute('target', '_blank');
     await expect(link).toHaveAttribute('rel', /noopener/);
-    await expect(cards.nth(1).locator('a.workspace-card-link')).toHaveCount(0);
+    await expect(link).toContainText('Open slides');
+    await expect(cards.nth(1).locator('a.workspace-card-slides')).toHaveCount(0);
   });
 });

@@ -71,8 +71,8 @@ The **Request a workspace** page is where you land after login. It allows you to
 
 You need to provide:
 
-* [x] the **lab (environment)** you want to use — available labs appear as selectable cards, each showing the lab name and, when the organiser set one, a short description of what it's for. When only one lab is available it is selected for you. 
-* [x] the **template** — once you pick a lab, its templates appear as selectable cards. Each card shows the template name, a short description of what it provides, and its IDE, resources, and source repository, so you can tell them apart before choosing. If the organiser added a link to the slides or website for a template, its card also shows a **Slides & resources** link that opens in a new tab, without selecting the template. When a lab has a single template it is selected for you.
+* [x] the **lab (environment)** you want to use — available labs appear as selectable cards, each showing the lab name and, when the organiser set one, a short description of what it's for. When only one lab is available it is selected for you.
+* [x] the **template** — once you pick a lab, its templates appear as selectable cards. Each card shows the template name, a short description of what it provides, and its IDE, resources, and source repository, so you can tell them apart before choosing. If the organiser added a link to the slides or website for a template, its card also has a **Slides** row at the bottom, showing the link's hostname. Clicking it opens the slides in a new tab, without selecting the template. When a lab has a single template it is selected for you.
 
 Your email address is automatically filled in from your login session and is not editable on this form.
 
@@ -88,6 +88,10 @@ The **connection token** is the password your workspace asks for when you open i
 
 !!! info "Waiting for DNS"
     Right after a workspace starts you may briefly see *"Workspace is up — waiting for DNS to propagate..."*. On a lab with a public domain, the workspace address is created in DNS when the environment is provisioned and can take up to a minute to become resolvable. EasyLab holds back the **Open** button until the address actually resolves, so you are not handed a link that fails with `DNS_PROBE_FINISHED_NXDOMAIN`. When the button turns green, the workspace is reachable.
+
+If the template has a slides link, the **Access Environment** step also shows a **Follow the workshop slides** block with an **Open slides** button that opens them in a new tab.
+
+![Slides link in the Access Environment step](screens/student-step3-slides.png){width=85%}
 
 ![Request a new development environment](screens/lab-create.png){width=85%}
 
@@ -108,7 +112,7 @@ If a lab cannot be reached when the page loads, a message says that some workspa
 
 ### Workspace cards
 
-Each card is collapsed by default and expands when you click its header (or the chevron), so a long list stays scannable. Even collapsed, a card always shows the essentials — its name, the **lab** and **template** it uses, and its auto-deletion badge — so you can tell workspaces apart without opening them. When the organiser set one for the template, a **Slides & resources** link to its slides or website sits next to the template and opens in a new tab.
+Each card is collapsed by default and expands when you click its header (or the chevron), so a long list stays scannable. Even collapsed, a card always shows the essentials — its name, the **lab** and **template** it uses, and its auto-deletion badge — so you can tell workspaces apart without opening them. When the organiser set a slides link for the template, an outline **Open slides** button sits next to the **Open** button and opens the slides in a new tab.
 
 Collapsed, each card shows:
 
@@ -125,6 +129,7 @@ Expand the card to reveal the rest:
 * **Workspace URL** — direct link to your workspace (with a copy button)
 * **Email** — the email you are signed in with (with a copy button)
 * **Created at** — when the workspace was created
+* **Slides** — the template's slides link, when the organiser set one
 
 An **Open Code Server** button is available on each card header — you don't need to expand the card to use it (on an [OpenChamber](#openchamber-workspaces) workspace it reads **Open OpenChamber**). Click it to open the workspace in a new tab — EasyLab resolves the workspace URL automatically so you don't need to copy it manually. It also signs you in, on code-server and on OpenChamber, so you land straight in the IDE without typing a password. The card does not show the workspace's connection token: if you open the workspace URL directly, you are asked for the token you were given when you requested the workspace.
 
@@ -208,6 +213,8 @@ more ways a message reaches you:
 
     You never have to dismiss anything. Messages clear themselves when their time runs out,
     and the megaphone disappears with the last one.
+
+    If the template has a slides link, the same extension adds a **Slides** item (book icon) to the status bar, an **EasyLab: Open slides** command to the command palette, and a one-time *"Your workshop slides are available."* message with an **Open slides** button. This applies to workspaces created after the slides feature was added; an older workspace gets the link only when all the lab's templates share one link.
 * **As a desktop notification** — press the **bell** in the portal header once and allow
   notifications when your browser asks. From then on, messages pop up over whatever you
   are doing, as long as a portal tab is still open somewhere. The bell turns green once

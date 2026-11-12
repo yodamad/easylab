@@ -6,10 +6,18 @@
 document.addEventListener('DOMContentLoaded', function() {
     setupLabTemplateHandlers();
 
+    document.addEventListener('htmx:beforeRequest', function(evt) {
+        if (evt.detail.elt && evt.detail.elt.id === 'workspace-request-form') {
+            clearDashboardSlides();
+        }
+    });
+
     document.addEventListener('htmx:afterRequest', function(evt) {
         if (evt.detail.elt && evt.detail.elt.id === 'workspace-request-form' && evt.detail.successful) {
             advanceStep(3);
+            showDashboardSlides();
         }
+
     });
 });
 
@@ -204,19 +212,6 @@ function renderPickerTile(item, checked, groupName) {
         label.appendChild(desc);
     }
 
-    const href = safeHttpURL(item.link);
-    if (href) {
-        const link = document.createElement('a');
-        link.className = 'picker-tile-link';
-        link.href = href;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        link.textContent = 'Slides & resources ↗';
-        // The tile is a <label> around a radio: don't let the click select it.
-        link.addEventListener('click', e => e.stopPropagation());
-        label.appendChild(link);
-    }
-
     if (item.chips && item.chips.length) {
         const meta = document.createElement('span');
         meta.className = 'template-tile-meta';
@@ -242,6 +237,22 @@ function renderPickerTile(item, checked, groupName) {
         note.className = 'template-tile-closed-note';
         note.textContent = 'Closed to new students. Your workspace is still here.';
         label.appendChild(note);
+    }
+
+    const href = safeHttpURL(item.link);
+    if (href) {
+        const link = document.createElement('a');
+        link.className = 'picker-tile-slides';
+        link.href = href;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.title = 'Open the slides';
+        link.innerHTML = slidesIconSvg + '<span class="picker-tile-slides-label">Slides</span>' +
+            '<span class="picker-tile-slides-host">' + escapeHtml(resourceHostname(href)) + '</span>';
+        input.dataset.resourceLink = href;
+        // The tile is a <label> around a radio: don't let the click select it.
+        link.addEventListener('click', e => e.stopPropagation());
+        label.appendChild(link);
     }
 
     return label;
@@ -401,3 +412,35 @@ document.addEventListener('click', async function(event) {
     statusEl.replaceWith(newEl);
     startWorkspaceStatusPolling();
 });
+
+// The selected template's slides link, shown under step 3 in a container of its
+// own so the status polling that replaces #workspace-response never wipes it.
+function clearDashboardSlides() {
+    const box = document.getElementById('dashboard-slides');
+    if (box) {
+        box.innerHTML = '';
+        box.hidden = true;
+    }
+}
+
+function showDashboardSlides() {
+    const response = document.getElementById('workspace-response');
+    const checked = document.querySelector('#template-tiles input[name="template_id"]:checked');
+    const href = checked ? safeHttpURL(checked.dataset.resourceLink) : '';
+    if (!href || !response) {
+        clearDashboardSlides();
+        return;
+    }
+    let box = document.getElementById('dashboard-slides');
+    if (!box) {
+        box = document.createElement('div');
+        box.id = 'dashboard-slides';
+        box.className = 'dashboard-slides';
+        response.insertAdjacentElement('afterend', box);
+    }
+    box.hidden = false;
+    box.innerHTML = `
+        <h3 class="dashboard-slides-title">Follow the workshop slides</h3>
+        <p class="dashboard-slides-text">Keep them open next to your workspace.</p>
+        <a class="student-btn student-btn-small workspace-card-slides" href="${escapeHtmlAttr(href)}" target="_blank" rel="noopener noreferrer" title="Open the slides (${escapeHtmlAttr(resourceHostname(href))})">${slidesIconSvg}<span>Open slides</span></a>`;
+}

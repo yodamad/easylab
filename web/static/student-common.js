@@ -31,6 +31,18 @@ function safeHttpURL(raw) {
     }
 }
 
+// resourceHostname returns the host of an http(s) URL ('' when it does not parse).
+function resourceHostname(href) {
+    try {
+        return new URL(href).hostname;
+    } catch (e) {
+        return '';
+    }
+}
+
+// The inline "slides" glyph shared by every link to a template's resource link.
+const slidesIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="slides-icon" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M12 16v4M8 20h8"/></svg>`;
+
 // The inline clipboard glyph shared by every copy button.
 const copyIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="copy-icon">
     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />

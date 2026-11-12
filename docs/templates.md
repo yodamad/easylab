@@ -43,7 +43,7 @@ validation instead of silently shipping a lab without its image.
 | Key | Type | Notes |
 |---|---|---|
 | `name` | string | **Required.** Shown in the student template selector; unique per lab. |
-| `resource_link` | string | Optional `http://` or `https://` URL of the slides or website for this template, e.g. `https://example.com/slides`. Students see it as a **Slides & resources** link on the template's tile and on their workspace cards. Other schemes (`javascript:`, `ftp:`), links without a scheme and links with a username or password are rejected. |
+| `resource_link` | string | Optional `http://` or `https://` URL of the slides or website for this template, e.g. `https://example.com/slides`. Students see it as a **Slides** row on the template's tile, an **Open slides** button on their workspace cards, and a **Slides** item inside the IDE. Other schemes (`javascript:`, `ftp:`), links without a scheme and links with a username or password are rejected. |
 | `ide` | string | `code-server` (the default — omit it) or `openchamber` for an AI-agent workspace. See [AI labs with OpenChamber](#ai-labs-with-openchamber). Older labs carrying `openvscode` still load; the value is rewritten to `code-server`. |
 | `image` | string | Container image override. Defaults to `codercom/code-server:latest`; **required** when `ide: openchamber`. |
 | `home_dir` | string | `ide: openchamber` only — the home directory inside your own image, where the workspace volume is mounted and below which the repo is cloned (`<home_dir>/project`). Defaults to upstream's `/home/openchamber`. See [If your image is not built from upstream's Dockerfile](#if-your-image-is-not-built-from-upstreams-dockerfile). |
@@ -92,6 +92,19 @@ workspace_templates:
 
 Each template has its own link, so a lab with several templates can link a
 different deck from each.
+
+Students find the link in three places: the template tile and the workspace card on
+the student portal, and inside the IDE. In code-server, the EasyLab notifications
+extension adds a **Slides** item (book icon, with the hostname as tooltip) to the
+status bar and an **EasyLab: Open slides** command to the command palette. It also
+shows a one-time *"Your workshop slides are available."* message with an **Open
+slides** button.
+
+The workspace learns its template through the `EASYLAB_TEMPLATE` environment
+variable, which is set only on workspaces created after this feature was added. An
+older workspace sees the link only when all of the lab's templates share the same
+link. Editing the link in the template applies live, without restarting workspaces:
+the IDE checks for changes about every 20 seconds.
 
 ## Persistence
 

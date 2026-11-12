@@ -3101,7 +3101,8 @@ body.student-dashboard-page {
 
 .template-tile {
     position: relative;
-    display: block;
+    display: flex;
+    flex-direction: column;
     cursor: pointer;
     margin: 0;
     background: var(--surface);
@@ -3141,28 +3142,88 @@ body.student-dashboard-page {
     line-height: 1.45;
 }
 
-.picker-tile-link {
-    display: inline-block;
-    margin-top: 0.6rem;
-    font-size: 0.85rem;
-    font-weight: 500;
-    color: var(--primary-color);
-    text-decoration: none;
-}
-
-.workspace-card-link {
-    display: inline-flex;
+.picker-tile-slides {
+    display: flex;
     align-items: center;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    color: var(--primary-color);
+    gap: 0.4rem;
+    margin: auto -1rem -0.9rem;
+    padding: 0.55rem 1rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.82rem;
+    color: var(--text-light);
     text-decoration: none;
 }
 
-.picker-tile-link:hover,
-.workspace-card-link:hover {
-    color: var(--primary-hover);
-    text-decoration: underline;
+.template-tile > :has(+ .picker-tile-slides) {
+    margin-bottom: 0.8rem;
+}
+
+.picker-tile-slides .slides-icon {
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+}
+
+.picker-tile-slides-label {
+    font-weight: 500;
+    color: var(--text);
+}
+
+.picker-tile-slides-host {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.picker-tile-slides:hover,
+.picker-tile-slides:hover .picker-tile-slides-label {
+    color: var(--student-hover);
+}
+
+/* Outline secondary action opening a template's slides (My Workspaces card, step 3). */
+.workspace-card-slides {
+    margin-top: 0;
+    gap: 0.4rem;
+    flex-shrink: 0;
+    background: transparent;
+    color: var(--student-hover);
+    border: 1px solid var(--student-color);
+    padding: calc(0.5rem - 1px) calc(1rem - 1px);
+}
+
+.workspace-card-slides:hover {
+    background: rgba(72, 187, 120, 0.12);
+    color: var(--student-hover);
+}
+
+.workspace-card-slides .slides-icon {
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+}
+
+.dashboard-slides {
+    margin-top: 1.25rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.dashboard-slides[hidden] {
+    display: none;
+}
+
+.dashboard-slides-title {
+    margin: 0 0 0.25rem;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.dashboard-slides-text {
+    margin: 0 0 0.6rem;
+    font-size: 0.875rem;
+    color: var(--text-light);
 }
 
 .template-tile-meta {
@@ -3451,6 +3512,22 @@ select.loading {
 .workspace-card-open {
     margin-top: 0;
     flex-shrink: 0;
+}
+
+@media (max-width: 480px) {
+    .workspace-card-header {
+        flex-wrap: wrap;
+    }
+
+    .workspace-card-header-actions {
+        flex-wrap: wrap;
+        width: 100%;
+    }
+
+    .workspace-card-header-actions .student-btn {
+        flex: 1 1 100%;
+        justify-content: center;
+    }
 }
 
 .workspace-card .collapsible-toggle {

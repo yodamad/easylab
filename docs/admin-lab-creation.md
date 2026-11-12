@@ -255,8 +255,9 @@ These are the ones that change what a student sees, so they are always on screen
    workspace (e.g. *Go 1.26 + Postgres*). The name must be unique within the lab.
    Add a **Resource link** (optional) — the `http://` or `https://` address of the
    slides or website that go with this template (e.g. `https://example.com/slides`).
-   Students see it as a **Slides & resources** link on the template's tile in the
-   environment picker and next to the template on their **My Workspaces** cards.
+   Students see it as a **Slides** row on the template's tile in the
+   environment picker, as an **Open slides** button on their **My Workspaces**
+   cards, and inside their IDE.
    Links without a scheme, other schemes such as `javascript:` or `ftp:`, and links
    with a username or password are rejected when the lab is saved. In YAML the key
    is [`resource_link`](templates.md#key-reference).

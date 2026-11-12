@@ -499,9 +499,12 @@ func TestNotifyExtensionManifest(t *testing.T) {
 		require.True(t, ok)
 		commands, ok := contributes["commands"].([]any)
 		require.True(t, ok)
-		require.Len(t, commands, 2)
+		require.Len(t, commands, 3)
 		assert.Equal(t, "easylab.showMessages", commands[0].(map[string]any)["command"])
 		assert.Equal(t, "easylab.askForHelp", commands[1].(map[string]any)["command"])
+		assert.Equal(t, "easylab.openSlides", commands[2].(map[string]any)["command"])
+		assert.Equal(t, "Open slides", commands[2].(map[string]any)["title"])
+		assert.Equal(t, "EasyLab", commands[2].(map[string]any)["category"])
 	})
 
 	t.Run("source registers every id the manifest contributes", func(t *testing.T) {

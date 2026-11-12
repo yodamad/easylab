@@ -430,11 +430,21 @@ func newNotificationResponse(n StudentNotification, labName string) notification
 
 // writeNotifications sends a notification list as the JSON both clients expect.
 func writeNotifications(w http.ResponseWriter, entries []notificationResponse) {
+	writeNotificationsWithLink(w, entries, "")
+}
+
+// writeNotificationsWithLink is writeNotifications plus the optional
+// resource_link key, omitted when link is empty.
+func writeNotificationsWithLink(w http.ResponseWriter, entries []notificationResponse, link string) {
 	if entries == nil {
 		entries = []notificationResponse{}
 	}
+	body := map[string]interface{}{"notifications": entries}
+	if link != "" {
+		body["resource_link"] = link
+	}
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{"notifications": entries}); err != nil {
+	if err := json.NewEncoder(w).Encode(body); err != nil {
 		log.Printf("[notify] failed to encode notifications: %v", err)
 	}
 }
@@ -498,8 +508,9 @@ func (h *Handler) StudentNotifications(w http.ResponseWriter, r *http.Request) {
 //
 // It is the one student-facing endpoint not behind RequireStudentAuth: the IDE
 // has no session cookie, so it authenticates with the workspace's notify token
-// (see notifyToken). The token names the lab and the owner; nothing else is read
-// from the request.
+// (see notifyToken). The token names the lab and the owner, and alone decides
+// access. The optional template parameter only picks which slides link to return
+// (see workspaceResourceLink); it is read after the token is verified.
 func (h *Handler) WorkspaceNotifications(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -524,6 +535,15 @@ func (h *Handler) WorkspaceNotifications(w http.ResponseWriter, r *http.Request)
 
 	job.mu.RLock()
 	secret := job.NotifySecret
+	var templates []WorkspaceTemplate
+	var closed map[string]bool
+	if job.Config != nil {
+		templates = append(templates, job.Config.WorkspaceTemplates...)
+		closed = make(map[string]bool, len(job.Config.DisabledTemplates))
+		for name, disabled := range job.Config.DisabledTemplates {
+			closed[name] = disabled
+		}
+	}
 	job.mu.RUnlock()
 
 	owner, ok := verifyNotifyToken(secret, labID, token)
@@ -537,7 +557,43 @@ func (h *Handler) WorkspaceNotifications(w http.ResponseWriter, r *http.Request)
 	for _, n := range h.jobManager.ActiveStudentNotifications(labID, owner) {
 		entries = append(entries, newNotificationResponse(n, ""))
 	}
-	writeNotifications(w, entries)
+	writeNotificationsWithLink(w, entries, workspaceResourceLink(templates, closed, r.URL.Query().Get("template")))
+}
+
+// workspaceResourceLink picks the slides link to show a workspace: the named
+// template's, or — when the name is empty or unknown — the lab's only link if
+// every open template that has one shares the same. Closed templates never feed
+// that fallback, so it cannot hand out a link the portal no longer shows; a
+// named one still matches, since its workspace may predate the closing. It
+// returns "" when nothing qualifies or the stored value fails
+// validateResourceLink.
+func workspaceResourceLink(templates []WorkspaceTemplate, closed map[string]bool, name string) string {
+	link := ""
+	found := false
+	if name != "" {
+		for _, t := range templates {
+			if t.Name == name {
+				link, found = t.ResourceLink, true
+				break
+			}
+		}
+	}
+	if !found {
+		distinct := map[string]struct{}{}
+		for _, t := range templates {
+			if t.ResourceLink != "" && !closed[t.Name] {
+				distinct[t.ResourceLink] = struct{}{}
+				link = t.ResourceLink
+			}
+		}
+		if len(distinct) != 1 {
+			return ""
+		}
+	}
+	if link == "" || validateResourceLink(link) != nil {
+		return ""
+	}
+	return link
 }
 
 // SendLabNotification handles POST /api/labs/{id}/notifications: an admin sends

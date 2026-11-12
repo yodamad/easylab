@@ -109,15 +109,23 @@ function renderWorkspaceCard(info, labId) {
     const labDisplay = escapeHtml(info.lab_name || info.lab_id || '');
 
     const resourceHref = safeHttpURL(info.template_resource_link);
-    const resourceLink = resourceHref
-        ? `<a class="workspace-card-link" href="${escapeHtmlAttr(resourceHref)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">Slides &amp; resources &#8599;</a>`
+    const slidesButton = resourceHref
+        ? `<a class="student-btn student-btn-small workspace-card-slides" href="${escapeHtmlAttr(resourceHref)}" target="_blank" rel="noopener noreferrer" title="Open the slides (${escapeHtmlAttr(resourceHostname(resourceHref))})" onclick="event.stopPropagation()">${slidesIconSvg}<span>Open slides</span></a>`
+        : '';
+    const slidesField = resourceHref
+        ? `<div class="student-credential-item">
+                            <label>Slides:</label>
+                            <div class="student-credential-item-value">
+                                <a href="${escapeHtmlAttr(resourceHref)}" target="_blank" rel="noopener noreferrer">${escapeHtml(resourceHref)}</a>
+                            </div>
+                        </div>`
         : '';
     const labChip = labDisplay
         ? `<span class="workspace-card-chip"><span class="workspace-card-chip-key">Lab</span>${labDisplay}</span>`
         : '';
     const templateChip = (info.template
         ? `<span class="workspace-card-chip"><span class="workspace-card-chip-key">Template</span>${escapeHtml(info.template)}</span>`
-        : '') + resourceLink;
+        : '');
 
     // The open button names the IDE the workspace actually runs. "ide" is absent
     // for a workspace listed by an older server, which means code-server — whose
@@ -152,6 +160,7 @@ function renderWorkspaceCard(info, labId) {
                     <div class="workspace-card-subtitle">${labChip}${templateChip}${pausedChip}</div>
                 </div>
                 <div class="workspace-card-header-actions">
+                    ${slidesButton}
                     <button onclick="event.stopPropagation(); openCodeServer('${escapeHtmlAttr(info.lab_id)}', '${escapeHtmlAttr(info.workspace_name)}')" class="student-btn student-btn-small workspace-card-open" title="${safeOpenTitle}">${safeOpenLabel}</button>
                     <button class="collapsible-toggle" type="button" aria-label="Toggle workspace details" aria-expanded="false">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="chevron-icon">
@@ -174,6 +183,7 @@ function renderWorkspaceCard(info, labId) {
                                 <button class="copy-btn" data-copy-text="${safeUrl}" title="Copy URL">${copyIconSvg}</button>
                             </div>
                         </div>
+                        ${slidesField}
                         <div class="student-credential-item">
                             <label>Email:</label>
                             <div class="student-credential-item-value credential-with-copy">
