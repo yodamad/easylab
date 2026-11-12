@@ -504,6 +504,7 @@ func createTestAuthHandler() *AuthHandler {
 		studentSessions:     make(map[string]*Session),
 		azureOAuthStates:    make(map[string]time.Time),
 		templates:           make(map[string]*template.Template),
+		loginAttempts:       make(map[string]*loginAttemptState),
 	}
 }
 
