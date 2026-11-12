@@ -27,7 +27,7 @@ To access the student portal, you must log in with:
 
 Your email is validated on submission and stored in your session. It will be pre-filled automatically on all subsequent pages so you don't need to enter it again. It is also what identifies your workspaces, so use the same address each time: signing in with a different address — including the same name at another domain, such as `you@team.example.com` instead of `you@example.com` — gives you a separate, empty workspace rather than the one you were working in. Capitalisation and surrounding spaces do not matter.
 
-After 5 failed password attempts, further attempts are locked out for 15 minutes as a brute-force protection. If you're locked out, wait 15 minutes and try again, or use Azure AD, GitHub or GitLab login if your workshop offers it.
+After 5 failed password attempts from the same client (IP address), further attempts from that client are locked out for 15 minutes as a brute-force protection — even with the right password. Other students are not affected, unless they reach EasyLab from the same public IP address (for example a venue network behind one NAT). If you're locked out, wait 15 minutes and try again, or use Azure AD, GitHub or GitLab login if your workshop offers it.
 
 ![Student Login](screens/student-login.png){width=45%}
 

@@ -41,6 +41,12 @@ const (
 	// where a client-supplied X-Forwarded-Proto header would not be stripped by
 	// a trusted proxy first — see docs/docker.md / docs/helm.md.
 	EnvTrustForwardedProto = "TRUST_FORWARDED_PROTO"
+	// EnvTrustProxyClientIP, when exactly "true", makes the login lockout identify
+	// a client by the X-Forwarded-For / X-Real-IP headers of the reverse proxy in
+	// front instead of the connection's address. Off by default: when the app is
+	// reachable without a proxy, a client could set those headers itself and dodge
+	// the lockout. The Helm chart (behind its Ingress) and in-lab portals set it.
+	EnvTrustProxyClientIP = "TRUST_PROXY_CLIENT_IP"
 	// EnvAzureADAdminGroupID restricts admin Azure AD login to direct members of this group.
 	EnvAzureADAdminGroupID = "AZURE_AD_ADMIN_GROUP_ID"
 	// Cookie name for session
@@ -61,6 +67,10 @@ const (
 	maxLoginAttempts   = 5
 	loginAttemptWindow = 15 * time.Minute
 	lockoutDuration    = 15 * time.Minute
+	// maxLoginAttemptKeys bounds how many clients' failures are tracked at once;
+	// failures from further clients share loginAttemptOverflowKey.
+	maxLoginAttemptKeys     = 100000
+	loginAttemptOverflowKey = "overflow"
 )
 
 // contextKey is a type for context keys in this package
@@ -316,15 +326,50 @@ func isSecureRequest(r *http.Request) bool {
 	return r.Header.Get("X-Forwarded-Proto") == "https"
 }
 
-// clientKey derives the rate-limiting key for a request: the remote IP with
+// clientKey derives the rate-limiting key for a request: the client's IP with
 // any port stripped, so multiple connections from the same client share one
 // counter.
+//
+// Behind a reverse proxy (an ingress controller, the Helm chart's ingress, an
+// in-lab portal's ingress) RemoteAddr is the proxy, so keying on it alone puts
+// every visitor in one counter: five bad attempts from anyone — a scanner, a
+// typo — locked everyone out, correct password or not. So, when
+// TRUST_PROXY_CLIENT_IP is "true", the client is taken from the proxy's headers:
+// the last X-Forwarded-For hop, which is the one the nearest proxy appended
+// (earlier hops are client-supplied and could be rotated to dodge the lockout),
+// else X-Real-IP. It is opt-in because without a proxy in front a client sets
+// these headers itself.
+//
+// IPv6 addresses are reduced to their /64: one client usually holds a whole
+// /64 and could otherwise rotate through it for fresh counters.
 func clientKey(r *http.Request) string {
+	if os.Getenv(EnvTrustProxyClientIP) == "true" {
+		if xff := r.Header.Values("X-Forwarded-For"); len(xff) > 0 {
+			hops := strings.Split(xff[len(xff)-1], ",")
+			if ip := net.ParseIP(strings.TrimSpace(hops[len(hops)-1])); ip != nil {
+				return ipKey(ip)
+			}
+		}
+		if ip := net.ParseIP(strings.TrimSpace(r.Header.Get("X-Real-IP"))); ip != nil {
+			return ipKey(ip)
+		}
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ipKey(ip)
 	}
 	return host
+}
+
+// ipKey is the lockout key of one address: IPv4 as is, IPv6 as its /64.
+func ipKey(ip net.IP) string {
+	if ip.To4() != nil {
+		return ip.String()
+	}
+	return (&net.IPNet{IP: ip.Mask(net.CIDRMask(64, 128)), Mask: net.CIDRMask(64, 128)}).String()
 }
 
 // checkLoginLockout reports whether the given client is currently locked out
@@ -334,6 +379,10 @@ func (ah *AuthHandler) checkLoginLockout(key string) bool {
 	defer ah.loginAttemptsMu.Unlock()
 
 	st, exists := ah.loginAttempts[key]
+	if !exists && len(ah.loginAttempts) >= maxLoginAttemptKeys {
+		// Untracked while the map is full: its failures went to the shared counter.
+		st, exists = ah.loginAttempts[loginAttemptOverflowKey]
+	}
 	if !exists {
 		return false
 	}
@@ -352,6 +401,12 @@ func (ah *AuthHandler) recordLoginFailure(key string) {
 
 	now := time.Now()
 	st, exists := ah.loginAttempts[key]
+	if !exists && len(ah.loginAttempts) >= maxLoginAttemptKeys {
+		// Too many distinct clients failing at once to track each: fold the
+		// newcomers into one shared counter rather than grow without bound.
+		key = loginAttemptOverflowKey
+		st, exists = ah.loginAttempts[key]
+	}
 	if !exists || now.After(st.windowStart.Add(loginAttemptWindow)) {
 		st = &loginAttemptState{windowStart: now}
 		ah.loginAttempts[key] = st
@@ -694,7 +749,9 @@ func (ah *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	loginKey := clientKey(r)
+	// Separate from the student form's counter: failures on one must not lock
+	// the other (bots probe /login far more than /student/login).
+	loginKey := "admin:" + clientKey(r)
 	if ah.checkLoginLockout(loginKey) {
 		log.Printf("Login attempt rejected: client locked out after repeated failures")
 		http.Redirect(w, r, "/login?error=Too+many+failed+attempts%2C+please+try+again+later", http.StatusSeeOther)
@@ -958,7 +1015,7 @@ func (ah *AuthHandler) HandleStudentLogin(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	loginKey := clientKey(r)
+	loginKey := "student:" + clientKey(r)
 	if ah.checkLoginLockout(loginKey) {
 		log.Printf("Student login attempt rejected: client locked out after repeated failures")
 		http.Redirect(w, r, "/student/login?error=Too+many+failed+attempts%2C+please+try+again+later", http.StatusSeeOther)

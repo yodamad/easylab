@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
@@ -1794,6 +1795,133 @@ func TestLoginLockout_UnderThresholdStillAllowed(t *testing.T) {
 	}
 	if ah.checkLoginLockout(key) {
 		t.Error("client should not be locked out before reaching maxLoginAttempts")
+	}
+}
+
+func TestClientKey(t *testing.T) {
+	tests := []struct {
+		name       string
+		remoteAddr string
+		headers    map[string][]string
+		trust      bool
+		expected   string
+	}{
+		{name: "no proxy headers", remoteAddr: "10.0.0.5:4242", trust: true, expected: "10.0.0.5"},
+		{name: "remote addr without port", remoteAddr: "10.0.0.5", expected: "10.0.0.5"},
+		{name: "headers ignored by default", remoteAddr: "10.0.0.5:4242",
+			headers: map[string][]string{"X-Forwarded-For": {"203.0.113.7"}, "X-Real-Ip": {"203.0.113.8"}}, expected: "10.0.0.5"},
+		{name: "single forwarded hop", remoteAddr: "10.0.0.5:4242", trust: true,
+			headers: map[string][]string{"X-Forwarded-For": {"203.0.113.7"}}, expected: "203.0.113.7"},
+		{name: "last hop wins over client-supplied ones", remoteAddr: "10.0.0.5:4242", trust: true,
+			headers: map[string][]string{"X-Forwarded-For": {"1.2.3.4, 198.51.100.9"}}, expected: "198.51.100.9"},
+		{name: "last header line wins", remoteAddr: "10.0.0.5:4242", trust: true,
+			headers: map[string][]string{"X-Forwarded-For": {"1.2.3.4", "198.51.100.9"}}, expected: "198.51.100.9"},
+		{name: "ipv6 hop reduced to its /64", remoteAddr: "10.0.0.5:4242", trust: true,
+			headers: map[string][]string{"X-Forwarded-For": {"2001:db8:1:2:aaaa::1"}}, expected: "2001:db8:1:2::/64"},
+		{name: "ipv6 remote addr reduced to its /64", remoteAddr: "[2001:db8:1:2:bbbb::9]:4242", expected: "2001:db8:1:2::/64"},
+		{name: "x-real-ip fallback", remoteAddr: "10.0.0.5:4242", trust: true,
+			headers: map[string][]string{"X-Real-Ip": {"203.0.113.8"}}, expected: "203.0.113.8"},
+		{name: "garbage forwarded header ignored", remoteAddr: "10.0.0.5:4242", trust: true,
+			headers: map[string][]string{"X-Forwarded-For": {"not-an-ip"}}, expected: "10.0.0.5"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.trust {
+				t.Setenv(EnvTrustProxyClientIP, "true")
+			} else {
+				t.Setenv(EnvTrustProxyClientIP, "")
+			}
+			req := httptest.NewRequest(http.MethodPost, "/student/login", nil)
+			req.RemoteAddr = tt.remoteAddr
+			for k, vs := range tt.headers {
+				for _, v := range vs {
+					req.Header.Add(k, v)
+				}
+			}
+			if got := clientKey(req); got != tt.expected {
+				t.Errorf("clientKey() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+// studentLoginVia posts the student login form as the given client behind a
+// shared proxy (same RemoteAddr for everyone, client in X-Forwarded-For).
+func studentLoginVia(ah *AuthHandler, clientIP, password string) string {
+	sum := sha256.Sum256([]byte(password))
+	form := url.Values{"email": {"student@example.com"}, "password_hash": {hex.EncodeToString(sum[:])}}
+	req := httptest.NewRequest(http.MethodPost, "/student/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.RemoteAddr = "10.244.0.12:51000"
+	req.Header.Set("X-Forwarded-For", clientIP)
+	w := httptest.NewRecorder()
+	ah.HandleStudentLogin(w, req)
+	return w.Header().Get("Location")
+}
+
+// Regression: behind a proxy every client shares RemoteAddr, and five failures
+// from anyone used to lock every student out — even with the right password.
+func TestStudentLoginLockout_PerClientBehindProxy(t *testing.T) {
+	t.Setenv(EnvTrustProxyClientIP, "true")
+	ah := createTestAuthHandler()
+	hash, err := HashStudentPassword("ABCDE-FGHJK-LMNPQ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ah.SetStudentPassword(hash)
+
+	for i := 0; i < maxLoginAttempts; i++ {
+		studentLoginVia(ah, "203.0.113.50", "wrong-password")
+	}
+	if loc := studentLoginVia(ah, "203.0.113.50", "ABCDE-FGHJK-LMNPQ"); !strings.Contains(loc, "Too+many+failed+attempts") {
+		t.Errorf("failing client: Location = %q, want lockout", loc)
+	}
+	if loc := studentLoginVia(ah, "203.0.113.51", "ABCDE-FGHJK-LMNPQ"); loc != "/student/dashboard" {
+		t.Errorf("other client behind the same proxy: Location = %q, want /student/dashboard", loc)
+	}
+}
+
+func TestLoginLockout_OverflowSharesOneCounter(t *testing.T) {
+	ah := createTestAuthHandler()
+	ah.loginAttemptsMu.Lock()
+	for i := 0; i < maxLoginAttemptKeys; i++ {
+		ah.loginAttempts[fmt.Sprintf("filler-%d", i)] = &loginAttemptState{windowStart: time.Now()}
+	}
+	ah.loginAttemptsMu.Unlock()
+
+	for i := 0; i < maxLoginAttempts; i++ {
+		ah.recordLoginFailure(fmt.Sprintf("newcomer-%d", i))
+	}
+	ah.loginAttemptsMu.Lock()
+	size := len(ah.loginAttempts)
+	ah.loginAttemptsMu.Unlock()
+	if size != maxLoginAttemptKeys+1 {
+		t.Errorf("map size = %d, want %d (cap plus the overflow entry)", size, maxLoginAttemptKeys+1)
+	}
+	if !ah.checkLoginLockout("yet-another-newcomer") {
+		t.Error("untracked client should share the locked-out overflow counter")
+	}
+}
+
+func TestLoginLockout_AdminFailuresDoNotLockStudents(t *testing.T) {
+	t.Setenv(EnvTrustProxyClientIP, "true")
+	ah := createTestAuthHandler()
+	hash, err := HashStudentPassword("ABCDE-FGHJK-LMNPQ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ah.SetStudentPassword(hash)
+
+	for i := 0; i < maxLoginAttempts; i++ {
+		form := url.Values{"password_hash": {"bad"}}
+		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.RemoteAddr = "10.244.0.12:51000"
+		req.Header.Set("X-Forwarded-For", "203.0.113.60")
+		ah.HandleLogin(httptest.NewRecorder(), req)
+	}
+	if loc := studentLoginVia(ah, "203.0.113.60", "ABCDE-FGHJK-LMNPQ"); loc != "/student/dashboard" {
+		t.Errorf("student login after admin failures: Location = %q, want /student/dashboard", loc)
 	}
 }
 

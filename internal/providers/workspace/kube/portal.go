@@ -67,6 +67,11 @@ const (
 	// EnvPortalKubeconfig points NewInCluster at a kubeconfig file instead of the
 	// pod's service account, to run a portal outside a cluster during development.
 	EnvPortalKubeconfig = "EASYLAB_PORTAL_KUBECONFIG"
+	// envTrustProxyClientIP mirrors server.EnvTrustProxyClientIP (this package
+	// cannot import server). A portal is only reachable through its Ingress — its
+	// Service is ClusterIP — so the client IP the ingress forwards can be trusted
+	// for the login lockout.
+	envTrustProxyClientIP = "TRUST_PROXY_CLIENT_IP"
 )
 
 // NewInCluster builds a kube Backend from the identity of the pod it runs in. It
@@ -283,6 +288,7 @@ func (b *Backend) portalDeployment(labID, image string) *appsv1.Deployment {
 							{Name: EnvPortalNamespace, ValueFrom: &corev1.EnvVarSource{
 								FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"},
 							}},
+							{Name: envTrustProxyClientIP, Value: "true"},
 						},
 						Ports:          []corev1.ContainerPort{{ContainerPort: portalContainerPort}},
 						ReadinessProbe: probe(),
