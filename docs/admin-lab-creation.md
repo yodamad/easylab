@@ -791,62 +791,62 @@ What it changes:
 
 * **A workspace namespace of its own**, derived from the lab's stack name — `workshops-<stack>`, falling back to a unique suffix if that is taken too. This is the change that makes a second domain possible at all. Each lab's wildcard certificate is named `easylab-wildcard-tls` inside its namespace, and one certificate cannot cover two unrelated domains, so two labs sharing a namespace would fight over it. Separate namespaces also keep each lab's student workspaces, volumes and image registry apart. A namespace you set yourself is respected, unless another lab already holds it.
 * **Reuse of the ingress controller and cert-manager** already on the cluster, instead of installing a second copy. A second install fails outright, because the Helm release names are fixed. A namespace you typed next to **Install** is replaced by the namespace the sitting lab's components actually run in — it was a target to create, and once the lab is reusing instead of installing, nothing of yours is there to find.
-* **A working DNS-01 setup**, in one of two ways depending on your DNS credentials — see below. Recreating the ClusterIssuer, solver webhook and DNS credential secret is what produces a `had an apply conflict` failure on `dns-credentials-<provider>`: the credential secret is one fixed-name object per DNS provider, and the second lab's deployment cannot take fields the first lab's owns.
+* **A DNS-01 setup of its own** — its own ClusterIssuer and its own credential secret, reusing only the cluster-wide solver webhook. See below. Recreating the solver webhook, or the fixed-name `dns-credentials-<provider>` secret, is what produces a `had an apply conflict` failure: those are one object per cluster, and the second lab's deployment cannot take fields the first lab's owns.
 
 Each lab still gets its own A-records, since each has its own domain and ingress IP, and
 you still fill in the DNS provider, zone and credentials.
 
 ##### How certificates are issued on a shared cluster
 
-A cert-manager `ClusterIssuer` carries exactly one DNS-01 solver with one credential
-secret reference. So whether a joining lab can reuse the existing issuer depends
-entirely on whether the credentials behind it can also write *this* lab's zone — and
-EasyLab decides by comparing the credentials you entered against the sitting lab's:
+**Every lab on a shared cluster gets its own `ClusterIssuer`.** As long as you enter
+DNS credentials for the lab, EasyLab creates an issuer named after it —
+`easylab-<stack>-<id>` — together with its own credential secret
+`dns-credentials-<provider>-<stack>-<id>`, and reuses only the cluster-wide DNS-01
+solver webhook. It does this even when the sitting lab's issuer is there and its
+credentials would have worked.
 
-| Your DNS credentials | What happens |
-|---|---|
-| **Same** as the lab already on the cluster | The existing ClusterIssuer, solver webhook and credential secret are reused as-is. This is the **Already configured** setting, applied for you. |
-| **Different** — e.g. a per-zone OVH consumer key | The lab gets **its own ClusterIssuer and its own credential secret**, named after the lab, and reuses only the DNS-01 solver webhook. The webhook is cluster-wide and serves any number of issuers, each carrying its own credentials. |
-| **Left blank** | The existing issuer is reused, and certificates are issued with the other lab's credentials — there is nothing else to build an issuer from. |
+One issuer per lab, rather than one shared issuer, because the issuer is the single
+object every workspace certificate on the cluster points at:
 
-Reuse also requires the issuer to still be **on the cluster**. The other labs' records
-say one was created; only the cluster says whether it is still there, and the two
-disagree after a lab whose rollback or destroy took the ClusterIssuer with it while
-leaving cert-manager, the solver webhook and the credential secret standing — which is
-exactly what a **failed** lab leaves behind. So before reusing an issuer EasyLab reads
-the cluster's ClusterIssuers and only adopts one that is present, Ready and has a DNS-01
-solver:
+* Destroying, rolling back or retrying any lab can then never take away the issuer the
+  *other* labs request certificates from. A failed lab's rollback removes its own
+  ClusterIssuer while leaving cert-manager, the solver webhook and the credential
+  secret standing — and a lab pointed at an issuer that is gone fails completely
+  silently: it deploys clean, nothing errors, and every certificate sits for ever on
+  `Referenced "ClusterIssuer" not found`.
+* A `ClusterIssuer` carries exactly one DNS-01 solver with one credential secret
+  reference, so each lab's certificates are issued with the credentials you entered
+  for *that* lab — not with another lab's. Two domains in zones needing different
+  provider keys (a per-zone OVH consumer key, say) therefore share a cluster without
+  any special handling. Sharing an issuer across them could not work: the solver would
+  answer the ACME challenge with the other account's keys and OVH would return
+  `404 Client::NotFound: "This service does not exist"` for a zone that account does
+  not hold — again with a green deploy and no certificate.
+* The credential secret is per-lab for the same reason the issuer is. Recreating the
+  one fixed-name `dns-credentials-<provider>` secret is what produces the
+  `had an apply conflict` failure.
+
+The solver webhook is the one piece that *is* shared: it is cluster-wide and serves any
+number of issuers, each carrying its own credentials. Only the lab that installs it may
+install it — its namespace, Helm release and secret-reader RBAC grant all carry fixed
+names. That grant covers every secret in the cert-manager namespace, so it already
+covers each joining lab's own credential secret.
+
+This **overrides an explicit Already configured choice**, including one applied by
+[Detect from cluster](#detect-from-cluster). The notice on the lab page says when the
+override happened and why.
+
+**If you leave the DNS credentials blank**, there is nothing to build an issuer from, so
+the lab reuses the sitting lab's issuer and its certificates are issued with that lab's
+credentials. This is the only case where adoption still happens, and because adopting an
+issuer that is not there is silent, EasyLab reads the cluster's ClusterIssuers first:
 
 | The named issuer | What happens |
 |---|---|
-| **Present**, Ready, with a DNS-01 solver | Reused, as in the table above. |
-| **Gone**, and you entered DNS credentials | The lab gets **its own ClusterIssuer and credential secret** instead, reusing only the solver webhook. The notice says the issuer is no longer on the cluster. |
-| **Gone**, and you left the credentials blank | The issuer is still named, because there is nothing to build a replacement from — but the notice says so plainly, and names what you have to do: enter this lab's DNS credentials, or create the issuer on the cluster. Without one, every workspace certificate stays Pending. |
-| **Unverifiable** — the cluster could not be read in time, or your credentials may not list ClusterIssuers | The other labs' records decide, as before. A failed read is not evidence that the issuer is gone. |
-
-Adopting an issuer that is not there is the one case that fails completely silently: the
-lab deploys clean, nothing errors, and every certificate sits for ever on `Referenced
-"ClusterIssuer" not found`.
-
-This comparison **overrides an explicit Already configured choice**, including one
-applied by [Detect from cluster](#detect-from-cluster). Reusing an issuer whose
-credentials cannot write your zone is not a setting that merely performs worse — it
-cannot work, and it fails without an error at deploy time: the solver webhook answers
-the ACME challenge with the other account's keys and OVH returns
-`404 Client::NotFound: "This service does not exist"` for a zone that account does not
-hold. The lab deploys green and no certificate is ever issued. The notice on the lab
-page says when this override happened and why.
-
-The second case is why two domains in zones needing different provider keys can share
-one cluster. Reusing the issuer there would be silent failure, not an error:
-cert-manager would attempt the challenge with credentials that cannot write the zone,
-the `CertificateRequest` would sit pending forever, and workspaces would be served the
-ingress controller's own self-signed certificate.
-
-Only the lab that *installs* the solver webhook may install it — its namespace, Helm
-release and the secret-reader RBAC grant all carry fixed names. That grant covers every
-secret in the cert-manager namespace, so it already covers a joining lab's own
-credential secret.
+| **Present**, with a DNS-01 solver | Reused — whether or not it is Ready yet. An issuer registers its ACME account on first use, and a cluster-wide fault such as a solver webhook whose APIService is missing holds *every* issuer at `Ready=False`. A not-Ready issuer is reused and reported in a notice, so you can check the webhook before students arrive. |
+| **Present**, but HTTP-01 only | Treated as unusable: Let's Encrypt does not issue wildcard certificates over HTTP-01. |
+| **Gone** | The issuer is still named, because there is nothing to build a replacement from — but the notice says so plainly, and names what you have to do: enter this lab's DNS credentials to get an issuer of its own, or create the named issuer on the cluster. Without one, every workspace certificate stays Pending. |
+| **Unverifiable** — the cluster could not be read in time, or your credentials may not list ClusterIssuers | The other labs' records decide. A failed read is not evidence that the issuer is gone. |
 
 !!! warning "ExternalDNS cannot be shared"
     Its namespace, credential secret and Helm release all have fixed names and are

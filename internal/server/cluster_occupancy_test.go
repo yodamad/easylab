@@ -27,8 +27,8 @@ func unknownIssuers() observedIssuers {
 }
 
 // issuersOnCluster is the opposite: the cluster was read, and these are the
-// usable (Ready, DNS-01 capable) ClusterIssuers it holds. An empty call means
-// the cluster was read and holds none.
+// DNS-01 capable ClusterIssuers it holds. An empty call means the cluster was
+// read and holds none.
 func issuersOnCluster(names ...string) observedIssuers {
 	items := make([]clusterscan.ClusterIssuerInfo, 0, len(names))
 	for _, name := range names {
@@ -238,9 +238,12 @@ func TestAdoptSharedClusterMovesNamespaceAndReusesInfra(t *testing.T) {
 	assert.Equal(t, "traefik", cfg.IngressClassName)
 	assert.Equal(t, "cert-manager", cfg.CertManagerNamespace)
 
-	// Recreating the DNS-01 plumbing is the reported apply conflict.
-	assert.True(t, cfg.DNSAlreadyConfigured)
-	assert.Equal(t, "letsencrypt", cfg.ClusterIssuerName)
+	// The lab brought its own DNS credentials, so it gets its own issuer and its
+	// own credential secret rather than leaning on the sitting lab's.
+	assert.False(t, cfg.DNSAlreadyConfigured)
+	assert.True(t, cfg.DNSOwnIssuer)
+	assert.Equal(t, "easylab-workshop-two-11112222", cfg.ClusterIssuerName)
+	assert.Equal(t, "dns-credentials-ovh-workshop-two-11112222", cfg.DNSCredentialSecretName)
 
 	require.NotEmpty(t, notices)
 	assert.Contains(t, strings.Join(notices, "\n"), "workshops-workshop-two")
@@ -378,7 +381,10 @@ func TestAdoptSharedClusterFallsBackToTheDefaultIssuerInItsNotice(t *testing.T) 
 	neighbour := sittingLab()
 	neighbour.clusterIssuerName = ""
 
+	// Only a lab that brought no DNS credentials of its own reuses the sitting
+	// lab's issuer, so that is the case where the notice has to name one.
 	cfg := joiningLab()
+	cfg.DNSCredentials = nil
 	notices := adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{neighbour}, unknownIssuers())
 
 	assert.True(t, cfg.DNSAlreadyConfigured)
@@ -624,32 +630,20 @@ func TestAdoptSharedClusterKeepsAnExplicitIssuerName(t *testing.T) {
 	assert.Equal(t, "my-own-secret", cfg.DNSCredentialSecretName)
 }
 
-func TestAdoptSharedClusterLeavesAnAlreadyDecidedIssuerAlone(t *testing.T) {
+// A lab that already asked for its own issuer is left where it is: adoption has
+// nothing to add, and must not rename the objects the admin named.
+func TestAdoptSharedClusterLeavesAnOwnIssuerChoiceAlone(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name   string
-		mutate func(*LabConfig)
-	}{
-		{name: "already configured", mutate: func(c *LabConfig) { c.DNSAlreadyConfigured = true }},
-		{name: "own issuer", mutate: func(c *LabConfig) { c.DNSOwnIssuer = true }},
-	}
+	cfg := joiningLab()
+	cfg.DNSOwnIssuer = true
+	before := *cfg
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+	adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{sittingLab()}, unknownIssuers())
 
-			cfg := joiningLab()
-			tt.mutate(cfg)
-			before := *cfg
-
-			adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{sittingLab()}, unknownIssuers())
-
-			assert.Equal(t, before.DNSAlreadyConfigured, cfg.DNSAlreadyConfigured)
-			assert.Equal(t, before.DNSOwnIssuer, cfg.DNSOwnIssuer)
-			assert.Empty(t, cfg.DNSCredentialSecretName)
-		})
-	}
+	assert.Equal(t, before.DNSAlreadyConfigured, cfg.DNSAlreadyConfigured)
+	assert.Equal(t, before.DNSOwnIssuer, cfg.DNSOwnIssuer)
+	assert.Empty(t, cfg.DNSCredentialSecretName)
 }
 
 func TestLabObjectSuffix(t *testing.T) {
@@ -1053,29 +1047,90 @@ func TestRenderClusterNotices(t *testing.T) {
 	assert.Contains(t, html, "&lt;ok&gt;")
 }
 
-// The job records of the other labs on a cluster say an issuer was created; only
-// the cluster says whether it is still there. These three tests cover the fork
-// that answer drives, because getting it wrong is silent: the lab deploys clean
-// and every certificate sits Pending on "Referenced ClusterIssuer not found".
-func TestAdoptSharedClusterReusesIssuerStillOnCluster(t *testing.T) {
+// One issuer per lab is the rule: a lab that brought DNS credentials of its own
+// always gets its own ClusterIssuer and credential secret, so that destroying or
+// rolling back any lab on the cluster can never take away the issuer the others
+// request certificates from. Reuse survives only for a lab that supplied no
+// credentials, since there is then nothing to build an issuer from.
+func TestAdoptSharedClusterOwnsItsIssuerEvenWhenTheSharedOneWouldWork(t *testing.T) {
 	t.Parallel()
 
+	// Same DNS credentials as the sitting lab, and its issuer is on the cluster:
+	// reuse would have worked, and is still not what happens.
 	cfg := joiningLab()
 	notices := adoptSharedCluster(cfg, "job-11112222-3333-4444-5555-666677778888",
 		[]clusterNeighbour{sittingLab()}, issuersOnCluster("letsencrypt"))
 
-	assert.True(t, cfg.DNSAlreadyConfigured, "the issuer is there, so reuse it")
+	assert.False(t, cfg.DNSAlreadyConfigured)
+	assert.True(t, cfg.DNSOwnIssuer)
+	assert.Equal(t, "easylab-workshop-two-11112222", cfg.ClusterIssuerName)
+	assert.Equal(t, "dns-credentials-ovh-workshop-two-11112222", cfg.DNSCredentialSecretName)
+
+	joined := strings.Join(notices, "\n")
+	assert.Contains(t, joined, "Each lab on a shared cluster gets its own issuer")
+	assert.Contains(t, joined, "solver webhook")
+}
+
+// An explicit "Already configured" choice in the wizard does not survive either,
+// and the admin is told that it was overridden and why.
+func TestAdoptSharedClusterOverridesAlreadyConfigured(t *testing.T) {
+	t.Parallel()
+
+	cfg := joiningLab()
+	cfg.DNSAlreadyConfigured = true
+	notices := adoptSharedCluster(cfg, "job-11112222-3333-4444-5555-666677778888",
+		[]clusterNeighbour{sittingLab()}, issuersOnCluster("letsencrypt"))
+
+	assert.False(t, cfg.DNSAlreadyConfigured)
+	assert.True(t, cfg.DNSOwnIssuer)
+	assert.Contains(t, strings.Join(notices, "\n"), `overrides the "Already configured" setting`)
+}
+
+// A lab with no DNS credentials of its own cannot build an issuer, so it reuses
+// the sitting lab's — the one case where adoption still happens.
+func TestAdoptSharedClusterReusesIssuerWhenLabBroughtNoCredentials(t *testing.T) {
+	t.Parallel()
+
+	cfg := joiningLab()
+	cfg.DNSCredentials = nil
+	notices := adoptSharedCluster(cfg, "job-11112222-3333-4444-5555-666677778888",
+		[]clusterNeighbour{sittingLab()}, issuersOnCluster("letsencrypt"))
+
+	assert.True(t, cfg.DNSAlreadyConfigured, "nothing to build an issuer from, so reuse it")
 	assert.False(t, cfg.DNSOwnIssuer)
 	assert.Equal(t, "letsencrypt", cfg.ClusterIssuerName)
 	assert.Contains(t, strings.Join(notices, "\n"), `reusing ClusterIssuer "letsencrypt"`)
 }
 
+// A present-but-not-Ready issuer is still reused by a credential-less lab: on a
+// cluster whose DNS-01 solver webhook is broken every issuer reads Ready=False.
+// The admin is told, since nothing else in the wizard surfaces it.
+func TestAdoptSharedClusterReusesAnIssuerThatIsNotReadyYet(t *testing.T) {
+	t.Parallel()
+
+	cfg := joiningLab()
+	cfg.DNSCredentials = nil
+	notices := adoptSharedCluster(cfg, "job-11112222-3333-4444-5555-666677778888",
+		[]clusterNeighbour{sittingLab()},
+		newObservedIssuers([]clusterscan.ClusterIssuerInfo{
+			{Name: "letsencrypt", Ready: false, HasDNS01: true}}))
+
+	assert.True(t, cfg.DNSAlreadyConfigured)
+	assert.False(t, cfg.DNSOwnIssuer, "a cluster-wide fault is not a reason to build a second issuer")
+	assert.Equal(t, "letsencrypt", cfg.ClusterIssuerName)
+
+	joined := strings.Join(notices, "\n")
+	assert.Contains(t, joined, "on the cluster but not Ready")
+	assert.Contains(t, joined, "solver webhook")
+}
+
 func TestAdoptSharedClusterOwnsIssuerWhenTheClusterSaysItIsGone(t *testing.T) {
 	t.Parallel()
 
-	// Same DNS credentials as the sitting lab, so the only thing stopping reuse
-	// is that the issuer the records promise is not on the cluster — what a
-	// failed lab leaves behind once its rollback took the issuer with it.
+	// The lab owns its issuer either way; what the cluster lookup changes is the
+	// explanation the admin reads — here, that the issuer the other labs' records
+	// promise is not on the cluster at all, which a failed lab's rollback leaves
+	// behind once it has taken the issuer with it.
 	cfg := joiningLab()
 	notices := adoptSharedCluster(cfg, "job-11112222-3333-4444-5555-666677778888",
 		[]clusterNeighbour{sittingLab()}, issuersOnCluster())
@@ -1086,16 +1141,16 @@ func TestAdoptSharedClusterOwnsIssuerWhenTheClusterSaysItIsGone(t *testing.T) {
 	assert.Equal(t, "dns-credentials-ovh-workshop-two-11112222", cfg.DNSCredentialSecretName)
 
 	joined := strings.Join(notices, "\n")
-	assert.Contains(t, joined, `ClusterIssuer "letsencrypt" is no longer on this cluster`)
+	assert.Contains(t, joined, `ClusterIssuer "letsencrypt" is not on this cluster either`)
 	assert.Contains(t, joined, "its own ClusterIssuer")
 }
 
 func TestAdoptSharedClusterWarnsWhenIssuerIsGoneAndLabHasNoCredentials(t *testing.T) {
 	t.Parallel()
 
-	// With no DNS credentials of its own there is nothing to build a replacement
-	// issuer from, so adopting stays — but the admin has to be told, since the
-	// lab cannot get a certificate until someone acts.
+	// With no DNS credentials of its own there is nothing to build an issuer
+	// from, so adopting stays — but the admin has to be told, since the lab
+	// cannot get a certificate until someone acts.
 	cfg := joiningLab()
 	cfg.DNSCredentials = nil
 	notices := adoptSharedCluster(cfg, "job-11112222-3333-4444-5555-666677778888",
@@ -1107,28 +1162,35 @@ func TestAdoptSharedClusterWarnsWhenIssuerIsGoneAndLabHasNoCredentials(t *testin
 
 	joined := strings.Join(notices, "\n")
 	assert.Contains(t, joined, `ClusterIssuer "letsencrypt" is not on this cluster`)
-	assert.Contains(t, joined, "cannot build a replacement issuer")
+	assert.Contains(t, joined, "cannot build an issuer of its own")
 	assert.Contains(t, joined, "stays Pending")
 }
 
-// An issuer that exists but cannot issue a wildcard certificate is no better
-// than an absent one, so only Ready + DNS-01 counts as evidence of presence.
+// Presence plus a DNS-01 solver is what makes an issuer reusable. Readiness must
+// not come into it: a cluster-wide fault such as a solver webhook with no
+// APIService holds every issuer at Ready=False, and building a second issuer
+// there would not work either.
 func TestObservedIssuers(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name  string
-		items []clusterscan.ClusterIssuerInfo
-		query string
-		want  bool
+		name         string
+		items        []clusterscan.ClusterIssuerInfo
+		query        string
+		want         bool
+		wantNotReady bool
 	}{
 		{name: "ready dns-01 issuer is there", items: []clusterscan.ClusterIssuerInfo{
 			{Name: "letsencrypt", Ready: true, HasDNS01: true}}, query: "letsencrypt", want: true},
 		{name: "another name is not there", items: []clusterscan.ClusterIssuerInfo{
 			{Name: "letsencrypt", Ready: true, HasDNS01: true}}, query: "letsencrypt-prod", want: false},
-		{name: "not ready does not count", items: []clusterscan.ClusterIssuerInfo{
-			{Name: "letsencrypt", Ready: false, HasDNS01: true}}, query: "letsencrypt", want: false},
-		{name: "http-01 only does not count", items: []clusterscan.ClusterIssuerInfo{
+		{
+			name: "present but not ready is still reusable, and reported",
+			items: []clusterscan.ClusterIssuerInfo{
+				{Name: "letsencrypt", Ready: false, HasDNS01: true}},
+			query: "letsencrypt", want: true, wantNotReady: true,
+		},
+		{name: "http-01 only cannot issue a wildcard", items: []clusterscan.ClusterIssuerInfo{
 			{Name: "letsencrypt", Ready: true, HasHTTP01: true}}, query: "letsencrypt", want: false},
 		{name: "cluster read and empty", items: nil, query: "letsencrypt", want: false},
 	}
@@ -1139,8 +1201,12 @@ func TestObservedIssuers(t *testing.T) {
 			observed := newObservedIssuers(tt.items)
 			assert.True(t, observed.known, "a cluster that was read is known, even when it holds nothing")
 			assert.Equal(t, tt.want, observed.has(tt.query))
+			assert.Equal(t, tt.wantNotReady, observed.notReady(tt.query))
 		})
 	}
+
+	// An unknown lookup may not claim an issuer is waiting on readiness either.
+	assert.False(t, unknownIssuers().notReady("letsencrypt"))
 
 	// Unknown is the fallback, and it must never claim an issuer is present or
 	// absent — has() false plus known false is what sends the decision back to
