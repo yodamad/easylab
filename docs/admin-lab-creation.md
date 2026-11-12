@@ -29,6 +29,7 @@ Start by naming the lab:
 
 * **Lab Name** (required) — a unique name used as the prefix for all cloud resources (letters, numbers, hyphens and underscores only).
 * **Description** (optional) — a free-text summary of what the lab is for (e.g. *Kubernetes 101 workshop, June 2025 cohort*). It is shown in the [labs list](admin-lab-management.md#manage-your-labs) to help you tell labs apart, and to students on the environment picker when they request a workspace.
+* **Resource link** (optional) — the `http://` or `https://` address of your slides or website (e.g. `https://example.com/slides`). Students see it as a **Slides & resources** link on the portal, on the environment picker and on their **My Workspaces** cards. Links without a scheme, other schemes such as `javascript:` or `ftp:`, and links with a username or password are rejected. You can change it when you retry a failed lab with edited configuration.
 
 First you need to choose how to provide the Kubernetes cluster:
 

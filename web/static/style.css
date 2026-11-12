@@ -3141,6 +3141,30 @@ body.student-dashboard-page {
     line-height: 1.45;
 }
 
+.picker-tile-link {
+    display: inline-block;
+    margin-top: 0.6rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+.workspace-card-link {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+.picker-tile-link:hover,
+.workspace-card-link:hover {
+    color: var(--primary-hover);
+    text-decoration: underline;
+}
+
 .template-tile-meta {
     display: flex;
     flex-wrap: wrap;

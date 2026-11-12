@@ -204,6 +204,19 @@ function renderPickerTile(item, checked, groupName) {
         label.appendChild(desc);
     }
 
+    const href = safeHttpURL(item.link);
+    if (href) {
+        const link = document.createElement('a');
+        link.className = 'picker-tile-link';
+        link.href = href;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = 'Slides & resources ↗';
+        // The tile is a <label> around a radio: don't let the click select it.
+        link.addEventListener('click', e => e.stopPropagation());
+        label.appendChild(link);
+    }
+
     if (item.chips && item.chips.length) {
         const meta = document.createElement('span');
         meta.className = 'template-tile-meta';
@@ -250,6 +263,7 @@ function renderLabTile(lab, checked) {
         id: lab.id,
         name: config.stack_name || lab.id,
         description: config.description,
+        link: config.resource_link,
         chips: [],
         closed: config.disabled
     }, checked, 'lab_id');

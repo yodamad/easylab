@@ -21,12 +21,14 @@ const studentWorkspacesTimeout = 5 * time.Second
 // no token: the student gets into the IDE through OpenWorkspace, which checks
 // ownership again and posts the token on their behalf.
 type studentWorkspace struct {
-	LabID         string `json:"lab_id"`
-	LabName       string `json:"lab_name"`
-	WorkspaceName string `json:"workspace_name"`
-	WorkspaceURL  string `json:"workspace_url"`
-	Email         string `json:"email"`
-	Template      string `json:"template,omitempty"`
+	LabID   string `json:"lab_id"`
+	LabName string `json:"lab_name"`
+	// LabResourceLink is the lab's slides/website link, "" when none is set.
+	LabResourceLink string `json:"lab_resource_link,omitempty"`
+	WorkspaceName   string `json:"workspace_name"`
+	WorkspaceURL    string `json:"workspace_url"`
+	Email           string `json:"email"`
+	Template        string `json:"template,omitempty"`
 	// IDE is the workspace's IDE base, so the card can name what it opens.
 	IDE       string `json:"ide,omitempty"`
 	CreatedAt string `json:"created_at"`
@@ -67,6 +69,7 @@ func (h *Handler) ListStudentWorkspaces(w http.ResponseWriter, r *http.Request) 
 	type lab struct {
 		id              string
 		name            string
+		resourceLink    string
 		kubeconfig      string
 		namespace       string
 		lifetimeHours   int
@@ -88,6 +91,7 @@ func (h *Handler) ListStudentWorkspaces(w http.ResponseWriter, r *http.Request) 
 			if job.Config.StackName != "" {
 				l.name = job.Config.StackName
 			}
+			l.resourceLink = job.Config.ResourceLink
 			l.lifetimeHours = job.Config.WorkspaceLifetimeHours
 			l.labDeletionDate = job.Config.LabDeletionDate
 		}
@@ -139,17 +143,18 @@ func (h *Handler) ListStudentWorkspaces(w http.ResponseWriter, r *http.Request) 
 					continue
 				}
 				entry := studentWorkspace{
-					LabID:         l.id,
-					LabName:       l.name,
-					WorkspaceName: ws.Name,
-					WorkspaceURL:  ws.URL,
-					Email:         email,
-					Template:      ws.Template,
-					IDE:           ws.IDE,
-					CreatedAt:     ws.CreatedAt.Format(time.RFC3339),
-					Ready:         ws.Ready,
-					Paused:        ws.Phase == workspace.PhaseStopped,
-					createdAt:     ws.CreatedAt,
+					LabID:           l.id,
+					LabName:         l.name,
+					LabResourceLink: l.resourceLink,
+					WorkspaceName:   ws.Name,
+					WorkspaceURL:    ws.URL,
+					Email:           email,
+					Template:        ws.Template,
+					IDE:             ws.IDE,
+					CreatedAt:       ws.CreatedAt.Format(time.RFC3339),
+					Ready:           ws.Ready,
+					Paused:          ws.Phase == workspace.PhaseStopped,
+					createdAt:       ws.CreatedAt,
 				}
 				if deletionAt := workspaceDeletionTime(ws.CreatedAt, l.lifetimeHours, l.labDeletionDate); deletionAt != nil {
 					entry.DeletionAt = deletionAt.Format(time.RFC3339)

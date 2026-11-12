@@ -15,6 +15,22 @@ function escapeHtmlAttr(text) {
     return escapeHtml(text).replace(/'/g, '&#39;');
 }
 
+// safeHttpURL returns the normalized href for raw only when it parses as an
+// absolute http: or https: URL, and '' otherwise (blocks javascript:, data:, ...).
+// The WHATWG parser leaves characters like " ' < > ` unencoded in a host, so a
+// href still containing any of them (or whitespace) is refused: the result is
+// also embedded in HTML attribute strings, where a " would end the attribute.
+function safeHttpURL(raw) {
+    if (!raw) return '';
+    try {
+        const u = new URL(raw);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+        return /["'<>`\\\s]/.test(u.href) ? '' : u.href;
+    } catch (e) {
+        return '';
+    }
+}
+
 // The inline clipboard glyph shared by every copy button.
 const copyIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="copy-icon">
     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
