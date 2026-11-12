@@ -156,6 +156,12 @@ Two sets of credentials exist and are easy to confuse:
     itself and overwrites any client-supplied value. Only disable it if you expose the pod
     in a way where a client-supplied header could reach it unmodified.
 
+    The same setting makes the login lockout (5 failures → 15 minutes) count per client,
+    from the last `X-Forwarded-For` hop or `X-Real-IP` the ingress adds, rather than per
+    ingress-controller pod — which would otherwise lock every user out at once. If the
+    controller's Service uses `externalTrafficPolicy: Cluster`, the load balancer may hide
+    client IPs from it too; set `Local` (or enable PROXY protocol) to keep counters per user.
+
 ## Values reference
 
 ### Why some keys are kebab-case and others camelCase {#key-naming}

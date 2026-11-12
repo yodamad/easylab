@@ -32,7 +32,7 @@ Every admin page shows the EasyLab copyright and version in the sidebar footer. 
 
 ## Login
 
-Admin login uses the password set via `LAB_ADMIN_PASSWORD` (or Azure AD, if configured — see [Azure AD authentication](azure-ad.md)). After 5 failed password attempts, further attempts from the same client are locked out for 15 minutes as a brute-force protection.
+Admin login uses the password set via `LAB_ADMIN_PASSWORD` (or Azure AD, if configured — see [Azure AD authentication](azure-ad.md)). After 5 failed password attempts, further attempts from the same client are locked out for 15 minutes as a brute-force protection. The admin and student login forms keep separate counters, so failures on one never lock the other. Behind a reverse proxy the client is identified by the proxy's `X-Forwarded-For` (last hop) or `X-Real-IP` header, under the same trust setting as `TRUST_FORWARDED_PROTO` (see [Docker — Environment Variables](docker.md#environment-variables)).
 
 The login page follows your system's light or dark preference; the sun/moon button in the top-right corner switches theme, and the choice is shared with the homepage.
 

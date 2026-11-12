@@ -61,6 +61,12 @@ spec:
                 configMapKeyRef:
                   name: {{ include "easylab.fullname" . }}-config
                   key: DATA_DIR
+            {{- /* Behind the chart's Ingress (the Service is ClusterIP), the login lockout
+                   counts per forwarded client IP instead of per ingress-controller pod. */}}
+            {{- if .Values.ingress.enabled }}
+            - name: TRUST_PROXY_CLIENT_IP
+              value: "true"
+            {{- end }}
             {{- with .Values.config.mode }}
             - name: EASYLAB_MODE
               value: {{ . | quote }}
