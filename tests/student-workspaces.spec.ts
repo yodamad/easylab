@@ -1,7 +1,7 @@
 import { test, expect, Page } from '@playwright/test';
 
 /**
- * My Workspaces follows the student's login, not the browser.
+ * My workspaces follows the student's login, not the browser.
  *
  * The list comes from the server (GET /api/student/workspaces), so a student who
  * signs in on another laptop finds their workspaces there. Which workspaces a
@@ -54,7 +54,7 @@ async function mockWorkspaces(page: Page, workspaces: object[], incomplete = fal
   );
 }
 
-test.describe('My Workspaces: listed from the server', () => {
+test.describe('My workspaces: listed from the server', () => {
   test('lists the workspaces in a browser that never saved them', async ({ browser }) => {
     // A fresh context stands in for another laptop: no cookie from a previous visit.
     const context = await browser.newContext();
@@ -108,7 +108,7 @@ test.describe('My Workspaces: listed from the server', () => {
     await expect(page.locator('#workspaces-list-container .warning-message')).toContainText('could not be reached');
   });
 
-  test('clearing a workspace deletes it and reloads the list', async ({ page }) => {
+  test('deleting a workspace deletes it and reloads the list', async ({ page }) => {
     await login(page);
     let remaining = [...WORKSPACES];
     await page.route('**/api/student/workspaces', route =>
@@ -125,7 +125,7 @@ test.describe('My Workspaces: listed from the server', () => {
 
     const card = page.locator('.workspace-card').first();
     await card.locator('.workspace-card-header').click();
-    await card.getByRole('button', { name: 'Clear' }).click();
+    await card.getByRole('button', { name: 'Delete workspace' }).click();
 
     await expect(page.locator('.workspace-card')).toHaveCount(1);
     expect(deleted).toBe('ws-alice-go');

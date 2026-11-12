@@ -197,7 +197,7 @@ function renderWorkspaceCard(info, labId) {
                         </div>
                     </div>
                     <div class="workspace-card-footer-actions">
-                        <button onclick="clearWorkspaceInfo('${safeLab}')" class="student-btn student-btn-danger student-btn-small" title="Delete this workspace">Clear</button>
+                        <button onclick="clearWorkspaceInfo('${safeLab}')" class="student-btn student-btn-small student-btn-outline-danger" title="Delete this workspace">Delete workspace</button>
                     </div>
                 </div>
             </div>
@@ -262,7 +262,7 @@ async function clearWorkspaceInfo(labId) {
     const info = _workspaces[labId];
     if (!info) return;
 
-    if (!confirm('Are you sure you want to clear this workspace? It will be deleted from the lab, along with everything saved in it.')) return;
+    if (!confirm('Are you sure you want to delete this workspace? It will be deleted from the lab, along with everything saved in it.')) return;
 
     const deleted = await deleteWorkspaceFromCluster(info);
     await loadAllWorkspaceInfos();
@@ -272,7 +272,7 @@ async function clearWorkspaceInfo(labId) {
 }
 
 async function clearAllWorkspaceInfos() {
-    if (!confirm('Are you sure you want to clear all your workspaces? They will be deleted from their labs, along with everything saved in them.')) return;
+    if (!confirm('Are you sure you want to delete all your workspaces? They will be deleted from their labs, along with everything saved in them.')) return;
     const clearAllBtn = document.getElementById('clear-all-btn');
     if (clearAllBtn) clearAllBtn.disabled = true;
 

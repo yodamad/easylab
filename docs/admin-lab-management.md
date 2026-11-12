@@ -768,7 +768,7 @@ What changes for students:
 * Students without a workspace there no longer see the closed lab or template in the
   student portal, and a request for it is refused.
 * Students who already have a workspace there keep it. It keeps running, it stays on
-  their **My Workspaces** page, and the closed lab or template still appears in their
+  their **My workspaces** page, and the closed lab or template still appears in their
   picker, marked as closed, so they can get their link and password back at any time.
 * A closed lab disappears from the [feedback form](feedbacks.md) the same way: only
   students with a workspace on it can still pick it. Collect feedback before closing
@@ -969,7 +969,7 @@ Things to know:
 * You get the **same access as the student**: anything you edit or run is done in
   their environment. The student can stay connected at the same time, but
   code-server does not show each other's cursors.
-* The student is told. Their workspace card on **My Workspaces** shows *"A teacher
+* The student is told. Their workspace card on **My workspaces** shows *"A teacher
   opened this workspace on …"* with the date and time of the latest open.
 * Each open is recorded in the [audit log](audit-log.md) as `workspace.open`, and
   in the lab's **Activity** tab.

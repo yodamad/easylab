@@ -67,7 +67,7 @@ If the organiser limited sign-in to a GitLab group you are not a member of, you 
 
 ## Request a new development environment
 
-The **Request a workspace** page is where you land after login. It allows you to request a new development environment. Your existing workspaces live on a separate **My Workspaces** page — reach it any time from the link in the header — so this page stays focused on the single task of requesting one.
+The **Request a workspace** page is where you land after login. It allows you to request a new development environment. Your existing workspaces live on a separate **My workspaces** page — switch between the two any time with the **Request a workspace** / **My workspaces** tabs in the header — so this page stays focused on the single task of requesting one.
 
 You need to provide:
 
@@ -76,15 +76,15 @@ You need to provide:
 
 Your email address is automatically filled in from your login session and is not editable on this form.
 
-The organiser can close a lab or a template to new students, and can schedule a lab to close itself at a given date and time. A closed one no longer appears here unless you already have a workspace on it. In that case its card has a dashed border and reads *"Closed to new students. Your workspace is still here."*, and the button becomes **Open my workspace**: it gives you back the link and connection token of your existing workspace instead of creating a new one. Your workspace also stays on the **My Workspaces** page.
+The organiser can close a lab or a template to new students, and can schedule a lab to close itself at a given date and time. A closed one no longer appears here unless you already have a workspace on it. In that case its card has a dashed border and reads *"Closed to new students. Your workspace is still here."*, and the button becomes **Open my workspace**: it gives you back the link and connection token of your existing workspace instead of creating a new one. Your workspace also stays on the **My workspaces** page.
 
 ![A closed template you still have a workspace on](screens/student-closed-template.png){width=85%}
 
 Then, you'll get all information needed to connect to your workspace!
 
-Just use the provided link and credentials to connect to your workspace. A **View my workspaces →** link takes you to the My Workspaces page, where the new workspace is already listed.
+Just use the provided link and credentials to connect to your workspace. A **View my workspaces →** link takes you to the My workspaces page, where the new workspace is already listed.
 
-The **connection token** is the password your workspace asks for when you open its URL directly. It is shown here, when you request the workspace; the My Workspaces page does not display it. With code-server you rarely need it — **Open workspace** on the My Workspaces page signs you in for you, and does the same on an [OpenChamber](#openchamber-workspaces) workspace; you only need the token if you open the URL directly, or in the rare case the [password page](#openchamber-workspaces) is shown.
+The **connection token** is the password your workspace asks for when you open its URL directly. It is shown here, when you request the workspace; the My workspaces page does not display it. With code-server you rarely need it — **Open workspace** on the My workspaces page signs you in for you, and does the same on an [OpenChamber](#openchamber-workspaces) workspace; you only need the token if you open the URL directly, or in the rare case the [password page](#openchamber-workspaces) is shown.
 
 !!! info "Waiting for DNS"
     Right after a workspace starts you may briefly see *"Workspace is up — waiting for DNS to propagate..."*. On a lab with a public domain, the workspace address is created in DNS when the environment is provisioned and can take up to a minute to become resolvable. EasyLab holds back the **Open** button until the address actually resolves, so you are not handed a link that fails with `DNS_PROBE_FINISHED_NXDOMAIN`. When the button turns green, the workspace is reachable.
@@ -95,15 +95,15 @@ If the template has a slides link, the **Access Environment** step also shows a 
 
 ![Request a new development environment](screens/lab-create.png){width=85%}
 
-## My Workspaces
+## My workspaces
 
-**My Workspaces** is its own page, reached from the link in the header (or the **View my workspaces →** link shown after you request one). It displays a card for each workspace you have requested — across different labs and different templates within the same lab. Only your own workspaces are shown. When you have none yet, the page invites you to request your first one.
+**My workspaces** is its own page, reached from the **My workspaces** tab in the header (or the **View my workspaces →** link shown after you request one). It displays a card for each workspace you have requested — across different labs and different templates within the same lab. Only your own workspaces are shown. When you have none yet, the page invites you to request your first one.
 
-![My Workspaces](screens/workspace-data.png){width=75%}
+![My workspaces](screens/workspace-data.png){width=75%}
 
 ### Find your workspaces on another device
 
-Your workspaces follow your login, not your browser. Nothing is stored on your laptop: sign in to the student portal from another computer with the **same email** (or the same Microsoft, GitHub or GitLab account) and **My Workspaces** lists the same workspaces, ready to open.
+Your workspaces follow your login, not your browser. Nothing is stored on your laptop: sign in to the student portal from another computer with the **same email** (or the same Microsoft, GitHub or GitLab account) and **My workspaces** lists the same workspaces, ready to open.
 
 !!! info "Sign in the same way"
     A workspace belongs to the name before the `@` of the email you signed in with. Signing in with a different email, or with a different provider that gives you a different username, shows a different list.
@@ -112,7 +112,7 @@ If a lab cannot be reached when the page loads, a message says that some workspa
 
 ### Workspace cards
 
-Each card is collapsed by default and expands when you click its header (or the chevron), so a long list stays scannable. Even collapsed, a card always shows the essentials — its name, the **lab** and **template** it uses, and its auto-deletion badge — so you can tell workspaces apart without opening them. When the organiser set a slides link for the template, an outline **Open slides** button sits next to the **Open** button and opens the slides in a new tab.
+Each card is collapsed by default and expands when you click its header (or the chevron), so a long list stays scannable. Even collapsed, a card always shows the essentials — its name, the **lab** and **template** it uses, and its auto-deletion badge — so you can tell workspaces apart without opening them. When the organiser set a slides link for the template, an outline **Open slides** button sits next to the **Open workspace** button and opens the slides in a new tab.
 
 Collapsed, each card shows:
 
@@ -166,22 +166,24 @@ The organiser can have workspaces that nobody is using paused automatically. A w
 
 A paused workspace keeps **all its files**, its URL and its password; its card shows an amber *"⏸ Paused"* chip:
 
-![A paused workspace on My Workspaces](screens/student-workspace-paused.png){width=700}
+![A paused workspace on My workspaces](screens/student-workspace-paused.png){width=700}
 
 To bring it back:
 
-* On **My Workspaces**, click **Open workspace**. A message tells you the workspace is starting again; click **Open workspace** once more a moment later to get in.
+* On **My workspaces**, click **Open workspace**. A message tells you the workspace is starting again; click **Open workspace** once more a moment later to get in.
 * On **Request a workspace**, a paused workspace shows *"⏸ Workspace paused after inactivity"* with a **Resume** button. Requesting the same template again resumes it too.
 
 What does not survive a pause is anything that was *running*: open terminals and the commands in them. If you need to leave a long command running, keep the code-server tab open.
 
 ### Managing workspaces
 
-* **Clear** — Delete a single workspace. It is removed from the lab (its environment is shut down and deleted) and from your list.
-* **Clear All** — Delete all your workspaces at once, in the same way.
+* **Delete workspace** (at the bottom of an expanded card) — Delete a single workspace. It is removed from the lab (its environment is shut down and deleted) and from your list.
+* **Delete all** (next to the page title) — Delete all your workspaces at once, in the same way.
 
-!!! warning "Clearing deletes the workspace"
-    Clearing a workspace is not just a tidy-up of the list: the workspace itself is deleted from the lab, along with everything saved in it. Push or download anything you want to keep first. Once cleared, you can request a new workspace for that template from the **Request a workspace** page.
+Both ask you to confirm first.
+
+!!! warning "Deleting removes everything in the workspace"
+    The workspace itself is deleted from the lab, along with everything saved in it. Push or download anything you want to keep first. Once it is deleted, you can request a new workspace for that template from the **Request a workspace** page.
 
 If a workspace cannot be deleted from the lab (for example the lab is temporarily unreachable), it stays in the list and a message asks you to try again. A workspace that is already gone — deleted by the organiser or by its auto-deletion date — no longer appears in the list.
 
@@ -264,7 +266,7 @@ not offer them, use the **Ask for help** button on the portal instead.
 
 ## Submit feedback
 
-After completing a lab session, you can share your experience via the **Feedback** page, accessible from the student portal header.
+After completing a lab session, you can share your experience via the **Feedback** page: click the speech-bubble icon (*Share your feedback*) in the student portal header.
 
 **Required fields:**
 
