@@ -254,6 +254,49 @@ func validateURL(urlStr string) bool {
 	return err == nil && u.Scheme != "" && u.Host != ""
 }
 
+// maxResourceLinkLength bounds the lab resource link so a pasted blob cannot
+// bloat every job file and student API response.
+const maxResourceLinkLength = 2048
+
+// errInvalidResourceLink is the client-safe message for a rejected resource link.
+var errInvalidResourceLink = fmt.Errorf("the resource link must be a full http:// or https:// URL (for example https://example.com/slides), without a username or password")
+
+// validateResourceLink checks the optional lab resource link (slides/website)
+// shown to students. The server never fetches it, so there is no SSRF check:
+// it only has to be a plain http(s) link a browser can open safely. Anything
+// else (javascript:, data:, credentials in the URL) is rejected. Empty is allowed.
+//
+// url.Parse (and the browser's WHATWG parser) accept characters such as " ( ) =
+// in a host, so a link like http://a"onmouseover=... would parse fine yet break
+// out of an HTML attribute on the student page. Quote/markup characters,
+// whitespace and control characters are therefore rejected anywhere in the
+// link, and the hostname must be a plain DNS name or an IP address.
+func validateResourceLink(link string) error {
+	if link == "" {
+		return nil
+	}
+	if len(link) > maxResourceLinkLength {
+		return errInvalidResourceLink
+	}
+	for _, c := range link {
+		if c <= ' ' || c == 0x7f || strings.ContainsRune("\"'<>`\\", c) {
+			return errInvalidResourceLink
+		}
+	}
+	u, err := url.Parse(link)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		return errInvalidResourceLink
+	}
+	if host := u.Hostname(); net.ParseIP(host) == nil && !resourceLinkHostRe.MatchString(host) {
+		return errInvalidResourceLink
+	}
+	return nil
+}
+
+// resourceLinkHostRe matches a plain DNS hostname (internationalized names
+// must be entered in their punycode xn-- form).
+var resourceLinkHostRe = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$`)
+
 // validateServerFetchURL validates that a URL is safe for the EasyLab server
 // itself to fetch (e.g. detectVariablesFromGit's git clone): http/https only,
 // and not pointed at a loopback/link-local/private address (cloud metadata
@@ -787,6 +830,7 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 	config := &LabConfig{
 		StackName:          stackName,
 		Description:        strings.TrimSpace(r.FormValue("description")),
+		ResourceLink:       strings.TrimSpace(r.FormValue("resource_link")),
 		UseExistingCluster: useExistingCluster,
 
 		WorkspaceNamespace: r.FormValue("workspace_namespace"),
@@ -1277,6 +1321,12 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 	if err := validateDNSConfig(initialConfig); err != nil {
 		log.Printf("Invalid DNS configuration: %v", err)
 		h.renderHTMLError(w, "DNS Configuration Error", err.Error())
+		return
+	}
+
+	if err := validateResourceLink(initialConfig.ResourceLink); err != nil {
+		log.Printf("Rejected invalid lab resource link")
+		h.renderHTMLError(w, "Invalid Resource Link", "The resource link must be a full http:// or https:// URL (for example https://example.com/slides), without a username or password.")
 		return
 	}
 
@@ -5615,6 +5665,12 @@ func (h *Handler) RetryJobWithConfig(w http.ResponseWriter, r *http.Request) {
 	if err := validateDNSConfig(editedConfig); err != nil {
 		log.Printf("Invalid DNS configuration: %v", err)
 		h.renderHTMLError(w, "DNS Configuration Error", err.Error())
+		return
+	}
+
+	if err := validateResourceLink(editedConfig.ResourceLink); err != nil {
+		log.Printf("Rejected invalid lab resource link on retry")
+		h.renderHTMLError(w, "Invalid Resource Link", "The resource link must be a full http:// or https:// URL (for example https://example.com/slides), without a username or password.")
 		return
 	}
 

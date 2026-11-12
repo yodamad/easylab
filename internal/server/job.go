@@ -326,6 +326,10 @@ type LabConfig struct {
 	// Description is a free-text, human-readable summary of the lab's purpose.
 	Description string `json:"description,omitempty"`
 
+	// ResourceLink is an optional http(s) URL to the lab's slides or website,
+	// shown to students on the portal.
+	ResourceLink string `json:"resource_link,omitempty"`
+
 	// Cloud Provider
 	Provider string `json:"provider"` // "ovh", "aws", "azure", etc.
 

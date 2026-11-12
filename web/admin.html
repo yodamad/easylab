@@ -108,6 +108,12 @@
                         </div>
 
                         <div class="form-group">
+                            <label for="resource_link">Resource link</label>
+                            <input type="url" id="resource_link" name="resource_link" placeholder="https://… (slides, workshop website)">
+                            <small>Optional link to the lab's slides or website. Shown to students on the portal.</small>
+                        </div>
+
+                        <div class="form-group">
                             <label>Cluster Mode *</label>
                             <div class="button-group">
                                 <button type="button" class="source-button" data-cluster-mode="new" id="cluster-mode-new" onclick="wizard.setClusterMode(false)">

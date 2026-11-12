@@ -111,9 +111,13 @@ function renderWorkspaceCard(info, labId) {
     const templateChip = info.template
         ? `<span class="workspace-card-chip"><span class="workspace-card-chip-key">Template</span>${escapeHtml(info.template)}</span>`
         : '';
-    const labChip = labDisplay
-        ? `<span class="workspace-card-chip"><span class="workspace-card-chip-key">Lab</span>${labDisplay}</span>`
+    const resourceHref = safeHttpURL(info.lab_resource_link);
+    const resourceLink = resourceHref
+        ? `<a class="workspace-card-link" href="${escapeHtmlAttr(resourceHref)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">Slides &amp; resources &#8599;</a>`
         : '';
+    const labChip = (labDisplay
+        ? `<span class="workspace-card-chip"><span class="workspace-card-chip-key">Lab</span>${labDisplay}</span>`
+        : '') + resourceLink;
 
     // The open button names the IDE the workspace actually runs. "ide" is absent
     // for a workspace listed by an older server, which means code-server — whose

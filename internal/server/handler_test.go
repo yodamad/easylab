@@ -1722,6 +1722,139 @@ func TestCreateLabConfigFromForm_Description(t *testing.T) {
 	}
 }
 
+func TestValidateResourceLink(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		link    string
+		wantErr bool
+	}{
+		{name: "empty is allowed", link: ""},
+		{name: "https with path query and fragment", link: "https://example.com/slides/deck?x=1&y=2#page-3"},
+		{name: "http", link: "http://example.com/slides"},
+		{name: "https with port", link: "https://example.com:8443/"},
+		{name: "javascript scheme", link: "javascript:alert(1)", wantErr: true},
+		{name: "data scheme", link: "data:text/html,<script>alert(1)</script>", wantErr: true},
+		{name: "ftp scheme", link: "ftp://example.com/file", wantErr: true},
+		{name: "no scheme", link: "example.com/slides", wantErr: true},
+		{name: "no host", link: "https://", wantErr: true},
+		{name: "userinfo with password", link: "https://u:p@example.com/", wantErr: true},
+		{name: "userinfo without password", link: "https://user@example.com/", wantErr: true},
+		{name: "unparsable", link: "http://exa mple.com/%zz", wantErr: true},
+		{name: "ipv4 host", link: "http://192.0.2.10/slides"},
+		{name: "ipv6 host", link: "http://[2001:db8::1]:8080/slides"},
+		{name: "punycode host", link: "https://xn--bcher-kva.example/"},
+		{name: "attribute breakout via quote in host", link: `http://a"onmouseover=alert(1)//`, wantErr: true},
+		{name: "single quote in path", link: "https://example.com/a'b", wantErr: true},
+		{name: "angle bracket in query", link: "https://example.com/?q=<script>", wantErr: true},
+		{name: "parenthesis in host", link: "http://a(b).com/", wantErr: true},
+		{name: "tab character", link: "https://example.com/\tx", wantErr: true},
+		{name: "backslash", link: `https://example.com\evil.com/`, wantErr: true},
+		{name: "at the length limit", link: "https://example.com/" + strings.Repeat("a", maxResourceLinkLength-len("https://example.com/"))},
+		{name: "over the length limit", link: "https://example.com/" + strings.Repeat("a", maxResourceLinkLength), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validateResourceLink(tt.link)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestCreateLabConfigFromForm_ResourceLink(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "plain link", input: "https://example.com/slides", want: "https://example.com/slides"},
+		{name: "trims surrounding whitespace", input: "  https://example.com/slides \n", want: "https://example.com/slides"},
+		{name: "empty stays empty", input: "", want: ""},
+		{name: "whitespace only becomes empty", input: "   ", want: ""},
+	}
+	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/", nil)
+			req.Form = map[string][]string{
+				"stack_name":    {"my-stack"},
+				"resource_link": {tt.input},
+			}
+			cfg := h.createLabConfigFromForm(req, nil)
+			assert.Equal(t, tt.want, cfg.ResourceLink)
+		})
+	}
+}
+
+// An invalid resource link is rejected before any job exists, for both a real
+// launch and a dry run.
+func TestHandler_ProcessLabRequest_InvalidResourceLink(t *testing.T) {
+	links := []struct {
+		name string
+		link string
+	}{
+		{name: "javascript scheme", link: "javascript:alert(1)"},
+		{name: "no scheme", link: "example.com/slides"},
+		{name: "userinfo", link: "https://u:p@example.com/"},
+	}
+	endpoints := []struct {
+		name string
+		path string
+		call func(h *Handler, w http.ResponseWriter, r *http.Request)
+	}{
+		{name: "create", path: "/api/labs", call: func(h *Handler, w http.ResponseWriter, r *http.Request) { h.CreateLab(w, r) }},
+		{name: "dry run", path: "/api/labs/dry-run", call: func(h *Handler, w http.ResponseWriter, r *http.Request) { h.DryRunLab(w, r) }},
+	}
+	for _, ep := range endpoints {
+		for _, tt := range links {
+			t.Run(ep.name+"/"+tt.name, func(t *testing.T) {
+				jm := NewJobManager(t.TempDir())
+				h := NewHandler(jm, NewPulumiExecutor(jm, t.TempDir()), NewCredentialsManager(), nil, nil, nil)
+
+				form := url.Values{}
+				form.Set("use_existing_cluster", "true")
+				form.Set("stack_name", "test-stack")
+				form.Set("external_kubeconfig", "apiVersion: v1\nkind: Config\n")
+				form.Set("resource_link", tt.link)
+				req := httptest.NewRequest("POST", ep.path, strings.NewReader(form.Encode()))
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				w := httptest.NewRecorder()
+				ep.call(h, w, req)
+
+				assert.Contains(t, w.Body.String(), "Invalid Resource Link")
+				assert.Empty(t, jm.GetAllJobs(), "no job may be created for a rejected link")
+			})
+		}
+	}
+}
+
+func TestHandler_RetryJobWithConfig_InvalidResourceLink(t *testing.T) {
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "test", UseExistingCluster: true, ExternalKubeconfig: "kc", ResourceLink: "https://example.com/orig"})
+	require.NoError(t, jm.UpdateJobStatus(id, JobStatusFailed))
+	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+
+	form := url.Values{}
+	form.Set("resource_link", "javascript:alert(1)")
+	w := httptest.NewRecorder()
+	h.RetryJobWithConfig(w, retryWithConfigRequest(id, form))
+
+	assert.Contains(t, w.Body.String(), "Invalid Resource Link")
+
+	job, _ := jm.GetJob(id)
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	assert.Equal(t, JobStatusFailed, job.Status, "the job must stay failed")
+	require.NotNil(t, job.Config)
+	assert.Equal(t, "https://example.com/orig", job.Config.ResourceLink, "the stored link must not change")
+}
+
 // The creation wizard drops a scheduled close it cannot use instead of refusing
 // the lab: a malformed or past date leaves the new lab open rather than born
 // closed to the students it was created for.
