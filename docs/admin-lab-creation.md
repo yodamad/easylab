@@ -29,7 +29,6 @@ Start by naming the lab:
 
 * **Lab Name** (required) — a unique name used as the prefix for all cloud resources (letters, numbers, hyphens and underscores only).
 * **Description** (optional) — a free-text summary of what the lab is for (e.g. *Kubernetes 101 workshop, June 2025 cohort*). It is shown in the [labs list](admin-lab-management.md#manage-your-labs) to help you tell labs apart, and to students on the environment picker when they request a workspace.
-* **Resource link** (optional) — the `http://` or `https://` address of your slides or website (e.g. `https://example.com/slides`). Students see it as a **Slides & resources** link on the portal, on the environment picker and on their **My Workspaces** cards. Links without a scheme, other schemes such as `javascript:` or `ftp:`, and links with a username or password are rejected. You can change it when you retry a failed lab with edited configuration.
 
 First you need to choose how to provide the Kubernetes cluster:
 
@@ -254,6 +253,13 @@ These are the ones that change what a student sees, so they are always on screen
 
 1. **Name it** — the name and description students see when they pick a
    workspace (e.g. *Go 1.26 + Postgres*). The name must be unique within the lab.
+   Add a **Resource link** (optional) — the `http://` or `https://` address of the
+   slides or website that go with this template (e.g. `https://example.com/slides`).
+   Students see it as a **Slides & resources** link on the template's tile in the
+   environment picker and next to the template on their **My Workspaces** cards.
+   Links without a scheme, other schemes such as `javascript:` or `ftp:`, and links
+   with a username or password are rejected when the lab is saved. In YAML the key
+   is [`resource_link`](templates.md#key-reference).
 2. **Editor** — **VS Code in the browser** (code-server, the default) or **An AI
    coding agent** ([OpenChamber](templates.md#ai-labs-with-openchamber), for a lab
    about working with an agent). OpenChamber publishes no image, so picking it

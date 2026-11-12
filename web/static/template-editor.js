@@ -399,7 +399,7 @@ var TemplateEditor = (function () {
         // Before the rest: it decides which of the fields below are submittable.
         setTemplateIDE(row, ide);
 
-        ['name', 'description', 'image', 'home_dir', 'git_repo', 'git_branch', 'git_folder',
+        ['name', 'description', 'resource_link', 'image', 'home_dir', 'git_repo', 'git_branch', 'git_folder',
             'cpu', 'cpu_limit', 'memory', 'memory_limit', 'disk_size', 'storage_class',
             'startup_script', 'dotfiles_repo'].forEach(function (field) {
             var node = row.querySelector('[data-field="' + field + '"]');
@@ -672,6 +672,7 @@ var TemplateEditor = (function () {
         var body = new FormData();
         body.append('template_name', templateName);
         body.append('template_description', (el('devcontainer_template_description') || {}).value || '');
+        body.append('template_resource_link', (el('devcontainer_template_resource_link') || {}).value || '');
         body.append('source', devcontainerSource);
         body.append('git_repo', (el('devcontainer_git_repo') || {}).value || '');
         body.append('git_branch', (el('devcontainer_git_branch') || {}).value || '');

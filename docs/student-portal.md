@@ -221,7 +221,7 @@ All in the lab's workspace namespace, named `easylab-portal-<lab id>`:
 |----------|---------|
 | Deployment, Service, Ingress | The portal itself (one replica) and its address |
 | ServiceAccount, Role, RoleBinding | The portal's identity and permissions |
-| Secret `…-config` | The lab's configuration as students see it (including its **Slides & resources** link, so the in-lab portal shows it too), and the sign-in settings |
+| Secret `…-config` | The lab's configuration as students see it (including its workspace templates and their **Slides & resources** links, so the in-lab portal shows them too), and the sign-in settings |
 | ConfigMap `…-outbox` | What the portal has to report back until the admin collects it |
 
 The portal's Role is limited to that namespace: it can manage the workspace resources

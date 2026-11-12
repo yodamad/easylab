@@ -20,9 +20,8 @@ func TestPortalStateFromJob_CarriesNoCredentials(t *testing.T) {
 	id := jm.CreateJob(&LabConfig{
 		StackName:              "workshop",
 		Description:            "Kubernetes 101",
-		ResourceLink:           "https://example.com/slides?v=1",
 		WorkspaceNamespace:     "labs",
-		WorkspaceTemplates:     []WorkspaceTemplate{{Name: "go"}, {Name: "python"}},
+		WorkspaceTemplates:     []WorkspaceTemplate{{Name: "go", ResourceLink: "https://example.com/slides?v=1"}, {Name: "python"}},
 		WorkspaceLifetimeHours: 8,
 		LabDeletionDate:        &deletion,
 		BakedImages:            map[string]BakedImage{"go": {Image: "registry/go@sha256:abc"}},
@@ -56,7 +55,6 @@ func TestPortalStateFromJob_CarriesNoCredentials(t *testing.T) {
 	assert.Equal(t, id, state.LabID)
 	assert.Equal(t, "workshop", state.StackName)
 	assert.Equal(t, "labs", state.WorkspaceNamespace)
-	assert.Equal(t, "https://example.com/slides?v=1", state.ResourceLink)
 	assert.Len(t, state.WorkspaceTemplates, 2)
 	assert.Equal(t, 8, state.WorkspaceLifetimeHours)
 	assert.Equal(t, &deletion, state.LabDeletionDate)
@@ -87,9 +85,8 @@ func TestPortalStateFromJob_CarriesNoCredentials(t *testing.T) {
 	decoded, err := decodePortalState(config)
 	require.NoError(t, err)
 	rebuilt := decoded.labConfig()
-	assert.Equal(t, []WorkspaceTemplate{{Name: "go"}, {Name: "python"}}, rebuilt.WorkspaceTemplates)
+	assert.Equal(t, []WorkspaceTemplate{{Name: "go", ResourceLink: "https://example.com/slides?v=1"}, {Name: "python"}}, rebuilt.WorkspaceTemplates, "a template resource link survives the sync")
 	assert.True(t, rebuilt.StudentPortal)
-	assert.Equal(t, "https://example.com/slides?v=1", rebuilt.ResourceLink, "the resource link survives the sync")
 	assert.Empty(t, rebuilt.DNSCredentials)
 	assert.Empty(t, rebuilt.ExternalKubeconfig)
 }

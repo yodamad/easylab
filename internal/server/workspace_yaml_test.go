@@ -456,6 +456,7 @@ func TestMarshalWorkspaceTemplatesYAML_RoundTrip(t *testing.T) {
 			Mounts: []WorkspaceMount{{Type: "configmap", Name: "cfg", Path: "/etc/config"}},
 		},
 		{Name: "minimal"},
+		{Name: "with-slides", ResourceLink: "https://example.com/slides?v=1#p2"},
 	}
 
 	rendered, err := marshalWorkspaceTemplatesYAML(original)
@@ -729,6 +730,15 @@ func TestWorkspaceTemplatesFromRequest_ValidatesFormMode(t *testing.T) {
 				"template_0_ide":  {"openchamber"},
 			},
 			wantErr: "requires image",
+		},
+		{
+			name: "javascript resource link",
+			form: url.Values{
+				"templates_mode":           {"form"},
+				"template_0_name":          {"workspace"},
+				"template_0_resource_link": {"javascript:alert(1)"},
+			},
+			wantErr: "resource_link must be",
 		},
 		{
 			name: "ephemeral combined with a disk size",
@@ -1298,4 +1308,34 @@ workspace_templates:
 `)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ephemeral conflicts with disk_size")
+}
+
+func TestValidateWorkspaceTemplates_ResourceLink(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		link    string
+		wantErr bool
+	}{
+		{name: "empty", link: ""},
+		{name: "https", link: "https://example.com/slides"},
+		{name: "http with port", link: "http://example.com:8080/x"},
+		{name: "javascript scheme", link: "javascript:alert(1)", wantErr: true},
+		{name: "no scheme", link: "example.com/slides", wantErr: true},
+		{name: "quote in host", link: `http://a"onmouseover=alert(1)//`, wantErr: true},
+		{name: "userinfo", link: "https://u:p@example.com/", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validateWorkspaceTemplates([]WorkspaceTemplate{{Name: "go", ResourceLink: tt.link}})
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), `template "go": resource_link must be a full http:// or https:// URL`)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
 }

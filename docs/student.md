@@ -71,8 +71,8 @@ The **Request a workspace** page is where you land after login. It allows you to
 
 You need to provide:
 
-* [x] the **lab (environment)** you want to use — available labs appear as selectable cards, each showing the lab name and, when the organiser set one, a short description of what it's for. When only one lab is available it is selected for you. If the organiser added a link to the slides or website, the card also shows a **Slides & resources** link that opens in a new tab, without selecting the lab.
-* [x] the **template** — once you pick a lab, its templates appear as selectable cards. Each card shows the template name, a short description of what it provides, and its IDE, resources, and source repository, so you can tell them apart before choosing. When a lab has a single template it is selected for you.
+* [x] the **lab (environment)** you want to use — available labs appear as selectable cards, each showing the lab name and, when the organiser set one, a short description of what it's for. When only one lab is available it is selected for you. 
+* [x] the **template** — once you pick a lab, its templates appear as selectable cards. Each card shows the template name, a short description of what it provides, and its IDE, resources, and source repository, so you can tell them apart before choosing. If the organiser added a link to the slides or website for a template, its card also shows a **Slides & resources** link that opens in a new tab, without selecting the template. When a lab has a single template it is selected for you.
 
 Your email address is automatically filled in from your login session and is not editable on this form.
 
@@ -108,7 +108,7 @@ If a lab cannot be reached when the page loads, a message says that some workspa
 
 ### Workspace cards
 
-Each card is collapsed by default and expands when you click its header (or the chevron), so a long list stays scannable. Even collapsed, a card always shows the essentials — its name, the **lab** and **template** it uses, and its auto-deletion badge — so you can tell workspaces apart without opening them. When the organiser set one, a **Slides & resources** link to the lab's slides or website sits next to the lab name and opens in a new tab.
+Each card is collapsed by default and expands when you click its header (or the chevron), so a long list stays scannable. Even collapsed, a card always shows the essentials — its name, the **lab** and **template** it uses, and its auto-deletion badge — so you can tell workspaces apart without opening them. When the organiser set one for the template, a **Slides & resources** link to its slides or website sits next to the template and opens in a new tab.
 
 Collapsed, each card shows:
 

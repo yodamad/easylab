@@ -30,8 +30,6 @@ type PortalState struct {
 	StackName   string    `json:"stack_name,omitempty"`
 	Description string    `json:"description,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
-	// ResourceLink is the lab's slides/website link shown to students.
-	ResourceLink string `json:"resource_link,omitempty"`
 
 	WorkspaceNamespace     string              `json:"workspace_namespace,omitempty"`
 	WorkspaceTemplates     []WorkspaceTemplate `json:"workspace_templates,omitempty"`
@@ -164,7 +162,6 @@ func portalStateFromJob(job *Job, auth StudentAuthSnapshot, publicURL string) Po
 	if cfg := job.Config; cfg != nil {
 		state.StackName = cfg.StackName
 		state.Description = cfg.Description
-		state.ResourceLink = cfg.ResourceLink
 		state.WorkspaceNamespace = cfg.WorkspaceNamespace
 		state.WorkspaceTemplates = cfg.WorkspaceTemplates
 		state.WorkspaceLifetimeHours = cfg.WorkspaceLifetimeHours
@@ -185,7 +182,6 @@ func (s PortalState) labConfig() *LabConfig {
 	return &LabConfig{
 		StackName:              s.StackName,
 		Description:            s.Description,
-		ResourceLink:           s.ResourceLink,
 		WorkspaceNamespace:     s.WorkspaceNamespace,
 		WorkspaceTemplates:     s.WorkspaceTemplates,
 		WorkspaceLifetimeHours: s.WorkspaceLifetimeHours,

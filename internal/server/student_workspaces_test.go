@@ -172,29 +172,35 @@ func TestListStudentWorkspaces_Entry(t *testing.T) {
 	assert.Empty(t, resp.Workspaces[1].TeacherAccessedAt)
 }
 
-func TestListStudentWorkspaces_LabResourceLink(t *testing.T) {
+func TestListStudentWorkspaces_TemplateResourceLink(t *testing.T) {
 	t.Parallel()
 
 	h, jm := newUploadTestHandler(t)
-	withLink := labWithBackend(jm, "with-link", 0)
-	labWithBackend(jm, "no-link", 0)
-	job, _ := jm.GetJob(withLink)
+	id := labWithBackend(jm, "lab", 0)
+	job, _ := jm.GetJob(id)
 	job.mu.Lock()
-	job.Config.ResourceLink = "https://example.com/slides"
+	job.Config.WorkspaceTemplates = []WorkspaceTemplate{
+		{Name: "with-link", ResourceLink: "https://example.com/slides"},
+		{Name: "no-link"},
+	}
 	job.mu.Unlock()
 	useBackendsByKubeconfig(h, map[string]*fakeBackend{
-		"with-link": {workspaces: []workspace.Workspace{{ID: "ws-a", Name: "ws-a", Owner: "alice"}}},
-		"no-link":   {workspaces: []workspace.Workspace{{ID: "ws-b", Name: "ws-b", Owner: "alice"}}},
+		"lab": {workspaces: []workspace.Workspace{
+			{ID: "ws-a", Name: "ws-a", Owner: "alice", Template: "with-link"},
+			{ID: "ws-b", Name: "ws-b", Owner: "alice", Template: "no-link"},
+			{ID: "ws-c", Name: "ws-c", Owner: "alice", Template: "deleted-template"},
+		}},
 	})
 
 	resp := listStudentWorkspaces(t, h, "alice@example.com")
-	require.Len(t, resp.Workspaces, 2)
+	require.Len(t, resp.Workspaces, 3)
 	links := map[string]string{}
 	for _, w := range resp.Workspaces {
-		links[w.LabName] = w.LabResourceLink
+		links[w.Template] = w.TemplateResourceLink
 	}
 	assert.Equal(t, "https://example.com/slides", links["with-link"])
 	assert.Empty(t, links["no-link"])
+	assert.Empty(t, links["deleted-template"])
 }
 
 func TestListStudentWorkspaces_SkipsLabsWithoutCluster(t *testing.T) {

@@ -252,7 +252,7 @@ function renderPickerTile(item, checked, groupName) {
 function renderTemplateTile(t, checked) {
     const chips = [];
     if (t.resources) chips.push(['cpu', t.resources]);
-    return renderPickerTile({ id: t.id, name: t.name, description: t.description, chips: chips, closed: t.closed }, checked, 'template_id');
+    return renderPickerTile({ id: t.id, name: t.name, description: t.description, link: t.resource_link, chips: chips, closed: t.closed }, checked, 'template_id');
 }
 
 // renderLabTile builds one selectable lab card from a job returned by
@@ -263,7 +263,6 @@ function renderLabTile(lab, checked) {
         id: lab.id,
         name: config.stack_name || lab.id,
         description: config.description,
-        link: config.resource_link,
         chips: [],
         closed: config.disabled
     }, checked, 'lab_id');

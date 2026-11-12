@@ -2499,7 +2499,6 @@ async function applyPrefill(config, templatesYaml, jobId, action) {
     const stackNamePreview = document.getElementById('stack-name-preview');
     if (stackNamePreview && config.stack_name) stackNamePreview.textContent = config.stack_name;
     setFieldValue('description', config.description);
-    setFieldValue('resource_link', config.resource_link);
     wizard.setClusterMode(!!config.use_existing_cluster);
 
     if (config.use_existing_cluster) {

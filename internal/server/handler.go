@@ -616,6 +616,7 @@ func parseWorkspaceTemplatesFromForm(r *http.Request) []WorkspaceTemplate {
 		t := WorkspaceTemplate{
 			Name:          name,
 			Description:   strings.TrimSpace(getFormValue(r, fmt.Sprintf("template_%d_description", i))),
+			ResourceLink:  strings.TrimSpace(getFormValue(r, fmt.Sprintf("template_%d_resource_link", i))),
 			IDE:           getFormValue(r, fmt.Sprintf("template_%d_ide", i)),
 			HomeDir:       strings.TrimSpace(getFormValue(r, fmt.Sprintf("template_%d_home_dir", i))),
 			Image:         getFormValue(r, fmt.Sprintf("template_%d_image", i)),
@@ -830,7 +831,6 @@ func (h *Handler) createLabConfigFromForm(r *http.Request, providerCreds Provide
 	config := &LabConfig{
 		StackName:          stackName,
 		Description:        strings.TrimSpace(r.FormValue("description")),
-		ResourceLink:       strings.TrimSpace(r.FormValue("resource_link")),
 		UseExistingCluster: useExistingCluster,
 
 		WorkspaceNamespace: r.FormValue("workspace_namespace"),
@@ -1321,12 +1321,6 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 	if err := validateDNSConfig(initialConfig); err != nil {
 		log.Printf("Invalid DNS configuration: %v", err)
 		h.renderHTMLError(w, "DNS Configuration Error", err.Error())
-		return
-	}
-
-	if err := validateResourceLink(initialConfig.ResourceLink); err != nil {
-		log.Printf("Rejected invalid lab resource link")
-		h.renderHTMLError(w, "Invalid Resource Link", "The resource link must be a full http:// or https:// URL (for example https://example.com/slides), without a username or password.")
 		return
 	}
 
@@ -1968,9 +1962,11 @@ func (h *Handler) ListLabTemplates(w http.ResponseWriter, r *http.Request) {
 		ID          string `json:"id"`
 		Name        string `json:"name"`
 		Description string `json:"description,omitempty"`
-		IDE         string `json:"ide,omitempty"`
-		Resources   string `json:"resources,omitempty"`
-		Repo        string `json:"repo,omitempty"`
+		// ResourceLink is the template's slides/website link, "" when none is set.
+		ResourceLink string `json:"resource_link,omitempty"`
+		IDE          string `json:"ide,omitempty"`
+		Resources    string `json:"resources,omitempty"`
+		Repo         string `json:"repo,omitempty"`
 		// Closed marks a template that takes no new students: it is listed only
 		// because this student already has a workspace on it.
 		Closed bool `json:"closed,omitempty"`
@@ -1986,13 +1982,14 @@ func (h *Handler) ListLabTemplates(w http.ResponseWriter, r *http.Request) {
 			ide = workspace.DefaultIDEKind
 		}
 		options = append(options, templateOption{
-			ID:          t.Name,
-			Name:        t.Name,
-			Description: t.Description,
-			IDE:         ide,
-			Resources:   templateResourceSummary(t),
-			Repo:        shortRepoName(t.GitRepo),
-			Closed:      closed,
+			ID:           t.Name,
+			Name:         t.Name,
+			Description:  t.Description,
+			ResourceLink: t.ResourceLink,
+			IDE:          ide,
+			Resources:    templateResourceSummary(t),
+			Repo:         shortRepoName(t.GitRepo),
+			Closed:       closed,
 		})
 	}
 
@@ -5665,12 +5662,6 @@ func (h *Handler) RetryJobWithConfig(w http.ResponseWriter, r *http.Request) {
 	if err := validateDNSConfig(editedConfig); err != nil {
 		log.Printf("Invalid DNS configuration: %v", err)
 		h.renderHTMLError(w, "DNS Configuration Error", err.Error())
-		return
-	}
-
-	if err := validateResourceLink(editedConfig.ResourceLink); err != nil {
-		log.Printf("Rejected invalid lab resource link on retry")
-		h.renderHTMLError(w, "Invalid Resource Link", "The resource link must be a full http:// or https:// URL (for example https://example.com/slides), without a username or password.")
 		return
 	}
 

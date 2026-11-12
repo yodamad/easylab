@@ -294,6 +294,9 @@ func validateWorkspaceTemplates(templates []WorkspaceTemplate) error {
 		if t.GitRepo != "" && !validateURL(t.GitRepo) {
 			return fmt.Errorf("%s: git_repo %q is not a valid URL", where, t.GitRepo)
 		}
+		if err := validateResourceLink(t.ResourceLink); err != nil {
+			return fmt.Errorf("%s: resource_link must be a full http:// or https:// URL (for example https://example.com/slides), without a username or password", where)
+		}
 		if t.DotfilesRepo != "" && !validateURL(t.DotfilesRepo) {
 			return fmt.Errorf("%s: dotfiles_repo %q is not a valid URL", where, t.DotfilesRepo)
 		}

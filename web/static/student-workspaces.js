@@ -108,15 +108,15 @@ function renderWorkspaceCard(info, labId) {
     const safeName = escapeHtml(info.workspace_name);
     const labDisplay = escapeHtml(info.lab_name || info.lab_id || '');
 
-    const templateChip = info.template
-        ? `<span class="workspace-card-chip"><span class="workspace-card-chip-key">Template</span>${escapeHtml(info.template)}</span>`
-        : '';
-    const resourceHref = safeHttpURL(info.lab_resource_link);
+    const resourceHref = safeHttpURL(info.template_resource_link);
     const resourceLink = resourceHref
         ? `<a class="workspace-card-link" href="${escapeHtmlAttr(resourceHref)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">Slides &amp; resources &#8599;</a>`
         : '';
-    const labChip = (labDisplay
+    const labChip = labDisplay
         ? `<span class="workspace-card-chip"><span class="workspace-card-chip-key">Lab</span>${labDisplay}</span>`
+        : '';
+    const templateChip = (info.template
+        ? `<span class="workspace-card-chip"><span class="workspace-card-chip-key">Template</span>${escapeHtml(info.template)}</span>`
         : '') + resourceLink;
 
     // The open button names the IDE the workspace actually runs. "ide" is absent

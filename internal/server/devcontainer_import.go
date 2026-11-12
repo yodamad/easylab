@@ -192,6 +192,9 @@ func devcontainerTemplate(res devcontainer.Result, r *http.Request) WorkspaceTem
 	return WorkspaceTemplate{
 		Name:        name,
 		Description: strings.TrimSpace(getFormValue(r, "template_description")),
+		// ResourceLink is only rendered into the returned YAML here; it is
+		// validated when the wizard or drawer submits that YAML.
+		ResourceLink: strings.TrimSpace(getFormValue(r, "template_resource_link")),
 		// The IDE is injected onto a volume the build leaves alone, so it is the
 		// admin's choice rather than anything the devcontainer.json dictates.
 		IDE:         strings.TrimSpace(getFormValue(r, "ide")),

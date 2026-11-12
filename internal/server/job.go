@@ -127,10 +127,13 @@ type WorkspaceTemplate struct {
 	Name string `json:"name"`
 	// Description is a free-text, human-readable summary of what the template provides.
 	Description string `json:"description,omitempty"`
-	Image       string `json:"image,omitempty"`
-	GitRepo     string `json:"git_repo,omitempty"`
-	GitBranch   string `json:"git_branch,omitempty"`
-	GitFolder   string `json:"git_folder,omitempty"`
+	// ResourceLink is an optional http(s) URL to the template's slides or
+	// website, shown to students on the portal next to the template.
+	ResourceLink string `json:"resource_link,omitempty"`
+	Image        string `json:"image,omitempty"`
+	GitRepo      string `json:"git_repo,omitempty"`
+	GitBranch    string `json:"git_branch,omitempty"`
+	GitFolder    string `json:"git_folder,omitempty"`
 	// GitShallow clones GitRepo with --depth 1: only the tip commit, so a large
 	// workshop repo is ready much sooner, at the cost of the student having no git
 	// history (no log, blame or checkout of older commits). Opt-in for that reason.
@@ -325,10 +328,6 @@ type LabConfig struct {
 
 	// Description is a free-text, human-readable summary of the lab's purpose.
 	Description string `json:"description,omitempty"`
-
-	// ResourceLink is an optional http(s) URL to the lab's slides or website,
-	// shown to students on the portal.
-	ResourceLink string `json:"resource_link,omitempty"`
 
 	// Cloud Provider
 	Provider string `json:"provider"` // "ovh", "aws", "azure", etc.

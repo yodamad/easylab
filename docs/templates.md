@@ -43,6 +43,7 @@ validation instead of silently shipping a lab without its image.
 | Key | Type | Notes |
 |---|---|---|
 | `name` | string | **Required.** Shown in the student template selector; unique per lab. |
+| `resource_link` | string | Optional `http://` or `https://` URL of the slides or website for this template, e.g. `https://example.com/slides`. Students see it as a **Slides & resources** link on the template's tile and on their workspace cards. Other schemes (`javascript:`, `ftp:`), links without a scheme and links with a username or password are rejected. |
 | `ide` | string | `code-server` (the default — omit it) or `openchamber` for an AI-agent workspace. See [AI labs with OpenChamber](#ai-labs-with-openchamber). Older labs carrying `openvscode` still load; the value is rewritten to `code-server`. |
 | `image` | string | Container image override. Defaults to `codercom/code-server:latest`; **required** when `ide: openchamber`. |
 | `home_dir` | string | `ide: openchamber` only — the home directory inside your own image, where the workspace volume is mounted and below which the repo is cloned (`<home_dir>/project`). Defaults to upstream's `/home/openchamber`. See [If your image is not built from upstream's Dockerfile](#if-your-image-is-not-built-from-upstreams-dockerfile). |
@@ -78,6 +79,19 @@ default image with a 5Gi persistent volume.
 workspace_templates:
   - name: default
 ```
+
+## Slides and resources link
+
+Point students at the slides or workshop website that go with a template:
+
+```yaml
+workspace_templates:
+  - name: go-workshop
+    resource_link: https://example.com/slides/go-workshop
+```
+
+Each template has its own link, so a lab with several templates can link a
+different deck from each.
 
 ## Persistence
 

@@ -1767,7 +1767,9 @@ func TestValidateResourceLink(t *testing.T) {
 	}
 }
 
-func TestCreateLabConfigFromForm_ResourceLink(t *testing.T) {
+func TestParseWorkspaceTemplatesFromForm_ResourceLink(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name  string
 		input string
@@ -1778,23 +1780,24 @@ func TestCreateLabConfigFromForm_ResourceLink(t *testing.T) {
 		{name: "empty stays empty", input: "", want: ""},
 		{name: "whitespace only becomes empty", input: "   ", want: ""},
 	}
-	h := NewHandler(NewJobManager(""), &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			req := httptest.NewRequest("POST", "/", nil)
 			req.Form = map[string][]string{
-				"stack_name":    {"my-stack"},
-				"resource_link": {tt.input},
+				"template_0_name":          {"go"},
+				"template_0_resource_link": {tt.input},
 			}
-			cfg := h.createLabConfigFromForm(req, nil)
-			assert.Equal(t, tt.want, cfg.ResourceLink)
+			templates := parseWorkspaceTemplatesFromForm(req)
+			require.Len(t, templates, 1)
+			assert.Equal(t, tt.want, templates[0].ResourceLink)
 		})
 	}
 }
 
-// An invalid resource link is rejected before any job exists, for both a real
-// launch and a dry run.
-func TestHandler_ProcessLabRequest_InvalidResourceLink(t *testing.T) {
+// An invalid template resource link is rejected before any job exists, for both
+// a real launch and a dry run.
+func TestHandler_ProcessLabRequest_InvalidTemplateResourceLink(t *testing.T) {
 	links := []struct {
 		name string
 		link string
@@ -1821,38 +1824,19 @@ func TestHandler_ProcessLabRequest_InvalidResourceLink(t *testing.T) {
 				form.Set("use_existing_cluster", "true")
 				form.Set("stack_name", "test-stack")
 				form.Set("external_kubeconfig", "apiVersion: v1\nkind: Config\n")
-				form.Set("resource_link", tt.link)
+				form.Set("templates_mode", "form")
+				form.Set("template_0_name", "go")
+				form.Set("template_0_resource_link", tt.link)
 				req := httptest.NewRequest("POST", ep.path, strings.NewReader(form.Encode()))
 				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 				w := httptest.NewRecorder()
 				ep.call(h, w, req)
 
-				assert.Contains(t, w.Body.String(), "Invalid Resource Link")
+				assert.Contains(t, w.Body.String(), "resource_link must be")
 				assert.Empty(t, jm.GetAllJobs(), "no job may be created for a rejected link")
 			})
 		}
 	}
-}
-
-func TestHandler_RetryJobWithConfig_InvalidResourceLink(t *testing.T) {
-	jm := NewJobManager("")
-	id := jm.CreateJob(&LabConfig{StackName: "test", UseExistingCluster: true, ExternalKubeconfig: "kc", ResourceLink: "https://example.com/orig"})
-	require.NoError(t, jm.UpdateJobStatus(id, JobStatusFailed))
-	h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
-
-	form := url.Values{}
-	form.Set("resource_link", "javascript:alert(1)")
-	w := httptest.NewRecorder()
-	h.RetryJobWithConfig(w, retryWithConfigRequest(id, form))
-
-	assert.Contains(t, w.Body.String(), "Invalid Resource Link")
-
-	job, _ := jm.GetJob(id)
-	job.mu.RLock()
-	defer job.mu.RUnlock()
-	assert.Equal(t, JobStatusFailed, job.Status, "the job must stay failed")
-	require.NotNil(t, job.Config)
-	assert.Equal(t, "https://example.com/orig", job.Config.ResourceLink, "the stored link must not change")
 }
 
 // The creation wizard drops a scheduled close it cannot use instead of refusing
@@ -2345,11 +2329,12 @@ func TestListLabTemplates_EnrichedFields(t *testing.T) {
 	id := jm.CreateJob(&LabConfig{
 		StackName: "lab",
 		WorkspaceTemplates: []WorkspaceTemplate{{
-			Name:        "go-postgres",
-			Description: "Go 1.26 with a Postgres sidecar",
-			CPU:         "1",
-			Memory:      "2Gi",
-			GitRepo:     "https://gitlab.com/group/api-workshop.git",
+			Name:         "go-postgres",
+			Description:  "Go 1.26 with a Postgres sidecar",
+			CPU:          "1",
+			Memory:       "2Gi",
+			GitRepo:      "https://gitlab.com/group/api-workshop.git",
+			ResourceLink: "https://example.com/slides",
 		}},
 	})
 	require.NoError(t, jm.UpdateJobStatus(id, JobStatusCompleted))
@@ -2367,6 +2352,7 @@ func TestListLabTemplates_EnrichedFields(t *testing.T) {
 	assert.Equal(t, "code-server", got[0]["ide"])
 	assert.Equal(t, "1 · 2Gi", got[0]["resources"])
 	assert.Equal(t, "api-workshop", got[0]["repo"])
+	assert.Equal(t, "https://example.com/slides", got[0]["resource_link"])
 }
 
 func TestParseWorkspaceTemplatesFromForm_MultipleTemplates(t *testing.T) {
