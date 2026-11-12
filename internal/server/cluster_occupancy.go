@@ -1,12 +1,16 @@
 package server
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"maps"
 	"net/url"
 	"strings"
+	"time"
 
 	"easylab/ingress"
+	"easylab/internal/clusterscan"
 	"easylab/utils"
 
 	"k8s.io/client-go/tools/clientcmd"
@@ -63,6 +67,82 @@ type clusterNeighbour struct {
 // webhook or credential secret.
 func (n clusterNeighbour) servesDNS01() bool {
 	return n.domain != "" && n.dnsProvider != ""
+}
+
+// observedIssuers is what a look at the cluster itself found, which the job
+// records cannot tell us.
+//
+// The distinction that matters is between "the cluster holds no such issuer" and
+// "we could not find out": only the first is evidence of absence, and only the
+// first may be acted on. A lookup that failed — unreachable cluster, no
+// cert-manager CRDs, denied list — leaves known false, and every decision below
+// falls back to what the job records say, exactly as it did before this check
+// existed.
+type observedIssuers struct {
+	// known reports that the lookup succeeded, so absence is meaningful.
+	known bool
+	// usable holds the names of the ClusterIssuers that are Ready and carry a
+	// DNS-01 solver. An issuer that exists but cannot solve DNS-01 is no more
+	// reusable than one that is missing.
+	usable map[string]bool
+}
+
+// has reports whether name is a ClusterIssuer this lab can reuse. It answers
+// false for an unknown lookup, so callers must check known first where that
+// difference matters.
+func (o observedIssuers) has(name string) bool {
+	return o.known && o.usable[name]
+}
+
+// newObservedIssuers records a successful lookup.
+func newObservedIssuers(items []clusterscan.ClusterIssuerInfo) observedIssuers {
+	usable := make(map[string]bool, len(items))
+	for _, item := range items {
+		if item.Usable() {
+			usable[item.Name] = true
+		}
+	}
+	return observedIssuers{known: true, usable: usable}
+}
+
+// clusterIssuerLookupTimeout bounds the one extra cluster read a lab creation
+// makes. Lab creation is interactive, and a cluster that cannot answer in this
+// long is better left unanswered — the caller degrades to the job records rather
+// than keeping the admin waiting.
+const clusterIssuerLookupTimeout = 15 * time.Second
+
+// observeClusterIssuers looks up the ClusterIssuers on the cluster this lab is
+// joining. A failure is not an error the admin should see: it only means the
+// adoption decision falls back to the job records, which is what it did before
+// this check existed, so it is logged and reported as unknown.
+func (h *Handler) observeClusterIssuers(ctx context.Context, jobID string) observedIssuers {
+	job, exists := h.jobManager.GetJob(jobID)
+	if !exists {
+		return observedIssuers{}
+	}
+	job.mu.RLock()
+	var kubeconfig string
+	if job.Config != nil {
+		kubeconfig = job.Config.ExternalKubeconfig
+	}
+	job.mu.RUnlock()
+
+	// No kubeconfig means this lab provisions its own cluster, where it is alone
+	// by construction and there is nothing to adopt.
+	if strings.TrimSpace(kubeconfig) == "" || h.listClusterIssuers == nil {
+		return observedIssuers{}
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, clusterIssuerLookupTimeout)
+	defer cancel()
+
+	items, err := h.listClusterIssuers(ctx, kubeconfig)
+	if err != nil {
+		log.Printf("Lab %s: could not list the cluster's ClusterIssuers, falling back to the other labs' "+
+			"configuration to decide whether to reuse one: %v", jobID, err)
+		return observedIssuers{}
+	}
+	return newObservedIssuers(items)
 }
 
 // clusterKey identifies the cluster a lab targets, so labs can be compared
@@ -175,7 +255,7 @@ func clusterNeighbours(jobs []*Job, key, excludeJobID string) []clusterNeighbour
 //
 // It is a no-op for the first lab on a cluster and for a lab on its own
 // dedicated cluster, so it is safe to call unconditionally.
-func adoptSharedCluster(cfg *LabConfig, jobID string, neighbours []clusterNeighbour) []string {
+func adoptSharedCluster(cfg *LabConfig, jobID string, neighbours []clusterNeighbour, issuers observedIssuers) []string {
 	if cfg == nil || len(neighbours) == 0 {
 		return nil
 	}
@@ -195,7 +275,7 @@ func adoptSharedCluster(cfg *LabConfig, jobID string, neighbours []clusterNeighb
 	}
 
 	notices = append(notices, reuseSharedIngress(cfg, *host)...)
-	notices = append(notices, reuseSharedCertManager(cfg, *host, jobID)...)
+	notices = append(notices, reuseSharedCertManager(cfg, *host, jobID, issuers)...)
 	notices = append(notices, sharedClusterHazards(cfg, *host)...)
 	return notices
 }
@@ -285,7 +365,7 @@ func reuseSharedIngress(cfg *LabConfig, host clusterNeighbour) []string {
 // the conflict the admin actually hits first: the credential secret is one
 // fixed-name object per DNS provider, and the second lab's stack cannot take
 // fields the first lab's stack owns.
-func reuseSharedCertManager(cfg *LabConfig, host clusterNeighbour, jobID string) []string {
+func reuseSharedCertManager(cfg *LabConfig, host clusterNeighbour, jobID string, issuers observedIssuers) []string {
 	var notices []string
 
 	if cfg.InstallCertManager == nil || *cfg.InstallCertManager {
@@ -308,7 +388,7 @@ func reuseSharedCertManager(cfg *LabConfig, host clusterNeighbour, jobID string)
 	// returns 404 for a zone that account does not hold. So the credentials
 	// decide, and the notice says what was overridden.
 	if cfg.DNSProvider != "" && !cfg.DNSOwnIssuer {
-		notices = append(notices, adoptIssuer(cfg, host, jobID)...)
+		notices = append(notices, adoptIssuer(cfg, host, jobID, issuers)...)
 	}
 
 	return notices
@@ -325,35 +405,96 @@ func reuseSharedCertManager(cfg *LabConfig, host clusterNeighbour, jobID string)
 // gets an issuer and a credential secret of its own instead, pointed at the
 // solver webhook already installed on the cluster, which is cluster-wide
 // infrastructure and serves any number of issuers.
-func adoptIssuer(cfg *LabConfig, host clusterNeighbour, jobID string) []string {
+func adoptIssuer(cfg *LabConfig, host clusterNeighbour, jobID string, issuers observedIssuers) []string {
 	// A lab that supplied no credentials of its own has nothing to build an
 	// issuer from, so reusing the sitting lab's is the only option open to it.
 	hasOwnCredentials := len(cfg.DNSCredentials) > 0 && !allValuesEmpty(cfg.DNSCredentials)
 
 	if !hasOwnCredentials || sameDNSCredentials(cfg.DNSCredentials, host.dnsCredentials) {
-		cfg.DNSAlreadyConfigured = true
-		if cfg.ClusterIssuerName == "" {
-			cfg.ClusterIssuerName = host.clusterIssuerName
-		}
 		issuer := cfg.ClusterIssuerName
+		if issuer == "" {
+			issuer = host.clusterIssuerName
+		}
 		if issuer == "" {
 			issuer = utils.DefaultClusterIssuerName
 		}
-		reason := "this lab's DNS credentials are the same ones"
-		if !hasOwnCredentials {
-			reason = "this lab supplied no DNS credentials of its own, so certificates are issued with that lab's"
+
+		// The job records say a lab set this issuer up. Only the cluster says
+		// whether it is still there, and the two disagree after a lab whose
+		// rollback or destroy took the ClusterIssuer with it while leaving
+		// cert-manager, the solver webhook and the credential secret standing —
+		// which is exactly what a *failed* lab leaves behind, and failed labs are
+		// counted as neighbours on purpose (see clusterNeighbours).
+		//
+		// Adopting an issuer that is not there skips creating the one object that
+		// is missing. Nothing fails at deploy time: the lab comes up clean and
+		// every certificate sits Pending for ever on "Referenced ClusterIssuer not
+		// found". So where the cluster has been read and says the issuer is gone,
+		// the job records do not get the last word.
+		if !issuers.known || issuers.has(issuer) {
+			cfg.DNSAlreadyConfigured = true
+			if cfg.ClusterIssuerName == "" {
+				cfg.ClusterIssuerName = host.clusterIssuerName
+			}
+			reason := "this lab's DNS credentials are the same ones"
+			if !hasOwnCredentials {
+				reason = "this lab supplied no DNS credentials of its own, so certificates are issued with that lab's"
+			}
+			return []string{fmt.Sprintf(
+				"DNS-01 marked as already configured, reusing ClusterIssuer %q: lab %q created it along with the "+
+					"solver webhook and the credential secret, and %s. "+
+					"Recreating them is what produces the \"had an apply conflict\" failure on %q.",
+				issuer, host.stackName, reason, "dns-credentials-"+cfg.DNSProvider)}
 		}
-		return []string{fmt.Sprintf(
-			"DNS-01 marked as already configured, reusing ClusterIssuer %q: lab %q created it along with the "+
-				"solver webhook and the credential secret, and %s. "+
-				"Recreating them is what produces the \"had an apply conflict\" failure on %q.",
-			issuer, host.stackName, reason, "dns-credentials-"+cfg.DNSProvider)}
+
+		// The issuer is gone and this lab has no credentials to build a
+		// replacement with, so neither reusing nor owning one can work. Adopting
+		// is left in place as the least surprising of two broken outcomes — the
+		// alternative recreates the webhook and credential secret that *are* still
+		// there and fails the deploy on an apply conflict — and the notice says
+		// plainly what the admin has to do.
+		if !hasOwnCredentials {
+			cfg.DNSAlreadyConfigured = true
+			if cfg.ClusterIssuerName == "" {
+				cfg.ClusterIssuerName = host.clusterIssuerName
+			}
+			return []string{fmt.Sprintf(
+				"ClusterIssuer %q is not on this cluster, or is not Ready with a DNS-01 solver: lab %q set it up, "+
+					"but it has since been removed — a failed or destroyed lab takes the issuer with it and leaves "+
+					"cert-manager and the solver webhook standing. This lab supplied no DNS credentials of its own, "+
+					"so EasyLab cannot build a replacement issuer: enter this lab's DNS credentials to get an issuer "+
+					"of its own, or create %q on the cluster. Without one, every workspace certificate stays Pending.",
+				issuer, host.stackName, issuer)}
+		}
+
+		return ownIssuer(cfg, host, jobID, fmt.Sprintf(
+			"ClusterIssuer %q is no longer on this cluster — lab %q set it up, but a failed or destroyed lab "+
+				"has since taken it with it, leaving cert-manager and the solver webhook standing. Reusing a "+
+				"missing issuer is what leaves every workspace certificate Pending on \"Referenced "+
+				"ClusterIssuer not found\"",
+			issuer, host.stackName),
+			"reusing that issuer would have produced a lab whose certificates never issue")
 	}
 
+	return ownIssuer(cfg, host, jobID, fmt.Sprintf(
+		"Its DNS credentials differ from that lab's, and one ClusterIssuer can only carry one set — so sharing "+
+			"its issuer would issue this lab's certificates with credentials that cannot write zone %q",
+		cfg.DNSZone),
+		"reusing that issuer would have failed silently, with the OVH API returning 404 for a zone the "+
+			"other lab's account does not hold")
+}
+
+// ownIssuer gives the lab a ClusterIssuer and credential secret of its own,
+// against the solver webhook already installed on the cluster. why is the reason
+// this lab cannot reuse the sitting lab's issuer, as a sentence without its final
+// stop; it goes into the notice so the admin sees which of the cases applied.
+// overrideDetail is appended, in the same form, only when this overrode an
+// explicit "Already configured" choice and so owes the admin an explanation.
+func ownIssuer(cfg *LabConfig, host clusterNeighbour, jobID, why, overrideDetail string) []string {
 	// Reaching here with the flag set means the admin asked to reuse an issuer
-	// that cannot serve this lab's zone. Clearing it is what lets ingress/https.go
-	// take the own-issuer branch at all, since it treats "already configured" as
-	// the stronger signal.
+	// that cannot serve this lab's zone, or one that is not there. Clearing it is
+	// what lets ingress/https.go take the own-issuer branch at all, since it
+	// treats "already configured" as the stronger signal.
 	overrodeExplicitChoice := cfg.DNSAlreadyConfigured
 	cfg.DNSAlreadyConfigured = false
 	cfg.DNSOwnIssuer = true
@@ -370,13 +511,10 @@ func adoptIssuer(cfg *LabConfig, host clusterNeighbour, jobID string) []string {
 	}
 	notice := fmt.Sprintf(
 		"This lab gets its own ClusterIssuer %q and credential secret %q, reusing the DNS-01 solver webhook "+
-			"lab %q installed. Its DNS credentials differ from that lab's, and one ClusterIssuer can only "+
-			"carry one set — so sharing its issuer would issue this lab's certificates with credentials that "+
-			"cannot write zone %q.",
-		cfg.ClusterIssuerName, cfg.DNSCredentialSecretName, host.stackName, cfg.DNSZone)
+			"lab %q installed. %s.",
+		cfg.ClusterIssuerName, cfg.DNSCredentialSecretName, host.stackName, why)
 	if overrodeExplicitChoice {
-		notice += " This overrides the \"Already configured\" setting: reusing that issuer would have failed " +
-			"silently, with the OVH API returning 404 for a zone the other lab's account does not hold."
+		notice += fmt.Sprintf(" This overrides the \"Already configured\" setting: %s.", overrideDetail)
 	}
 	return []string{notice}
 }

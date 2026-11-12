@@ -45,6 +45,13 @@ type Handler struct {
 	// cached, so a kubeconfig that turns out to be wrong leaves nothing behind.
 	// Overridable in tests.
 	scanCluster func(ctx context.Context, kubeconfig string, opts clusterscan.Options) (*clusterscan.Report, []error)
+	// listClusterIssuers reads just the ClusterIssuers of the cluster a lab is
+	// being created on, to check that the issuer it is about to reuse is really
+	// there. Separate from scanCluster because it runs on every lab creation that
+	// joins an occupied cluster, not only behind the admin's "Detect from cluster"
+	// button, and so answers the one question instead of running every probe.
+	// Overridable in tests.
+	listClusterIssuers func(ctx context.Context, kubeconfig string) ([]clusterscan.ClusterIssuerInfo, error)
 	// workspaceBackends caches one built backend per lab (keyed by lab ID) so
 	// concurrent requests against the same lab reuse a single Kubernetes client
 	// instead of each building its own from scratch. A kubeconfig or namespace
@@ -395,6 +402,7 @@ func NewHandler(jobManager *JobManager, pulumiExec *PulumiExecutor, credentialsM
 		pulumiExec:          pulumiExec,
 		newWorkspaceBackend: workspace.Default,
 		scanCluster:         clusterscan.ScanKubeconfig,
+		listClusterIssuers:  clusterscan.ListClusterIssuers,
 		workspaceBackends:   make(map[string]*cachedWorkspaceBackend),
 		workspaceCreateSem:  make(chan struct{}, workspaceCreateConcurrency()),
 		pulumiExecSem:       make(chan struct{}, pulumiExecutionConcurrency()),
@@ -1384,8 +1392,13 @@ func (h *Handler) processLabRequest(w http.ResponseWriter, r *http.Request, isDr
 	var clusterNotices []string
 	neighbours := clusterNeighbours(h.jobManager.GetAllJobs(), clusterKeyForLab, jobID)
 	if len(neighbours) > 0 {
+		// What the job records cannot say: whether the ClusterIssuer those labs
+		// set up is still on the cluster. A lab that failed or was destroyed takes
+		// it with it and leaves cert-manager standing, and reusing an issuer that
+		// is gone yields a lab whose certificates never issue.
+		issuers := h.observeClusterIssuers(r.Context(), jobID)
 		h.updateJobConfig(jobID, func(config *LabConfig) {
-			clusterNotices = adoptSharedCluster(config, jobID, neighbours)
+			clusterNotices = adoptSharedCluster(config, jobID, neighbours, issuers)
 		})
 		for _, notice := range clusterNotices {
 			log.Printf("Lab %s joining a shared cluster: %s", jobID, notice)

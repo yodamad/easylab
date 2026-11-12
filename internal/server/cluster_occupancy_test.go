@@ -1,11 +1,13 @@
 package server
 
 import (
+	"context"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 
+	"easylab/internal/clusterscan"
 	"easylab/utils"
 
 	"github.com/stretchr/testify/assert"
@@ -16,6 +18,23 @@ import (
 // put two labs on genuinely different clusters.
 func kubeconfigFor(server string) string {
 	return strings.Replace(testKubeconfig("tok"), "https://cluster.example.com:6443", server, 1)
+}
+
+// unknownIssuers is what a lab creation sees when the cluster could not be read:
+// no evidence either way, so the decision falls back to the other labs' records.
+func unknownIssuers() observedIssuers {
+	return observedIssuers{}
+}
+
+// issuersOnCluster is the opposite: the cluster was read, and these are the
+// usable (Ready, DNS-01 capable) ClusterIssuers it holds. An empty call means
+// the cluster was read and holds none.
+func issuersOnCluster(names ...string) observedIssuers {
+	items := make([]clusterscan.ClusterIssuerInfo, 0, len(names))
+	for _, name := range names {
+		items = append(items, clusterscan.ClusterIssuerInfo{Name: name, Ready: true, HasDNS01: true})
+	}
+	return newObservedIssuers(items)
 }
 
 func TestClusterKey(t *testing.T) {
@@ -203,7 +222,7 @@ func TestAdoptSharedClusterMovesNamespaceAndReusesInfra(t *testing.T) {
 	t.Parallel()
 
 	cfg := joiningLab()
-	notices := adoptSharedCluster(cfg, "job-11112222-3333-4444-5555-666677778888", []clusterNeighbour{sittingLab()})
+	notices := adoptSharedCluster(cfg, "job-11112222-3333-4444-5555-666677778888", []clusterNeighbour{sittingLab()}, unknownIssuers())
 
 	// The namespace is the change that makes a second domain possible at all.
 	assert.NotEqual(t, defaultWorkspaceNamespace, cfg.WorkspaceNamespace)
@@ -243,7 +262,7 @@ func TestAdoptSharedClusterNoOp(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Empty(t, adoptSharedCluster(tt.cfg, "job-abc", tt.neighbours))
+			assert.Empty(t, adoptSharedCluster(tt.cfg, "job-abc", tt.neighbours, unknownIssuers()))
 			if tt.cfg != nil {
 				assert.Empty(t, tt.cfg.WorkspaceNamespace)
 				assert.Nil(t, tt.cfg.InstallCertManager)
@@ -259,7 +278,7 @@ func TestAdoptSharedClusterQuickStartLabKeepsItsNamespaceOnly(t *testing.T) {
 	// No domain means no cert-manager and no certificate, so there is nothing to
 	// reuse — but the namespace still has to be its own.
 	cfg := &LabConfig{StackName: "quick", UseExistingCluster: true, ClusterProfile: "shared"}
-	notices := adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{sittingLab()})
+	notices := adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{sittingLab()}, unknownIssuers())
 
 	assert.Equal(t, "workshops-quick", cfg.WorkspaceNamespace)
 	assert.Nil(t, cfg.InstallCertManager)
@@ -276,7 +295,7 @@ func TestAdoptSharedClusterRespectsExplicitChoices(t *testing.T) {
 	cfg.NginxIngressNamespace = "ingress-nginx"
 	cfg.ClusterIssuerName = "my-issuer"
 
-	notices := adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{sittingLab()})
+	notices := adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{sittingLab()}, unknownIssuers())
 
 	// A namespace nobody holds is left exactly as the admin set it.
 	assert.Equal(t, "team-two", cfg.WorkspaceNamespace)
@@ -304,7 +323,7 @@ func TestAdoptSharedClusterReplacesAnInstallTargetNamespace(t *testing.T) {
 	cfg.InstallCertManager = boolPtr(true)
 	cfg.CertManagerNamespace = "my-certs"
 
-	notices := adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{neighbour})
+	notices := adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{neighbour}, unknownIssuers())
 
 	require.NotNil(t, cfg.InstallNginxIngress)
 	assert.False(t, *cfg.InstallNginxIngress)
@@ -330,7 +349,7 @@ func TestAdoptSharedClusterClearsAnInstallTargetWhenTheHostUsedDefaults(t *testi
 	cfg.NginxIngressNamespace = "my-traefik"
 	cfg.CertManagerNamespace = "my-certs"
 
-	adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{neighbour})
+	adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{neighbour}, unknownIssuers())
 
 	assert.Empty(t, cfg.NginxIngressNamespace)
 	assert.Empty(t, cfg.CertManagerNamespace)
@@ -346,7 +365,7 @@ func TestAdoptSharedClusterWithoutADNS01Host(t *testing.T) {
 	neighbour.dnsProvider = ""
 
 	cfg := joiningLab()
-	adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{neighbour})
+	adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{neighbour}, unknownIssuers())
 
 	assert.Equal(t, "workshops-workshop-two", cfg.WorkspaceNamespace)
 	assert.Nil(t, cfg.InstallCertManager)
@@ -360,7 +379,7 @@ func TestAdoptSharedClusterFallsBackToTheDefaultIssuerInItsNotice(t *testing.T) 
 	neighbour.clusterIssuerName = ""
 
 	cfg := joiningLab()
-	notices := adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{neighbour})
+	notices := adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{neighbour}, unknownIssuers())
 
 	assert.True(t, cfg.DNSAlreadyConfigured)
 	assert.Contains(t, strings.Join(notices, "\n"), utils.DefaultClusterIssuerName)
@@ -400,7 +419,7 @@ func TestAdoptSharedClusterHazards(t *testing.T) {
 			neighbour := sittingLab()
 			tt.mutate(cfg, &neighbour)
 
-			joined := strings.Join(adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{neighbour}), "\n")
+			joined := strings.Join(adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{neighbour}, unknownIssuers()), "\n")
 			if tt.wantNotice != "" {
 				assert.Contains(t, joined, tt.wantNotice)
 			}
@@ -572,7 +591,7 @@ func TestAdoptSharedClusterGivesADifferentlyCredentialedLabItsOwnIssuer(t *testi
 	cfg.DNSZone = "two.example"
 	cfg.DNSCredentials = map[string]string{"ovhAppKey": "key-for-two"}
 
-	notices := adoptSharedCluster(cfg, "job-11112222-3333-4444-5555-666677778888", []clusterNeighbour{sittingLab()})
+	notices := adoptSharedCluster(cfg, "job-11112222-3333-4444-5555-666677778888", []clusterNeighbour{sittingLab()}, unknownIssuers())
 
 	// Reusing the sitting issuer would issue with credentials that cannot write
 	// this lab's zone, and fail silently.
@@ -598,7 +617,7 @@ func TestAdoptSharedClusterKeepsAnExplicitIssuerName(t *testing.T) {
 	cfg.ClusterIssuerName = "my-own-issuer"
 	cfg.DNSCredentialSecretName = "my-own-secret"
 
-	adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{sittingLab()})
+	adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{sittingLab()}, unknownIssuers())
 
 	assert.True(t, cfg.DNSOwnIssuer)
 	assert.Equal(t, "my-own-issuer", cfg.ClusterIssuerName)
@@ -624,7 +643,7 @@ func TestAdoptSharedClusterLeavesAnAlreadyDecidedIssuerAlone(t *testing.T) {
 			tt.mutate(cfg)
 			before := *cfg
 
-			adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{sittingLab()})
+			adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{sittingLab()}, unknownIssuers())
 
 			assert.Equal(t, before.DNSAlreadyConfigured, cfg.DNSAlreadyConfigured)
 			assert.Equal(t, before.DNSOwnIssuer, cfg.DNSOwnIssuer)
@@ -704,7 +723,7 @@ func TestAdoptSharedClusterRefusesToClaimASharedIssuerName(t *testing.T) {
 			cfg.ClusterIssuerName = tt.issuer
 			cfg.DNSCredentialSecretName = tt.secret
 
-			adoptSharedCluster(cfg, "job-11112222-3333-4444-5555-666677778888", []clusterNeighbour{sittingLab()})
+			adoptSharedCluster(cfg, "job-11112222-3333-4444-5555-666677778888", []clusterNeighbour{sittingLab()}, unknownIssuers())
 
 			assert.True(t, cfg.DNSOwnIssuer)
 			assert.Equal(t, tt.wantIssuer, cfg.ClusterIssuerName)
@@ -774,7 +793,7 @@ func TestAdoptSharedClusterOverridesAlreadyConfiguredWhenCredentialsDiffer(t *te
 	cfg.DNSAlreadyConfigured = true // as set by the wizard or Detect from cluster
 	cfg.DNSCredentials = map[string]string{"ovhAppKey": "key-for-two"}
 
-	notices := adoptSharedCluster(cfg, "job-11112222-3333-4444-5555-666677778888", []clusterNeighbour{sittingLab()})
+	notices := adoptSharedCluster(cfg, "job-11112222-3333-4444-5555-666677778888", []clusterNeighbour{sittingLab()}, unknownIssuers())
 
 	assert.False(t, cfg.DNSAlreadyConfigured,
 		"ingress/https.go treats alreadyConfigured as the stronger signal, so it has to be cleared")
@@ -807,7 +826,7 @@ func TestAdoptSharedClusterReusesWhenTheLabSuppliedNoCredentials(t *testing.T) {
 			cfg := joiningLab()
 			cfg.DNSCredentials = tt.creds
 
-			notices := adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{sittingLab()})
+			notices := adoptSharedCluster(cfg, "job-abc", []clusterNeighbour{sittingLab()}, unknownIssuers())
 
 			assert.True(t, cfg.DNSAlreadyConfigured)
 			assert.False(t, cfg.DNSOwnIssuer)
@@ -1032,4 +1051,188 @@ func TestRenderClusterNotices(t *testing.T) {
 	assert.Contains(t, html, "This cluster already hosts another lab")
 	assert.NotContains(t, html, "<ok>", "notices must be escaped before they reach the page")
 	assert.Contains(t, html, "&lt;ok&gt;")
+}
+
+// The job records of the other labs on a cluster say an issuer was created; only
+// the cluster says whether it is still there. These three tests cover the fork
+// that answer drives, because getting it wrong is silent: the lab deploys clean
+// and every certificate sits Pending on "Referenced ClusterIssuer not found".
+func TestAdoptSharedClusterReusesIssuerStillOnCluster(t *testing.T) {
+	t.Parallel()
+
+	cfg := joiningLab()
+	notices := adoptSharedCluster(cfg, "job-11112222-3333-4444-5555-666677778888",
+		[]clusterNeighbour{sittingLab()}, issuersOnCluster("letsencrypt"))
+
+	assert.True(t, cfg.DNSAlreadyConfigured, "the issuer is there, so reuse it")
+	assert.False(t, cfg.DNSOwnIssuer)
+	assert.Equal(t, "letsencrypt", cfg.ClusterIssuerName)
+	assert.Contains(t, strings.Join(notices, "\n"), `reusing ClusterIssuer "letsencrypt"`)
+}
+
+func TestAdoptSharedClusterOwnsIssuerWhenTheClusterSaysItIsGone(t *testing.T) {
+	t.Parallel()
+
+	// Same DNS credentials as the sitting lab, so the only thing stopping reuse
+	// is that the issuer the records promise is not on the cluster — what a
+	// failed lab leaves behind once its rollback took the issuer with it.
+	cfg := joiningLab()
+	notices := adoptSharedCluster(cfg, "job-11112222-3333-4444-5555-666677778888",
+		[]clusterNeighbour{sittingLab()}, issuersOnCluster())
+
+	assert.False(t, cfg.DNSAlreadyConfigured, "reusing an absent issuer strands every certificate")
+	assert.True(t, cfg.DNSOwnIssuer)
+	assert.Equal(t, "easylab-workshop-two-11112222", cfg.ClusterIssuerName)
+	assert.Equal(t, "dns-credentials-ovh-workshop-two-11112222", cfg.DNSCredentialSecretName)
+
+	joined := strings.Join(notices, "\n")
+	assert.Contains(t, joined, `ClusterIssuer "letsencrypt" is no longer on this cluster`)
+	assert.Contains(t, joined, "its own ClusterIssuer")
+}
+
+func TestAdoptSharedClusterWarnsWhenIssuerIsGoneAndLabHasNoCredentials(t *testing.T) {
+	t.Parallel()
+
+	// With no DNS credentials of its own there is nothing to build a replacement
+	// issuer from, so adopting stays — but the admin has to be told, since the
+	// lab cannot get a certificate until someone acts.
+	cfg := joiningLab()
+	cfg.DNSCredentials = nil
+	notices := adoptSharedCluster(cfg, "job-11112222-3333-4444-5555-666677778888",
+		[]clusterNeighbour{sittingLab()}, issuersOnCluster())
+
+	assert.True(t, cfg.DNSAlreadyConfigured)
+	assert.False(t, cfg.DNSOwnIssuer)
+	assert.Equal(t, "letsencrypt", cfg.ClusterIssuerName)
+
+	joined := strings.Join(notices, "\n")
+	assert.Contains(t, joined, `ClusterIssuer "letsencrypt" is not on this cluster`)
+	assert.Contains(t, joined, "cannot build a replacement issuer")
+	assert.Contains(t, joined, "stays Pending")
+}
+
+// An issuer that exists but cannot issue a wildcard certificate is no better
+// than an absent one, so only Ready + DNS-01 counts as evidence of presence.
+func TestObservedIssuers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		items []clusterscan.ClusterIssuerInfo
+		query string
+		want  bool
+	}{
+		{name: "ready dns-01 issuer is there", items: []clusterscan.ClusterIssuerInfo{
+			{Name: "letsencrypt", Ready: true, HasDNS01: true}}, query: "letsencrypt", want: true},
+		{name: "another name is not there", items: []clusterscan.ClusterIssuerInfo{
+			{Name: "letsencrypt", Ready: true, HasDNS01: true}}, query: "letsencrypt-prod", want: false},
+		{name: "not ready does not count", items: []clusterscan.ClusterIssuerInfo{
+			{Name: "letsencrypt", Ready: false, HasDNS01: true}}, query: "letsencrypt", want: false},
+		{name: "http-01 only does not count", items: []clusterscan.ClusterIssuerInfo{
+			{Name: "letsencrypt", Ready: true, HasHTTP01: true}}, query: "letsencrypt", want: false},
+		{name: "cluster read and empty", items: nil, query: "letsencrypt", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			observed := newObservedIssuers(tt.items)
+			assert.True(t, observed.known, "a cluster that was read is known, even when it holds nothing")
+			assert.Equal(t, tt.want, observed.has(tt.query))
+		})
+	}
+
+	// Unknown is the fallback, and it must never claim an issuer is present or
+	// absent — has() false plus known false is what sends the decision back to
+	// the other labs' records.
+	assert.False(t, unknownIssuers().known)
+	assert.False(t, unknownIssuers().has("letsencrypt"))
+}
+
+// A cluster that cannot be read must leave the pre-existing behaviour in place
+// rather than deciding the issuer is gone: a timeout or a denied list is not
+// evidence of absence.
+func TestObserveClusterIssuers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		cfg        *LabConfig
+		lookup     func(ctx context.Context, kubeconfig string) ([]clusterscan.ClusterIssuerInfo, error)
+		unknownJob bool
+		wantKnown  bool
+		wantHas    bool
+	}{
+		{
+			name:       "unknown job",
+			cfg:        &LabConfig{ExternalKubeconfig: "kubeconfig"},
+			unknownJob: true,
+			lookup: func(context.Context, string) ([]clusterscan.ClusterIssuerInfo, error) {
+				t.Error("no cluster should be read for a job that is not there")
+				return nil, nil
+			},
+		},
+		{
+			name: "no kubeconfig to read the cluster with",
+			cfg:  &LabConfig{},
+			lookup: func(context.Context, string) ([]clusterscan.ClusterIssuerInfo, error) {
+				t.Error("no cluster should be read without a kubeconfig")
+				return nil, nil
+			},
+		},
+		{
+			name: "unreachable cluster stays unknown",
+			cfg:  &LabConfig{ExternalKubeconfig: "kubeconfig"},
+			lookup: func(context.Context, string) ([]clusterscan.ClusterIssuerInfo, error) {
+				return nil, assert.AnError
+			},
+		},
+		{
+			name: "cluster read",
+			cfg:  &LabConfig{ExternalKubeconfig: "kubeconfig"},
+			lookup: func(context.Context, string) ([]clusterscan.ClusterIssuerInfo, error) {
+				return []clusterscan.ClusterIssuerInfo{{Name: "letsencrypt", Ready: true, HasDNS01: true}}, nil
+			},
+			wantKnown: true,
+			wantHas:   true,
+		},
+		{
+			name: "cluster read and holds no usable issuer",
+			cfg:  &LabConfig{ExternalKubeconfig: "kubeconfig"},
+			lookup: func(context.Context, string) ([]clusterscan.ClusterIssuerInfo, error) {
+				return nil, nil
+			},
+			wantKnown: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			jm := NewJobManager("")
+			id := jm.CreateJob(tt.cfg)
+			h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+			h.listClusterIssuers = tt.lookup
+			if tt.unknownJob {
+				id = "job-does-not-exist"
+			}
+
+			observed := h.observeClusterIssuers(context.Background(), id)
+			assert.Equal(t, tt.wantKnown, observed.known)
+			assert.Equal(t, tt.wantHas, observed.has("letsencrypt"))
+		})
+	}
+}
+
+// Without the seam wired up — a Handler built as a struct literal rather than
+// through NewHandler — the lookup must be skipped, not panic.
+func TestObserveClusterIssuersWithoutLookup(t *testing.T) {
+	t.Parallel()
+
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{ExternalKubeconfig: "kubeconfig"})
+	h := &Handler{jobManager: jm}
+
+	assert.False(t, h.observeClusterIssuers(context.Background(), id).known)
 }

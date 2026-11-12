@@ -373,6 +373,24 @@ func ScanKubeconfig(ctx context.Context, kubeconfig string, opts Options) (*Repo
 	return Scan(ctx, scanner, opts)
 }
 
+// ListClusterIssuers reports the ClusterIssuers on the cluster a kubeconfig
+// points at, and nothing else. It exists for the one caller that needs a single
+// fact rather than a report: a lab joining an occupied cluster has to know
+// whether the ClusterIssuer it is about to reuse is actually there, and a full
+// Scan would run a dozen probes to answer it.
+//
+// An error means the question could not be answered — an unusable kubeconfig, an
+// unreachable cluster, no cert-manager CRDs, or a denied list. It is not the same
+// as an empty slice, which means the cluster was read and holds no ClusterIssuer;
+// only the latter is evidence of absence.
+func ListClusterIssuers(ctx context.Context, kubeconfig string) ([]ClusterIssuerInfo, error) {
+	scanner, err := New(kubeconfig)
+	if err != nil {
+		return nil, err
+	}
+	return scanner.listClusterIssuers(ctx, probeTimeout)
+}
+
 // Scan runs every probe and returns what it found plus the raw probe errors, which
 // the caller logs. The errors deliberately stay out of the Report.
 //

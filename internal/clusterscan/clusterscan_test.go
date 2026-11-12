@@ -813,6 +813,56 @@ func TestNew_RejectsBadKubeconfig(t *testing.T) {
 	}
 }
 
+// ListClusterIssuers is the one question a lab creation asks on its own, to
+// decide whether the issuer another lab's records promise is still there. An
+// error has to stay distinguishable from an empty list: only the empty list is
+// evidence that the cluster holds no issuer.
+func TestListClusterIssuers(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reports the issuers the cluster holds", func(t *testing.T) {
+		t.Parallel()
+
+		scanner, _ := newTestScanner(t, fixture{
+			resources: certManagerResources,
+			issuers: []runtime.Object{
+				clusterIssuer("prod", "https://acme-v02.api.letsencrypt.org/directory", "dns01", true),
+				clusterIssuer("http", "https://acme-v02.api.letsencrypt.org/directory", "http01", true),
+			},
+		})
+
+		got, err := scanner.listClusterIssuers(context.Background(), time.Second)
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+
+		usable := map[string]bool{}
+		for _, issuer := range got {
+			usable[issuer.Name] = issuer.Usable()
+		}
+		assert.True(t, usable["prod"])
+		assert.False(t, usable["http"], "an HTTP-01 issuer cannot issue the wildcard certificate")
+	})
+
+	t.Run("a cluster with no issuers is not an error", func(t *testing.T) {
+		t.Parallel()
+
+		scanner, _ := newTestScanner(t, fixture{resources: certManagerResources})
+
+		got, err := scanner.listClusterIssuers(context.Background(), time.Second)
+		require.NoError(t, err)
+		assert.Empty(t, got)
+	})
+
+	t.Run("an unusable kubeconfig is an error, not an empty cluster", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := ListClusterIssuers(context.Background(), "this is not a kubeconfig")
+		require.Error(t, err)
+		assert.Nil(t, got)
+		assert.NotContains(t, err.Error(), "this is not a kubeconfig")
+	})
+}
+
 func TestParseMinor(t *testing.T) {
 	t.Parallel()
 

@@ -809,6 +809,25 @@ EasyLab decides by comparing the credentials you entered against the sitting lab
 | **Different** — e.g. a per-zone OVH consumer key | The lab gets **its own ClusterIssuer and its own credential secret**, named after the lab, and reuses only the DNS-01 solver webhook. The webhook is cluster-wide and serves any number of issuers, each carrying its own credentials. |
 | **Left blank** | The existing issuer is reused, and certificates are issued with the other lab's credentials — there is nothing else to build an issuer from. |
 
+Reuse also requires the issuer to still be **on the cluster**. The other labs' records
+say one was created; only the cluster says whether it is still there, and the two
+disagree after a lab whose rollback or destroy took the ClusterIssuer with it while
+leaving cert-manager, the solver webhook and the credential secret standing — which is
+exactly what a **failed** lab leaves behind. So before reusing an issuer EasyLab reads
+the cluster's ClusterIssuers and only adopts one that is present, Ready and has a DNS-01
+solver:
+
+| The named issuer | What happens |
+|---|---|
+| **Present**, Ready, with a DNS-01 solver | Reused, as in the table above. |
+| **Gone**, and you entered DNS credentials | The lab gets **its own ClusterIssuer and credential secret** instead, reusing only the solver webhook. The notice says the issuer is no longer on the cluster. |
+| **Gone**, and you left the credentials blank | The issuer is still named, because there is nothing to build a replacement from — but the notice says so plainly, and names what you have to do: enter this lab's DNS credentials, or create the issuer on the cluster. Without one, every workspace certificate stays Pending. |
+| **Unverifiable** — the cluster could not be read in time, or your credentials may not list ClusterIssuers | The other labs' records decide, as before. A failed read is not evidence that the issuer is gone. |
+
+Adopting an issuer that is not there is the one case that fails completely silently: the
+lab deploys clean, nothing errors, and every certificate sits for ever on `Referenced
+"ClusterIssuer" not found`.
+
 This comparison **overrides an explicit Already configured choice**, including one
 applied by [Detect from cluster](#detect-from-cluster). Reusing an issuer whose
 credentials cannot write your zone is not a setting that merely performs worse — it
