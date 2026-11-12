@@ -3514,6 +3514,20 @@ select.loading {
     flex-shrink: 0;
 }
 
+/* Open workspace and Open slides sit side by side: same border box and line
+   height, so the outlined button and the filled one are exactly as tall. */
+.workspace-card-open,
+.workspace-card-slides {
+    border: 1px solid var(--student-color);
+    padding: calc(0.5rem - 1px) calc(1rem - 1px);
+    line-height: 1.25rem;
+    margin-top: 0;
+}
+
+.workspace-card-open:hover {
+    border-color: var(--student-hover);
+}
+
 @media (max-width: 480px) {
     .workspace-card-header {
         flex-wrap: wrap;

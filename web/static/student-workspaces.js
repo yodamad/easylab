@@ -127,10 +127,10 @@ function renderWorkspaceCard(info, labId) {
         ? `<span class="workspace-card-chip"><span class="workspace-card-chip-key">Template</span>${escapeHtml(info.template)}</span>`
         : '');
 
-    // The open button names the IDE the workspace actually runs. "ide" is absent
-    // for a workspace listed by an older server, which means code-server — whose
-    // label is left exactly as it was, so documented screenshots stay accurate.
-    const openLabel = info.ide === 'openchamber' ? 'Open OpenChamber' : 'Open Code Server';
+    // The button reads the same for every IDE; its tooltip names the IDE the
+    // workspace actually runs. "ide" is absent for a workspace listed by an older
+    // server, which means code-server.
+    const openLabel = 'Open workspace';
     const openTitle = info.ide === 'openchamber' ? 'Open OpenChamber' : 'Open code-server';
     const safeOpenLabel = escapeHtml(openLabel);
     const safeOpenTitle = escapeHtmlAttr(openTitle);
