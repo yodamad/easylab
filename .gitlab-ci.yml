@@ -105,8 +105,6 @@ build:
       - .go-mod-cache/
       - .go-build-cache/
     policy: pull-push
-  tags:
-      - saas-linux-medium-amd64
       
 # Run Go tests (starts immediately, parallel with build)
 test:
