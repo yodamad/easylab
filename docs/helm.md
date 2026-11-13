@@ -36,10 +36,10 @@ if something misbehaves.
 - A **base64-encoded 32-byte encryption key** — see [Required secrets](#required-secrets).
   The pod will not start without it.
 
-Application images are **multi-platform**: every tag of `docker.io/yodamad/easylab` is a
-manifest list for `linux/amd64` and `linux/arm64`, so Kubernetes picks the right variant
-and no architecture-specific values are needed. (Custom builds are a different story — see
-the [`exec format error`](#troubleshooting) entry in Troubleshooting.)
+Application images are published for **`linux/amd64` only** — every tag of
+`docker.io/yodamad/easylab` is a single-architecture image, not a manifest list. On arm64
+nodes (AWS Graviton, for example) you must build and push your own image; see the
+[`exec format error`](#troubleshooting) entry in Troubleshooting.
 
 ## Install
 
@@ -583,8 +583,8 @@ kubectl apply -f easylab-manifests.yaml
 ## Troubleshooting
 
 ??? warning "`exec /app/main: exec format error`"
-    The image's architecture does not match your nodes (for example an **arm64** image on
-    **amd64** workers). Published tags are multi-arch, so this only happens with a
+    The image's architecture does not match your nodes. Published tags are **`linux/amd64`
+    only**, so this happens either when you run them on **arm64** nodes, or with a
     **custom** image built on Apple Silicon with plain `docker build` and no platform flag.
 
     Build and push with an explicit platform matching your cluster (most cloud clusters are
@@ -593,7 +593,7 @@ kubectl apply -f easylab-manifests.yaml
     docker buildx build --platform linux/amd64 -t your-registry/easylab:your-tag --push .
     ```
     For arm64 nodes (AWS Graviton, for example) use `--platform linux/arm64`, or publish
-    both in one tag like CI does:
+    both architectures in one tag:
     ```bash
     docker buildx build --platform linux/amd64,linux/arm64 -t your-registry/easylab:your-tag --push .
     ```

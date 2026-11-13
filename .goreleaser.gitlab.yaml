@@ -13,6 +13,9 @@ builds:
     binary: main
     goos:
       - linux
+    # Both arches are kept for tagged releases (`goreleaser release`).
+    # The per-pipeline `build` job passes --single-target so it compiles only
+    # linux/amd64 — the one arch docker-build actually consumes.
     goarch:
       - amd64
       - arm64
