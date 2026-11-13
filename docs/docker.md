@@ -129,7 +129,9 @@ The Docker Compose setup includes two named volumes for data persistence:
 docker build -t easylab .
 ```
 
-**Multi-architecture (amd64 + arm64):** CI publishes each tag as `linux/amd64` and `linux/arm64` so the same tag works on typical cloud nodes and on arm64 (for example AWS Graviton). The GitLab pipeline builds both architectures with GoReleaser and passes `--build-arg SKIP_BUILD=true` so each image layer copies the matching prebuilt binary from `docker-prebuild/linux_${TARGETARCH}/main`.
+**Published architecture:** CI publishes each tag as **`linux/amd64` only** — the `docker-build` job pushes a single image with `--customPlatform linux/amd64`, not a multi-arch manifest list. The GitLab pipeline builds that binary with GoReleaser and passes `--build-arg SKIP_BUILD=true` so the image layer copies the prebuilt binary from `docker-prebuild/linux_amd64/main`.
+
+If you run on arm64 nodes (AWS Graviton, for example), build and push your own image with Buildx as shown below — the `Dockerfile` supports both architectures via `TARGETARCH`.
 
 **Local multi-arch with Buildx** (compile inside Docker per platform; default `SKIP_BUILD=false`):
 
@@ -137,7 +139,7 @@ docker build -t easylab .
 docker buildx build --platform linux/amd64,linux/arm64 --build-arg SKIP_BUILD=false -t your-registry/easylab:tag --push .
 ```
 
-**Local multi-arch reusing prebuilt binaries** (same layout as CI: run `goreleaser build --clean --snapshot -f .goreleaser.gitlab.yaml`, then copy each `dist/.../main` into `docker-prebuild/linux_amd64/main` and `docker-prebuild/linux_arm64/main` as in `.gitlab-ci.yml`, or use your own paths and adjust the Dockerfile):
+**Local multi-arch reusing prebuilt binaries** (run `goreleaser build --clean --snapshot -f .goreleaser.gitlab.yaml`, then copy each `dist/.../main` into `docker-prebuild/linux_amd64/main` and `docker-prebuild/linux_arm64/main`). `.goreleaser.gitlab.yaml` declares both `amd64` and `arm64`, so a plain local run produces both; CI's `build` job adds `--single-target` to compile only the amd64 binary its image needs:
 
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 --build-arg SKIP_BUILD=true -t your-registry/easylab:tag --push .

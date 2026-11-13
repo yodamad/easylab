@@ -22,6 +22,10 @@
 
 variables:
   GO_VERSION: "1.26"
+  # Pinned: the Go build cache keys on the compiler ID, so an unpinned goreleaser
+  # image silently invalidates the whole cache whenever upstream bumps its Go.
+  # The build cache key below tracks this value — bump it to rotate the cache.
+  GORELEASER_VERSION: "v2.20.2"
   DOCKER_DRIVER: overlay2
   DOCKER_TLS_CERTDIR: "/certs"
   IMAGE_NAME: "docker.io/${DOCKER_REGISTRY_USER}/easylab"
@@ -58,11 +62,11 @@ stages:
     - go mod download
     - go mod verify
 
-# Multi-arch Linux binaries (amd64 + arm64) via GoReleaser for Docker image reuse
+# linux/amd64 binary via GoReleaser, staged for reuse by the Kaniko image build
 build:
   stage: build
   image:
-    name: goreleaser/goreleaser
+    name: goreleaser/goreleaser:${GORELEASER_VERSION}
     entrypoint: [""]
   variables:
     GOMODCACHE: ${CI_PROJECT_DIR}/.go-mod-cache
@@ -74,33 +78,43 @@ build:
     - mkdir -p .go-tmp
   script:
     - |    
+      # --single-target builds only linux/amd64 (the one arch docker-build
+      # consumes) instead of every goarch in the config, halving this job.
+      # Tagged releases still get all arches from the `goreleaser` publish job.
+      export GOOS=linux GOARCH=amd64
       if [ -n "$CI_COMMIT_TAG" ]; then
-        goreleaser build --clean -f .goreleaser.gitlab.yaml
+        goreleaser build --clean --single-target -f .goreleaser.gitlab.yaml
       else
-        goreleaser build --clean --snapshot -f .goreleaser.gitlab.yaml
+        goreleaser build --clean --snapshot --single-target -f .goreleaser.gitlab.yaml
       fi
     - |
-      mkdir -p docker-prebuild/linux_amd64 docker-prebuild/linux_arm64
+      mkdir -p docker-prebuild/linux_amd64
       find dist -type f -name main | while IFS= read -r f; do
         case "$f" in
           *linux_amd64*) cp "$f" docker-prebuild/linux_amd64/main ;;
-          *linux_arm64*) cp "$f" docker-prebuild/linux_arm64/main ;;
         esac
       done
-      if [ ! -f docker-prebuild/linux_amd64/main ] || [ ! -f docker-prebuild/linux_arm64/main ]; then
-        echo "Expected prebuilt binaries under docker-prebuild/linux_{amd64,arm64}/main"
+      if [ ! -f docker-prebuild/linux_amd64/main ]; then
+        echo "Expected prebuilt binary under docker-prebuild/linux_amd64/main"
         find dist -type f || true
         exit 1
       fi
-      chmod +x docker-prebuild/linux_amd64/main docker-prebuild/linux_arm64/main
+      chmod +x docker-prebuild/linux_amd64/main
   artifacts:
+    # dist/ is deliberately not published: it holds a second copy of the same
+    # binary already staged under docker-prebuild/, .dockerignore excludes it
+    # from the Kaniko context, and the tag-only `goreleaser` job runs with
+    # --clean, which wipes dist/ before it builds.
     paths:
       - docker-prebuild/
-      - dist/
       - web/
     expire_in: 1 hour
   cache:
-    key: go-${GO_VERSION}-${CI_COMMIT_REF_SLUG}
+    # fallback_keys lets a new branch start from the default branch's warm
+    # cache instead of compiling ~1170 packages from scratch.
+    key: go-${GORELEASER_VERSION}-${CI_COMMIT_REF_SLUG}
+    fallback_keys:
+      - go-${GORELEASER_VERSION}-${CI_DEFAULT_BRANCH}
     paths:
       - .go-mod-cache/
       - .go-build-cache/
@@ -154,7 +168,7 @@ hadolint:
   allow_failure: false
 
 # Reusable base for Kaniko image builds — no Docker daemon, no privileged pods required.
-# arm64 cross-build executes via QEMU binfmt if registered on the cluster nodes (standard on most managed k8s).
+# linux/amd64 only; see docker-build's --customPlatform below.
 .docker-kaniko-base:
   stage: package
   image:
@@ -292,7 +306,7 @@ update-docker-compose:
 goreleaser:
   stage: publish
   image:
-    name: goreleaser/goreleaser
+    name: goreleaser/goreleaser:${GORELEASER_VERSION}
     entrypoint: [""]
   only:
     - tags
