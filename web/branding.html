@@ -1,0 +1,145 @@
+{{define "title"}}Branding{{end}}
+{{define "body-class"}}admin-page{{end}}
+{{define "head-extra"}}
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.0/dist/htmx.min.js" integrity="sha384-wS5l5IKJBvK6sPTKa2WZ1js3d947pvWXbPJ1OmWfEuxLgeHcEbjUUA5i9V5ZkpCw" crossorigin="anonymous"></script>
+<style>
+#branding-preview { --branding-preview-accent: {{if .Branding.Accent}}{{.Branding.Accent}}{{else}}#2563eb{{end}}; }
+</style>
+{{end}}
+
+{{define "body"}}
+<div class="admin-layout">
+    {{template "admin-sidebar" .}}
+    <div class="admin-main">
+        <div class="admin-page-header">
+            <h1>Branding</h1>
+        </div>
+        <div class="admin-page-body">
+        <div class="branding-layout">
+
+            <section class="branding-preview-column" aria-labelledby="branding-preview-heading">
+                <h2 id="branding-preview-heading">What students see</h2>
+                <p class="section-description">A scaled mock of the student sign-in page. It updates as you type, before anything is saved.</p>
+
+                <div class="branding-preview" id="branding-preview">
+                    <div class="branding-preview-lockup">
+                        <img id="branding-preview-logo" class="branding-preview-logo" src="{{.Branding.LogoURL}}" alt="">
+                        <div class="branding-preview-text">
+                            {{/* Each part is hidden when the real page would not
+                                 print it: no wordmark beside a logo that was
+                                 uploaded without a name, and no tagline once the
+                                 instance is branded and none was given. */}}
+                            <span id="branding-preview-name" class="branding-preview-name"{{if not .Branding.ShowWordmark}} hidden{{end}}>{{.Branding.Name}}</span>
+                            <span id="branding-preview-tagline" class="branding-preview-tagline"{{if not .Branding.Tagline}} hidden{{end}}>{{.Branding.Tagline}}</span>
+                        </div>
+                    </div>
+                    <span id="branding-preview-btn" class="branding-preview-btn">Sign in</span>
+                    <p class="branding-preview-attribution">Powered by EasyLab</p>
+                </div>
+
+                <p class="branding-note">The <strong>Powered by EasyLab</strong> line is not removable. It appears whenever the branding is customised.</p>
+
+                {{if .Branding.AccentAdjusted}}
+                <div class="warning-message">
+                    <p>The colour you chose was darkened so the white text on buttons stays readable.</p>
+                </div>
+                {{end}}
+            </section>
+
+            <div class="branding-form-column">
+                <form id="branding-form"
+                      method="POST"
+                      action="/api/branding"
+                      enctype="multipart/form-data"
+                      hx-post="/api/branding"
+                      hx-encoding="multipart/form-data"
+                      hx-target="#save-response"
+                      hx-swap="innerHTML"
+                      hx-indicator="#branding-loading"
+                      hx-boost="false"
+                      data-default-name="{{.DefaultName}}"
+                      data-default-tagline="{{.DefaultTagline}}"
+                      data-has-custom-logo="{{if .Branding.HasCustomLogo}}true{{else}}false{{end}}">
+                    <div id="branding-loading" class="htmx-indicator">
+                        <div class="spinner"></div>
+                        <p>Saving branding...</p>
+                    </div>
+
+                    <div class="form-section">
+                        <h2>Student branding</h2>
+                        <p class="section-description">Choose the logo, name and colour students see on the sign-in page and in their portal. Leave a field empty to use its default.</p>
+
+                        <div class="form-group">
+                            <label for="branding-logo">Logo</label>
+                            <div class="branding-file-row">
+                                <input type="file" id="branding-logo" name="branding_logo" accept="image/png,image/svg+xml">
+                            </div>
+                            <small>PNG or SVG, up to {{.LogoMaxKB}}KB. Leaving the file input empty keeps the current logo.</small>
+                            {{if .Branding.HasCustomLogo}}
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="branding-logo-remove" name="branding_logo_remove" value="on">
+                                Remove the uploaded logo and go back to the EasyLab one
+                            </label>
+                            {{end}}
+                        </div>
+
+                        <div class="form-group">
+                            <label for="branding-name">Name</label>
+                            <input type="text" id="branding-name" name="branding_name"
+                                   maxlength="40"
+                                   placeholder="{{.DefaultName}}"
+                                   value="{{.Name}}"
+                                   autocomplete="off">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="branding-tagline">Tagline</label>
+                            <input type="text" id="branding-tagline" name="branding_tagline"
+                                   maxlength="80"
+                                   placeholder="{{.DefaultTagline}}"
+                                   value="{{.Tagline}}"
+                                   autocomplete="off">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="branding-accent">Accent colour</label>
+                            <div class="branding-accent-row">
+                                <div class="branding-swatches">
+                                    {{range .Presets}}
+                                    <button type="button" class="branding-swatch" data-accent="{{.Value}}" title="{{.Name}}" aria-label="{{.Name}}"></button>
+                                    {{end}}
+                                </div>
+                                <input type="text" id="branding-accent" name="branding_accent"
+                                       class="branding-accent-input"
+                                       maxlength="7"
+                                       placeholder="#2563eb"
+                                       value="{{.Accent}}"
+                                       autocomplete="off">
+                            </div>
+                            <small>Pick a preset or type a hex colour such as <code>#2563eb</code>. Leave empty for the EasyLab blue.</small>
+                        </div>
+                    </div>
+
+                    <div class="info-box">
+                        <p>Branding applies to this whole instance, not to a single lab.
+                        {{if eq .PortalLabs 0}}No lab is running its own student portal right now. When one is, saving pushes the branding to it too.
+                        {{else if eq .PortalLabs 1}}Saving also pushes it to the 1 lab running its own student portal, which picks it up within about ten seconds — no restart, and nobody is signed out.
+                        {{else}}Saving also pushes it to the {{.PortalLabs}} labs running their own student portals, which pick it up within about ten seconds — no restart, and nobody is signed out.{{end}}</p>
+                    </div>
+
+                    <div id="save-response"></div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">
+                            <span class="btn-icon">💾</span> Save branding
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+        </div>
+        </div>
+    </div>
+</div>
+<script src="{{asset "/static/branding.js"}}"></script>
+{{end}}

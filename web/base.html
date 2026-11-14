@@ -4,12 +4,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EasyLab - {{template "title" .}}</title>
+    <title>{{branding.Name}} - {{template "title" .}}</title>
     <link rel="icon" type="image/png" href="{{asset "/static/favicon.png"}}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{asset "/static/style.css"}}">
+    {{template "branding-accent" .}}
     {{block "head-extra" .}}{{end}}
 </head>
 <body class="{{block "body-class" .}}{{end}}">
@@ -82,6 +83,10 @@
             <span class="admin-nav-icon">🎓</span>
             <span class="admin-nav-label">Student portals</span>
         </a>
+        <a href="/admin/branding" class="admin-nav-item" data-matchexact="/admin/branding">
+            <span class="admin-nav-icon">🎨</span>
+            <span class="admin-nav-label">Branding</span>
+        </a>
     </nav>
     <div class="admin-sidebar-footer">
         <div class="admin-sidebar-copyright">{{template "copyright-notice"}}</div>
@@ -113,7 +118,32 @@
 <script src="{{asset "/static/admin-help-requests.js"}}"></script>
 {{end}}
 
-{{define "copyright-notice"}}&copy; yodamad 2026 &middot; EasyLab v{{appVersion}}{{end}}
+{{/* branding-accent repaints the few colours the house palette exposes as custom
+     properties, so one hex from the admin reaches every button, link and header
+     gradient without a second stylesheet. Emitted only when an accent is set:
+     an unbranded page is byte-identical to one from before branding existed.
+     A <style> element, not the style="..." attribute the project forbids.
+     The student sign-in page does not read --primary-color: its button, focus
+     rings and "Student Portal" label all come from --login-accent, declared on
+     body.student-login-page. A :root define cannot reach it, so the accent is
+     repeated on that selector (and on its light-theme twin) — same specificity,
+     later in source, so it wins. Without this the accent stopped at the portal
+     pages and the sign-in page stayed EasyLab teal. */}}
+{{define "branding-accent"}}{{with branding}}{{if .Accent}}<style>:root{--primary-color: {{.Accent}}; --primary-hover: {{.AccentHover}}; --student-color: {{.Accent}};}
+body.student-login-page,[data-theme="light"] body.student-login-page{--login-accent: {{.Accent}}; --login-glow: color-mix(in srgb, {{.Accent}} 16%, transparent);}</style>{{end}}{{end}}{{end}}
+
+{{/* EasyLab stays credited whatever an admin brands: the workshop's name leads,
+     the product it runs on follows. */}}
+{{define "copyright-notice"}}{{with branding}}{{if .IsCustom}}{{.Name}} &middot; powered by EasyLab v{{appVersion}}{{else}}&copy; yodamad 2026 &middot; EasyLab v{{appVersion}}{{end}}{{end}}{{end}}
+
+{{/* student-brand is the header lockup every signed-in student page shows. One
+     definition rather than three copies, so branding applies in a single place. */}}
+{{define "student-brand"}}
+<div class="header-brand">
+    <img src="{{branding.LogoURL}}" alt="{{branding.LogoAlt}}" class="header-logo">
+    <span class="header-app-name">Student Portal</span>
+</div>
+{{end}}
 
 {{define "student-footer"}}
 <footer class="student-footer">{{template "copyright-notice"}}</footer>

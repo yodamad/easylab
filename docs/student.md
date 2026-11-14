@@ -10,6 +10,8 @@ You can request **one workspace per template per lab**. If a lab has multiple te
 
 Every student page shows the EasyLab copyright and version in a footer at the bottom of the page. The version reflects the latest Git tag the binary was built from (`dev` for local/untagged builds).
 
+Your organiser may have put their own logo, name, tagline and colour on these pages, so what you see can look different from the screenshots below. The pages and the steps are the same either way, and the footer then reads your organiser's name followed by *powered by EasyLab*.
+
 !!! note "Which address do I use?"
     Your workshop organiser gives you the address of the student space. It is either a
     shared one for every lab, or one dedicated to your lab (the lab's own domain). A

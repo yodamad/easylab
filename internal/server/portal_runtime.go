@@ -126,6 +126,15 @@ func (p *PortalRuntime) Load(ctx context.Context) error {
 	// After the state is installed, because it replaces the lab's help queue with
 	// the admin's — which does not carry what was raised here a moment ago.
 	p.reapplyLocalHelp(state)
+	// The admin's branding, which this process cannot read from disk: it has no
+	// data dir. A branding change therefore reaches students here within one
+	// reload interval, with no redeploy and nobody signed out. A state with none
+	// resets to stock EasyLab, which is how an admin clearing it takes effect.
+	if state.Branding != nil {
+		SetBrandingProvider(state.Branding.View())
+	} else {
+		SetBrandingProvider(BrandingSettings{}.View())
+	}
 	if p.auth != nil {
 		p.auth.ConfigurePortalAuth(state.LabID, state.Auth)
 	}

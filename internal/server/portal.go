@@ -209,6 +209,11 @@ func (h *Handler) portalConfigFor(job *Job) (map[string][]byte, error) {
 	h.portalErrorsMu.RLock()
 	state.PortalURL = h.portalURLs[job.ID]
 	h.portalErrorsMu.RUnlock()
+	// This instance's branding, so the portal's students see the workshop's own
+	// logo and colour rather than EasyLab's. Left nil when nothing is branded.
+	if branding := h.savedBranding(); !branding.IsZero() {
+		state.Branding = &branding
+	}
 	return encodePortalState(state)
 }
 

@@ -185,6 +185,10 @@ The central instance remains where everything is decided and recorded:
   is copied to the portal with the rest of the lab, and the portal turns new students away
   when the date passes without asking the central instance. The Closed badge and the audit
   entry come from the central instance's next cleanup check.
+* **Branding** — the logo, name, tagline and accent colour you set on the
+  [Branding](admin.md#branding) page are copied to every portal within seconds, so a lab's
+  own portal looks like your workshop too. Nothing restarts and no student is signed out.
+  Branding is instance-wide: every portal gets the same one.
 * **Upgrades** — after you upgrade the central instance, each portal is moved to the new
   image on the next cycle.
 * **Opening a student's workspace** as a teacher works as before, and the student is told
@@ -221,7 +225,7 @@ All in the lab's workspace namespace, named `easylab-portal-<lab id>`:
 |----------|---------|
 | Deployment, Service, Ingress | The portal itself (one replica) and its address |
 | ServiceAccount, Role, RoleBinding | The portal's identity and permissions |
-| Secret `…-config` | The lab's configuration as students see it (including its workspace templates and their slides links, so the in-lab portal shows them too), and the sign-in settings |
+| Secret `…-config` | The lab's configuration as students see it (including its workspace templates and their slides links, so the in-lab portal shows them too), the sign-in settings, and the instance's [branding](admin.md#branding) — logo bytes included, which is why an uploaded logo is capped at 128 KB |
 | ConfigMap `…-outbox` | What the portal has to report back until the admin collects it |
 
 The portal's Role is limited to that namespace: it can manage the workspace resources

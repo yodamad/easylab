@@ -368,6 +368,10 @@ func main() {
 	handler.SetMode(mode)
 	handler.SetPortalAuth(publicURL, authHandler.StudentAuthSnapshot)
 	handler.SetPortalSettingsStore(portalSettings)
+	// The workshop's own logo, name, tagline and accent colour for the student
+	// pages. Installing the store also installs what it holds as the branding
+	// every template renders, so a saved branding survives a restart.
+	handler.SetBrandingStore(server.NewBrandingStore(*dataDir))
 	// A password saved on the Student portals page beats the one the auth handler
 	// hashed out of the environment at construction.
 	handler.ApplyStudentPassword()
@@ -477,6 +481,11 @@ func registerCommonRoutes(mux *http.ServeMux, handler *server.Handler) {
 		w.Write([]byte("OK"))
 	})
 	mux.HandleFunc("/static/", handler.ServeStatic) // Static files don't need auth
+
+	// The admin's uploaded logo. Public, like the static assets above and for the
+	// same reason: the student login page shows it before anyone has signed in.
+	// Registered in every mode — an in-lab portal serves the copy it was synced.
+	mux.HandleFunc("/branding/logo", handler.ServeBrandingLogo)
 
 	// Read by the notification extension inside a student's IDE, which has no
 	// session cookie and authenticates with its workspace's notify token instead
@@ -645,6 +654,8 @@ func registerAdminRoutes(mux *http.ServeMux, handler *server.Handler, authHandle
 	mux.HandleFunc("/admin/student-portals", authHandler.RequireAuth(handler.ServePortalSettings))
 	mux.HandleFunc("/api/portal-settings", authHandler.RequireAuth(handler.SavePortalSettings))
 	mux.HandleFunc("/api/student-portal-password", authHandler.RequireAuth(handler.GetStudentPortalPassword))
+	mux.HandleFunc("/admin/branding", authHandler.RequireAuth(handler.ServeBranding))
+	mux.HandleFunc("/api/branding", authHandler.RequireAuth(handler.SaveBranding))
 	mux.HandleFunc("/api/templates/detect-variables", authHandler.RequireAuth(handler.DetectTemplateVariables))
 	mux.HandleFunc("/api/templates/detect-devcontainer", authHandler.RequireAuth(handler.DetectDevcontainer))
 	// Kept outside the /api/labs/ subtree below: that one is a catch-all dispatched

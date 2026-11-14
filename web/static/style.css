@@ -7206,7 +7206,11 @@ body.admin-page {
     padding: 0.25rem 1rem 0.5rem;
     font-size: 0.6875rem;
     color: #475569;
-    white-space: nowrap;
+    /* Wraps rather than overflowing the sidebar: a branded instance's footer
+       carries the workshop's own name as well as the EasyLab version, which is
+       longer than the stock copyright this line used to hold. */
+    overflow-wrap: anywhere;
+    line-height: 1.4;
 }
 
 .admin-sidebar-footer .admin-nav-item:hover {
@@ -9153,4 +9157,283 @@ details[open] > .secrets-summary::after {
     width: 2.25rem;
     height: 2.25rem;
     border-radius: var(--radius);
+}
+
+/* ==========================================================================
+   Admin Branding page (web/branding.html) and the login attribution line
+   ========================================================================== */
+
+.branding-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+    gap: 2rem;
+    align-items: start;
+}
+
+.branding-preview-column h2 {
+    font-size: 1.125rem;
+    margin-bottom: 0.25rem;
+}
+
+.branding-preview-column .section-description {
+    margin-bottom: var(--spacing);
+}
+
+.branding-form-column {
+    min-width: 0;
+}
+
+.branding-preview {
+    --branding-preview-accent: var(--primary-color);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+    padding: 2rem 1.5rem 1.25rem;
+    background: #0b1a24;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.branding-preview-lockup {
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    max-width: 100%;
+}
+
+.branding-preview-logo {
+    height: 56px;
+    width: auto;
+    max-width: 120px;
+    object-fit: contain;
+    flex-shrink: 0;
+}
+
+.branding-preview-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 0;
+}
+
+.branding-preview-name {
+    font-size: 1.75rem;
+    font-weight: 800;
+    line-height: 1.1;
+    color: #ffffff;
+    overflow-wrap: anywhere;
+}
+
+.branding-preview-tagline {
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #8fb4c0;
+    overflow-wrap: anywhere;
+}
+
+.branding-preview-btn {
+    display: inline-block;
+    padding: 0.625rem 2.5rem;
+    border-radius: var(--radius);
+    background: var(--branding-preview-accent);
+    color: #ffffff;
+    font-weight: 600;
+    font-size: 0.95rem;
+    cursor: default;
+    user-select: none;
+}
+
+.branding-preview-attribution {
+    font-size: 0.75rem;
+    color: #8fb4c0;
+    text-align: center;
+}
+
+.branding-note {
+    margin-top: 0.75rem;
+    font-size: 0.85rem;
+    color: var(--text-light);
+}
+
+.branding-preview-column .warning-message {
+    margin-top: var(--spacing);
+}
+
+.branding-file-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.branding-file-row input[type="file"] {
+    max-width: 100%;
+    font-size: 0.875rem;
+    color: var(--text-light);
+}
+
+/* The native "Choose file" button is the only control on this form that doesn't
+   look like the rest, so give it the field border and the house font. Scoped to
+   this row: file inputs elsewhere stay native, as they have been. */
+.branding-file-row input[type="file"]::file-selector-button {
+    margin-right: 0.75rem;
+    padding: 0.4rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.branding-file-row input[type="file"]::file-selector-button:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+/* `.form-group label` is `display: block` and outranks `.checkbox-label`, which
+   stacked the remove-logo checkbox above its own text. Match that specificity so
+   the box sits beside the label, as checkboxes do everywhere else. */
+.branding-form-column .form-group label.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0;
+    margin-top: 0.75rem;
+    font-weight: 400;
+    cursor: pointer;
+}
+
+.branding-form-column .form-group label.checkbox-label input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+    flex-shrink: 0;
+}
+
+.branding-accent-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1rem;
+}
+
+.branding-swatches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.branding-swatch {
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: 2px solid var(--border);
+    border-radius: 50%;
+    background: var(--branding-swatch-color, var(--primary-color));
+    cursor: pointer;
+    transition: transform 0.15s ease;
+}
+
+.branding-swatch:hover {
+    transform: scale(1.1);
+}
+
+.branding-swatch:focus-visible {
+    outline: 3px solid var(--text);
+    outline-offset: 2px;
+}
+
+.branding-accent-input {
+    width: 8rem;
+    max-width: 100%;
+    font-family: monospace;
+}
+
+@media (max-width: 900px) {
+    .branding-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 480px) {
+    .branding-preview {
+        padding: 1.5rem 1rem 1rem;
+    }
+
+    .branding-preview-name {
+        font-size: 1.4rem;
+    }
+}
+
+/* Quiet attribution under the login card (web/student-login.html) */
+.login-attribution {
+    margin-top: 1.25rem;
+    text-align: center;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    color: #5a9aaa;
+}
+
+[data-theme="light"] .login-attribution {
+    color: var(--text-light);
+}
+
+/* Branded sign-in lockup.
+   The stock lockup is tuned for EasyLab's own identity: a square logo at a fixed
+   4rem, the seven letters of "EasyLab" at 3.6rem, and a teal gradient and glow
+   that are our palette, not the admin's. Applied unchanged to a real brand, a
+   wide logo renders enormous, a longer name overflows the bar, and the name is
+   painted in EasyLab's colours. These rules only take effect once an admin has
+   branded the instance, so the stock page is exactly as it was.
+   They come last in the file deliberately: they carry the same specificity as
+   the [data-theme="light"] rules they override, so source order decides. */
+.home-brand--custom {
+    max-width: min(100%, 680px);
+    margin-left: auto;
+    margin-right: auto;
+    gap: 1.25rem;
+}
+
+/* Cap the width, not just the height: most real logos are horizontal, and a
+   height-only limit lets one grow to whatever its aspect ratio implies. The
+   glow is dropped — it tinted someone else's mark EasyLab teal. */
+.home-brand--custom .home-brand-logo {
+    height: auto;
+    max-height: 3.25rem;
+    max-width: 240px;
+    filter: none;
+}
+
+/* The name as plain legible type, at a size that survives a long one.
+   Not in the accent: the accent is only guaranteed readable with white text on
+   top of it (that is what the contrast guard checks), so a dark accent — a navy
+   or a deep green — would disappear against this scene. The accent carries the
+   button, the focus rings and the "Student Portal" label; the logo carries the
+   brand colour. The name just has to be readable. */
+.home-brand--custom .home-wordmark {
+    font-size: clamp(1.5rem, 3.2vw, 2.25rem);
+    background: none;
+    -webkit-background-clip: border-box;
+    background-clip: border-box;
+    -webkit-text-fill-color: currentColor;
+    color: #eef5f6;
+    filter: none;
+    overflow-wrap: anywhere;
+}
+
+[data-theme="light"] .home-brand--custom .home-wordmark {
+    background: none;
+    color: #0c2530;
+}
+
+@media (max-width: 640px) {
+    .home-brand--custom .home-brand-logo {
+        max-height: 2.5rem;
+        max-width: 180px;
+    }
 }
