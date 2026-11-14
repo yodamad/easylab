@@ -27,6 +27,7 @@ As an admin (trainer, speaker, ...), you have access to the admin space to manag
 * [x] View deployment statistics (KPIs, monthly chart, per-project breakdown)
 * [x] Configure automatic workspace and lab deletion (cleaning policies)
 * [x] View an audit log of lab, workspace, and credential actions ([details](audit-log.md))
+* [x] [Brand the student portal](#branding) with your own logo, name, tagline and accent colour
 
 Every admin page shows the EasyLab copyright and version in the sidebar footer. The version reflects the latest Git tag the binary was built from (`dev` for local/untagged builds).
 
@@ -125,6 +126,38 @@ The kubeconfig is checked for validity before it is saved, and needs the same pe
 !!! warning "A kubeconfig is usually a cluster-admin credential"
 
     Saved kubeconfigs are encrypted with AES-256-GCM in credential storage and are never written anywhere else, never returned to the browser, and never recorded in the [audit log](audit-log.md). They follow the [credential storage](#credential-storage) rules above: without a passphrase or `LAB_DATA_ENCRYPTION_KEY` they last until EasyLab restarts, and while storage is locked the **Clusters** page lists the profile names but cannot use them.
+
+## Branding
+
+By default the student portal is EasyLab-branded. On the **Branding** page in the sidebar you can put your own workshop, company or client identity on the pages your students see: a **logo**, a **name**, a **tagline** and an **accent colour**.
+
+![Branding page](screens/branding.png)
+
+To brand the student portal:
+
+1. Open **Branding** in the admin sidebar.
+2. Upload a **logo** — PNG or SVG, up to 128 KB. Leaving the file field empty keeps the logo already saved; tick **Remove the uploaded logo** to go back to the EasyLab one.
+3. Enter a **Name** (up to 40 characters) and a **Tagline** (up to 80 characters). Both are optional, and an empty field is not filled in with EasyLab's own wording once you have branded anything:
+    * **No name, with a logo** — the logo stands alone, which is usually what you want: most logos already contain the name, and printing it again next to them doubles it up. Give a name anyway if your logo is a symbol rather than a wordmark, or if you want the browser tab and screen readers to say what the portal is: without one, the tab still reads *EasyLab* and the logo carries no text alternative, because EasyLab has no way to know what your mark is called.
+    * **No tagline** — nothing is printed in its place. EasyLab's *Cloud Lab Infrastructure Platform* appears only while the instance is completely unbranded.
+4. Pick an **accent colour** from the preset swatches, or type a hex value such as `#2563eb`. Leave it empty for the EasyLab blue.
+5. Click **Save branding**.
+
+The preview on the left of the page tracks what you type and pick, so you can see the student sign-in lockup before saving.
+
+What changes: the logo, name and tagline on the student sign-in page and in the student portal header, the browser tab title, and the accent colour — the sign-in button, its focus rings and the *Student Portal* label, plus the buttons, links and header in the portal itself. What does not change: the admin space and the public homepage still look like EasyLab, so you can always tell which product you are administering.
+
+The sign-in lockup also resizes itself once you brand it. EasyLab's own is built for a square logo and the seven letters of *EasyLab*; a real brand usually has a wide logo and a longer name, so a branded lockup caps the logo's width as well as its height, drops EasyLab's teal glow from it, and sets the name at a size that still fits on a phone.
+
+Branding is **instance-wide** — there is no per-lab branding. Saving also pushes the branding to every lab that runs its own [in-lab student portal](student-portal.md) in its own cluster; those portals pick it up within about ten seconds, without restarting and without signing any student out.
+
+Two details worth knowing:
+
+* **EasyLab attribution stays.** A branded portal's footer reads `<your name> · powered by EasyLab v<version>` instead of the EasyLab copyright, and the sign-in page gains a small *Powered by EasyLab* line. This is not configurable.
+* **Light accent colours are darkened.** The accent carries white button and header text, so if the colour you pick is too light for that to stay readable, EasyLab darkens it until it is and says so on the page.
+* **Your name is not painted in your accent.** The accent is only guaranteed readable with white text on top of it, which is what that check measures — a dark navy or deep green would disappear if the name were set in it. Your logo carries the brand colour, the accent carries the button and the labels, and the name is set in plain legible type.
+
+Branding is stored unencrypted in `branding.json` in the data directory — a logo, a name, a tagline and a colour are not secrets, so unlike credentials and profiles they survive a restart with no passphrase.
 
 ## Where to go next
 

@@ -136,6 +136,10 @@ type Handler struct {
 	// the Student portals page; they take precedence over the environment (see
 	// portal_settings.go). Nil unless SetPortalSettingsStore is called.
 	portalSettings *PortalSettingsStore
+	// brandingStore holds the logo, name, tagline and accent colour an admin saved
+	// from the Branding page (see branding.go). Nil unless SetBrandingStore is
+	// called — an in-lab portal has none and renders the branding it was synced.
+	brandingStore *BrandingStore
 	// portalErrors holds the last deployment failure of each lab's portal, keyed
 	// by lab ID, for the lab detail page. Not persisted: the next reconcile
 	// either clears or reproduces it.
@@ -1157,6 +1161,7 @@ func (h *Handler) getTemplate(filename string) (*template.Template, error) {
 		"github-auth.html":         "web/github-auth.html",
 		"gitlab-auth.html":         "web/gitlab-auth.html",
 		"portal-settings.html":     "web/portal-settings.html",
+		"branding.html":            "web/branding.html",
 		"labs-list.html":           "web/labs-list.html",
 		"lab-detail.html":          "web/lab-detail.html",
 		"admin-stats.html":         "web/admin-stats.html",

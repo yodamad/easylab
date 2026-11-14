@@ -6,10 +6,7 @@
     <div class="student-dashboard-container" data-current-email="{{.Email}}">
         <header class="student-dashboard-header">
             <div class="header-content">
-                <div class="header-brand">
-                    <img src="{{asset "/static/logo.png"}}" alt="EasyLab Logo" class="header-logo">
-                    <span class="header-app-name">Student Portal</span>
-                </div>
+                {{template "student-brand" .}}
                 <nav class="student-nav" aria-label="Student portal">
                     <a href="/student/dashboard" class="student-nav-link">Request a workspace</a>
                     <a href="/student/workspaces" class="student-nav-link" aria-current="page">My workspaces</a>

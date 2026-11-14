@@ -572,3 +572,90 @@ func TestJob_HelpRequestsAreNotExposed(t *testing.T) {
 	require.Len(t, persisted.HelpRequests, 1)
 	assert.Equal(t, "stuck", persisted.HelpRequests[0].Message)
 }
+
+// The admin's branding rides the state of every lab's portal, and only when the
+// instance is actually branded.
+func TestPortalConfigFor_Branding(t *testing.T) {
+	t.Parallel()
+
+	branded := BrandingSettings{Name: "Acme", Tagline: "Hands on", Accent: "#157f5f", LogoData: testPNG, LogoType: "image/png"}
+	tests := []struct {
+		name     string
+		settings *BrandingSettings // nil: no store wired at all
+		expected *BrandingSettings
+	}{
+		{name: "no store", settings: nil, expected: nil},
+		{name: "store with nothing saved", settings: &BrandingSettings{}, expected: nil},
+		{name: "branded", settings: &branded, expected: &branded},
+		{name: "accent only", settings: &BrandingSettings{Accent: "#1f2933"}, expected: &BrandingSettings{Accent: "#1f2933"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			jm := NewJobManager("")
+			id := jm.CreateJob(&LabConfig{StackName: "workshop"})
+			job, ok := jm.GetJob(id)
+			require.True(t, ok)
+			h := NewHandler(jm, &PulumiExecutor{}, NewCredentialsManager(), nil, nil, nil)
+			if tt.settings != nil {
+				store := NewBrandingStore("")
+				require.NoError(t, store.Set(*tt.settings))
+				h.brandingStore = store // not SetBrandingStore: that would touch the package-level provider
+			}
+
+			config, err := h.portalConfigFor(job)
+			require.NoError(t, err)
+			state, err := decodePortalState(config)
+			require.NoError(t, err)
+
+			if tt.expected == nil {
+				assert.Nil(t, state.Branding)
+				assert.NotContains(t, string(config[portalStateKey]), `"branding"`)
+				return
+			}
+			require.NotNil(t, state.Branding)
+			assert.Equal(t, *tt.expected, *state.Branding)
+		})
+	}
+}
+
+// portalStateFromJob is the lab's own state; branding is the instance's and is
+// attached later, in portalConfigFor.
+func TestPortalStateFromJob_NoBranding(t *testing.T) {
+	t.Parallel()
+	jm := NewJobManager("")
+	id := jm.CreateJob(&LabConfig{StackName: "workshop"})
+	job, ok := jm.GetJob(id)
+	require.True(t, ok)
+	assert.Nil(t, portalStateFromJob(job, StudentAuthSnapshot{}, "").Branding)
+}
+
+// A portal applies the branding it was synced, and a state without any resets it.
+// It mutates the package-level provider, so it is not parallel.
+func TestPortalRuntime_LoadAppliesBranding(t *testing.T) {
+	previous := brandingProvider.Load()
+	t.Cleanup(func() { brandingProvider.Store(previous) })
+
+	tests := []struct {
+		name     string
+		branding *BrandingSettings
+		wantName string
+		wantLogo bool
+	}{
+		{name: "branded state", branding: &BrandingSettings{Name: "Acme", LogoData: testPNG, LogoType: "image/png"}, wantName: "Acme", wantLogo: true},
+		{name: "unbranded state resets to stock", branding: nil, wantName: brandingDefaultName},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Start from something else, so a no-op Load cannot pass by accident.
+			SetBrandingProvider(BrandingSettings{Name: "Stale"}.View())
+
+			fb := newFakePortalBackend()
+			newTestPortal(t, fb, PortalState{LabID: "lab-1", StackName: "workshop", Branding: tt.branding})
+
+			got := currentBranding()
+			assert.Equal(t, tt.wantName, got.Name)
+			assert.Equal(t, tt.wantLogo, got.HasCustomLogo)
+		})
+	}
+}

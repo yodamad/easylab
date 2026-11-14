@@ -23,12 +23,18 @@
 </button>
 
 <div class="login-scene">
-    <div class="home-brand">
-        <img src="{{asset "/static/logo.png"}}" alt="EasyLab" class="home-brand-logo">
+    {{/* home-brand--custom lets the lockup size itself for a real brand: an
+         arbitrary name instead of the seven letters of "EasyLab", and a logo
+         that is usually wide rather than square. The wordmark and the tagline
+         are each dropped when there is nothing of the admin's to print. */}}
+    <div class="home-brand{{if branding.IsCustom}} home-brand--custom{{end}}">
+        <img src="{{branding.LogoURL}}" alt="{{branding.LogoAlt}}" class="home-brand-logo">
+        {{if or branding.ShowWordmark branding.Tagline}}
         <div class="home-brand-text">
-            <span class="home-wordmark">EasyLab</span>
-            <span class="home-tagline">Cloud Lab Infrastructure Platform</span>
+            {{if branding.ShowWordmark}}<span class="home-wordmark">{{branding.Name}}</span>{{end}}
+            {{if branding.Tagline}}<span class="home-tagline">{{branding.Tagline}}</span>{{end}}
         </div>
+        {{end}}
     </div>
 
     <div class="login-container">
@@ -112,6 +118,12 @@
             <p>Contact your instructor if you need access.</p>
         </div>
     </div>
+
+    {{/* Branded instances still say what they run on. Hidden when nothing is
+         branded, where the lockup above already reads EasyLab. */}}
+    {{if branding.IsCustom}}
+    <p class="login-attribution">Powered by EasyLab v{{appVersion}}</p>
+    {{end}}
 </div>
 
 <script src="{{asset "/static/login.js"}}"></script>

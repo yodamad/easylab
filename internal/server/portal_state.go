@@ -73,6 +73,15 @@ type PortalState struct {
 	// not told its own address at startup, and the workspaces it creates need one
 	// to read their notifications from — this is it.
 	PortalURL string `json:"portal_url,omitempty"`
+	// Branding is the admin's own logo, name, tagline and accent colour, so a
+	// lab's portal looks like the workshop running it rather than like EasyLab
+	// (see branding.go). It is this instance's, not the lab's: branding is
+	// instance-wide, and this is how it reaches a cluster the admin's disk cannot.
+	//
+	// The admin's own words and image, not a secret — the same standing as the
+	// notifications above. Nil when nothing is branded, which keeps an unbranded
+	// instance's state byte-identical to before branding existed.
+	Branding *BrandingSettings `json:"branding,omitempty"`
 
 	Auth PortalAuthState `json:"auth"`
 }

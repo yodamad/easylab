@@ -17,4 +17,10 @@ var templateFuncMap = template.FuncMap{
 	// asset renders "/static/x.js" as "/static/x.js?v=<content hash>" so a deploy
 	// invalidates the browser's copy on its own — see assetURL in assets.go.
 	"asset": assetURL,
+	// branding renders the admin's own logo, name, tagline and accent colour on
+	// the student pages. A function rather than page data because the login pages
+	// are served by AuthHandler from its own template set and its own data map:
+	// this reaches every page that parses base.html without either of them
+	// knowing about branding. See branding.go.
+	"branding": currentBranding,
 }
